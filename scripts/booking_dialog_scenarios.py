@@ -49,10 +49,8 @@ EXPECT_ACTION_BY_TAG = {
     "handoff": ["booking_escalated", "escalate", "handoff"],
 }
 EXPECT_REPLY_TYPE_BY_TAG = {
-    "time": "time",
-    "name": "name",
-    "phone": "phone",
-    "confirm": "confirm",
+    "booking": "time",
+    "time": "name",
 }
 EXPECT_STATE_BY_TAG = {
     "handoff": "pending",

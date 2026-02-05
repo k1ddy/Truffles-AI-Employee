@@ -147,3 +147,4 @@
 | 2026-02-05-control-plane-gonogo-a10 | done | feat/2026-02-05-control-plane-gonogo-a10 | /home/zhan/worktrees/2026-02-05-control-plane-gonogo-a10 | docs/TASK_PACKAGES/TP-2026-02-05-control-plane-gonogo.md | 2026-02-05 |
 | 2026-02-05-consultant-capabilities-a1 | done | feat/2026-02-05-consultant-capabilities-a1 | /home/zhan/worktrees/2026-02-05-consultant-capabilities-a1 | docs/TASK_PACKAGES/TP-2026-02-05-capabilities-passport.md | 2026-02-05 |
 | 2026-02-05-legal-readiness-pack-a10 | done | feat/2026-02-05-legal-readiness-pack-a10 | /home/zhan/worktrees/2026-02-05-legal-readiness-pack-a10 | docs/TASK_PACKAGES/TP-2026-02-05-legal-readiness-pack.md | 2026-02-05 |
+| 2026-02-05-llm-quality-judge-a1 | done | feat/2026-02-05-llm-quality-judge-a1 | /home/zhan/worktrees/2026-02-05-llm-quality-judge-a1 | docs/TASK_PACKAGES/TP-2026-02-05-llm-quality-runner.md | 2026-02-05 |

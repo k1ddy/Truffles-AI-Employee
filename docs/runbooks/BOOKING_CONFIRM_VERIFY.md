@@ -137,6 +137,7 @@ Prerequisites
 - Valid `WEBHOOK_SECRET` and `branches.instance_id` (auto-resolved if present).
 - Admin token for outbox (`ALERTS_ADMIN_TOKEN`) unless `--skip-outbox`.
 - Manager simulation: Telegram chat id in client settings or Console token.
+- LLM-judge (optional): `OPENAI_API_KEY` (or `--judge-api-key`).
 
 Quickstart (smoke, no baseline update)
 ```bash
@@ -161,6 +162,7 @@ python3 ops/diagnose.py llm-quality \
   --scenario-coverage booking,info,interrupt,handoff \
   --manager-mode simulate \
   --pending-mode ack \
+  --judge-sample 0.1 \
   --reset-before-dialog \
   --append-history \
   --update-baseline
@@ -170,7 +172,7 @@ Artifacts
 - `/tmp/booking_quality/<stamp>/scenarios.json`
 - `/tmp/booking_quality/<stamp>/responses.jsonl`
 - `/tmp/booking_quality/<stamp>/trace_bundle.jsonl`
-- `/tmp/booking_quality/<stamp>/summary.json` (includes baseline_metrics + delta)
+- `/tmp/booking_quality/<stamp>/summary.json` (includes baseline_metrics + delta + coverage + judge)
 - Baseline + history: `ops/results/booking_quality.json`
 
 Evaluation contract (state-aware)
@@ -182,6 +184,7 @@ Evaluation contract (state-aware)
 - Manager callbacks (simulate mode): `take` -> `manager_active` + `handover.status=active`; `resolve` -> `bot_active` + `resolved`; `return` -> `bot_active` + `bot_handling`.
 - Info requests must match `info_sections`/intents (price/location/hours/promo/duration/parking/master).
 - Booking-active turns should show slot progress; stalls are flagged.
+- Booking `expected_reply_type` is limited to `service_choice`/`time`/`name` (phone/confirm are not expected_reply_type).
 
 Reason codes (summary.failures / failure_counts)
 - decision_meta_missing
@@ -208,6 +211,12 @@ Thresholds (summary.thresholds)
 - unknown_state_rate <= 0.02
 - booking_slot_progress_rate >= 0.25
 - handoff_correct_rate >= 0.90
+
+LLM judge (semantic, non-blocking)
+- Enabled via `--judge-sample 0.1` (or `--judge-mode all` to judge every reply).
+- Uses user text + bot reply + decision_meta/trace summary; does not check raw facts beyond provided context.
+- Output stored in `summary.json` under `judge` and per-turn in `responses.jsonl`.
+- Judge results are non-blocking and should be used as a signal, not a gate.
 
 How to read results
 - `reply_rate` counts inline `bot_response` + outbox; `expected_reply_rate` excludes expected non-replies (pending/manager_active).

@@ -712,6 +712,12 @@ LLM_QUALITY_TAG_HINTS_RE = {
     tag: [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
     for tag, patterns in LLM_QUALITY_TAG_HINTS.items()
 }
+LLM_QUALITY_LANG_KK_CHARS = set("ӘәҒғҚқҢңӨөҰұҮүІіҺһ")
+LLM_QUALITY_NOISE_HINTS = [
+    r"^\\s*(ок|ok|окей|okay|thanks|thx|спс|спасибо|\\?+|!+|\\.+|ээ+|мм+|угу|ага)\\s*$",
+    r"^\\s*[👍🙏✅]+\\s*$",
+]
+LLM_QUALITY_NOISE_RE = re.compile("|".join(LLM_QUALITY_NOISE_HINTS), re.IGNORECASE)
 LLM_QUALITY_BUNDLE_INTENTS = {"info_bundle", "multi_intent_info"}
 LLM_QUALITY_KNOWN_STATES = {"bot_active", "pending", "manager_active"}
 LLM_QUALITY_BOOKING_SLOTS = ("service", "datetime", "name", "phone")
@@ -753,6 +759,15 @@ LLM_QUALITY_REASON_LABELS = {
     "handoff_state_mismatch": "state mismatch after manager action",
     "handoff_status_mismatch": "handover status mismatch after manager action",
 }
+LLM_QUALITY_JUDGE_REASONS = {
+    "irrelevant_reply": "reply does not address the user's intent/question",
+    "missed_question": "question not answered or slot not collected",
+    "looped_prompt": "bot repeats prior prompt without progress",
+    "needs_clarification": "reply should clarify but does not",
+    "should_handoff": "should have escalated/handed off",
+    "unsafe_response": "violates policy/safety expectations",
+}
+LLM_QUALITY_JUDGE_VERDICTS = {"pass", "fail", "uncertain"}
 
 
 def _chaos_pick(rng, items):
@@ -2193,6 +2208,37 @@ def _llm_quality_extract_turn_tags(turn):
             tags.append(tag.strip())
     return tags
 
+def _llm_quality_normalize_expect_token(token: str | None):
+    if token is None:
+        return None
+    value = token.strip()
+    if not value:
+        return None
+    lowered = value.lower()
+    if lowered in {"none", "null"}:
+        return None
+    return value
+
+def _llm_quality_normalize_expect_value(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        parts = [item.strip() for item in value.split(",") if item.strip()]
+        if not parts:
+            return None
+        if len(parts) == 1:
+            return _llm_quality_normalize_expect_token(parts[0])
+        return [_llm_quality_normalize_expect_token(item) for item in parts]
+    if isinstance(value, list):
+        normalized = []
+        for item in value:
+            token = _llm_quality_normalize_expect_token(str(item))
+            if token is None and str(item).strip().lower() not in {"none", "null"}:
+                continue
+            normalized.append(token)
+        return normalized or None
+    return value
+
 def _llm_quality_extract_expectations(turn):
     expect = turn.get("expect")
     if not isinstance(expect, dict):
@@ -2211,12 +2257,8 @@ def _llm_quality_extract_expectations(turn):
         info_sections = [str(item).strip() for item in info_sections if str(item).strip()]
     else:
         info_sections = []
-    reply_type = expect.get("reply_type")
-    if isinstance(reply_type, str):
-        reply_type = reply_type.strip()
-    state = expect.get("state")
-    if isinstance(state, str):
-        state = state.strip()
+    reply_type = _llm_quality_normalize_expect_value(expect.get("reply_type"))
+    state = _llm_quality_normalize_expect_value(expect.get("state"))
     expected_reply = expect.get("expected_reply")
     if isinstance(expected_reply, str):
         if expected_reply.strip().lower() in {"true", "yes", "1"}:
@@ -2259,6 +2301,31 @@ def _llm_quality_infer_info_tags(text):
                 tags.add(tag)
                 break
     return tags
+
+def _llm_quality_detect_language(text: str | None) -> str:
+    if not text:
+        return "unknown"
+    has_cyrillic = bool(re.search(r"[А-Яа-яЁёӘәҒғҚқҢңӨөҰұҮүІіҺһ]", text))
+    has_latin = bool(re.search(r"[A-Za-z]", text))
+    has_kk = any(ch in LLM_QUALITY_LANG_KK_CHARS for ch in text)
+    if has_kk and has_latin:
+        return "mixed"
+    if has_kk:
+        return "kk"
+    if has_cyrillic and has_latin:
+        return "mixed"
+    if has_cyrillic:
+        return "ru"
+    if has_latin:
+        return "latin"
+    return "unknown"
+
+def _llm_quality_is_noise(text: str | None, tags: list[str]) -> bool:
+    if tags and "noise" in tags:
+        return True
+    if not text:
+        return False
+    return bool(LLM_QUALITY_NOISE_RE.search(text))
 
 def _llm_quality_collect_info_signals(meta, trace_entries):
     info_sections = set()
@@ -2407,6 +2474,71 @@ def _llm_quality_generate_batch(args, *, count, seed):
         return None, None, "scenario output missing dialogs"
     return dialogs, warnings, None
 
+def _llm_quality_redact_text(text: str | None) -> str | None:
+    if not text:
+        return text
+    redacted = text
+    redacted = re.sub(r"\+?\d[\d\s().-]{7,}\d", "<phone>", redacted)
+    redacted = re.sub(
+        r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", "<email>", redacted
+    )
+    return redacted
+
+def _llm_quality_parse_llm_json(content: str) -> dict:
+    text = (content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\\s*```$", "", text).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(text[start : end + 1])
+        raise
+
+def _llm_quality_build_judge_prompt(payload: dict) -> str:
+    reasons = ", ".join(sorted(LLM_QUALITY_JUDGE_REASONS.keys()))
+    return (
+        "You are a QA judge for a salon booking consultant. "
+        "Use only the provided context. Do not assume missing facts. "
+        "If conversation_state is pending/manager_active, any bot reply is wrong. "
+        "If expected_reply is false but the bot replied, mark fail. "
+        "If expected_info_sections are present, the reply must address them or ask for clarification. "
+        "Return JSON only with keys: verdict, score, reasons, summary. "
+        f"verdict must be one of: {sorted(LLM_QUALITY_JUDGE_VERDICTS)}. "
+        f"reasons must be from: [{reasons}].\\n\\n"
+        f"Context JSON:\\n{json.dumps(payload, ensure_ascii=False)}"
+    )
+
+def _llm_quality_call_judge(
+    *, api_key: str, model: str, base_url: str, prompt: str, timeout: float
+) -> dict:
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "Return JSON only."},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 800,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base_url.rstrip('/')}/v1/chat/completions",
+        data=data,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = json.loads(resp.read().decode("utf-8"))
+    content = body["choices"][0]["message"]["content"]
+    return _llm_quality_parse_llm_json(content)
+
 def _llm_quality_compute_delta(current, baseline):
     if isinstance(current, (int, float)) and isinstance(baseline, (int, float)):
         return round(current - baseline, 6)
@@ -2519,6 +2651,7 @@ def _llm_quality_evaluate_turn(
     meta,
     trace_entries,
     state,
+    conv_meta,
     handover_meta,
     bot_response,
     expected_response,
@@ -2549,7 +2682,15 @@ def _llm_quality_evaluate_turn(
     if expected_reply_type and not _llm_quality_value_matches(
         expected_reply_type, actual_expected_reply_type
     ):
-        reasons.append("expected_reply_type_mismatch")
+        fallback_ok = False
+        if booking_progressed:
+            fallback_ok = True
+        elif _chaos_reply_type_fallback_ok(
+            expected_reply_type, actual_expected_reply_type, meta, conv_meta, trace_entries
+        ):
+            fallback_ok = True
+        if not fallback_ok:
+            reasons.append("expected_reply_type_mismatch")
     if expected_reply is not None and expected_reply != expected_response:
         reasons.append("expected_reply_mismatch")
     if expected_info_sections:
@@ -2930,7 +3071,19 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--fail-on-thresholds", action="store_true")
     parser.add_argument("--fail-on-regression", action="store_true")
     parser.add_argument("--regression-tolerance", type=float, default=0.02)
+    parser.add_argument("--judge-mode", choices=["off", "sample", "all"], default="off")
+    parser.add_argument("--judge-sample", type=float, default=0.1)
+    parser.add_argument("--judge-model", default="gpt-4o-mini")
+    parser.add_argument(
+        "--judge-base-url",
+        default=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com"),
+    )
+    parser.add_argument("--judge-api-key", default=None)
+    parser.add_argument("--judge-timeout", type=float, default=25.0)
+    parser.add_argument("--judge-seed", type=int, default=None)
+    parser.add_argument("--judge-no-redact", action="store_false", dest="judge_redact")
     parser.add_argument("--dry-run", action="store_true")
+    parser.set_defaults(judge_redact=True)
     return parser.parse_args(argv)
 
 def _parse_explain_args(argv):
@@ -4577,6 +4730,18 @@ def _run_llm_quality(args):
         elif client_meta and client_meta.get("client_id"):
             console_headers["X-Client-Id"] = client_meta.get("client_id")
 
+    judge_mode = args.judge_mode
+    if judge_mode == "off" and args.judge_sample and args.judge_sample > 0:
+        judge_mode = "sample"
+    judge_api_key = args.judge_api_key or os.environ.get("OPENAI_API_KEY")
+    judge_enabled = judge_mode != "off"
+    judge_skip_reason = None
+    if judge_enabled and not judge_api_key:
+        judge_enabled = False
+        judge_skip_reason = "missing_api_key"
+    judge_seed = args.judge_seed if args.judge_seed is not None else args.seed
+    judge_rng = random.Random(judge_seed or int(time.time()))
+
     dialogs = []
     warnings = {}
     batch_size = max(1, args.batch_size)
@@ -4655,6 +4820,36 @@ def _run_llm_quality(args):
         "filled_slots_total": 0,
     }
     booking_progress = {}
+    coverage_stats = {
+        "turn_tags": {},
+        "turn_kinds": {},
+        "media_kind": {},
+        "language": {},
+        "noise": {"turns": 0, "noisy": 0},
+        "intents": {},
+        "actions": {},
+        "expected_reply_type": {},
+    }
+    judge_stats = {
+        "enabled": judge_enabled,
+        "mode": judge_mode if judge_enabled else "off",
+        "sample": args.judge_sample,
+        "model": args.judge_model if judge_enabled else None,
+        "base_url": args.judge_base_url if judge_enabled else None,
+        "redact": args.judge_redact,
+        "skip_reason": judge_skip_reason,
+        "counts": {
+            "candidates": 0,
+            "judged": 0,
+            "pass": 0,
+            "fail": 0,
+            "uncertain": 0,
+            "errors": 0,
+            "skipped": 0,
+        },
+        "reasons": {},
+        "skips": {},
+    }
     failures = []
     failure_counts = {}
 
@@ -4688,6 +4883,23 @@ def _run_llm_quality(args):
             failure_counts[reason] = failure_counts.get(reason, 0) + 1
         if len(failures) < LLM_QUALITY_FAILURE_LIMIT:
             failures.append(record)
+
+    def _record_judge_skip(reason):
+        judge_stats["counts"]["skipped"] += 1
+        judge_stats["skips"][reason] = judge_stats["skips"].get(reason, 0) + 1
+
+    def _should_judge_turn(state, bot_response):
+        if not judge_enabled:
+            return False, None
+        if not bot_response:
+            return False, "no_bot_response"
+        if state in {"pending", "manager_active"}:
+            return False, "pending_state"
+        judge_stats["counts"]["candidates"] += 1
+        if judge_mode == "sample" and args.judge_sample > 0:
+            if judge_rng.random() >= args.judge_sample:
+                return False, "sample_skip"
+        return True, None
 
     def _send_telegram_action(action, handover_id, conv_meta):
         if not telegram_chat_id:
@@ -5004,6 +5216,20 @@ def _run_llm_quality(args):
                 expected_reply_type_value = _chaos_extract_expected_reply(
                     (conv_meta or {}).get("context")
                 )
+                if expected_reply_type_value:
+                    coverage_stats["expected_reply_type"][expected_reply_type_value] = (
+                        coverage_stats["expected_reply_type"].get(expected_reply_type_value, 0) + 1
+                    )
+                action_value = (meta or {}).get("action") if isinstance(meta, dict) else None
+                if action_value:
+                    coverage_stats["actions"][action_value] = (
+                        coverage_stats["actions"].get(action_value, 0) + 1
+                    )
+                intent_value = (meta or {}).get("intent") if isinstance(meta, dict) else None
+                if intent_value:
+                    coverage_stats["intents"][intent_value] = (
+                        coverage_stats["intents"].get(intent_value, 0) + 1
+                    )
                 outbox_summary = None
                 outbox_payload = None
                 outbox_payload_status = None
@@ -5034,6 +5260,22 @@ def _run_llm_quality(args):
                 _bump_state(state, expected_response, bot_response)
 
                 turn_tags = _llm_quality_extract_turn_tags(turn)
+                for tag in turn_tags:
+                    coverage_stats["turn_tags"][tag] = coverage_stats["turn_tags"].get(tag, 0) + 1
+                turn_kind = turn.get("kind") or "text"
+                coverage_stats["turn_kinds"][turn_kind] = (
+                    coverage_stats["turn_kinds"].get(turn_kind, 0) + 1
+                )
+                if "media" in turn_tags:
+                    media_kind = "audio" if "audio" in turn_tags else "photo"
+                    coverage_stats["media_kind"][media_kind] = (
+                        coverage_stats["media_kind"].get(media_kind, 0) + 1
+                    )
+                lang = _llm_quality_detect_language(text)
+                coverage_stats["language"][lang] = coverage_stats["language"].get(lang, 0) + 1
+                coverage_stats["noise"]["turns"] += 1
+                if _llm_quality_is_noise(text, turn_tags):
+                    coverage_stats["noise"]["noisy"] += 1
                 expectations = _llm_quality_extract_expectations(turn)
                 expected_action = expectations.get("action")
                 expected_info_sections = expectations.get("info_sections") or []
@@ -5110,6 +5352,7 @@ def _run_llm_quality(args):
                     meta=meta,
                     trace_entries=trace_entries,
                     state=state,
+                    conv_meta=conv_meta,
                     handover_meta=handover_meta,
                     bot_response=bot_response,
                     expected_response=expected_response,
@@ -5129,6 +5372,90 @@ def _run_llm_quality(args):
                 else:
                     stats["turns_passed"] += 1
                 trace_id = (meta or {}).get("trace_id") if isinstance(meta, dict) else None
+                judge_result = None
+                should_judge, judge_skip_reason = _should_judge_turn(state, bot_response)
+                if should_judge and not outbox_text:
+                    should_judge = False
+                    judge_skip_reason = "missing_bot_text"
+                if should_judge:
+                    judge_payload = {
+                        "user_text": _llm_quality_redact_text(text)
+                        if args.judge_redact
+                        else text,
+                        "bot_response": _llm_quality_redact_text(outbox_text)
+                        if args.judge_redact
+                        else outbox_text,
+                        "conversation_state": state,
+                        "turn_tags": turn_tags,
+                        "expected": {
+                            "action": expected_action,
+                            "reply_type": expected_reply_type,
+                            "state": expected_state,
+                            "expected_reply": expected_reply,
+                            "info_sections": expected_info_sections,
+                        },
+                        "decision_meta": {
+                            "action": (meta or {}).get("action") if isinstance(meta, dict) else None,
+                            "intent": (meta or {}).get("intent") if isinstance(meta, dict) else None,
+                            "info_sections": (meta or {}).get("info_sections")
+                            if isinstance(meta, dict)
+                            else None,
+                            "expected_reply_type": expected_reply_type_value,
+                            "pending_action": (meta or {}).get("pending_action")
+                            if isinstance(meta, dict)
+                            else None,
+                            "policy_gate": (meta or {}).get("policy_gate") if isinstance(meta, dict) else None,
+                        },
+                        "trace_summary": {
+                            "stages": [
+                                entry.get("stage")
+                                for entry in trace_entries
+                                if isinstance(entry, dict) and entry.get("stage")
+                            ][:12],
+                        },
+                        "booking_active": booking_active,
+                        "booking_slots": booking_slots,
+                        "info_tags": info_tags,
+                    }
+                    prompt = _llm_quality_build_judge_prompt(judge_payload)
+                    try:
+                        judge_raw = _llm_quality_call_judge(
+                            api_key=judge_api_key,
+                            model=args.judge_model,
+                            base_url=args.judge_base_url,
+                            prompt=prompt,
+                            timeout=args.judge_timeout,
+                        )
+                        verdict = (judge_raw or {}).get("verdict")
+                        verdict = verdict.lower().strip() if isinstance(verdict, str) else None
+                        reasons = (judge_raw or {}).get("reasons") or []
+                        if isinstance(reasons, str):
+                            reasons = [item.strip() for item in reasons.split(",") if item.strip()]
+                        elif not isinstance(reasons, list):
+                            reasons = []
+                        summary_text = (judge_raw or {}).get("summary")
+                        score = (judge_raw or {}).get("score")
+                        if verdict not in LLM_QUALITY_JUDGE_VERDICTS:
+                            verdict = "uncertain"
+                        judge_stats["counts"]["judged"] += 1
+                        judge_stats["counts"][verdict] += 1
+                        for reason in reasons:
+                            judge_stats["reasons"][reason] = (
+                                judge_stats["reasons"].get(reason, 0) + 1
+                            )
+                        judge_result = {
+                            "verdict": verdict,
+                            "score": score,
+                            "reasons": reasons,
+                            "summary": summary_text,
+                            "model": args.judge_model,
+                        }
+                    except Exception as exc:
+                        judge_stats["counts"]["errors"] += 1
+                        judge_result = {"error": str(exc), "model": args.judge_model}
+                else:
+                    if judge_skip_reason:
+                        _record_judge_skip(judge_skip_reason)
                 _record_failure(
                     evaluation_reasons,
                     {
@@ -5208,6 +5535,7 @@ def _run_llm_quality(args):
                         "ok": not evaluation_reasons,
                         "reasons": evaluation_reasons,
                     },
+                    "judge": judge_result,
                     "manager_actions": manager_actions_run,
                     "pending_action": pending_action_result,
                     "inline_response_text": inline_response_text,
@@ -5364,6 +5692,10 @@ def _run_llm_quality(args):
         "pending_mode": args.pending_mode,
         "jid_mode": args.jid_mode,
         "regression_tolerance": args.regression_tolerance,
+        "judge_mode": judge_mode,
+        "judge_sample": args.judge_sample,
+        "judge_model": args.judge_model if judge_enabled else None,
+        "judge_redact": args.judge_redact,
     }
     summary = {
         "run_id": run_id,
@@ -5383,6 +5715,8 @@ def _run_llm_quality(args):
         "delta": delta,
         "failure_counts": failure_counts,
         "failures": failures,
+        "coverage": coverage_stats,
+        "judge": judge_stats,
         "thresholds": {
             "rules": LLM_QUALITY_THRESHOLDS,
             "results": threshold_results,
@@ -5406,6 +5740,7 @@ def _run_llm_quality(args):
         "config": safe_config,
         "rates": metrics.get("rates"),
         "failure_counts": failure_counts,
+        "judge": judge_stats.get("counts"),
     }
     if args.update_baseline or args.append_history:
         os.makedirs(os.path.dirname(baseline_path), exist_ok=True)
