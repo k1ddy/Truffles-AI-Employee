@@ -635,6 +635,125 @@ CHAOS_PENDING_STATUS = [
 CHAOS_PENDING_ACK = PENDING_ACK_PHRASES
 CHAOS_PENDING_WAIT = ["спасибо", "рахмет", "понял", "ждете", "окей"]
 
+LLM_QUALITY_INFO_TAGS = {
+    "price",
+    "location",
+    "hours",
+    "promo",
+    "duration",
+    "parking",
+    "master",
+}
+LLM_QUALITY_INFO_SECTION_MAP = {
+    "price": {"pricing", "price", "payment_info", "payment"},
+    "location": {"address", "location"},
+    "hours": {"hours", "working_hours", "schedule"},
+    "promo": {"discounts", "discount", "promo", "promotion"},
+    "duration": {"duration", "service_duration"},
+    "parking": {"parking"},
+    "master": {"master", "specialist"},
+}
+LLM_QUALITY_SECTION_TAG_MAP = {}
+for _tag, _sections in LLM_QUALITY_INFO_SECTION_MAP.items():
+    for _section in _sections:
+        LLM_QUALITY_SECTION_TAG_MAP.setdefault(_section, _tag)
+LLM_QUALITY_TAG_HINTS = {
+    "price": [
+        r"сколько\\s+стоит",
+        r"\\bцена\\b",
+        r"стоимост",
+        r"ценник",
+        r"по\\s+чем",
+        r"бағасы",
+        r"қанша",
+    ],
+    "location": [
+        r"где\\s+вы",
+        r"адрес",
+        r"находит",
+        r"как\\s+до\\s+вас",
+        r"қайда",
+        r"мекенжай",
+    ],
+    "hours": [
+        r"работаете",
+        r"во\\s+сколько",
+        r"график",
+        r"часы",
+        r"қашан",
+        r"жұмыс",
+        r"ашық",
+    ],
+    "promo": [
+        r"акци",
+        r"скид",
+        r"промо",
+        r"спецпредлож",
+        r"жеңілд",
+    ],
+    "duration": [
+        r"сколько\\s+длит",
+        r"длительн",
+        r"по\\s+времени",
+        r"уақ",
+    ],
+    "parking": [
+        r"парков",
+        r"тұрақ",
+    ],
+    "master": [
+        r"мастер",
+        r"специалист",
+        r"к\\s+мастер",
+        r"у\\s+мастера",
+    ],
+}
+LLM_QUALITY_TAG_HINTS_RE = {
+    tag: [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
+    for tag, patterns in LLM_QUALITY_TAG_HINTS.items()
+}
+LLM_QUALITY_BUNDLE_INTENTS = {"info_bundle", "multi_intent_info"}
+LLM_QUALITY_KNOWN_STATES = {"bot_active", "pending", "manager_active"}
+LLM_QUALITY_BOOKING_SLOTS = ("service", "datetime", "name", "phone")
+LLM_QUALITY_FAILURE_LIMIT = 50
+LLM_QUALITY_THRESHOLDS = {
+    "reply_rate": 0.9,
+    "expected_reply_rate": 0.95,
+    "info_answer_rate": 0.7,
+    "unknown_state_rate": 0.02,
+    "booking_slot_progress_rate": 0.25,
+    "handoff_correct_rate": 0.9,
+}
+LLM_QUALITY_THRESHOLD_DIRECTIONS = {
+    "unknown_state_rate": "max",
+}
+LLM_QUALITY_REGRESSION_KEYS = (
+    "reply_rate",
+    "expected_reply_rate",
+    "info_answer_rate",
+    "unknown_state_rate",
+    "booking_slot_progress_rate",
+    "handoff_correct_rate",
+)
+LLM_QUALITY_REASON_LABELS = {
+    "decision_meta_missing": "decision_meta missing for inbound turn",
+    "decision_trace_missing": "decision_trace missing for inbound turn",
+    "unknown_state": "conversation.state missing or not in known states",
+    "expected_state_mismatch": "conversation.state does not match scenario expectation",
+    "expected_action_mismatch": "decision_meta.action does not match scenario expectation",
+    "expected_reply_type_mismatch": "expected_reply_type does not match scenario expectation",
+    "expected_reply_mismatch": "reply expectation does not match scenario expectation",
+    "expected_info_section_miss": "expected info_sections missing in meta/trace",
+    "missing_bot_reply": "expected response but no bot reply observed",
+    "unexpected_bot_reply_manager": "bot replied while manager_active",
+    "handover_missing": "manager_active but handover missing",
+    "info_section_miss": "info request not answered per meta/trace",
+    "booking_slot_stall": "booking active without slot progress",
+    "manager_action_failed": "manager callback failed",
+    "handoff_state_mismatch": "state mismatch after manager action",
+    "handoff_status_mismatch": "handover status mismatch after manager action",
+}
+
 
 def _chaos_pick(rng, items):
     return rng.choice(items)
@@ -2049,6 +2168,408 @@ def _resolve_chaos_jid_base(simulation_id: str, seed: int | None) -> int:
     offset = (offset + int(seed or 0)) % 1000000
     return 79990000000 + (offset * 1000)
 
+def _llm_quality_repo_root():
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def _llm_quality_dialog_script():
+    return os.path.join(_llm_quality_repo_root(), "scripts", "booking_dialog_scenarios.py")
+
+def _llm_quality_parse_actions(value):
+    if not value:
+        return []
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+def _llm_quality_pick_jid(jids, idx, rng, mode):
+    if not jids:
+        return None
+    if mode == "random":
+        return rng.choice(jids)
+    return jids[idx % len(jids)]
+
+def _llm_quality_extract_turn_tags(turn):
+    tags = []
+    for tag in turn.get("tags") or []:
+        if isinstance(tag, str) and tag.strip():
+            tags.append(tag.strip())
+    return tags
+
+def _llm_quality_extract_expectations(turn):
+    expect = turn.get("expect")
+    if not isinstance(expect, dict):
+        return {}
+    action = expect.get("action")
+    if isinstance(action, str):
+        action = [item.strip() for item in action.split(",") if item.strip()]
+    elif isinstance(action, list):
+        action = [str(item).strip() for item in action if str(item).strip()]
+    else:
+        action = None
+    info_sections = expect.get("info_sections")
+    if isinstance(info_sections, str):
+        info_sections = [item.strip() for item in info_sections.split(",") if item.strip()]
+    elif isinstance(info_sections, list):
+        info_sections = [str(item).strip() for item in info_sections if str(item).strip()]
+    else:
+        info_sections = []
+    reply_type = expect.get("reply_type")
+    if isinstance(reply_type, str):
+        reply_type = reply_type.strip()
+    state = expect.get("state")
+    if isinstance(state, str):
+        state = state.strip()
+    expected_reply = expect.get("expected_reply")
+    if isinstance(expected_reply, str):
+        if expected_reply.strip().lower() in {"true", "yes", "1"}:
+            expected_reply = True
+        elif expected_reply.strip().lower() in {"false", "no", "0"}:
+            expected_reply = False
+        else:
+            expected_reply = None
+    if not isinstance(expected_reply, bool):
+        expected_reply = None
+    return {
+        "action": action,
+        "info_sections": [section.lower() for section in info_sections],
+        "reply_type": reply_type or None,
+        "state": state or None,
+        "expected_reply": expected_reply,
+    }
+
+def _llm_quality_expected_section_answered(expected_sections, meta, trace_entries):
+    if not expected_sections:
+        return False, [], []
+    info_sections, intents = _llm_quality_collect_info_signals(meta, trace_entries)
+    actual = set(info_sections) | set(intents)
+    return bool(set(expected_sections) & actual), info_sections, intents
+
+def _llm_quality_value_matches(expected, actual):
+    if expected is None:
+        return True
+    if isinstance(expected, (list, tuple, set)):
+        return actual in expected
+    return actual == expected
+
+def _llm_quality_infer_info_tags(text):
+    if not text:
+        return set()
+    tags = set()
+    for tag, patterns in LLM_QUALITY_TAG_HINTS_RE.items():
+        for pattern in patterns:
+            if pattern.search(text):
+                tags.add(tag)
+                break
+    return tags
+
+def _llm_quality_collect_info_signals(meta, trace_entries):
+    info_sections = set()
+    intents = set()
+    if isinstance(meta, dict):
+        intent = meta.get("intent")
+        if isinstance(intent, str) and intent.strip():
+            intents.add(intent.strip().lower())
+        sections = meta.get("info_sections")
+        if isinstance(sections, list):
+            for section in sections:
+                if isinstance(section, str) and section.strip():
+                    info_sections.add(section.strip().lower())
+    for entry in trace_entries or []:
+        if not isinstance(entry, dict):
+            continue
+        intent = entry.get("intent")
+        if isinstance(intent, str) and intent.strip():
+            intents.add(intent.strip().lower())
+        sections = entry.get("info_sections")
+        if isinstance(sections, list):
+            for section in sections:
+                if isinstance(section, str) and section.strip():
+                    info_sections.add(section.strip().lower())
+    return info_sections, intents
+
+def _llm_quality_info_answered(info_tags, meta, trace_entries):
+    info_sections, intents = _llm_quality_collect_info_signals(meta, trace_entries)
+    answered = {}
+    bundle_hit = bool(intents.intersection(LLM_QUALITY_BUNDLE_INTENTS))
+    for tag in info_tags:
+        tokens = LLM_QUALITY_INFO_SECTION_MAP.get(tag, {tag})
+        matched = bool(tokens & info_sections or tokens & intents)
+        if not matched and bundle_hit:
+            matched = True
+        answered[tag] = matched
+    return answered, info_sections, intents
+
+def _llm_quality_expected_response(state, meta):
+    action = (meta or {}).get("action") if isinstance(meta, dict) else None
+    pending_action = (meta or {}).get("pending_action") if isinstance(meta, dict) else None
+    if state == "manager_active":
+        return False, "manager_active"
+    if state == "pending":
+        return False, "pending_state"
+    if action in CHAOS_PENDING_ACTIONS or pending_action in CHAOS_PENDING_ACTIONS:
+        return False, "pending_action"
+    return True, None
+
+def _llm_quality_expected_manager_state(action, state_before):
+    if action == "take":
+        return "manager_active", "active"
+    if action == "resolve":
+        return "bot_active", "resolved"
+    if action == "return":
+        return "bot_active", "bot_handling"
+    if action == "skip":
+        return state_before, None
+    return None, None
+
+def _llm_quality_extract_outbox_text(payload):
+    if not isinstance(payload, dict):
+        return None
+    body = payload.get("body")
+    if isinstance(body, dict):
+        for key in ("message", "text", "caption"):
+            value = body.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    for key in ("message", "text", "caption"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+def _llm_quality_fetch_outbox_payload(db_user, client_id, inbound_message_id):
+    if not client_id or not inbound_message_id:
+        return None, None, None
+    safe_client = _escape_sql_literal(client_id)
+    safe_id = _escape_sql_literal(inbound_message_id)
+    query = (
+        "SELECT payload_json::text, status "
+        "FROM outbox_messages "
+        f"WHERE client_id = '{safe_client}' AND inbound_message_id = '{safe_id}' "
+        "ORDER BY created_at DESC LIMIT 1;"
+    )
+    row, error = _run_psql_query(db_user, query)
+    if error:
+        return None, None, error
+    if not row:
+        return None, None, None
+    parts = row.split("\t", 1)
+    payload = None
+    if parts and parts[0]:
+        try:
+            payload = json.loads(parts[0])
+        except Exception:
+            payload = None
+    status = parts[1] if len(parts) > 1 else None
+    return payload, status, None
+
+def _llm_quality_generate_batch(args, *, count, seed):
+    script_path = _llm_quality_dialog_script()
+    cmd = [
+        sys.executable,
+        script_path,
+        "--count",
+        str(count),
+        "--min-turns",
+        str(args.min_turns),
+        "--max-turns",
+        str(args.max_turns),
+        "--output",
+        "-",
+        "--mode",
+        args.mode,
+        "--media-mode",
+        args.media_mode,
+        "--media-kind",
+        args.media_kind,
+    ]
+    if args.scenario_coverage and str(args.scenario_coverage).strip().lower() not in {"none", "off"}:
+        cmd += ["--coverage", str(args.scenario_coverage)]
+    if args.include_media:
+        cmd.append("--include-media")
+    if seed is not None:
+        cmd += ["--seed", str(seed)]
+    if args.mode == "llm":
+        if args.llm_model:
+            cmd += ["--llm-model", args.llm_model]
+        if args.llm_base_url:
+            cmd += ["--llm-base-url", args.llm_base_url]
+        if args.llm_api_key:
+            cmd += ["--llm-api-key", args.llm_api_key]
+    result = run_command(cmd)
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        return None, None, stderr or "scenario generation failed"
+    try:
+        payload = json.loads(result.stdout or "")
+    except Exception as exc:
+        return None, None, f"scenario json parse failed: {exc}"
+    dialogs = payload.get("dialogs") or []
+    warnings = payload.get("warnings") or {}
+    if not isinstance(dialogs, list):
+        return None, None, "scenario output missing dialogs"
+    return dialogs, warnings, None
+
+def _llm_quality_compute_delta(current, baseline):
+    if isinstance(current, (int, float)) and isinstance(baseline, (int, float)):
+        return round(current - baseline, 6)
+    if isinstance(current, dict) and isinstance(baseline, dict):
+        delta = {}
+        for key in sorted(set(current.keys()) | set(baseline.keys())):
+            delta[key] = _llm_quality_compute_delta(current.get(key), baseline.get(key))
+        return delta
+    return None
+
+def _llm_quality_check_thresholds(metrics):
+    rates = (metrics or {}).get("rates") or {}
+    values = {
+        "reply_rate": rates.get("reply_rate"),
+        "expected_reply_rate": rates.get("expected_reply_rate"),
+        "info_answer_rate": rates.get("info_answer_rate"),
+        "unknown_state_rate": rates.get("unknown_state_rate"),
+        "booking_slot_progress_rate": rates.get("booking_slot_progress_rate"),
+        "handoff_correct_rate": rates.get("handoff_correct_rate"),
+    }
+    results = {}
+    breaches = []
+    for key, threshold in LLM_QUALITY_THRESHOLDS.items():
+        value = values.get(key)
+        direction = LLM_QUALITY_THRESHOLD_DIRECTIONS.get(key, "min")
+        if value is None:
+            ok = None
+        elif direction == "max":
+            ok = value <= threshold
+        else:
+            ok = value >= threshold
+        results[key] = {
+            "value": value,
+            "threshold": threshold,
+            "direction": direction,
+            "ok": ok,
+        }
+        if ok is False:
+            breaches.append(key)
+    return results, breaches
+
+def _llm_quality_check_regression(metrics, baseline_metrics, tolerance):
+    if not baseline_metrics:
+        return {}, []
+    rates = (metrics or {}).get("rates") or {}
+    baseline_rates = (baseline_metrics or {}).get("rates") or {}
+    results = {}
+    breaches = []
+    for key in LLM_QUALITY_REGRESSION_KEYS:
+        current = rates.get(key)
+        baseline = baseline_rates.get(key)
+        direction = LLM_QUALITY_THRESHOLD_DIRECTIONS.get(key, "min")
+        if current is None or baseline is None:
+            ok = None
+            delta = None
+        else:
+            delta = round(current - baseline, 6)
+            if direction == "max":
+                ok = delta <= tolerance
+            else:
+                ok = delta >= -tolerance
+        results[key] = {
+            "value": current,
+            "baseline": baseline,
+            "delta": delta,
+            "direction": direction,
+            "ok": ok,
+        }
+        if ok is False:
+            breaches.append(key)
+    return results, breaches
+
+def _llm_quality_last_trace_stage(trace_entries):
+    for entry in reversed(trace_entries or []):
+        if isinstance(entry, dict) and entry.get("stage"):
+            return entry.get("stage")
+    return None
+
+def _llm_quality_extract_booking_slots(meta, conv_meta):
+    slots = {}
+    raw_slots = (meta or {}).get("slots")
+    if isinstance(raw_slots, dict):
+        for key in LLM_QUALITY_BOOKING_SLOTS:
+            value = raw_slots.get(key)
+            if isinstance(value, str) and value.strip():
+                slots[key] = value.strip()
+    context = (conv_meta or {}).get("context") if isinstance(conv_meta, dict) else None
+    booking = context.get("booking") if isinstance(context, dict) else None
+    if isinstance(booking, dict):
+        for key in LLM_QUALITY_BOOKING_SLOTS:
+            if key in slots:
+                continue
+            value = booking.get(key)
+            if isinstance(value, str) and value.strip():
+                slots[key] = value.strip()
+    return slots
+
+def _llm_quality_booking_active(conv_meta):
+    context = (conv_meta or {}).get("context") if isinstance(conv_meta, dict) else None
+    expected_reply = _chaos_extract_expected_reply(context)
+    if expected_reply in CHAOS_BOOKING_REPLY_TYPES:
+        return True
+    booking = context.get("booking") if isinstance(context, dict) else None
+    if isinstance(booking, dict) and booking.get("active") is True:
+        return True
+    return False
+
+def _llm_quality_evaluate_turn(
+    *,
+    meta,
+    trace_entries,
+    state,
+    handover_meta,
+    bot_response,
+    expected_response,
+    expected_action,
+    expected_info_sections,
+    expected_reply_type,
+    expected_state,
+    expected_reply,
+    actual_expected_reply_type,
+    info_tags,
+    info_answered,
+    booking_active,
+    booking_progressed,
+):
+    reasons = []
+    if meta is None:
+        reasons.append("decision_meta_missing")
+    if not trace_entries:
+        reasons.append("decision_trace_missing")
+    if state not in LLM_QUALITY_KNOWN_STATES:
+        reasons.append("unknown_state")
+    if expected_state and not _llm_quality_value_matches(expected_state, state):
+        reasons.append("expected_state_mismatch")
+    if expected_action:
+        action_value = (meta or {}).get("action") if isinstance(meta, dict) else None
+        if not _llm_quality_value_matches(expected_action, action_value):
+            reasons.append("expected_action_mismatch")
+    if expected_reply_type and not _llm_quality_value_matches(
+        expected_reply_type, actual_expected_reply_type
+    ):
+        reasons.append("expected_reply_type_mismatch")
+    if expected_reply is not None and expected_reply != expected_response:
+        reasons.append("expected_reply_mismatch")
+    if expected_info_sections:
+        expected_answered, _, _ = _llm_quality_expected_section_answered(
+            expected_info_sections, meta, trace_entries
+        )
+        if not expected_answered:
+            reasons.append("expected_info_section_miss")
+    if expected_response and not bot_response:
+        reasons.append("missing_bot_reply")
+    if state == "manager_active" and bot_response:
+        reasons.append("unexpected_bot_reply_manager")
+    if state == "manager_active" and not handover_meta:
+        reasons.append("handover_missing")
+    if info_tags and not any(info_answered.values()) and state not in {"pending", "manager_active"}:
+        reasons.append("info_section_miss")
+    if booking_active and booking_progressed is False:
+        reasons.append("booking_slot_stall")
+    return reasons
+
 def _parse_livecheck_args(argv):
     parser = argparse.ArgumentParser(
         prog="ops/diagnose.py livecheck",
@@ -2339,6 +2860,76 @@ def _parse_chaos_sim_args(argv):
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--debug-all", action="store_true")
     parser.add_argument("--rag-audit", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    return parser.parse_args(argv)
+
+def _parse_llm_quality_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py llm-quality",
+        description="Run booking dialogs (LLM or template) with state-aware evaluation.",
+    )
+    parser.add_argument(
+        "--base-url",
+        default=os.environ.get("TRUFFLES_API_BASE_URL", "http://localhost:8000"),
+    )
+    parser.add_argument(
+        "--client-slug",
+        default=os.environ.get("TRUFFLES_CLIENT_SLUG", "demo_salon"),
+    )
+    parser.add_argument("--count", type=int, default=5)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--mode", choices=["template", "llm"], default="llm")
+    parser.add_argument("--min-turns", type=int, default=10)
+    parser.add_argument("--max-turns", type=int, default=15)
+    parser.add_argument("--include-media", action="store_true")
+    parser.add_argument("--media-mode", choices=["text", "payload"], default="text")
+    parser.add_argument("--media-kind", choices=["photo", "audio"], default="photo")
+    parser.add_argument("--scenario-coverage", default="booking,info,interrupt")
+    parser.add_argument("--llm-model", default="gpt-4o-mini")
+    parser.add_argument(
+        "--llm-base-url",
+        default=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com"),
+    )
+    parser.add_argument("--llm-api-key", default=None)
+    parser.add_argument("--batch-size", type=int, default=5)
+    parser.add_argument("--retry-count", type=int, default=2)
+    parser.add_argument("--retry-backoff", type=float, default=0.6)
+    parser.add_argument("--min-wait", type=float, default=0.5)
+    parser.add_argument("--max-wait", type=float, default=1.5)
+    parser.add_argument("--allowlist-jids", default=None)
+    parser.add_argument("--remote-jid", default=None)
+    parser.add_argument("--jid-mode", choices=["round_robin", "random"], default="round_robin")
+    parser.add_argument("--allow-non-allowlist", action="store_true")
+    parser.add_argument("--webhook-secret", default=None)
+    parser.add_argument("--admin-token", default=None)
+    parser.add_argument("--instance-id", default=None)
+    parser.add_argument("--timeout", type=float, default=15.0)
+    parser.add_argument("--poll-timeout", type=float, default=20.0)
+    parser.add_argument("--poll-interval", type=float, default=0.6)
+    parser.add_argument("--trace-timeout", type=float, default=20.0)
+    parser.add_argument("--trace-interval", type=float, default=0.6)
+    parser.add_argument("--skip-outbox", action="store_true")
+    parser.add_argument("--outbox-wait", type=float, default=None)
+    parser.add_argument("--manager-mode", choices=["simulate", "check", "skip"], default="simulate")
+    parser.add_argument("--manager-channel", choices=["telegram", "console"], default="telegram")
+    parser.add_argument("--manager-actions", default="take,resolve")
+    parser.add_argument("--manager-wait", type=float, default=1.0)
+    parser.add_argument("--pending-mode", choices=["ack", "skip"], default="ack")
+    parser.add_argument("--ack-text", default="ок")
+    parser.add_argument("--reset-before-dialog", action="store_true")
+    parser.add_argument("--console-base-url", default=os.environ.get("CONSOLE_API_BASE_URL"))
+    parser.add_argument("--console-token", default=None)
+    parser.add_argument("--console-env", default="/home/zhan/secrets/console-contract.env")
+    parser.add_argument("--console-client-id", default=None)
+    parser.add_argument("--console-mode", choices=["real", "skip"], default="real")
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--run-id", default=None)
+    parser.add_argument("--update-baseline", action="store_true")
+    parser.add_argument("--append-history", action="store_true")
+    parser.add_argument("--history-max", type=int, default=20)
+    parser.add_argument("--fail-on-thresholds", action="store_true")
+    parser.add_argument("--fail-on-regression", action="store_true")
+    parser.add_argument("--regression-tolerance", type=float, default=0.02)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
@@ -3902,6 +4493,946 @@ def _ensure_bot_active_before_suite(args, context):
     if not cleared:
         raise SystemExit(
             f"livecheck-auto: pending state not cleared before {args.suite} (state_after={state})"
+        )
+
+def _run_llm_quality(args):
+    if args.count < 1:
+        raise SystemExit("llm-quality: --count must be >= 1")
+    rng = random.Random(args.seed or int(time.time()))
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    run_id = args.run_id or timestamp
+    base_url = args.base_url.rstrip("/")
+    client_slug = args.client_slug
+    webhook_url = f"{base_url}/webhook/{client_slug}"
+    output_dir = args.output_dir or os.path.join("/tmp/booking_quality", run_id)
+    os.makedirs(output_dir, exist_ok=True)
+
+    container_name, _ = resolve_container_name()
+    allowlist_jids = _resolve_allowlist_jids(args.allowlist_jids, container_name)
+    if args.remote_jid:
+        if allowlist_jids and args.remote_jid not in allowlist_jids and not args.allow_non_allowlist:
+            raise SystemExit(
+                f"llm-quality: remote-jid {args.remote_jid} not in allowlist; refusing to send"
+            )
+        if not allowlist_jids:
+            allowlist_jids = [args.remote_jid]
+    if not allowlist_jids and not args.allow_non_allowlist:
+        raise SystemExit("llm-quality: allowlist-jids required for state mode")
+
+    db_user = _resolve_db_user_simple()
+    client_meta, client_error = _fetch_client_meta(db_user, client_slug)
+    if client_error:
+        raise SystemExit(f"llm-quality: client meta lookup failed ({client_error})")
+    client_id = (client_meta or {}).get("client_id")
+    instance_id = (
+        args.instance_id
+        or (client_meta or {}).get("branch_instance_id")
+        or (client_meta or {}).get("client_instance_id")
+    )
+    webhook_secret = _resolve_webhook_secret(client_slug, args.webhook_secret)
+
+    admin_token = args.admin_token or os.environ.get("ALERTS_ADMIN_TOKEN")
+    if not admin_token and container_name:
+        admin_token = _resolve_env_from_container(container_name, "ALERTS_ADMIN_TOKEN")
+    skip_outbox = args.skip_outbox
+    outbox_wait_seconds = (
+        args.outbox_wait
+        if args.outbox_wait is not None
+        else _resolve_outbox_wait_seconds(container_name)
+    )
+    if not skip_outbox and not args.dry_run and not admin_token:
+        raise SystemExit("llm-quality: missing admin token for outbox/process")
+
+    manager_actions = [
+        action
+        for action in _llm_quality_parse_actions(args.manager_actions)
+        if action in {"take", "resolve", "return", "skip"}
+    ] or ["resolve"]
+    telegram_chat_id = None
+    if client_meta and client_meta.get("telegram_chat_id"):
+        try:
+            telegram_chat_id = int(client_meta.get("telegram_chat_id"))
+        except ValueError:
+            telegram_chat_id = None
+    owner_id, owner_username = _parse_owner_identity((client_meta or {}).get("owner_telegram_id"))
+    manager_id = owner_id if owner_id is not None else 10001
+    manager_username = owner_username or "llm_quality"
+    console_token = None
+    console_headers = {}
+    console_base_url = (args.console_base_url or base_url).rstrip("/")
+    if args.manager_channel == "console":
+        if args.console_mode == "skip":
+            console_token = None
+        else:
+            console_token, console_error = _resolve_console_token(args)
+            if console_error and args.manager_mode == "simulate":
+                print(
+                    json.dumps(
+                        {"stage": "console_token_error", "error": console_error}, ensure_ascii=False
+                    )
+                )
+                args.manager_mode = "check"
+        if args.console_client_id:
+            console_headers["X-Client-Id"] = args.console_client_id
+        elif client_meta and client_meta.get("client_id"):
+            console_headers["X-Client-Id"] = client_meta.get("client_id")
+
+    dialogs = []
+    warnings = {}
+    batch_size = max(1, args.batch_size)
+    seed_base = args.seed if args.seed is not None else int(time.time())
+    batch_idx = 0
+    while len(dialogs) < args.count:
+        batch_count = min(batch_size, args.count - len(dialogs))
+        batch_seed = seed_base + batch_idx if args.seed is not None else None
+        retries = 0
+        while True:
+            batch_dialogs, batch_warnings, error = _llm_quality_generate_batch(
+                args, count=batch_count, seed=batch_seed
+            )
+            if not error and batch_dialogs:
+                break
+            if retries >= args.retry_count:
+                raise SystemExit(f"llm-quality: scenario generation failed ({error})")
+            time.sleep(args.retry_backoff * (2 ** retries))
+            retries += 1
+        dialogs.extend(batch_dialogs)
+        if isinstance(batch_warnings, dict):
+            warnings.update(batch_warnings)
+        batch_idx += 1
+    dialogs = dialogs[: args.count]
+
+    scenarios_payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "mode": args.mode,
+        "count": len(dialogs),
+        "turn_range": [args.min_turns, args.max_turns],
+        "warnings": warnings,
+        "dialogs": dialogs,
+    }
+    scenarios_path = os.path.join(output_dir, "scenarios.json")
+    with open(scenarios_path, "w", encoding="utf-8") as handle:
+        json.dump(scenarios_payload, handle, ensure_ascii=False, indent=2)
+
+    responses_path = os.path.join(output_dir, "responses.jsonl")
+    trace_bundle_path = os.path.join(output_dir, "trace_bundle.jsonl")
+    stats = {
+        "dialogs": len(dialogs),
+        "turns": 0,
+        "turns_expected_response": 0,
+        "turns_with_response": 0,
+        "turns_missing_response": 0,
+        "turns_expected_missing": 0,
+        "turns_passed": 0,
+        "turns_failed": 0,
+        "unknown_state": 0,
+        "decision_meta_missing": 0,
+        "decision_trace_missing": 0,
+        "webhook_errors": 0,
+        "infra_errors": 0,
+        "decision_meta_errors": 0,
+        "decision_trace_errors": 0,
+        "info_mismatch": 0,
+    }
+    state_stats = {}
+    info_stats = {
+        "turns_with_info_request": 0,
+        "turns_info_answered": 0,
+        "turns_info_missed": 0,
+        "by_tag": {tag: {"requested": 0, "answered": 0, "missed": 0} for tag in LLM_QUALITY_INFO_TAGS},
+    }
+    manager_stats = {
+        "handovers_seen": 0,
+        "actions": {"take": 0, "resolve": 0, "return": 0, "skip": 0},
+        "errors": 0,
+        "actions_total": 0,
+        "actions_ok": 0,
+    }
+    booking_stats = {
+        "turns": 0,
+        "progress_opportunities": 0,
+        "progressed": 0,
+        "filled_slots_total": 0,
+    }
+    booking_progress = {}
+    failures = []
+    failure_counts = {}
+
+    def _bump_state(state, expected_response, replied):
+        key = state or "unknown"
+        entry = state_stats.setdefault(
+            key,
+            {
+                "turns": 0,
+                "replies": 0,
+                "expected_turns": 0,
+                "expected_replies": 0,
+                "expected_missing": 0,
+            },
+        )
+        entry["turns"] += 1
+        if replied:
+            entry["replies"] += 1
+        if expected_response:
+            entry["expected_turns"] += 1
+            if replied:
+                entry["expected_replies"] += 1
+            else:
+                entry["expected_missing"] += 1
+        return key
+
+    def _record_failure(reasons, record):
+        if not reasons:
+            return
+        for reason in reasons:
+            failure_counts[reason] = failure_counts.get(reason, 0) + 1
+        if len(failures) < LLM_QUALITY_FAILURE_LIMIT:
+            failures.append(record)
+
+    def _send_telegram_action(action, handover_id, conv_meta):
+        if not telegram_chat_id:
+            return None, "", "telegram_chat_id_missing"
+        topic_id = (conv_meta or {}).get("telegram_topic_id")
+        payload = {
+            "update_id": rng.randint(100000, 999999),
+            "callback_query": {
+                "id": f"sim-{uuid.uuid4().hex[:10]}",
+                "from": {"id": manager_id, "is_bot": False, "first_name": "Sim"},
+                "data": f"{action}_{handover_id}",
+                "message": {
+                    "message_id": rng.randint(1, 99999),
+                    "date": int(time.time()),
+                    "chat": {"id": telegram_chat_id, "type": "group"},
+                },
+            },
+        }
+        if topic_id:
+            payload["callback_query"]["message"]["message_thread_id"] = topic_id
+        return _send_webhook_payload(f"{base_url}/telegram-webhook", payload, None, args.timeout)
+
+    def _send_console_action(action, handover_id):
+        if args.console_mode == "skip":
+            return None, "", "console_skipped"
+        if not console_token:
+            return None, "", "console_token_missing"
+        url = f"{console_base_url}/console/v1/cases/{handover_id}/{action}"
+        return _console_request(
+            "POST",
+            url,
+            console_token,
+            headers=console_headers,
+            payload={},
+            timeout=args.timeout,
+        )
+
+    def _simulate_manager_actions(handover_id, conv_meta, conversation_id):
+        action_results = []
+        state_before = (conv_meta or {}).get("state")
+        for action in manager_actions:
+            if action in manager_stats["actions"]:
+                manager_stats["actions"][action] += 1
+            manager_stats["actions_total"] += 1
+            expected_state, expected_status = _llm_quality_expected_manager_state(
+                action, state_before
+            )
+            if args.manager_channel == "console":
+                status, body, error = _send_console_action(action, handover_id)
+            else:
+                status, body, error = _send_telegram_action(action, handover_id, conv_meta)
+            if error and error not in {"console_skipped"}:
+                manager_stats["errors"] += 1
+            if args.manager_wait and args.manager_wait > 0:
+                time.sleep(args.manager_wait)
+            conv_meta_after = None
+            handover_meta_after = None
+            if conversation_id:
+                conv_meta_after, _ = _fetch_conversation_meta(db_user, conversation_id)
+                handover_meta_after, _ = _fetch_handover_meta(db_user, conversation_id)
+            actual_state = (conv_meta_after or {}).get("state")
+            actual_status = (handover_meta_after or {}).get("status") if handover_meta_after else None
+            action_reasons = []
+            if error and error not in {"console_skipped"}:
+                action_reasons.append("manager_action_failed")
+            if expected_state is not None and actual_state != expected_state:
+                action_reasons.append("handoff_state_mismatch")
+            if expected_status:
+                if not handover_meta_after:
+                    action_reasons.append("handover_missing")
+                elif actual_status != expected_status:
+                    action_reasons.append("handoff_status_mismatch")
+            if not action_reasons:
+                manager_stats["actions_ok"] += 1
+            action_record = {
+                "action": action,
+                "status": status,
+                "error": error,
+                "response": (body or "")[:200] if body else None,
+                "state_before": state_before,
+                "state_after": actual_state,
+                "expected_state": expected_state,
+                "expected_status": expected_status,
+                "actual_status": actual_status,
+                "reasons": action_reasons,
+            }
+            if action_reasons:
+                _record_failure(
+                    action_reasons,
+                    {
+                        "type": "manager_action",
+                        "action": action,
+                        "conversation_id": conversation_id,
+                        "handover_id": handover_id,
+                        "state_before": state_before,
+                        "state_after": actual_state,
+                        "expected_state": expected_state,
+                        "expected_status": expected_status,
+                        "actual_status": actual_status,
+                        "error": error,
+                        "reasons": action_reasons,
+                    },
+                )
+            action_results.append(action_record)
+            if actual_state:
+                state_before = actual_state
+        return action_results
+
+    def _send_pending_ack(remote_jid):
+        if args.pending_mode != "ack":
+            return None
+        message_id = f"LLM-QUAL-ACK-{run_id}-{uuid.uuid4().hex[:6]}"
+        metadata = {
+            "sender": "LLMQuality",
+            "timestamp": int(time.time()),
+            "messageId": message_id,
+            "remoteJid": remote_jid,
+            "simulation_mode": True,
+            "simulation_id": run_id,
+            "simulation_llm": args.mode == "llm",
+        }
+        if instance_id:
+            metadata["instanceId"] = instance_id
+        payload = {
+            "body": {
+                "messageType": "text",
+                "message": args.ack_text,
+                "metadata": metadata,
+            }
+        }
+        status, body, error = _send_webhook_payload(webhook_url, payload, webhook_secret, args.timeout)
+        if not skip_outbox and not args.dry_run:
+            _post_admin_outbox_with_wait(
+                f"{base_url}/admin/outbox/process",
+                admin_token,
+                args.timeout,
+                outbox_wait_seconds,
+            )
+        return {
+            "action": "pending_ack",
+            "message_id": message_id,
+            "status": status,
+            "error": error,
+            "response": (body or "")[:200] if body else None,
+        }
+
+    def _reset_dialog_state(remote_jid):
+        if args.dry_run:
+            return None
+        if not client_id:
+            return None
+        conv_id, state, error = _fetch_latest_conversation_state(db_user, client_id, remote_jid)
+        if error:
+            return {"action": "preflight_state", "error": error}
+        if state not in ("pending", "manager_active"):
+            return None
+        actions = []
+        if state == "pending":
+            ack_result = _send_pending_ack(remote_jid)
+            if ack_result:
+                actions.append(ack_result)
+        if state == "manager_active" and args.manager_mode == "simulate":
+            handover_meta, _ = _fetch_handover_meta(db_user, conv_id)
+            handover_id = (handover_meta or {}).get("handover_id")
+            conv_meta, _ = _fetch_conversation_meta(db_user, conv_id)
+            if handover_id:
+                actions.extend(_simulate_manager_actions(handover_id, conv_meta, conv_id))
+        cleared = False
+        state_after = state
+        for _ in range(30):
+            time.sleep(1.0)
+            _, state_after, _ = _fetch_latest_conversation_state(db_user, client_id, remote_jid)
+            if state_after == "bot_active":
+                cleared = True
+                break
+        return {
+            "action": "preflight_clear",
+            "state_before": state,
+            "state_after": state_after,
+            "cleared": cleared,
+            "actions": actions,
+        }
+
+    min_wait = min(args.min_wait, args.max_wait)
+    max_wait = max(args.min_wait, args.max_wait)
+    started_at = datetime.now(timezone.utc)
+
+    with open(responses_path, "w", encoding="utf-8") as responses_handle, open(
+        trace_bundle_path, "w", encoding="utf-8"
+    ) as trace_handle:
+        for dialog_idx, dialog in enumerate(dialogs, start=1):
+            remote_jid = args.remote_jid or _llm_quality_pick_jid(
+                allowlist_jids, dialog_idx - 1, rng, args.jid_mode
+            )
+            if not remote_jid:
+                raise SystemExit("llm-quality: remote_jid unresolved")
+            if args.reset_before_dialog:
+                preflight = _reset_dialog_state(remote_jid)
+                if preflight:
+                    print(json.dumps(preflight, ensure_ascii=False))
+
+            for turn_idx, turn in enumerate(dialog.get("turns") or [], start=1):
+                stats["turns"] += 1
+                if args.dry_run:
+                    wait_seconds = 0
+                else:
+                    wait_seconds = rng.uniform(min_wait, max_wait)
+                if wait_seconds > 0:
+                    time.sleep(wait_seconds)
+
+                text = turn.get("text") or ""
+                message_id = (
+                    f"LLM-QUAL-{run_id}-{dialog_idx:03d}-{turn_idx:02d}-{uuid.uuid4().hex[:6]}"
+                )
+                metadata = {
+                    "sender": "LLMQuality",
+                    "timestamp": int(time.time()),
+                    "messageId": message_id,
+                    "remoteJid": remote_jid,
+                    "simulation_mode": True,
+                    "simulation_id": run_id,
+                    "simulation_llm": args.mode == "llm",
+                }
+                if instance_id:
+                    metadata["instanceId"] = instance_id
+
+                payload = None
+                if turn.get("kind") == "media" and isinstance(turn.get("media"), dict):
+                    payload = dict(turn.get("media"))
+                    payload["metadata"] = metadata
+                    payload.setdefault("message", text)
+                else:
+                    payload = {
+                        "messageType": "text",
+                        "message": text,
+                        "metadata": metadata,
+                    }
+
+                response_status = None
+                response_body = None
+                response_error = None
+                attempts = 0
+                response_payload = None
+                inline_response_text = None
+                if not args.dry_run:
+                    response_status, response_body, response_error, attempts = _send_webhook_payload_with_retry(
+                        webhook_url,
+                        {"body": payload},
+                        webhook_secret,
+                        args.timeout,
+                        args.retry_count,
+                        args.retry_backoff,
+                    )
+                    if response_body:
+                        try:
+                            response_payload = json.loads(response_body)
+                        except Exception:
+                            response_payload = None
+                    if isinstance(response_payload, dict):
+                        inline_response_text = response_payload.get("bot_response")
+                        if not isinstance(inline_response_text, str):
+                            inline_response_text = None
+                    if response_error:
+                        stats["webhook_errors"] += 1
+                        if _is_infra_error(response_error):
+                            stats["infra_errors"] += 1
+                    if not skip_outbox:
+                        _post_admin_outbox_with_wait(
+                            f"{base_url}/admin/outbox/process",
+                            admin_token,
+                            args.timeout,
+                            outbox_wait_seconds,
+                        )
+
+                conversation_id = None
+                meta = None
+                meta_error = None
+                trace_entries = []
+                trace_error = None
+                conv_meta = None
+                handover_meta = None
+                if not args.dry_run:
+                    conversation_id, meta, meta_error = _poll_decision_meta(
+                        db_user,
+                        message_id,
+                        args.poll_timeout,
+                        args.poll_interval,
+                    )
+                    if meta_error:
+                        stats["decision_meta_errors"] += 1
+                    if meta is None:
+                        stats["decision_meta_missing"] += 1
+                    if conversation_id:
+                        conv_meta, _ = _fetch_conversation_meta(db_user, conversation_id)
+                        conv_meta, trace_entries, trace_error = _poll_decision_trace(
+                            db_user,
+                            conversation_id,
+                            args.trace_timeout,
+                            args.trace_interval,
+                        )
+                        if trace_error:
+                            stats["decision_trace_errors"] += 1
+                        if not trace_entries:
+                            stats["decision_trace_missing"] += 1
+                        if (conv_meta or {}).get("state") in {"pending", "manager_active"}:
+                            handover_meta, _ = _fetch_handover_meta(db_user, conversation_id)
+                else:
+                    meta_error = "dry_run"
+
+                state = (conv_meta or {}).get("state")
+                if state not in LLM_QUALITY_KNOWN_STATES:
+                    stats["unknown_state"] += 1
+
+                expected_reply_type_value = _chaos_extract_expected_reply(
+                    (conv_meta or {}).get("context")
+                )
+                outbox_summary = None
+                outbox_payload = None
+                outbox_payload_status = None
+                outbox_text = None
+                if not args.dry_run and client_id:
+                    outbox_summary, _ = _fetch_outbox_summary(db_user, client_id, message_id)
+                    outbox_payload, outbox_payload_status, _ = _llm_quality_fetch_outbox_payload(
+                        db_user, client_id, message_id
+                    )
+                    outbox_text = _llm_quality_extract_outbox_text(outbox_payload)
+                if not outbox_text and inline_response_text:
+                    outbox_text = inline_response_text
+
+                bot_response = bool((outbox_summary or {}).get("count")) if outbox_summary else False
+                if inline_response_text:
+                    bot_response = True
+                if bot_response:
+                    stats["turns_with_response"] += 1
+                else:
+                    stats["turns_missing_response"] += 1
+
+                expected_response, expected_reason = _llm_quality_expected_response(state, meta)
+                if expected_response:
+                    stats["turns_expected_response"] += 1
+                    if not bot_response:
+                        stats["turns_expected_missing"] += 1
+
+                _bump_state(state, expected_response, bot_response)
+
+                turn_tags = _llm_quality_extract_turn_tags(turn)
+                expectations = _llm_quality_extract_expectations(turn)
+                expected_action = expectations.get("action")
+                expected_info_sections = expectations.get("info_sections") or []
+                expected_reply_type = expectations.get("reply_type")
+                expected_state = expectations.get("state")
+                expected_reply = expectations.get("expected_reply")
+                info_tags = [tag for tag in turn_tags if tag in LLM_QUALITY_INFO_TAGS]
+                if not info_tags:
+                    info_tags = sorted(_llm_quality_infer_info_tags(text))
+                info_answered = {}
+                info_sections = []
+                info_intents = []
+                info_mismatch = False
+                if expected_info_sections:
+                    info_stats["turns_with_info_request"] += 1
+                    answered_any, info_sections, info_intents = _llm_quality_expected_section_answered(
+                        expected_info_sections, meta, trace_entries
+                    )
+                    actual_section_set = set(info_sections) | set(info_intents)
+                    for section in expected_info_sections:
+                        info_answered[section] = section in actual_section_set
+                        tag = LLM_QUALITY_SECTION_TAG_MAP.get(section)
+                        if tag:
+                            info_stats["by_tag"][tag]["requested"] += 1
+                            if section in actual_section_set:
+                                info_stats["by_tag"][tag]["answered"] += 1
+                            else:
+                                info_stats["by_tag"][tag]["missed"] += 1
+                    if answered_any:
+                        info_stats["turns_info_answered"] += 1
+                    else:
+                        info_stats["turns_info_missed"] += 1
+                    if not answered_any and state not in {"manager_active", "pending"}:
+                        info_mismatch = True
+                        stats["info_mismatch"] += 1
+                elif info_tags:
+                    info_stats["turns_with_info_request"] += 1
+                    info_answered, info_sections, info_intents = _llm_quality_info_answered(
+                        info_tags, meta, trace_entries
+                    )
+                    answered_any = any(info_answered.values())
+                    if answered_any:
+                        info_stats["turns_info_answered"] += 1
+                    else:
+                        info_stats["turns_info_missed"] += 1
+                    for tag in info_tags:
+                        info_stats["by_tag"][tag]["requested"] += 1
+                        if info_answered.get(tag):
+                            info_stats["by_tag"][tag]["answered"] += 1
+                        else:
+                            info_stats["by_tag"][tag]["missed"] += 1
+                    if not answered_any and state not in {"manager_active", "pending"}:
+                        info_mismatch = True
+                        stats["info_mismatch"] += 1
+
+                booking_active = _llm_quality_booking_active(conv_meta)
+                booking_slots = _llm_quality_extract_booking_slots(meta, conv_meta)
+                booking_progressed = None
+                if booking_active:
+                    booking_stats["turns"] += 1
+                    booking_stats["progress_opportunities"] += 1
+                    progress_key = conversation_id or f"dialog-{dialog_idx}"
+                    prev_count = booking_progress.get(progress_key, 0)
+                    slot_count = len(booking_slots)
+                    booking_progressed = slot_count > prev_count
+                    if booking_progressed:
+                        booking_stats["progressed"] += 1
+                    booking_progress[progress_key] = max(prev_count, slot_count)
+                    booking_stats["filled_slots_total"] = max(
+                        booking_stats["filled_slots_total"], slot_count
+                    )
+
+                evaluation_reasons = _llm_quality_evaluate_turn(
+                    meta=meta,
+                    trace_entries=trace_entries,
+                    state=state,
+                    handover_meta=handover_meta,
+                    bot_response=bot_response,
+                    expected_response=expected_response,
+                    expected_action=expected_action,
+                    expected_info_sections=expected_info_sections,
+                    expected_reply_type=expected_reply_type,
+                    expected_state=expected_state,
+                    expected_reply=expected_reply,
+                    actual_expected_reply_type=expected_reply_type_value,
+                    info_tags=info_tags,
+                    info_answered=info_answered,
+                    booking_active=booking_active,
+                    booking_progressed=booking_progressed,
+                )
+                if evaluation_reasons:
+                    stats["turns_failed"] += 1
+                else:
+                    stats["turns_passed"] += 1
+                trace_id = (meta or {}).get("trace_id") if isinstance(meta, dict) else None
+                _record_failure(
+                    evaluation_reasons,
+                    {
+                        "type": "turn",
+                        "dialog_id": dialog.get("dialog_id"),
+                        "dialog_index": dialog_idx,
+                        "turn_index": turn_idx,
+                        "message_id": message_id,
+                        "conversation_id": conversation_id,
+                        "trace_id": trace_id,
+                        "last_trace_stage": _llm_quality_last_trace_stage(trace_entries),
+                        "conversation_state": state,
+                        "expected_response": expected_response,
+                        "bot_response": bot_response,
+                        "info_tags": info_tags,
+                        "booking_slots": booking_slots,
+                        "reasons": evaluation_reasons,
+                    },
+                )
+
+                manager_actions_run = []
+                handover_id = (handover_meta or {}).get("handover_id") if handover_meta else None
+                simulate_manager = args.manager_mode == "simulate" and handover_id
+                if state in {"pending", "manager_active"} and handover_id:
+                    manager_stats["handovers_seen"] += 1
+                if state in {"pending", "manager_active"} and args.manager_mode == "simulate":
+                    if handover_id:
+                        manager_actions_run = _simulate_manager_actions(
+                            handover_id, conv_meta, conversation_id
+                        )
+                    else:
+                        manager_stats["errors"] += 1
+                pending_action_result = None
+                if state == "pending" and args.pending_mode == "ack" and not simulate_manager:
+                    pending_action_result = _send_pending_ack(remote_jid)
+
+                record = {
+                    "dialog_id": dialog.get("dialog_id"),
+                    "dialog_goal": dialog.get("goal"),
+                    "dialog_index": dialog_idx,
+                    "turn_index": turn_idx,
+                    "turn_kind": turn.get("kind"),
+                    "turn_tags": turn_tags,
+                    "turn_text": text,
+                    "remote_jid": remote_jid,
+                    "message_id": message_id,
+                    "conversation_id": conversation_id,
+                    "conversation_state": state,
+                    "expected_reply_type": expected_reply_type_value,
+                    "decision_meta": meta,
+                    "decision_meta_error": meta_error,
+                    "trace_id": trace_id,
+                    "decision_trace": trace_entries,
+                    "decision_trace_error": trace_error,
+                    "decision_trace_stages": [
+                        entry.get("stage")
+                        for entry in trace_entries
+                        if isinstance(entry, dict)
+                    ],
+                    "handover": handover_meta,
+                    "outbox_summary": outbox_summary,
+                    "outbox_payload_status": outbox_payload_status,
+                    "outbox_text": outbox_text,
+                    "bot_response": bot_response,
+                    "expected_response": expected_response,
+                    "expected_response_reason": expected_reason,
+                    "turn_expectations": expectations,
+                    "info_tags": info_tags,
+                    "info_answered": info_answered,
+                    "info_sections": sorted(info_sections),
+                    "info_intents": sorted(info_intents),
+                    "info_mismatch": info_mismatch,
+                    "booking_active": booking_active,
+                    "booking_slots": booking_slots,
+                    "booking_progressed": booking_progressed,
+                    "evaluation": {
+                        "ok": not evaluation_reasons,
+                        "reasons": evaluation_reasons,
+                    },
+                    "manager_actions": manager_actions_run,
+                    "pending_action": pending_action_result,
+                    "inline_response_text": inline_response_text,
+                    "webhook": {
+                        "status": response_status,
+                        "error": response_error,
+                        "attempts": attempts,
+                        "response": (response_body or "")[:200] if response_body else None,
+                    },
+                }
+                responses_handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                trace_handle.write(
+                    json.dumps(
+                        {
+                            "dialog_id": dialog.get("dialog_id"),
+                            "dialog_index": dialog_idx,
+                            "turn_index": turn_idx,
+                            "message_id": message_id,
+                            "conversation_id": conversation_id,
+                            "trace_id": trace_id,
+                            "conversation_state": state,
+                            "expected_reply_type": expected_reply_type_value,
+                            "decision_meta": meta,
+                            "decision_trace": trace_entries,
+                            "decision_trace_error": trace_error,
+                            "last_trace_stage": _llm_quality_last_trace_stage(trace_entries),
+                            "handover": handover_meta,
+                            "outbox_summary": outbox_summary,
+                            "outbox_payload_status": outbox_payload_status,
+                            "outbox_text": outbox_text,
+                            "bot_response": bot_response,
+                            "expected_response": expected_response,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+
+    finished_at = datetime.now(timezone.utc)
+    duration_s = round((finished_at - started_at).total_seconds(), 2)
+    reply_rate_by_state = {}
+    expected_reply_rate_by_state = {}
+    state_counts = {}
+    for state_key, entry in state_stats.items():
+        state_counts[state_key] = entry.get("turns", 0)
+        if entry.get("turns"):
+            reply_rate_by_state[state_key] = round(
+                entry.get("replies", 0) / max(entry.get("turns", 1), 1), 4
+            )
+        if entry.get("expected_turns"):
+            expected_reply_rate_by_state[state_key] = round(
+                entry.get("expected_replies", 0) / max(entry.get("expected_turns", 1), 1), 4
+            )
+    metrics = {
+        "counts": {
+            "dialogs": stats["dialogs"],
+            "turns": stats["turns"],
+            "turns_expected_response": stats["turns_expected_response"],
+            "turns_with_response": stats["turns_with_response"],
+            "turns_missing_response": stats["turns_missing_response"],
+            "turns_expected_missing": stats["turns_expected_missing"],
+            "turns_passed": stats["turns_passed"],
+            "turns_failed": stats["turns_failed"],
+            "unknown_state": stats["unknown_state"],
+            "decision_meta_missing": stats["decision_meta_missing"],
+            "decision_trace_missing": stats["decision_trace_missing"],
+            "webhook_errors": stats["webhook_errors"],
+            "infra_errors": stats["infra_errors"],
+            "decision_meta_errors": stats["decision_meta_errors"],
+            "decision_trace_errors": stats["decision_trace_errors"],
+            "info_mismatch": stats["info_mismatch"],
+        },
+        "state": {
+            "counts": state_counts,
+            "reply_rate_by_state": reply_rate_by_state,
+            "expected_reply_rate_by_state": expected_reply_rate_by_state,
+            "raw": state_stats,
+        },
+        "info": info_stats,
+        "manager": manager_stats,
+        "booking": booking_stats,
+        "rates": {},
+    }
+    if stats["turns"]:
+        metrics["rates"]["reply_rate"] = round(
+            stats["turns_with_response"] / max(stats["turns"], 1), 4
+        )
+    if stats["turns_expected_response"]:
+        expected_replies = stats["turns_expected_response"] - stats["turns_expected_missing"]
+        metrics["rates"]["expected_reply_rate"] = round(
+            expected_replies / max(stats["turns_expected_response"], 1), 4
+        )
+    if stats["turns"]:
+        metrics["rates"]["decision_meta_coverage"] = round(
+            (stats["turns"] - stats["decision_meta_missing"]) / max(stats["turns"], 1),
+            4,
+        )
+        metrics["rates"]["decision_trace_coverage"] = round(
+            (stats["turns"] - stats["decision_trace_missing"]) / max(stats["turns"], 1),
+            4,
+        )
+        metrics["rates"]["unknown_state_rate"] = round(
+            stats["unknown_state"] / max(stats["turns"], 1), 4
+        )
+        metrics["rates"]["pass_rate"] = round(
+            stats["turns_passed"] / max(stats["turns"], 1), 4
+        )
+    if info_stats["turns_with_info_request"]:
+        metrics["rates"]["info_answer_rate"] = round(
+            info_stats["turns_info_answered"] / max(info_stats["turns_with_info_request"], 1),
+            4,
+        )
+    if booking_stats["progress_opportunities"]:
+        metrics["rates"]["booking_slot_progress_rate"] = round(
+            booking_stats["progressed"] / max(booking_stats["progress_opportunities"], 1),
+            4,
+        )
+    if manager_stats["actions_total"]:
+        metrics["rates"]["handoff_correct_rate"] = round(
+            manager_stats["actions_ok"] / max(manager_stats["actions_total"], 1), 4
+        )
+
+    baseline_path = os.path.join(_llm_quality_repo_root(), "ops", "results", "booking_quality.json")
+    baseline_payload = None
+    baseline_metrics = None
+    baseline_updated_at = None
+    baseline_history = []
+    if os.path.exists(baseline_path):
+        try:
+            with open(baseline_path, "r", encoding="utf-8") as handle:
+                baseline_payload = json.load(handle)
+            baseline_metrics = (baseline_payload or {}).get("metrics")
+            baseline_updated_at = (baseline_payload or {}).get("updated_at")
+            baseline_history = (baseline_payload or {}).get("history") or []
+        except Exception:
+            baseline_metrics = None
+
+    delta = _llm_quality_compute_delta(metrics, baseline_metrics) if baseline_metrics else None
+    threshold_results, threshold_breaches = _llm_quality_check_thresholds(metrics)
+    regression_results, regression_breaches = _llm_quality_check_regression(
+        metrics, baseline_metrics, args.regression_tolerance
+    )
+    safe_config = {
+        "mode": args.mode,
+        "count": args.count,
+        "min_turns": args.min_turns,
+        "max_turns": args.max_turns,
+        "include_media": args.include_media,
+        "media_mode": args.media_mode,
+        "media_kind": args.media_kind,
+        "scenario_coverage": args.scenario_coverage,
+        "seed": args.seed,
+        "manager_mode": args.manager_mode,
+        "pending_mode": args.pending_mode,
+        "jid_mode": args.jid_mode,
+        "regression_tolerance": args.regression_tolerance,
+    }
+    summary = {
+        "run_id": run_id,
+        "started_at": started_at.isoformat(),
+        "finished_at": finished_at.isoformat(),
+        "duration_s": duration_s,
+        "client_slug": client_slug,
+        "base_url": base_url,
+        "config": safe_config,
+        "allowlist_count": len(allowlist_jids),
+        "output_dir": output_dir,
+        "scenarios_path": scenarios_path,
+        "responses_path": responses_path,
+        "trace_bundle_path": trace_bundle_path,
+        "metrics": metrics,
+        "baseline_metrics": baseline_metrics,
+        "delta": delta,
+        "failure_counts": failure_counts,
+        "failures": failures,
+        "thresholds": {
+            "rules": LLM_QUALITY_THRESHOLDS,
+            "results": threshold_results,
+            "breaches": threshold_breaches,
+        },
+        "regression": {
+            "tolerance": args.regression_tolerance,
+            "baseline_updated_at": baseline_updated_at,
+            "results": regression_results,
+            "breaches": regression_breaches,
+        },
+        "reason_labels": LLM_QUALITY_REASON_LABELS,
+    }
+    summary_path = os.path.join(output_dir, "summary.json")
+    with open(summary_path, "w", encoding="utf-8") as handle:
+        json.dump(summary, handle, ensure_ascii=False, indent=2)
+
+    history_entry = {
+        "run_id": run_id,
+        "finished_at": finished_at.isoformat(),
+        "config": safe_config,
+        "rates": metrics.get("rates"),
+        "failure_counts": failure_counts,
+    }
+    if args.update_baseline or args.append_history:
+        os.makedirs(os.path.dirname(baseline_path), exist_ok=True)
+        baseline_payload = dict(baseline_payload or {})
+        history = list(baseline_payload.get("history") or [])
+        history.append(history_entry)
+        history_max = max(args.history_max or 0, 1)
+        if len(history) > history_max:
+            history = history[-history_max:]
+        baseline_payload["history"] = history
+        if args.update_baseline or "metrics" not in baseline_payload:
+            baseline_payload["metrics"] = metrics
+        if args.update_baseline or "config" not in baseline_payload:
+            baseline_payload["config"] = safe_config
+        if args.update_baseline or "updated_at" not in baseline_payload:
+            baseline_payload["updated_at"] = finished_at.isoformat()
+        with open(baseline_path, "w", encoding="utf-8") as handle:
+            json.dump(baseline_payload, handle, ensure_ascii=False, indent=2)
+
+    print(json.dumps({"output_dir": output_dir, "summary": summary_path}, ensure_ascii=False))
+    if args.fail_on_thresholds and threshold_breaches:
+        raise SystemExit(
+            f"llm-quality: threshold breaches ({', '.join(threshold_breaches)})"
+        )
+    if args.fail_on_regression and regression_breaches:
+        raise SystemExit(
+            f"llm-quality: regression breaches ({', '.join(regression_breaches)})"
         )
 
 def _run_webhook_fuzz(args):
@@ -8244,6 +9775,9 @@ if len(sys.argv) > 1 and sys.argv[1] == "webhook-fuzz":
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "chaos-sim":
     _run_chaos_sim(_parse_chaos_sim_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "llm-quality":
+    _run_llm_quality(_parse_llm_quality_args(sys.argv[2:]))
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "send-text":
     _run_send_text(_parse_send_text_args(sys.argv[2:]))
