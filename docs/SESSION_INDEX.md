@@ -148,3 +148,4 @@
 | 2026-02-05-consultant-capabilities-a1 | done | feat/2026-02-05-consultant-capabilities-a1 | /home/zhan/worktrees/2026-02-05-consultant-capabilities-a1 | docs/TASK_PACKAGES/TP-2026-02-05-capabilities-passport.md | 2026-02-05 |
 | 2026-02-05-legal-readiness-pack-a10 | done | feat/2026-02-05-legal-readiness-pack-a10 | /home/zhan/worktrees/2026-02-05-legal-readiness-pack-a10 | docs/TASK_PACKAGES/TP-2026-02-05-legal-readiness-pack.md | 2026-02-05 |
 | 2026-02-05-legal-rk-fill-a10 | done | feat/2026-02-05-legal-rk-fill-a10 | /home/zhan/worktrees/2026-02-05-legal-rk-fill-a10 | docs/TASK_PACKAGES/TP-2026-02-05-legal-rk-fill.md | 2026-02-05 |
+| 2026-02-05-doc-templates-a11 | done | feat/2026-02-05-doc-templates-a11 | /home/zhan/worktrees/2026-02-05-doc-templates-a11 | docs/TASK_PACKAGES/TP-2026-02-05-doc-templates.md | 2026-02-05 |
