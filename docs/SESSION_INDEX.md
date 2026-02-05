@@ -144,3 +144,4 @@
 | 2026-02-04-llm-policy-core-impl-a7 | active | feat/2026-02-04-llm-policy-core-impl-a7 | /home/zhan/worktrees/2026-02-04-llm-policy-core-impl-a7 | docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-impl.md | 2026-02-04 |
 | 2026-02-05-console-analytics-kpis-a7 | done | feat/2026-02-05-console-analytics-kpis-a7 | /home/zhan/worktrees/2026-02-05-console-analytics-kpis-a7 | docs/TASK_PACKAGES/TP-2026-02-05-console-analytics-kpis.md | 2026-02-05 |
 | 2026-02-05-llm-quality-runner-a1 | done | feat/2026-02-05-llm-quality-runner-a1 | /home/zhan/worktrees/2026-02-05-llm-quality-runner-a1 | docs/TASK_PACKAGES/TP-2026-02-05-llm-quality-runner.md | 2026-02-05 |
+| 2026-02-05-control-plane-gonogo-a10 | done | feat/2026-02-05-control-plane-gonogo-a10 | /home/zhan/worktrees/2026-02-05-control-plane-gonogo-a10 | docs/TASK_PACKAGES/TP-2026-02-05-control-plane-gonogo.md | 2026-02-05 |

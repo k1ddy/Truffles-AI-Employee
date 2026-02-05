@@ -314,6 +314,58 @@ Generated webhooks:
 - If a company has multiple branches but only one phone, strict isolation is not supported.
 - Require one phone per branch to onboard.
 
+### 2.5 Control Plane Go/No-Go (Ready for Live Customers)
+
+**Rule (DEC-014):** Live customers allowed only after Control Plane Go/No-Go checklist is satisfied and evidence recorded in `STATE.md`.
+
+#### 2.5.1 Простые определения
+- **Control Plane** — web console и процессы управления (provisioning, onboarding gates, knowledge publish, audit) — см. `SPECS/CONTROL_PLANE.md`.
+- **Go/No-Go** — формальное решение "можно/нельзя запускать живого клиента" на основе чек-листа; без evidence в `STATE.md` это No-Go.
+- **Онбординг клиента** — подготовка данных и технастроек до go-live: branch/instance/phone, знания, handover (см. раздел 2.4 и `Business/Sales/Чеклист_подключения_клиента.md`).
+- **Техподдержка после онбординга** — обработка обращений после go-live: каналы, сроки, эскалации. Поток handover описан в разделах 2.2-2.3; регламент поддержки отсутствует как отдельный документ (см. `Business/ДОКУМЕНТЫ_АРСЕНАЛ.md`).
+- **Договор** — юридическая база оказания услуг (предмет, оплата, ответственность, SLA/поддержка, обработка данных). В репо есть шаблон `Business/Legal/ДОГОВОР.md` (DERIVED; не канон до утверждения/подписания).
+- **Юридическая готовность** — наличие обязательных документов в финальном виде и готовых к подписанию/исполнению (см. `Business/ДОКУМЕНТЫ_АРСЕНАЛ.md`).
+
+#### 2.5.2 Go/No-Go checklist (Control Plane)
+
+**A. Юридическая и бизнес-готовность (No-Go без этого)**
+- Договор на услуги, NDA, счет на оплату, политика обработки данных — финальные/согласованные версии; в `Business/ДОКУМЕНТЫ_АРСЕНАЛ.md` отмечены как критичные и отсутствующие.
+- Шаблоны `Business/Legal/*.md` помечены DERIVED и не считаются каноническими до утверждения/подписания.
+- Если есть правила биллинга, зафиксировать каноническую версию (сейчас `Business/Sales/BILLING_COUNTING.md` = DRAFT).
+
+**B. Онбординг и данные клиента**
+- Созданы tenant+branch; `branches.instance_id` и `phone` заполнены и уникальны (см. раздел 2.4).
+- Обязательные данные branch-pack заполнены и валидированы (address/hours/services/pricing/durations/policies/disclaimers/ru/kk) — см. раздел 2.4.
+- Webhook URL создан и передан в ChatFlow; inbound проверен внешним номером (см. раздел 2.4).
+
+**C. Control Plane и Knowledge**
+- Provisioning/onboarding шаги проходят через консоль и/или API, порядок шагов соблюден (см. `SPECS/CONTROL_PLANE.md`).
+- Knowledge publish защищен: validate → publish → audit/rollback; ошибки ведут к safe mode (см. `SPECS/CONTROL_PLANE.md`).
+- Console build info подтвержден в `STATE.md` (DEC-014).
+
+**D. Runtime-готовность**
+- Trace/meta/outbox live-check выполнен; evidence в `STATE.md` (DEC-014).
+- CI/deploy зеленый и соответствует текущему коду (DEC-014).
+
+**E. Поддержка после go-live**
+- Канал эскалации настроен (Telegram/Console handover) и проверен (см. разделы 2.2-2.3).
+- Есть согласованный регламент поддержки (в `Business/ДОКУМЕНТЫ_АРСЕНАЛ.md` сейчас отмечен как отсутствующий).
+
+**Decision**
+- Любой пропуск в A-D → **No-Go**. Возможен только safe mode по правилам раздела 2.4 и с явным одобрением.
+
+#### 2.5.3 Где описаны процессы (и чего нет)
+
+**Описано в репо**
+- Onboarding flow (канон): раздел 2.4.
+- Escalation + manager response: разделы 2.2-2.3.
+- Control Plane onboarding + go/no-go gate: `SPECS/CONTROL_PLANE.md`.
+- Бриф/чеклист подключения (внутренние, DERIVED): `Business/Sales/Бриф_клиента.md`, `Business/Sales/Чеклист_подключения_клиента.md`.
+
+**Не описано или не готово (по `Business/ДОКУМЕНТЫ_АРСЕНАЛ.md`)**
+- Критичные документы до старта: договор, NDA, счет, политика обработки данных — не в финальном/подписанном виде.
+- Регламент техподдержки, чеклист запуска, инструкция для клиента — отсутствуют как финальные документы.
+
 ---
 
 ## 3. Module Contracts
