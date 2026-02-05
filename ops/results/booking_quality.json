@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-02-05T10:28:18.310220+00:00",
+  "updated_at": "2026-02-05T11:58:22.290849+00:00",
   "config": {
     "mode": "llm",
     "count": 5,
@@ -12,6 +12,11 @@
     "seed": null,
     "manager_mode": "simulate",
     "pending_mode": "ack",
+    "tool_hooks": "check",
+    "tool_hook_limit": 2,
+    "tool_confirm_text": "да",
+    "tool_cancel_text": "отмена",
+    "tool_hook_wait": 0.8,
     "jid_mode": "round_robin",
     "regression_tolerance": 0.02,
     "judge_mode": "sample",
@@ -22,13 +27,13 @@
   "metrics": {
     "counts": {
       "dialogs": 5,
-      "turns": 51,
-      "turns_expected_response": 48,
-      "turns_with_response": 51,
+      "turns": 53,
+      "turns_expected_response": 46,
+      "turns_with_response": 53,
       "turns_missing_response": 0,
       "turns_expected_missing": 0,
       "turns_passed": 0,
-      "turns_failed": 51,
+      "turns_failed": 53,
       "unknown_state": 0,
       "decision_meta_missing": 0,
       "decision_trace_missing": 0,
@@ -36,12 +41,12 @@
       "infra_errors": 0,
       "decision_meta_errors": 0,
       "decision_trace_errors": 0,
-      "info_mismatch": 42
+      "info_mismatch": 30
     },
     "state": {
       "counts": {
-        "bot_active": 48,
-        "pending": 3
+        "bot_active": 46,
+        "pending": 7
       },
       "reply_rate_by_state": {
         "bot_active": 1.0,
@@ -52,15 +57,15 @@
       },
       "raw": {
         "bot_active": {
-          "turns": 48,
-          "replies": 48,
-          "expected_turns": 48,
-          "expected_replies": 48,
+          "turns": 46,
+          "replies": 46,
+          "expected_turns": 46,
+          "expected_replies": 46,
           "expected_missing": 0
         },
         "pending": {
-          "turns": 3,
-          "replies": 3,
+          "turns": 7,
+          "replies": 7,
           "expected_turns": 0,
           "expected_replies": 0,
           "expected_missing": 0
@@ -68,64 +73,64 @@
       }
     },
     "info": {
-      "turns_with_info_request": 46,
-      "turns_info_answered": 1,
-      "turns_info_missed": 45,
+      "turns_with_info_request": 39,
+      "turns_info_answered": 3,
+      "turns_info_missed": 36,
       "by_tag": {
         "duration": {
           "requested": 0,
           "answered": 0,
           "missed": 0
         },
-        "location": {
-          "requested": 3,
-          "answered": 1,
-          "missed": 2
-        },
         "hours": {
+          "requested": 0,
+          "answered": 0,
+          "missed": 0
+        },
+        "promo": {
           "requested": 1,
           "answered": 0,
           "missed": 1
         },
-        "promo": {
-          "requested": 0,
+        "price": {
+          "requested": 3,
           "answered": 0,
-          "missed": 0
+          "missed": 3
         },
         "parking": {
-          "requested": 0,
-          "answered": 0,
+          "requested": 1,
+          "answered": 1,
           "missed": 0
-        },
-        "price": {
-          "requested": 2,
-          "answered": 0,
-          "missed": 2
         },
         "master": {
           "requested": 0,
           "answered": 0,
           "missed": 0
+        },
+        "location": {
+          "requested": 2,
+          "answered": 2,
+          "missed": 0
         }
       }
     },
     "manager": {
-      "handovers_seen": 3,
+      "handovers_seen": 7,
       "actions": {
-        "take": 3,
-        "resolve": 3,
+        "take": 7,
+        "resolve": 7,
         "return": 0,
         "skip": 0
       },
       "errors": 0,
-      "actions_total": 6,
-      "actions_ok": 6
+      "actions_total": 14,
+      "actions_ok": 14
     },
     "booking": {
-      "turns": 41,
-      "progress_opportunities": 41,
-      "progressed": 7,
-      "filled_slots_total": 3
+      "turns": 38,
+      "progress_opportunities": 38,
+      "progressed": 6,
+      "filled_slots_total": 2
     },
     "rates": {
       "reply_rate": 1.0,
@@ -134,8 +139,8 @@
       "decision_trace_coverage": 1.0,
       "unknown_state_rate": 0.0,
       "pass_rate": 0.0,
-      "info_answer_rate": 0.0217,
-      "booking_slot_progress_rate": 0.1707,
+      "info_answer_rate": 0.0769,
+      "booking_slot_progress_rate": 0.1579,
       "handoff_correct_rate": 1.0
     }
   },
@@ -227,6 +232,195 @@
         "uncertain": 0,
         "errors": 0,
         "skipped": 48
+      }
+    },
+    {
+      "run_id": "20260205-111839",
+      "finished_at": "2026-02-05T11:31:38.956371+00:00",
+      "config": {
+        "mode": "llm",
+        "count": 5,
+        "min_turns": 10,
+        "max_turns": 15,
+        "include_media": true,
+        "media_mode": "text",
+        "media_kind": "photo",
+        "scenario_coverage": "booking,info,interrupt,handoff",
+        "seed": null,
+        "manager_mode": "simulate",
+        "pending_mode": "ack",
+        "tool_hooks": "check",
+        "tool_hook_limit": 2,
+        "tool_confirm_text": "да",
+        "tool_cancel_text": "отмена",
+        "tool_hook_wait": 0.8,
+        "jid_mode": "round_robin",
+        "regression_tolerance": 0.02,
+        "judge_mode": "sample",
+        "judge_sample": 0.1,
+        "judge_model": "gpt-4o-mini",
+        "judge_redact": true
+      },
+      "rates": {
+        "reply_rate": 1.0,
+        "expected_reply_rate": 1.0,
+        "decision_meta_coverage": 1.0,
+        "decision_trace_coverage": 1.0,
+        "unknown_state_rate": 0.0,
+        "pass_rate": 0.0,
+        "info_answer_rate": 0.0217,
+        "booking_slot_progress_rate": 0.1395,
+        "handoff_correct_rate": 1.0
+      },
+      "failure_counts": {
+        "expected_state_mismatch": 49,
+        "expected_action_mismatch": 49,
+        "expected_info_section_miss": 45,
+        "booking_slot_stall": 37,
+        "expected_reply_type_mismatch": 43,
+        "info_section_miss": 6
+      },
+      "taxonomy": {
+        "expectation": 186,
+        "canon": 0,
+        "code": 37,
+        "data": 6,
+        "unknown": 0
+      },
+      "judge": {
+        "candidates": 49,
+        "judged": 10,
+        "pass": 4,
+        "fail": 6,
+        "uncertain": 0,
+        "errors": 0,
+        "skipped": 44
+      }
+    },
+    {
+      "run_id": "20260205-113237",
+      "finished_at": "2026-02-05T11:44:08.971499+00:00",
+      "config": {
+        "mode": "llm",
+        "count": 5,
+        "min_turns": 10,
+        "max_turns": 15,
+        "include_media": true,
+        "media_mode": "text",
+        "media_kind": "photo",
+        "scenario_coverage": "booking,info,interrupt,handoff",
+        "seed": null,
+        "manager_mode": "simulate",
+        "pending_mode": "ack",
+        "tool_hooks": "check",
+        "tool_hook_limit": 2,
+        "tool_confirm_text": "да",
+        "tool_cancel_text": "отмена",
+        "tool_hook_wait": 0.8,
+        "jid_mode": "round_robin",
+        "regression_tolerance": 0.02,
+        "judge_mode": "sample",
+        "judge_sample": 0.1,
+        "judge_model": "gpt-4o-mini",
+        "judge_redact": true
+      },
+      "rates": {
+        "reply_rate": 1.0,
+        "expected_reply_rate": 1.0,
+        "decision_meta_coverage": 1.0,
+        "decision_trace_coverage": 1.0,
+        "unknown_state_rate": 0.0,
+        "pass_rate": 0.0,
+        "info_answer_rate": 0.0417,
+        "booking_slot_progress_rate": 0.1429,
+        "handoff_correct_rate": 1.0
+      },
+      "failure_counts": {
+        "expected_state_mismatch": 50,
+        "expected_action_mismatch": 50,
+        "expected_info_section_miss": 46,
+        "expected_reply_type_mismatch": 44,
+        "booking_slot_stall": 36,
+        "info_section_miss": 5
+      },
+      "taxonomy": {
+        "expectation": 190,
+        "canon": 0,
+        "code": 36,
+        "data": 5,
+        "unknown": 0
+      },
+      "judge": {
+        "candidates": 47,
+        "judged": 7,
+        "pass": 2,
+        "fail": 5,
+        "uncertain": 0,
+        "errors": 0,
+        "skipped": 44
+      }
+    },
+    {
+      "run_id": "20260205-114556",
+      "finished_at": "2026-02-05T11:58:22.290849+00:00",
+      "config": {
+        "mode": "llm",
+        "count": 5,
+        "min_turns": 10,
+        "max_turns": 15,
+        "include_media": true,
+        "media_mode": "text",
+        "media_kind": "photo",
+        "scenario_coverage": "booking,info,interrupt,handoff",
+        "seed": null,
+        "manager_mode": "simulate",
+        "pending_mode": "ack",
+        "tool_hooks": "check",
+        "tool_hook_limit": 2,
+        "tool_confirm_text": "да",
+        "tool_cancel_text": "отмена",
+        "tool_hook_wait": 0.8,
+        "jid_mode": "round_robin",
+        "regression_tolerance": 0.02,
+        "judge_mode": "sample",
+        "judge_sample": 0.1,
+        "judge_model": "gpt-4o-mini",
+        "judge_redact": true
+      },
+      "rates": {
+        "reply_rate": 1.0,
+        "expected_reply_rate": 1.0,
+        "decision_meta_coverage": 1.0,
+        "decision_trace_coverage": 1.0,
+        "unknown_state_rate": 0.0,
+        "pass_rate": 0.0,
+        "info_answer_rate": 0.0769,
+        "booking_slot_progress_rate": 0.1579,
+        "handoff_correct_rate": 1.0
+      },
+      "failure_counts": {
+        "expected_state_mismatch": 49,
+        "expected_action_mismatch": 49,
+        "expected_info_section_miss": 35,
+        "booking_slot_stall": 32,
+        "expected_reply_type_mismatch": 43,
+        "info_section_miss": 4
+      },
+      "taxonomy": {
+        "expectation": 176,
+        "canon": 0,
+        "code": 32,
+        "data": 4,
+        "unknown": 0
+      },
+      "judge": {
+        "candidates": 46,
+        "judged": 3,
+        "pass": 1,
+        "fail": 2,
+        "uncertain": 0,
+        "errors": 0,
+        "skipped": 50
       }
     }
   ]

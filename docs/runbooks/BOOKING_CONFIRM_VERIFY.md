@@ -204,6 +204,12 @@ Reason codes (summary.failures / failure_counts)
 - handoff_state_mismatch
 - handoff_status_mismatch
 
+Taxonomy (summary.taxonomy)
+- expectation: expected_* mismatches (scenario/expectations drift).
+- canon: missing decision_meta/trace or unknown_state (invariant breaks).
+- code: missing_bot_reply, booking_slot_stall, handover state/status mismatches, manager_action_failed.
+- data: info_section_miss (packs/content gaps).
+
 Thresholds (summary.thresholds)
 - reply_rate >= 0.90
 - expected_reply_rate >= 0.95
@@ -218,6 +224,20 @@ LLM judge (semantic, non-blocking)
 - Output stored in `summary.json` under `judge` and per-turn in `responses.jsonl`.
 - Judge results are non-blocking and should be used as a signal, not a gate.
 
+Chaos coverage map (summary.coverage)
+- states: bot_active/pending/manager_active/unknown.
+- intents/actions: from decision_meta.
+- language: ru/kk/mixed/latin/unknown.
+- modality: text vs media (+ media_kind).
+- noise: noisy vs total turns.
+- trace_stages: gate coverage by trace stages.
+- tools: confirm/commit/cancel/calendar events + outcomes.
+
+Tool hooks (optional)
+- `--tool-hooks check` (default): record tool signals only.
+- `--tool-hooks auto`: send confirm text when slot_confirmation_required (skips if turn has `confirm` tag).
+- `--tool-confirm-text` / `--tool-cancel-text` / `--tool-hook-limit` / `--tool-hook-wait` tune hooks.
+
 How to read results
 - `reply_rate` counts inline `bot_response` + outbox; `expected_reply_rate` excludes expected non-replies (pending/manager_active).
 - `info_answer_rate` and `info_mismatch` flag interruptions (price/location/hours/promo/etc).
@@ -225,6 +245,7 @@ How to read results
 - `summary.metrics.state.reply_rate_by_state` shows reply rate per state; keep `unknown_state_rate` low.
 - `trace_bundle.jsonl` contains trace/meta/outbox + trace_id for fast inspection and per-turn diffs.
 - `summary.failures` is the compact error list (conversation/message/trace/stage pointers).
+- `summary.taxonomy` shows how failures split across expectation/canon/code/data.
 
 Continuity / no-drift rules
 - If baseline is empty (first run), a small bootstrap run is acceptable; replace with `--count >= 5` on the next accepted run.

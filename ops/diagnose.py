@@ -759,6 +759,26 @@ LLM_QUALITY_REASON_LABELS = {
     "handoff_state_mismatch": "state mismatch after manager action",
     "handoff_status_mismatch": "handover status mismatch after manager action",
 }
+LLM_QUALITY_TAXONOMY_CATEGORIES = ("expectation", "canon", "code", "data", "unknown")
+LLM_QUALITY_REASON_TAXONOMY = {
+    "decision_meta_missing": "canon",
+    "decision_trace_missing": "canon",
+    "unknown_state": "canon",
+    "expected_state_mismatch": "expectation",
+    "expected_action_mismatch": "expectation",
+    "expected_reply_type_mismatch": "expectation",
+    "expected_reply_mismatch": "expectation",
+    "expected_info_section_miss": "expectation",
+    "missing_bot_reply": "code",
+    "unexpected_bot_reply_manager": "code",
+    "handover_missing": "code",
+    "info_section_miss": "data",
+    "booking_slot_stall": "code",
+    "manager_action_failed": "code",
+    "handoff_state_mismatch": "code",
+    "handoff_status_mismatch": "code",
+}
+LLM_QUALITY_TOOL_OUTCOMES = ("success", "failure", "pending")
 LLM_QUALITY_JUDGE_REASONS = {
     "irrelevant_reply": "reply does not address the user's intent/question",
     "missed_question": "question not answered or slot not collected",
@@ -2327,6 +2347,74 @@ def _llm_quality_is_noise(text: str | None, tags: list[str]) -> bool:
         return False
     return bool(LLM_QUALITY_NOISE_RE.search(text))
 
+
+def _llm_quality_normalize_tool_token(value: object | None) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
+def _llm_quality_tool_outcome_from_decision(decision: object | None) -> str:
+    if decision is True:
+        return "success"
+    if decision is False:
+        return "failure"
+    token = _llm_quality_normalize_tool_token(decision)
+    if token in {"confirmed", "confirm", "accepted", "approved", "yes", "ok", "true"}:
+        return "success"
+    if token in {"rejected", "declined", "no", "false", "cancelled", "canceled"}:
+        return "failure"
+    return "pending"
+
+
+def _llm_quality_extract_tool_signals(meta, trace_entries):
+    if not isinstance(meta, dict):
+        return {}
+    action = _llm_quality_normalize_tool_token(meta.get("action"))
+    slot_required = bool(meta.get("slot_confirmation_required"))
+    slot_decision = meta.get("slot_confirmation_decision")
+    appointment_id = meta.get("appointment_id")
+    appointment_status = _llm_quality_normalize_tool_token(meta.get("appointment_status"))
+    blocked_reason = meta.get("booking_blocked_reason")
+    signals = {}
+    if slot_required or action == "booking_confirm":
+        outcome = _llm_quality_tool_outcome_from_decision(slot_decision)
+        signals["confirm"] = {
+            "required": slot_required,
+            "decision": slot_decision,
+            "outcome": outcome,
+        }
+    if appointment_id:
+        outcome = "success"
+        if blocked_reason:
+            outcome = "failure"
+        signals["commit"] = {
+            "appointment_id": appointment_id,
+            "appointment_status": meta.get("appointment_status"),
+            "outcome": outcome,
+        }
+    if action in {"booking_cancelled", "booking_cancel", "cancel"} or appointment_status in {
+        "cancelled",
+        "canceled",
+    }:
+        outcome = "success"
+        if blocked_reason:
+            outcome = "failure"
+        signals["cancel"] = {
+            "appointment_status": meta.get("appointment_status"),
+            "outcome": outcome,
+        }
+    if appointment_id or appointment_status:
+        outcome = "success" if (appointment_id or appointment_status) else "pending"
+        if blocked_reason:
+            outcome = "failure"
+        signals["calendar"] = {
+            "appointment_id": appointment_id,
+            "appointment_status": meta.get("appointment_status"),
+            "outcome": outcome,
+        }
+    return signals
+
 def _llm_quality_collect_info_signals(meta, trace_entries):
     info_sections = set()
     intents = set()
@@ -3057,6 +3145,11 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--manager-wait", type=float, default=1.0)
     parser.add_argument("--pending-mode", choices=["ack", "skip"], default="ack")
     parser.add_argument("--ack-text", default="ок")
+    parser.add_argument("--tool-hooks", choices=["off", "check", "auto"], default="check")
+    parser.add_argument("--tool-confirm-text", default="да")
+    parser.add_argument("--tool-cancel-text", default="отмена")
+    parser.add_argument("--tool-hook-wait", type=float, default=0.8)
+    parser.add_argument("--tool-hook-limit", type=int, default=2)
     parser.add_argument("--reset-before-dialog", action="store_true")
     parser.add_argument("--console-base-url", default=os.environ.get("CONSOLE_API_BASE_URL"))
     parser.add_argument("--console-token", default=None)
@@ -4829,6 +4922,14 @@ def _run_llm_quality(args):
         "intents": {},
         "actions": {},
         "expected_reply_type": {},
+        "states": {},
+        "trace_stages": {},
+        "modality": {},
+        "tools": {
+            "events": {},
+            "outcomes": {key: 0 for key in LLM_QUALITY_TOOL_OUTCOMES},
+            "by_tool": {},
+        },
     }
     judge_stats = {
         "enabled": judge_enabled,
@@ -4852,6 +4953,9 @@ def _run_llm_quality(args):
     }
     failures = []
     failure_counts = {}
+    taxonomy_counts = {key: 0 for key in LLM_QUALITY_TAXONOMY_CATEGORIES}
+    taxonomy_by_reason = {}
+    tool_hook_state = {}
 
     def _bump_state(state, expected_response, replied):
         key = state or "unknown"
@@ -4879,8 +4983,15 @@ def _run_llm_quality(args):
     def _record_failure(reasons, record):
         if not reasons:
             return
+        taxonomy_map = {}
         for reason in reasons:
             failure_counts[reason] = failure_counts.get(reason, 0) + 1
+            category = LLM_QUALITY_REASON_TAXONOMY.get(reason, "unknown")
+            taxonomy_counts[category] = taxonomy_counts.get(category, 0) + 1
+            taxonomy_by_reason[reason] = taxonomy_by_reason.get(reason, 0) + 1
+            taxonomy_map[reason] = category
+        if taxonomy_map:
+            record["taxonomy"] = taxonomy_map
         if len(failures) < LLM_QUALITY_FAILURE_LIMIT:
             failures.append(record)
 
@@ -5044,6 +5155,73 @@ def _run_llm_quality(args):
             "status": status,
             "error": error,
             "response": (body or "")[:200] if body else None,
+        }
+
+    def _send_tool_hook(remote_jid, text, action):
+        if args.tool_hooks != "auto":
+            return None
+        message_id = f"LLM-QUAL-TOOL-{action.upper()}-{run_id}-{uuid.uuid4().hex[:6]}"
+        metadata = {
+            "sender": "LLMQuality",
+            "timestamp": int(time.time()),
+            "messageId": message_id,
+            "remoteJid": remote_jid,
+            "simulation_mode": True,
+            "simulation_id": run_id,
+            "simulation_action": f"tool_{action}",
+        }
+        if instance_id:
+            metadata["instanceId"] = instance_id
+        payload = {
+            "body": {
+                "messageType": "text",
+                "message": text,
+                "metadata": metadata,
+            }
+        }
+        status = "dry_run"
+        body = None
+        error = None
+        hook_meta = None
+        hook_meta_error = None
+        hook_trace = []
+        hook_trace_error = None
+        hook_conv_id = None
+        if not args.dry_run:
+            status, body, error = _send_webhook_payload(
+                webhook_url, payload, webhook_secret, args.timeout
+            )
+            if not skip_outbox:
+                _post_admin_outbox_with_wait(
+                    f"{base_url}/admin/outbox/process",
+                    admin_token,
+                    args.timeout,
+                    outbox_wait_seconds,
+                )
+            hook_conv_id, hook_meta, hook_meta_error = _poll_decision_meta(
+                db_user,
+                message_id,
+                args.poll_timeout,
+                args.poll_interval,
+            )
+            if hook_conv_id:
+                _, hook_trace, hook_trace_error = _poll_decision_trace(
+                    db_user,
+                    hook_conv_id,
+                    args.trace_timeout,
+                    args.trace_interval,
+                )
+        if args.tool_hook_wait and args.tool_hook_wait > 0:
+            time.sleep(args.tool_hook_wait)
+        return {
+            "action": action,
+            "message_id": message_id,
+            "conversation_id": hook_conv_id,
+            "status": status,
+            "error": error or hook_meta_error or hook_trace_error,
+            "response": (body or "")[:200] if body else None,
+            "decision_meta": hook_meta,
+            "decision_trace": hook_trace,
         }
 
     def _reset_dialog_state(remote_jid):
@@ -5210,8 +5388,33 @@ def _run_llm_quality(args):
                     meta_error = "dry_run"
 
                 state = (conv_meta or {}).get("state")
-                if state not in LLM_QUALITY_KNOWN_STATES:
+                state_key = state if state in LLM_QUALITY_KNOWN_STATES else "unknown"
+                if state_key == "unknown":
                     stats["unknown_state"] += 1
+                coverage_stats["states"][state_key] = (
+                    coverage_stats["states"].get(state_key, 0) + 1
+                )
+                trace_stage_set = {
+                    entry.get("stage")
+                    for entry in trace_entries
+                    if isinstance(entry, dict) and entry.get("stage")
+                }
+                for stage in trace_stage_set:
+                    coverage_stats["trace_stages"][stage] = (
+                        coverage_stats["trace_stages"].get(stage, 0) + 1
+                    )
+                tool_signals = _llm_quality_extract_tool_signals(meta, trace_entries)
+                for tool_name, signal in tool_signals.items():
+                    coverage_stats["tools"]["events"][tool_name] = (
+                        coverage_stats["tools"]["events"].get(tool_name, 0) + 1
+                    )
+                    outcome = signal.get("outcome")
+                    if outcome in LLM_QUALITY_TOOL_OUTCOMES:
+                        coverage_stats["tools"]["outcomes"][outcome] += 1
+                        by_tool = coverage_stats["tools"]["by_tool"].setdefault(
+                            tool_name, {key: 0 for key in LLM_QUALITY_TOOL_OUTCOMES}
+                        )
+                        by_tool[outcome] += 1
 
                 expected_reply_type_value = _chaos_extract_expected_reply(
                     (conv_meta or {}).get("context")
@@ -5265,6 +5468,11 @@ def _run_llm_quality(args):
                 turn_kind = turn.get("kind") or "text"
                 coverage_stats["turn_kinds"][turn_kind] = (
                     coverage_stats["turn_kinds"].get(turn_kind, 0) + 1
+                )
+                is_media = turn_kind in {"media", "image", "audio", "file"} or "media" in turn_tags
+                modality = "media" if is_media else "text"
+                coverage_stats["modality"][modality] = (
+                    coverage_stats["modality"].get(modality, 0) + 1
                 )
                 if "media" in turn_tags:
                     media_kind = "audio" if "audio" in turn_tags else "photo"
@@ -5492,6 +5700,19 @@ def _run_llm_quality(args):
                 if state == "pending" and args.pending_mode == "ack" and not simulate_manager:
                     pending_action_result = _send_pending_ack(remote_jid)
 
+                tool_hook_result = None
+                if args.tool_hooks == "auto" and tool_signals.get("confirm"):
+                    if "confirm" not in turn_tags:
+                        hook_key = conversation_id or f"dialog-{dialog_idx}"
+                        hook_state = tool_hook_state.setdefault(
+                            hook_key, {"confirm": 0, "cancel": 0}
+                        )
+                        if hook_state["confirm"] < max(args.tool_hook_limit, 1):
+                            tool_hook_result = _send_tool_hook(
+                                remote_jid, args.tool_confirm_text, "confirm"
+                            )
+                            hook_state["confirm"] += 1
+
                 record = {
                     "dialog_id": dialog.get("dialog_id"),
                     "dialog_goal": dialog.get("goal"),
@@ -5531,6 +5752,8 @@ def _run_llm_quality(args):
                     "booking_active": booking_active,
                     "booking_slots": booking_slots,
                     "booking_progressed": booking_progressed,
+                    "tool_signals": tool_signals,
+                    "tool_hook": tool_hook_result,
                     "evaluation": {
                         "ok": not evaluation_reasons,
                         "reasons": evaluation_reasons,
@@ -5690,6 +5913,11 @@ def _run_llm_quality(args):
         "seed": args.seed,
         "manager_mode": args.manager_mode,
         "pending_mode": args.pending_mode,
+        "tool_hooks": args.tool_hooks,
+        "tool_hook_limit": args.tool_hook_limit,
+        "tool_confirm_text": args.tool_confirm_text,
+        "tool_cancel_text": args.tool_cancel_text,
+        "tool_hook_wait": args.tool_hook_wait,
         "jid_mode": args.jid_mode,
         "regression_tolerance": args.regression_tolerance,
         "judge_mode": judge_mode,
@@ -5717,6 +5945,16 @@ def _run_llm_quality(args):
         "failures": failures,
         "coverage": coverage_stats,
         "judge": judge_stats,
+        "taxonomy": {
+            "counts": taxonomy_counts,
+            "by_reason": {
+                reason: {
+                    "count": count,
+                    "category": LLM_QUALITY_REASON_TAXONOMY.get(reason, "unknown"),
+                }
+                for reason, count in taxonomy_by_reason.items()
+            },
+        },
         "thresholds": {
             "rules": LLM_QUALITY_THRESHOLDS,
             "results": threshold_results,
@@ -5740,6 +5978,7 @@ def _run_llm_quality(args):
         "config": safe_config,
         "rates": metrics.get("rates"),
         "failure_counts": failure_counts,
+        "taxonomy": taxonomy_counts,
         "judge": judge_stats.get("counts"),
     }
     if args.update_baseline or args.append_history:
