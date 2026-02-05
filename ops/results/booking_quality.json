@@ -1,0 +1,93 @@
+{
+  "updated_at": "2026-02-05T03:41:46.712671+00:00",
+  "config": {
+    "mode": "llm",
+    "count": 1,
+    "min_turns": 6,
+    "max_turns": 8,
+    "include_media": true,
+    "media_mode": "text",
+    "media_kind": "photo",
+    "seed": null,
+    "manager_mode": "simulate",
+    "pending_mode": "ack",
+    "jid_mode": "round_robin"
+  },
+  "metrics": {
+    "counts": {
+      "dialogs": 1,
+      "turns": 9,
+      "turns_expected_response": 9,
+      "turns_with_response": 9,
+      "turns_missing_response": 0,
+      "turns_expected_missing": 0,
+      "decision_meta_missing": 0,
+      "decision_trace_missing": 0,
+      "webhook_errors": 0,
+      "infra_errors": 0,
+      "decision_meta_errors": 0,
+      "decision_trace_errors": 0,
+      "info_mismatch": 1
+    },
+    "state_counts": {
+      "bot_active": 9
+    },
+    "info": {
+      "turns_with_info_request": 3,
+      "turns_info_answered": 2,
+      "turns_info_missed": 1,
+      "by_tag": {
+        "parking": {
+          "requested": 0,
+          "answered": 0,
+          "missed": 0
+        },
+        "location": {
+          "requested": 1,
+          "answered": 1,
+          "missed": 0
+        },
+        "price": {
+          "requested": 0,
+          "answered": 0,
+          "missed": 0
+        },
+        "hours": {
+          "requested": 1,
+          "answered": 1,
+          "missed": 0
+        },
+        "promo": {
+          "requested": 1,
+          "answered": 0,
+          "missed": 1
+        },
+        "duration": {
+          "requested": 0,
+          "answered": 0,
+          "missed": 0
+        },
+        "master": {
+          "requested": 0,
+          "answered": 0,
+          "missed": 0
+        }
+      }
+    },
+    "manager": {
+      "handovers_seen": 0,
+      "actions": {
+        "take": 0,
+        "resolve": 0
+      },
+      "errors": 0
+    },
+    "rates": {
+      "reply_rate": 1.0,
+      "expected_reply_rate": 1.0,
+      "decision_meta_coverage": 1.0,
+      "decision_trace_coverage": 1.0,
+      "info_answer_rate": 0.6667
+    }
+  }
+}

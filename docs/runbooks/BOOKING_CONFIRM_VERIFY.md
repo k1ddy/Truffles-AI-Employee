@@ -84,6 +84,7 @@ python3 scripts/booking_dialog_scenarios.py \
   --count 5 \
   --min-turns 10 \
   --max-turns 15 \
+  --coverage booking,info,interrupt \
   --include-media \
   --media-mode text \
   --output /tmp/booking_dialog_scenarios.json
@@ -97,6 +98,7 @@ python3 scripts/booking_dialog_scenarios.py \
   --count 3 \
   --min-turns 10 \
   --max-turns 15 \
+  --coverage booking,info,interrupt,handoff \
   --include-media \
   --media-mode text \
   --output /tmp/booking_dialog_scenarios_llm.json
@@ -111,5 +113,120 @@ Scenario patterns included
 
 Notes
 - Generator outputs client turns only (consultant replies are produced by live system).
+- Each turn includes `expect` (action/info_sections/reply_type/state/expected_reply) for rule-based evaluation.
+- Use `--coverage booking,info,interrupt,handoff` to force escalation coverage.
 - `media-mode payload` uses placeholder URLs; update for real media tests.
 - Calendar sync outbox may fail if OAuth tokens are placeholders. Fix: set `GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI` on API, complete OAuth via `/console/v1/calendar/google/connect` (callback `/api/calendar/callback`).
+
+---
+
+LLM booking quality runner (state-aware)
+
+Purpose
+- Run booking dialogs (LLM or template) with state-aware evaluation (manager_active/pending).
+- Persist a baseline and compare deltas to avoid repeating the same findings.
+
+When to use
+- After any booking-related changes (packs, routing, booking slots, expected_reply_type).
+- When investigating booking dialog gaps (missing replies, repeated prompts).
+- Before/after fixes to confirm improvement without drift.
+
+Prerequisites
+- `TEST_MODE=1` in `truffles-api`.
+- Allowlist JIDs (`OUTBOUND_ALLOWLIST_JIDS`) or `--remote-jid` from allowlist.
+- Valid `WEBHOOK_SECRET` and `branches.instance_id` (auto-resolved if present).
+- Admin token for outbox (`ALERTS_ADMIN_TOKEN`) unless `--skip-outbox`.
+- Manager simulation: Telegram chat id in client settings or Console token.
+
+Quickstart (smoke, no baseline update)
+```bash
+python3 ops/diagnose.py llm-quality \
+  --mode llm \
+  --count 1 \
+  --min-turns 6 \
+  --max-turns 8 \
+  --allowlist-jids "$OUTBOUND_ALLOWLIST_JIDS" \
+  --reset-before-dialog
+```
+
+Baseline run (accepted regression point)
+```bash
+python3 ops/diagnose.py llm-quality \
+  --mode llm \
+  --count 5 \
+  --min-turns 10 \
+  --max-turns 15 \
+  --include-media \
+  --allowlist-jids "$OUTBOUND_ALLOWLIST_JIDS" \
+  --scenario-coverage booking,info,interrupt,handoff \
+  --manager-mode simulate \
+  --pending-mode ack \
+  --reset-before-dialog \
+  --append-history \
+  --update-baseline
+```
+
+Artifacts
+- `/tmp/booking_quality/<stamp>/scenarios.json`
+- `/tmp/booking_quality/<stamp>/responses.jsonl`
+- `/tmp/booking_quality/<stamp>/trace_bundle.jsonl`
+- `/tmp/booking_quality/<stamp>/summary.json` (includes baseline_metrics + delta)
+- Baseline + history: `ops/results/booking_quality.json`
+
+Evaluation contract (state-aware)
+- `decision_meta` and `decision_trace` are required per inbound turn.
+- If `turn.expect` is present, it overrides heuristic matching for action/info_sections/reply_type/state.
+- Known states: `bot_active`, `pending`, `manager_active`; anything else is `unknown_state`.
+- `manager_active`/`pending` mean no bot reply expected; replies here are flagged.
+- `manager_active` requires a handover row; missing handover is a failure.
+- Manager callbacks (simulate mode): `take` -> `manager_active` + `handover.status=active`; `resolve` -> `bot_active` + `resolved`; `return` -> `bot_active` + `bot_handling`.
+- Info requests must match `info_sections`/intents (price/location/hours/promo/duration/parking/master).
+- Booking-active turns should show slot progress; stalls are flagged.
+
+Reason codes (summary.failures / failure_counts)
+- decision_meta_missing
+- decision_trace_missing
+- unknown_state
+- expected_state_mismatch
+- expected_action_mismatch
+- expected_reply_type_mismatch
+- expected_reply_mismatch
+- expected_info_section_miss
+- missing_bot_reply
+- unexpected_bot_reply_manager
+- handover_missing
+- info_section_miss
+- booking_slot_stall
+- manager_action_failed
+- handoff_state_mismatch
+- handoff_status_mismatch
+
+Thresholds (summary.thresholds)
+- reply_rate >= 0.90
+- expected_reply_rate >= 0.95
+- info_answer_rate >= 0.70
+- unknown_state_rate <= 0.02
+- booking_slot_progress_rate >= 0.25
+- handoff_correct_rate >= 0.90
+
+How to read results
+- `reply_rate` counts inline `bot_response` + outbox; `expected_reply_rate` excludes expected non-replies (pending/manager_active).
+- `info_answer_rate` and `info_mismatch` flag interruptions (price/location/hours/promo/etc).
+- `responses.jsonl` is the drill-down: check `conversation_state`, `expected_response_reason`, `info_mismatch`.
+- `summary.metrics.state.reply_rate_by_state` shows reply rate per state; keep `unknown_state_rate` low.
+- `trace_bundle.jsonl` contains trace/meta/outbox + trace_id for fast inspection and per-turn diffs.
+- `summary.failures` is the compact error list (conversation/message/trace/stage pointers).
+
+Continuity / no-drift rules
+- If baseline is empty (first run), a small bootstrap run is acceptable; replace with `--count >= 5` on the next accepted run.
+- Do not update baseline on tiny runs after bootstrap; use `--count >= 5` for baseline updates.
+- Keep `--count`, `--min-turns`, `--max-turns`, `--mode`, `--include-media` stable across comparisons.
+- For gates, add `--fail-on-thresholds` and `--fail-on-regression --regression-tolerance 0.02`.
+- Use `--append-history` to track failure trends in `ops/results/booking_quality.json`.
+- Always record the run in `STATE.md` with the `summary.json` path and keep `ops/results/booking_quality.json` in git.
+- Use `--seed` for reproducible deltas when debugging the same issue.
+
+Notes
+- Requires allowlist JIDs (state mode). Use `--remote-jid` for a fixed allowlist number.
+- Manager simulation uses Telegram callbacks by default; switch to console with `--manager-channel console`.
+- Use `--reset-before-dialog` to clear pending/manager_active before each dialog.

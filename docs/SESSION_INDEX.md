@@ -143,3 +143,4 @@
 | 2026-02-04-llm-policy-fastpath-a9 | active | feat/2026-02-04-llm-policy-fastpath-a9 | /home/zhan/worktrees/2026-02-04-llm-policy-fastpath-a9 | docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-fastpath.md | 2026-02-04 |
 | 2026-02-04-llm-policy-core-impl-a7 | active | feat/2026-02-04-llm-policy-core-impl-a7 | /home/zhan/worktrees/2026-02-04-llm-policy-core-impl-a7 | docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-impl.md | 2026-02-04 |
 | 2026-02-05-console-analytics-kpis-a7 | done | feat/2026-02-05-console-analytics-kpis-a7 | /home/zhan/worktrees/2026-02-05-console-analytics-kpis-a7 | docs/TASK_PACKAGES/TP-2026-02-05-console-analytics-kpis.md | 2026-02-05 |
+| 2026-02-05-llm-quality-runner-a1 | done | feat/2026-02-05-llm-quality-runner-a1 | /home/zhan/worktrees/2026-02-05-llm-quality-runner-a1 | docs/TASK_PACKAGES/TP-2026-02-05-llm-quality-runner.md | 2026-02-05 |
