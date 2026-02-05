@@ -1,73 +1,104 @@
 {
-  "updated_at": "2026-02-05T03:41:46.712671+00:00",
+  "updated_at": "2026-02-05T05:07:17.712071+00:00",
   "config": {
     "mode": "llm",
-    "count": 1,
-    "min_turns": 6,
-    "max_turns": 8,
+    "count": 5,
+    "min_turns": 10,
+    "max_turns": 15,
     "include_media": true,
     "media_mode": "text",
     "media_kind": "photo",
+    "scenario_coverage": "booking,info,interrupt,handoff",
     "seed": null,
     "manager_mode": "simulate",
     "pending_mode": "ack",
-    "jid_mode": "round_robin"
+    "jid_mode": "round_robin",
+    "regression_tolerance": 0.02
   },
   "metrics": {
     "counts": {
-      "dialogs": 1,
-      "turns": 9,
-      "turns_expected_response": 9,
-      "turns_with_response": 9,
+      "dialogs": 5,
+      "turns": 55,
+      "turns_expected_response": 49,
+      "turns_with_response": 55,
       "turns_missing_response": 0,
       "turns_expected_missing": 0,
+      "turns_passed": 0,
+      "turns_failed": 55,
+      "unknown_state": 0,
       "decision_meta_missing": 0,
       "decision_trace_missing": 0,
       "webhook_errors": 0,
       "infra_errors": 0,
       "decision_meta_errors": 0,
       "decision_trace_errors": 0,
-      "info_mismatch": 1
+      "info_mismatch": 33
     },
-    "state_counts": {
-      "bot_active": 9
+    "state": {
+      "counts": {
+        "bot_active": 49,
+        "pending": 6
+      },
+      "reply_rate_by_state": {
+        "bot_active": 1.0,
+        "pending": 1.0
+      },
+      "expected_reply_rate_by_state": {
+        "bot_active": 1.0
+      },
+      "raw": {
+        "bot_active": {
+          "turns": 49,
+          "replies": 49,
+          "expected_turns": 49,
+          "expected_replies": 49,
+          "expected_missing": 0
+        },
+        "pending": {
+          "turns": 6,
+          "replies": 6,
+          "expected_turns": 0,
+          "expected_replies": 0,
+          "expected_missing": 0
+        }
+      }
     },
     "info": {
-      "turns_with_info_request": 3,
-      "turns_info_answered": 2,
-      "turns_info_missed": 1,
+      "turns_with_info_request": 42,
+      "turns_info_answered": 4,
+      "turns_info_missed": 38,
       "by_tag": {
-        "parking": {
-          "requested": 0,
-          "answered": 0,
-          "missed": 0
-        },
-        "location": {
-          "requested": 1,
-          "answered": 1,
-          "missed": 0
-        },
-        "price": {
-          "requested": 0,
-          "answered": 0,
-          "missed": 0
-        },
-        "hours": {
-          "requested": 1,
-          "answered": 1,
-          "missed": 0
-        },
         "promo": {
           "requested": 1,
           "answered": 0,
           "missed": 1
         },
-        "duration": {
+        "parking": {
+          "requested": 1,
+          "answered": 1,
+          "missed": 0
+        },
+        "hours": {
+          "requested": 2,
+          "answered": 1,
+          "missed": 1
+        },
+        "location": {
+          "requested": 3,
+          "answered": 2,
+          "missed": 1
+        },
+        "master": {
           "requested": 0,
           "answered": 0,
           "missed": 0
         },
-        "master": {
+        "price": {
+          "requested": 3,
+          "answered": 0,
+          "missed": 3
+        },
+        "duration": {
           "requested": 0,
           "answered": 0,
           "missed": 0
@@ -75,19 +106,73 @@
       }
     },
     "manager": {
-      "handovers_seen": 0,
+      "handovers_seen": 6,
       "actions": {
-        "take": 0,
-        "resolve": 0
+        "take": 6,
+        "resolve": 6,
+        "return": 0,
+        "skip": 0
       },
-      "errors": 0
+      "errors": 0,
+      "actions_total": 12,
+      "actions_ok": 12
+    },
+    "booking": {
+      "turns": 39,
+      "progress_opportunities": 39,
+      "progressed": 6,
+      "filled_slots_total": 3
     },
     "rates": {
       "reply_rate": 1.0,
       "expected_reply_rate": 1.0,
       "decision_meta_coverage": 1.0,
       "decision_trace_coverage": 1.0,
-      "info_answer_rate": 0.6667
+      "unknown_state_rate": 0.0,
+      "pass_rate": 0.0,
+      "info_answer_rate": 0.0952,
+      "booking_slot_progress_rate": 0.1538,
+      "handoff_correct_rate": 1.0
     }
-  }
+  },
+  "history": [
+    {
+      "run_id": "20260205-045542",
+      "finished_at": "2026-02-05T05:07:17.712071+00:00",
+      "config": {
+        "mode": "llm",
+        "count": 5,
+        "min_turns": 10,
+        "max_turns": 15,
+        "include_media": true,
+        "media_mode": "text",
+        "media_kind": "photo",
+        "scenario_coverage": "booking,info,interrupt,handoff",
+        "seed": null,
+        "manager_mode": "simulate",
+        "pending_mode": "ack",
+        "jid_mode": "round_robin",
+        "regression_tolerance": 0.02
+      },
+      "rates": {
+        "reply_rate": 1.0,
+        "expected_reply_rate": 1.0,
+        "decision_meta_coverage": 1.0,
+        "decision_trace_coverage": 1.0,
+        "unknown_state_rate": 0.0,
+        "pass_rate": 0.0,
+        "info_answer_rate": 0.0952,
+        "booking_slot_progress_rate": 0.1538,
+        "handoff_correct_rate": 1.0
+      },
+      "failure_counts": {
+        "expected_state_mismatch": 52,
+        "expected_action_mismatch": 52,
+        "expected_reply_type_mismatch": 52,
+        "expected_info_section_miss": 38,
+        "booking_slot_stall": 33,
+        "info_section_miss": 10
+      }
+    }
+  ]
 }

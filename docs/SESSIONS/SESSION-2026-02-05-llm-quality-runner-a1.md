@@ -11,6 +11,7 @@
   - Session created.
   - Added llm-quality runner with trace bundle, per-turn evaluation + reason codes, thresholds, and manager action checks.
   - Added scenario expectations + coverage controls and regression/history gates.
+  - Ran LLM baseline refresh (count 5) and updated booking_quality baseline + history.
   - Added baseline file `ops/results/booking_quality.json`.
   - Updated booking confirm runbook with llm-quality evaluation contract + thresholds + artifacts.
   - Updated `AGENTS.md` and `docs/RUNBOOK.md` with llm-quality pointer.
@@ -26,8 +27,8 @@
   - docs/RUNBOOK.md
   - docs/SESSION_START_PROMPT.txt
   - ops/results/booking_quality.json
-  - /tmp/booking_quality/20260205-044137/summary.json
-  - /tmp/booking_quality/20260205-044137/responses.jsonl
-  - /tmp/booking_quality/20260205-044137/trace_bundle.jsonl
-  - /tmp/booking_quality/20260205-044137/scenarios.json
+  - /tmp/booking_quality/20260205-045542/summary.json
+  - /tmp/booking_quality/20260205-045542/responses.jsonl
+  - /tmp/booking_quality/20260205-045542/trace_bundle.jsonl
+  - /tmp/booking_quality/20260205-045542/scenarios.json
 - last_updated: 2026-02-05

@@ -56,7 +56,7 @@
 - `python3 ops/diagnose.py llm-quality --count 5 --mode llm` (allowlist JIDs)
 
 ## Evidence
-- `/tmp/booking_quality/20260205-044137/summary.json` + `responses.jsonl` + `scenarios.json` + `trace_bundle.jsonl`.
+- `/tmp/booking_quality/20260205-045542/summary.json` + `responses.jsonl` + `scenarios.json` + `trace_bundle.jsonl`.
 - `ops/results/booking_quality.json` baseline.
 - запись в `STATE.md`.
 
