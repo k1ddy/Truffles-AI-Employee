@@ -1,0 +1,29 @@
+# SESSION 2026-02-05-onboarding-billing-support-a11 — Session 2026-02-05-onboarding-billing-support-a11
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-05-onboarding-billing-support-audit.md
+- branch: feat/2026-02-05-onboarding-billing-support-a11
+- worktree: /home/zhan/worktrees/2026-02-05-onboarding-billing-support-a11
+- base_ref: origin/main
+- scope: Process audit + finalize legal/onboarding/support templates + canon billing policy.
+- done:
+  - Added audit process section with responsibilities + GAP list in docs/PROCESSES.md.
+  - Finalized legal/onboarding/support templates and canon billing policy.
+  - Resolved merge conflicts in legal/support/arsenal docs and session index.
+  - Aligned SLA template note to “only by separate agreement”.
+- next:
+  - Run session_check after conflict resolution before commit/push.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-05-onboarding-billing-support-audit.md
+  - docs/PROCESSES.md
+  - Business/Legal/ДОГОВОР.md
+  - Business/Legal/NDA.md
+  - Business/Legal/ПОЛИТИКА_ОБРАБОТКИ_ДАННЫХ.md
+  - Business/Legal/СЧЕТ_ШАБЛОН.md
+  - Business/Onboarding/Чеклист_запуска.md
+  - Business/Onboarding/Инструкция_клиента.md
+  - Business/Support/Регламент_техподдержки.md
+  - Business/Sales/BILLING_COUNTING.md
+  - Business/ДОКУМЕНТЫ_АРСЕНАЛ.md
+- last_updated: 2026-02-05
