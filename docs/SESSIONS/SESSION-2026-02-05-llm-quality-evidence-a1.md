@@ -1,0 +1,22 @@
+# SESSION 2026-02-05-llm-quality-evidence-a1 — Session 2026-02-05-llm-quality-evidence-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-05-llm-quality-runner.md
+- branch: feat/2026-02-05-llm-quality-evidence-a1
+- worktree: /home/zhan/worktrees/2026-02-05-llm-quality-evidence-a1
+- base_ref: feat/2026-02-05-llm-quality-judge-a1
+- scope: Run allowlist llm-quality with judge sample, update baseline + STATE.md evidence.
+- done:
+  - Session created.
+  - LLM-quality run complete (run_id 20260205-101643) with judge sample 0.1; baseline/history updated.
+  - STATE.md evidence updated for latest run.
+- next:
+  - Session end + commit.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-05-llm-quality-runner.md
+  - /tmp/booking_quality/20260205-101643/summary.json
+  - /tmp/booking_quality/20260205-101643/responses.jsonl
+  - /tmp/booking_quality/20260205-101643/trace_bundle.jsonl
+  - /tmp/booking_quality/20260205-101643/scenarios.json
+- last_updated: 2026-02-05
