@@ -10,8 +10,9 @@
 - done:
   - Added audit process section with responsibilities + GAP list in docs/PROCESSES.md.
   - Finalized legal/onboarding/support templates and canon billing policy.
+  - Resolved merge conflicts in legal/support/arsenal docs and session index.
 - next:
-  - Re-read for canon alignment, then session_check before commit.
+  - Run session_check after conflict resolution before commit/push.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-05-onboarding-billing-support-audit.md
   - docs/PROCESSES.md

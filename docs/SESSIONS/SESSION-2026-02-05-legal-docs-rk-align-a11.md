@@ -1,0 +1,21 @@
+# SESSION 2026-02-05-legal-docs-rk-align-a11 — Session 2026-02-05-legal-docs-rk-align-a11
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-05-legal-docs-rk-align.md
+- branch: feat/2026-02-05-legal-docs-rk-align-a11
+- worktree: /home/zhan/worktrees/2026-02-05-legal-docs-rk-align-a11
+- base_ref: origin/main
+- scope: Align legal/support templates with code-backed providers, data categories/retention, auth model, remove SLA, update refund/liability per RK law, fill contacts.
+- done:
+  - Updated privacy/data policies with code-based categories/retention, provider list, auth identifiers, and conditional cookies section.
+  - Updated contract: removed SLA appendix, refreshed subprocessors, corrected auth wording, removed unverified hosting geography claim.
+  - Updated refund/liability policies with RK law references; filled support regulation/contacts.
+  - Added subprocessors list section in user agreement; marked SLA template unused; updated docs arsenal.
+- next:
+  - Run `scripts/session_check.sh`, commit, push, session_end.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-05-legal-docs-rk-align.md
+  - https://adilet.zan.kz/rus/docs/K990000409_
+  - https://adilet.zan.kz/rus/docs/Z100000274_
+- last_updated: 2026-02-05
