@@ -31,7 +31,7 @@ DERIVED: legal template; not canonical until approved/signed. Claims must align 
 ## 4. Контакты
 
 - Email поддержки: support@truffles.kz
-- Дополнительный контакт: ________________________________
+- Дополнительный контакт: Telegram @ent3rprise
 
 ---
 
