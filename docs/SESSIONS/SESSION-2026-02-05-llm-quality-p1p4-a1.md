@@ -1,0 +1,27 @@
+# SESSION 2026-02-05-llm-quality-p1p4-a1 — Session 2026-02-05-llm-quality-p1p4-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-05-llm-quality-p1p4.md
+- branch: feat/2026-02-05-llm-quality-p1p4-a1
+- worktree: /home/zhan/worktrees/2026-02-05-llm-quality-p1p4-a1
+- base_ref: feat/2026-02-05-llm-quality-evidence-a1
+- scope: P1/P4: add chaos coverage axes + tool hooks + taxonomy/regression gates; update runbook; run allowlist llm-quality and record evidence.
+- done:
+  - Session created.
+  - Added chaos coverage axes (state/trace/modality/tools) + taxonomy tracking + tool hook args in llm-quality runner.
+  - Updated booking confirm runbook with taxonomy/coverage/tool hooks.
+  - Ran allowlist llm-quality (run_id 20260205-114556) and updated baseline/history.
+  - Updated STATE.md evidence for latest run.
+  - Added pack truth + consult playbook context for LLM-judge; extended tool hooks to auto cancel/calendar.
+  - Updated runbook to describe pack-truth judge + cancel/calendar tool hooks.
+  - Attempted allowlist LLM-quality run; failed due to OpenAI timeout (baseline not updated).
+- next:
+  - Session end + commit.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-05-llm-quality-p1p4.md
+  - /tmp/booking_quality/20260205-114556/summary.json
+  - /tmp/booking_quality/20260205-114556/responses.jsonl
+  - /tmp/booking_quality/20260205-114556/trace_bundle.jsonl
+  - /tmp/booking_quality/20260205-114556/scenarios.json
+- last_updated: 2026-02-05
