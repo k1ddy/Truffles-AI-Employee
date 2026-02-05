@@ -1,0 +1,34 @@
+# SESSION 2026-02-05-llm-quality-runner-a1 — Session 2026-02-05-llm-quality-runner-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-05-llm-quality-runner.md
+- branch: feat/2026-02-05-llm-quality-runner-a1
+- worktree: /home/zhan/worktrees/2026-02-05-llm-quality-runner-a1
+- base_ref: origin/main
+- scope: LLM booking quality runner (state-aware metrics + manager/pending simulation) + baseline + runbook.
+- done:
+  - Session created.
+  - Added llm-quality runner with trace bundle, per-turn evaluation + reason codes, thresholds, and manager action checks.
+  - Added scenario expectations + coverage controls and regression/history gates.
+  - Ran LLM baseline refresh (count 5) and updated booking_quality baseline + history.
+  - Added baseline file `ops/results/booking_quality.json`.
+  - Updated booking confirm runbook with llm-quality evaluation contract + thresholds + artifacts.
+  - Updated `AGENTS.md` and `docs/RUNBOOK.md` with llm-quality pointer.
+  - Added SOP pointer in `docs/SESSION_START_PROMPT.txt`.
+  - Ran booking quality sample (template mode, 1 dialog).
+- next:
+  - Rerun with larger sample when time permits (optional).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-05-llm-quality-runner.md
+  - ops/diagnose.py
+  - docs/runbooks/BOOKING_CONFIRM_VERIFY.md
+  - AGENTS.md
+  - docs/RUNBOOK.md
+  - docs/SESSION_START_PROMPT.txt
+  - ops/results/booking_quality.json
+  - /tmp/booking_quality/20260205-045542/summary.json
+  - /tmp/booking_quality/20260205-045542/responses.jsonl
+  - /tmp/booking_quality/20260205-045542/trace_bundle.jsonl
+  - /tmp/booking_quality/20260205-045542/scenarios.json
+- last_updated: 2026-02-05

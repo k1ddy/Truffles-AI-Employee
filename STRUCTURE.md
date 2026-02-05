@@ -127,6 +127,7 @@
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-02-05-llm-quality-runner.md`
 - `docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-dec.md`
 - `docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-impl.md`
 - `docs/TASK_PACKAGES/TP-2026-02-02-vertical-pack-canon.md`
@@ -583,6 +584,7 @@ truffles-api/
 | `onboard_client.py` | План (файла нет). Реальный онбординг: `sync_client.py` + `SPECS/MULTI_TENANT.md` |
 | `update_prompt.py` | Обновление промпта через API |
 | `metrics_daily_snapshot.sql` | Снимок дневных метрик (SLA/LLM/эскалации) |
+| `ops/results/booking_quality.json` | Baseline метрик LLM booking quality runner | QA/OPS/Brain |
 | `knowledge_backlog_top.sql` | Топ‑вопросы knowledge backlog (последние 7 дней) |
 | `sync_client.py` | Синк/валидация client_pack в Qdrant |
 | `migrations/` | SQL миграции |

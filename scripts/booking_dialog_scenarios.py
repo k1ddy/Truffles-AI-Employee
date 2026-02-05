@@ -36,6 +36,27 @@ TIME_RANGES = ["после 18", "после 19", "вечером", "в райо�
 TIME_EXACT = ["на 19:00", "на 18:30", "на 20:00", "на 17:45"]
 
 GREETINGS = ["Привет", "Здравствуйте", "Добрый день", "Салеметсиз бе"]
+EXPECT_INFO_SECTIONS = {
+    "price": ["pricing", "price", "payment_info", "payment"],
+    "location": ["address", "location"],
+    "hours": ["hours", "working_hours", "schedule"],
+    "promo": ["discounts", "discount", "promo", "promotion"],
+    "duration": ["duration", "service_duration"],
+    "parking": ["parking"],
+    "master": ["master", "specialist"],
+}
+EXPECT_ACTION_BY_TAG = {
+    "handoff": ["booking_escalated", "escalate", "handoff"],
+}
+EXPECT_REPLY_TYPE_BY_TAG = {
+    "time": "time",
+    "name": "name",
+    "phone": "phone",
+    "confirm": "confirm",
+}
+EXPECT_STATE_BY_TAG = {
+    "handoff": "pending",
+}
 
 INTERRUPTIONS = [
     {"text": "Сколько стоит {service}?", "tags": ["interrupt", "price"]},
@@ -68,6 +89,7 @@ SCENARIOS = [
     {
         "id": "haircut_price_location_photo",
         "goal": "book haircut with price/location interrupts + photo reference",
+        "coverage": ["booking", "info", "interrupt"],
         "turns": [
             {"text": "{greet}! Хочу записаться на {service} {day} {time_range}, есть свободное?", "tags": ["booking"]},
             {"text": "{interrupt_price}", "tags": ["interrupt", "price"]},
@@ -83,6 +105,7 @@ SCENARIOS = [
     {
         "id": "booking_time_swap_with_noise",
         "goal": "book service with time/name swaps and noise",
+        "coverage": ["booking", "info", "interrupt"],
         "turns": [
             {"text": "{greet}, хочу записаться на {service} {day}.", "tags": ["booking"]},
             {"text": "Можно {time_exact}?", "tags": ["time"]},
@@ -97,6 +120,7 @@ SCENARIOS = [
     {
         "id": "booking_master_switch",
         "goal": "book with master preference changes",
+        "coverage": ["booking", "info", "interrupt"],
         "turns": [
             {"text": "{greet}! Можно записаться на {service} {day} {time_range}?", "tags": ["booking"]},
             {"text": "Хотелось бы к {master}, но если занято, то любой.", "tags": ["master"]},
@@ -112,6 +136,7 @@ SCENARIOS = [
     {
         "id": "booking_kz_mix",
         "goal": "book with RU/KZ mixed interruptions",
+        "coverage": ["booking", "info", "interrupt"],
         "turns": [
             {"text": "{greet}! {service} керек, {day} {time_range} бар ма?", "tags": ["booking"]},
             {"text": "Бағасы қанша?", "tags": ["interrupt", "price"]},
@@ -127,12 +152,28 @@ SCENARIOS = [
     {
         "id": "booking_multi_service",
         "goal": "book with multi-service request and interruptions",
+        "coverage": ["booking", "info", "interrupt"],
         "turns": [
             {"text": "{greet}, хочу {service} и маникюр {day} {time_range}.", "tags": ["booking"]},
             {"text": "Можно сначала {service}, потом маникюр?", "tags": ["interrupt", "multi_service"]},
             {"text": "А сколько длится?", "tags": ["interrupt", "duration"]},
             {"text": "Можно {time_exact}?", "tags": ["time"]},
             {"text": "Меня зовут {name}.", "tags": ["name"]},
+            {"text": "Телефон {phone}.", "tags": ["phone"]},
+            {"text": "Да, подтверждаю.", "tags": ["confirm"]},
+        ],
+        "requires_media": False,
+    },
+    {
+        "id": "booking_escalation_return",
+        "goal": "request manager then resume booking",
+        "coverage": ["booking", "handoff"],
+        "turns": [
+            {"text": "{greet}! Хочу записаться на {service}.", "tags": ["booking"]},
+            {"text": "Можно связаться с менеджером?", "tags": ["handoff", "human"]},
+            {"text": "Спасибо, жду.", "tags": ["pending"]},
+            {"text": "Давайте продолжим запись, можно {time_exact}?", "tags": ["booking", "time"]},
+            {"text": "Имя {name}.", "tags": ["name"]},
             {"text": "Телефон {phone}.", "tags": ["phone"]},
             {"text": "Да, подтверждаю.", "tags": ["confirm"]},
         ],
@@ -163,17 +204,24 @@ def _build_context(rng: random.Random) -> dict[str, str]:
 
 def _format_turn(turn: dict[str, Any], ctx: dict[str, str]) -> dict[str, Any]:
     text = turn["text"].format(**ctx)
+    tags = list(turn.get("tags") or [])
     return {
         "kind": "text",
         "text": text,
-        "tags": list(turn.get("tags") or []),
+        "tags": tags,
+        "expect": _merge_expectations(tags, turn.get("expect")),
     }
 
 
 def _media_turn(ctx: dict[str, str], *, mode: str, kind: str) -> dict[str, Any]:
     caption = "Вот фото референса"
     if mode == "text":
-        return {"kind": "text", "text": caption, "tags": ["media", kind]}
+        return {
+            "kind": "text",
+            "text": caption,
+            "tags": ["media", kind],
+            "expect": _merge_expectations(["media", kind], None),
+        }
     if kind == "audio":
         media_payload = {
             "messageType": "audio",
@@ -198,7 +246,48 @@ def _media_turn(ctx: dict[str, str], *, mode: str, kind: str) -> dict[str, Any]:
                 "caption": caption,
             },
         }
-    return {"kind": "media", "text": caption, "tags": ["media", kind], "media": media_payload}
+    return {
+        "kind": "media",
+        "text": caption,
+        "tags": ["media", kind],
+        "media": media_payload,
+        "expect": _merge_expectations(["media", kind], None),
+    }
+
+
+def _default_expect() -> dict[str, Any]:
+    return {
+        "action": None,
+        "info_sections": [],
+        "reply_type": None,
+        "state": None,
+        "expected_reply": None,
+    }
+
+
+def _merge_expectations(tags: list[str], override: Any) -> dict[str, Any]:
+    expect = _default_expect()
+    for tag in tags:
+        if tag in EXPECT_INFO_SECTIONS:
+            expect["info_sections"].extend(EXPECT_INFO_SECTIONS[tag])
+        if tag in EXPECT_ACTION_BY_TAG and expect["action"] is None:
+            expect["action"] = EXPECT_ACTION_BY_TAG[tag][:]
+        if tag in EXPECT_REPLY_TYPE_BY_TAG and expect["reply_type"] is None:
+            expect["reply_type"] = EXPECT_REPLY_TYPE_BY_TAG[tag]
+        if tag in EXPECT_STATE_BY_TAG and expect["state"] is None:
+            expect["state"] = EXPECT_STATE_BY_TAG[tag]
+    info_sections = []
+    for item in expect["info_sections"]:
+        if isinstance(item, str):
+            value = item.strip().lower()
+            if value and value not in info_sections:
+                info_sections.append(value)
+    expect["info_sections"] = info_sections
+    if isinstance(override, dict):
+        for key in expect:
+            if key in override and override[key] not in (None, "", []):
+                expect[key] = override[key]
+    return expect
 
 
 def _insert_extras(turns: list[dict[str, Any]], extras: list[dict[str, Any]], rng: random.Random, target: int) -> None:
@@ -212,16 +301,47 @@ def _insert_extras(turns: list[dict[str, Any]], extras: list[dict[str, Any]], rn
         turns.insert(idx, extra)
 
 
+def _select_templates(
+    rng: random.Random,
+    *,
+    count: int,
+    coverage: list[str],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    if not coverage:
+        return [rng.choice(SCENARIOS) for _ in range(count)], []
+    missing: list[str] = []
+    coverage_targets = coverage
+    if count < len(coverage):
+        coverage_targets = rng.sample(coverage, k=count)
+        missing = [tag for tag in coverage if tag not in coverage_targets]
+    selected: list[dict[str, Any]] = []
+    remaining = SCENARIOS[:]
+    for tag in coverage_targets:
+        matches = [item for item in remaining if tag in (item.get("coverage") or [])]
+        if not matches:
+            missing.append(tag)
+            continue
+        choice = rng.choice(matches)
+        selected.append(choice)
+        remaining.remove(choice)
+    while len(selected) < count:
+        selected.append(rng.choice(SCENARIOS))
+    if len(selected) > count:
+        selected = selected[:count]
+    rng.shuffle(selected)
+    return selected, missing
+
+
 def _generate_template_dialog(
     rng: random.Random,
     *,
+    template: dict[str, Any],
     min_turns: int,
     max_turns: int,
     include_media: bool,
     media_mode: str,
     media_kind: str,
 ) -> dict[str, Any]:
-    template = rng.choice(SCENARIOS)
     ctx = _build_context(rng)
     turns = [_format_turn(t, ctx) for t in template["turns"]]
     extras = [_format_turn(t, ctx) for t in EXTRA_TURNS] + [_format_turn(t, ctx) for t in INTERRUPTIONS]
@@ -252,6 +372,15 @@ def _validate_dialog(dialog: dict[str, Any], *, min_turns: int, max_turns: int) 
         warnings.append("missing_interrupt_tag")
     if "media" not in tags:
         warnings.append("missing_media_tag")
+    for turn in turns:
+        expect = turn.get("expect")
+        if not isinstance(expect, dict):
+            warnings.append("missing_expect_block")
+            break
+        for key in ("action", "info_sections", "reply_type", "state", "expected_reply"):
+            if key not in expect:
+                warnings.append("expect_missing_key")
+                break
     return warnings
 
 
@@ -305,15 +434,20 @@ def _generate_llm_dialogs(
     model: str,
     base_url: str,
     api_key: str,
+    coverage: list[str],
+    seed: int | None,
 ) -> list[dict[str, Any]]:
     prompt = (
         "Generate JSON with key 'dialogs' as a list. "
         "Each dialog: {dialog_id, goal, turns}. "
-        "turns is a list of {kind,text,tags} with 10-15 client messages. "
+        "turns is a list of {kind,text,tags,expect} with 10-15 client messages. "
+        "expect must include keys: action, info_sections, reply_type, state, expected_reply. "
         "Include interruptions (price/location/noise), time/name swaps, and at least one media reference. "
         "Beauty salon domain, Russian language, natural chat. "
         f"Count={count}, turns_range={min_turns}-{max_turns}. "
-        f"media_mode={media_mode}, media_kind={media_kind}."
+        f"media_mode={media_mode}, media_kind={media_kind}. "
+        f"coverage_tags={','.join(coverage) if coverage else 'none'}. "
+        f"seed={seed}."
     )
     content = _call_openai(prompt, api_key=api_key, model=model, base_url=base_url)
     payload = _parse_llm_json(content)
@@ -321,6 +455,10 @@ def _generate_llm_dialogs(
     if not isinstance(dialogs, list):
         return []
     for dialog in dialogs:
+        turns = dialog.get("turns") or []
+        for turn in turns:
+            tags = list(turn.get("tags") or [])
+            turn["expect"] = _merge_expectations(tags, turn.get("expect"))
         if include_media and all("media" not in (turn.get("tags") or []) for turn in dialog.get("turns", [])):
             dialog.setdefault("turns", []).insert(
                 1, _media_turn(_build_context(rng), mode=media_mode, kind=media_kind)
@@ -339,12 +477,19 @@ def main() -> None:
     parser.add_argument("--include-media", action="store_true")
     parser.add_argument("--media-mode", choices=["text", "payload"], default="text")
     parser.add_argument("--media-kind", choices=["photo", "audio"], default="photo")
+    parser.add_argument("--coverage", default="booking,info,interrupt")
     parser.add_argument("--llm-model", default="gpt-4o-mini")
     parser.add_argument("--llm-base-url", default=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com"))
     parser.add_argument("--llm-api-key", default=os.environ.get("OPENAI_API_KEY"))
     args = parser.parse_args()
 
     rng = random.Random(args.seed or int(time.time()))
+    coverage = []
+    if args.coverage:
+        raw_coverage = [item.strip() for item in args.coverage.split(",") if item.strip()]
+        if raw_coverage and raw_coverage != ["none"]:
+            coverage = raw_coverage
+    missing_coverage: list[str] = []
     dialogs: list[dict[str, Any]] = []
     if args.mode == "llm":
         if not args.llm_api_key:
@@ -360,14 +505,18 @@ def main() -> None:
             model=args.llm_model,
             base_url=args.llm_base_url,
             api_key=args.llm_api_key,
+            coverage=coverage,
+            seed=args.seed,
         )
         if not dialogs:
             raise SystemExit("LLM mode returned empty dialogs")
     else:
-        for _ in range(args.count):
+        templates, missing_coverage = _select_templates(rng, count=args.count, coverage=coverage)
+        for template in templates:
             dialogs.append(
                 _generate_template_dialog(
                     rng,
+                    template=template,
                     min_turns=args.min_turns,
                     max_turns=args.max_turns,
                     include_media=args.include_media,
@@ -377,6 +526,8 @@ def main() -> None:
             )
 
     warnings: dict[str, list[str]] = {}
+    if args.mode == "template" and args.coverage and missing_coverage:
+        warnings["coverage"] = [f"missing_coverage_tag={tag}" for tag in missing_coverage]
     for dialog in dialogs:
         dialog_warnings = _validate_dialog(dialog, min_turns=args.min_turns, max_turns=args.max_turns)
         if dialog_warnings:
