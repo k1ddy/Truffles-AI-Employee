@@ -6,7 +6,7 @@
 - branch: feat/2026-02-06-tenant-context-runtime-a13
 - worktree: /home/zhan/worktrees/2026-02-06-tenant-context-runtime-a13
 - base_ref: origin/main
-- scope: Вшить tenant_context в runtime webhook/outbox/metrics и закрыть тестовые GAP для cross-tenant вне Console.
+- scope: Вшить tenant_context в runtime webhook/outbox/metrics, закрыть тестовые GAP для cross-tenant вне Console, затем убрать SAFE_MODE канон-двусмысленность.
 - done:
   - Добавлен `tenant_context` в `WebhookRequest` + parsing extraction.
   - Preflight webhook валидирует tenant_context mismatch (client/slug/instance/branch).
@@ -14,9 +14,13 @@
   - Добавлен outbox row tenant guard (`client_id`/`branch_id`/`tenant_context`).
   - Metrics daily/analytics SQL фильтрует user_messages по `metadata.tenant_context.client_id`.
   - Добавлены тесты для webhook/outbox/audit tenant isolation.
+  - SAFE_MODE канон выровнен: runtime fallback (`FACT/COLLECT/HANDOFF`, FACT pack-only, без booking-commit) + запрет safe-mode как Go-Live статуса синхронизирован в owner-docs.
 - next:
-  - Прогнать финальный `session_check` и оформить merge/close.
+  - Прогнать `session_check`, оформить commit и PR по SAFE_MODE canon alignment.
 - evidence:
   - /tmp/pytest_tenant_context_runtime_20260206_a13.txt
+  - STRATEGY/REQUIREMENTS.md
+  - docs/PROCESSES.md
+  - SPECS/VERTICAL_PACK_KIT.md
   - STATE.md (NOW)
 - last_updated: 2026-02-06
