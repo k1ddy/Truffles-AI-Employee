@@ -65,11 +65,14 @@
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 | `ops/diagnose.py` | Диагностика диалогов/trace/outbox + `dialog-report` (one-command) | QA/OPS/Brain |
 | `ops/shadow_replay.py` | Shadow replay report (decision_meta/trace comparison) | QA/OPS/Brain |
+| `ops/backfill_branch_rag.py` | Backfill Qdrant branch metadata from published knowledge | OPS/Brain |
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
 | `truffles-api/` | Backend API + workers | Backend |
 | `truffles-api/docker-compose.test.yml` | Test‑compose overrides (test containers, no prod env) | Backend/QA |
 | `truffles-api/app/services/onboarding_state.py` | Server-side onboarding state machine (Console) | Backend |
 | `truffles-api/app/services/console_confirmations.py` | Confirmation safeguards for destructive Console actions | Backend |
+| `truffles-api/app/services/capabilities_runtime.py` | Runtime capabilities context (client_capabilities → decision/booking) | Backend |
+| `truffles-api/app/services/knowledge_runtime.py` | Runtime published pack truth (knowledge_versions → demo_salon resolver) | Backend |
 | `truffles-api/app/services/reasoning_core.py` | Unified Reasoning Core API (signals -> gates -> actions -> compose -> trace) | Backend/Architect |
 | `truffles-api/app/services/pack_compiler_service.py` | Pack compiler (compiled artifacts, hashing, schema validation) | Backend/Architect |
 | `truffles-api/app/services/learned_response_service.py` | Auto-ingest + approval wiring for learned responses | Backend |
@@ -654,6 +657,7 @@ truffles-api/
 | `truffles-api/tests/test_admin_health.py` | Unit: Admin health minimum-data readiness |
 | `truffles-api/tests/test_pack_compiler.py` | Unit: pack compiler artifacts + checksum |
 | `truffles-api/tests/test_policy_dsl.py` | Unit: policy DSL schema validation |
+| `truffles-api/tests/test_knowledge_registry_chunking.py` | Unit: Qdrant pack chunking by size |
 
 ---
 
