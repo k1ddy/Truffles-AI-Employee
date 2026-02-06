@@ -766,7 +766,7 @@ def _apply_expected_reply_contract(
             not deterministic_matched
             and deterministic_available
             and answer_interpreter_attempted
-            and answer_error in {"error", "timeout", "invalid_json", "invalid_schema", "empty_response", "prompt_missing"}
+            and not answer_result_ok
         ):
             deterministic_matched = True
             if expected_slot_key:

@@ -20,6 +20,7 @@
   - Убран deterministic short‑circuit в expected_reply: теперь LLM пытается парсить service/time/name, а при ошибке падает в deterministic fallback (нужно для core‑eval E361a+).
   - Booking‑interrupt теперь допускается при `expected_reply_blocked_by_info`, чтобы info‑вопросы в активном booking не ломали info‑ответы (core‑eval E436).
   - Core‑eval (CI tier) прогнан локально после merge — зелёный.
+  - Deterministic fallback теперь срабатывает при не‑`ok` ответе answer_interpreter (stubbed/ошибки), чтобы слот‑логика закрывалась и `expected_reply_type` очищался в chaos‑тесте.
 - next:
   - Прогнать LLM‑quality матрицу (если нужно по цели).
   - Разобрать intermittent timeouts в livecheck (если повторятся).
@@ -37,4 +38,6 @@
   - /tmp/booking_e436_local_20260206b.txt
   - /tmp/pytest_demo_salon_eval_core_20260206.txt
   - /tmp/pytest_demo_salon_eval_core_20260206b.txt
+  - /tmp/pytest_demo_salon_eval_core_20260206c.txt
+  - /tmp/pytest_booking_chaos_dialogs_20260206.txt
 - last_updated: 2026-02-06
