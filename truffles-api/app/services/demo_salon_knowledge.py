@@ -3513,7 +3513,53 @@ def get_demo_salon_service_hint(message: str, client_slug: str | None = "demo_sa
 
 
 def get_truth_reply(message: str, client_slug: str | None = "demo_salon") -> str | None:
-    decision = get_demo_salon_decision(message, client_slug=client_slug)
+    decision = get_pack_decision(message, client_slug=client_slug)
     if decision and decision.action == "reply":
         return decision.response
     return None
+
+
+def get_pack_decision(
+    message: str,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
+    *,
+    intent_decomp: dict | None = None,
+) -> DemoSalonDecision | None:
+    return get_demo_salon_decision(message, client_slug=client_slug, intent_decomp=intent_decomp)
+
+
+def get_pack_service_decision(
+    message: str,
+    *,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
+    intent_decomp: dict | None = None,
+) -> DemoSalonDecision | None:
+    return get_demo_salon_service_decision(
+        message,
+        client_slug=client_slug,
+        intent_decomp=intent_decomp,
+    )
+
+
+def get_pack_price_reply(
+    message: str,
+    *,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
+) -> str | None:
+    return get_demo_salon_price_reply(message, client_slug=client_slug)
+
+
+def get_pack_price_item(
+    message: str,
+    *,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
+) -> str | None:
+    return get_demo_salon_price_item(message, client_slug=client_slug)
+
+
+def get_pack_service_hint(
+    message: str,
+    *,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
+) -> str | None:
+    return get_demo_salon_service_hint(message, client_slug=client_slug)
