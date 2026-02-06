@@ -15,6 +15,7 @@ class Branch(Base):
     slug = Column(Text, nullable=False)
     name = Column(Text, nullable=False)
     instance_id = Column(Text)
+    webhook_secret = Column(Text)
     phone = Column(Text)
     telegram_chat_id = Column(Text)
     knowledge_tag = Column(Text)

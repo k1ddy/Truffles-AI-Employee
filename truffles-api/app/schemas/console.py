@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from app.schemas.capabilities import CapabilitiesPayload
+from app.schemas.onboarding_contract import OnboardingContractPayload
 
 
 class ConsoleError(BaseModel):
@@ -516,6 +517,141 @@ class ConsoleCapabilitiesPatchRequest(BaseModel):
     status: Optional[Literal["active", "disabled"]] = None
     schema_version: Optional[str] = None
     payload: CapabilitiesPayload
+
+
+class ConsoleOnboardingContractRecord(BaseModel):
+    id: UUID
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    scope: Literal["client", "branch"]
+    status: Literal["active", "disabled"]
+    schema_version: str
+    payment_status: Literal["pending", "confirmed", "rejected"]
+    payment_confirmed_at: Optional[str] = None
+    payment_confirmed_by: Optional[UUID] = None
+    payload: OnboardingContractPayload
+    created_by: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleOnboardingContractResponse(BaseModel):
+    client_id: UUID
+    branch_id: Optional[UUID] = None
+    effective: OnboardingContractPayload
+    payment_status: Literal["pending", "confirmed", "rejected"]
+    payment_confirmed_at: Optional[str] = None
+    payment_confirmed_by: Optional[UUID] = None
+    capability_mismatches: list[str] = []
+    client_contract: Optional[ConsoleOnboardingContractRecord] = None
+    branch_contract: Optional[ConsoleOnboardingContractRecord] = None
+
+
+class ConsoleOnboardingContractPatchRequest(BaseModel):
+    scope: Literal["client", "branch"]
+    branch_id: Optional[UUID] = None
+    status: Optional[Literal["active", "disabled"]] = None
+    schema_version: Optional[str] = None
+    payment_status: Optional[Literal["pending", "confirmed", "rejected"]] = None
+    payload: OnboardingContractPayload
+
+
+class ConsoleReferencePack(BaseModel):
+    id: UUID
+    domain_slug: str
+    title: str
+    description: Optional[str] = None
+    schema_version: str
+    status: Literal["active", "disabled"]
+    metadata: dict
+    created_by: Optional[UUID] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleReferencePackListResponse(BaseModel):
+    items: list[ConsoleReferencePack]
+
+
+class ConsoleReferencePackUpsertRequest(BaseModel):
+    title: str
+    description: Optional[str] = None
+    schema_version: Optional[str] = None
+    status: Optional[Literal["active", "disabled"]] = None
+    metadata: Optional[dict] = None
+
+
+OnboardingPurchasedService = Literal[
+    "whatsapp",
+    "telegram",
+    "instagram",
+    "booking_collect",
+    "booking_confirm",
+    "knowledge_upload",
+    "analytics",
+    "auto_learn",
+    "provider_google_calendar",
+    "provider_local_calendar",
+    "provider_manual",
+    "provider_amocrm",
+    "provider_bitrix",
+]
+
+
+class ConsoleOnboardingAutopilotRequest(BaseModel):
+    company_id: Optional[UUID] = None
+    company_name: Optional[str] = None
+    client_id: Optional[UUID] = None
+    client_slug: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    branch_slug: Optional[str] = None
+    branch_name: Optional[str] = None
+    timezone: Optional[str] = None
+    phone: str
+    instance_id: str
+    payment_status: Optional[Literal["pending", "confirmed", "rejected"]] = "pending"
+    domain_slug: Optional[str] = None
+    purchased: Optional[CapabilitiesPayload] = None
+    purchased_services: Optional[list[OnboardingPurchasedService]] = None
+    client_data_text: Optional[str] = None
+    client_data_json: Optional[dict] = None
+    activate_branch: Optional[bool] = True
+    auto_create_reference_pack: Optional[bool] = True
+    auto_publish_knowledge: Optional[bool] = False
+
+
+class ConsoleOnboardingAutopilotIntake(BaseModel):
+    knowledge_tag: str
+    draft_saved: bool
+    published: bool
+    published_version_id: Optional[UUID] = None
+    missing_fields: list[str] = []
+    missing_questions: list[str] = []
+    payload: dict
+
+
+class ConsoleOnboardingAutopilotResponse(BaseModel):
+    company: ConsoleCompany
+    client: ConsoleClient
+    branch: ConsoleBranch
+    capabilities: ConsoleCapabilitiesRecord
+    onboarding_contract: ConsoleOnboardingContractRecord
+    payment_status: Literal["pending", "confirmed", "rejected"]
+    webhook_secret: str
+    webhook_url: str
+    reference_pack: Optional[ConsoleReferencePack] = None
+    onboarding_status: ConsoleOnboardingStatusResponse
+    go_no_go_missing: list[str] = []
+    intake: ConsoleOnboardingAutopilotIntake
+    actions: list[str] = []
+
+
+class ConsoleWebhookSecretResponse(BaseModel):
+    client_id: UUID
+    branch_id: UUID
+    instance_id: str
+    webhook_secret: str
+    webhook_url: str
 
 
 class ConsoleAgentListResponse(BaseModel):

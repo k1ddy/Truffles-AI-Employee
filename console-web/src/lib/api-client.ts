@@ -513,6 +513,7 @@ export type ListLearningCandidatesParams = operations["listLearningCandidates"][
 export type ListCompaniesParams = operations["listAdminCompanies"]["parameters"]["query"];
 export type ListClientsParams = operations["listAdminClients"]["parameters"]["query"];
 export type ListBranchesParams = operations["listAdminBranches"]["parameters"]["query"];
+export type ListReferencePacksParams = operations["listAdminReferencePacks"]["parameters"]["query"];
 
 // ═══════════════════════════════════════════════════════════════════
 // API METHODS (typed)
@@ -638,6 +639,34 @@ export const adminApi = {
         apiClient.patch<components["schemas"]["CapabilitiesRecord"]>("/admin/capabilities", data, {
             headers: buildClientHeader(clientId),
         }),
+    getOnboardingContract: (params: { branch_id?: string; clientId?: string }) =>
+        apiClient.get<components["schemas"]["OnboardingContractResponse"]>("/admin/onboarding-contract", {
+            params: params.branch_id ? { branch_id: params.branch_id } : undefined,
+            headers: buildClientHeader(params.clientId),
+        }),
+    patchOnboardingContract: (
+        data: components["schemas"]["OnboardingContractPatchRequest"],
+        clientId?: string,
+    ) =>
+        apiClient.patch<components["schemas"]["OnboardingContractRecord"]>("/admin/onboarding-contract", data, {
+            headers: buildClientHeader(clientId),
+        }),
+    getWebhookSecret: (params: { branch_id?: string; clientId?: string }) =>
+        apiClient.get<components["schemas"]["WebhookSecretResponse"]>("/admin/webhook-secret", {
+            params: params.branch_id ? { branch_id: params.branch_id } : undefined,
+            headers: buildClientHeader(params.clientId),
+        }),
+    runOnboardingAutopilot: (
+        data: components["schemas"]["OnboardingAutopilotRequest"],
+        clientId?: string,
+    ) =>
+        apiClient.post<components["schemas"]["OnboardingAutopilotResponse"]>("/admin/onboarding/autopilot", data, {
+            headers: buildClientHeader(clientId),
+        }),
+    listReferencePacks: (params?: ListReferencePacksParams) =>
+        apiClient.get<components["schemas"]["ReferencePackListResponse"]>("/admin/reference-packs", { params }),
+    upsertReferencePack: (domainSlug: string, data: components["schemas"]["ReferencePackUpsertRequest"]) =>
+        apiClient.put<components["schemas"]["ReferencePack"]>(`/admin/reference-packs/${domainSlug}`, data),
 };
 
 /** Onboarding endpoints */

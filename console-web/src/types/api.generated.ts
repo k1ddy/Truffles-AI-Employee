@@ -917,6 +917,101 @@ export interface paths {
         patch: operations["patchAdminCapabilities"];
         trace?: never;
     };
+    "/admin/onboarding-contract": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** Get effective onboarding contract */
+        get: operations["getAdminOnboardingContract"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Upsert onboarding contract record */
+        patch: operations["patchAdminOnboardingContract"];
+        trace?: never;
+    };
+    "/admin/webhook-secret": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** Get or generate webhook secret from branch instance_id */
+        get: operations["getAdminWebhookSecret"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/onboarding/autopilot": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run single-operator onboarding autopilot */
+        post: operations["runAdminOnboardingAutopilot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/reference-packs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List niche reference packs */
+        get: operations["listAdminReferencePacks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/reference-packs/{domain_slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Create or update niche reference pack */
+        put: operations["upsertAdminReferencePack"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1606,6 +1701,162 @@ export interface components {
             status?: "active" | "disabled" | null;
             schema_version?: string | null;
             payload: components["schemas"]["CapabilitiesPayload"];
+        };
+        OnboardingContractPayload: {
+            domain_slug?: string | null;
+            purchased?: components["schemas"]["CapabilitiesPayload"];
+        };
+        OnboardingContractRecord: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            client_id?: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            /** @enum {string} */
+            scope?: "client" | "branch";
+            /** @enum {string} */
+            status?: "active" | "disabled";
+            schema_version?: string;
+            /** @enum {string} */
+            payment_status?: "pending" | "confirmed" | "rejected";
+            /** Format: date-time */
+            payment_confirmed_at?: string | null;
+            /** Format: uuid */
+            payment_confirmed_by?: string | null;
+            payload?: components["schemas"]["OnboardingContractPayload"];
+            /** Format: uuid */
+            created_by?: string | null;
+            /** Format: date-time */
+            created_at?: string | null;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        OnboardingContractResponse: {
+            /** Format: uuid */
+            client_id?: string;
+            /** Format: uuid */
+            branch_id?: string | null;
+            effective?: components["schemas"]["OnboardingContractPayload"];
+            /** @enum {string} */
+            payment_status?: "pending" | "confirmed" | "rejected";
+            /** Format: date-time */
+            payment_confirmed_at?: string | null;
+            /** Format: uuid */
+            payment_confirmed_by?: string | null;
+            capability_mismatches?: string[];
+            client_contract?: components["schemas"]["OnboardingContractRecord"];
+            branch_contract?: components["schemas"]["OnboardingContractRecord"];
+        };
+        OnboardingContractPatchRequest: {
+            /** @enum {string} */
+            scope: "client" | "branch";
+            /** Format: uuid */
+            branch_id?: string | null;
+            /** @enum {string|null} */
+            status?: "active" | "disabled" | null;
+            schema_version?: string | null;
+            /** @enum {string|null} */
+            payment_status?: "pending" | "confirmed" | "rejected" | null;
+            payload: components["schemas"]["OnboardingContractPayload"];
+        };
+        /** @enum {string} */
+        OnboardingPurchasedService: "whatsapp" | "telegram" | "instagram" | "booking_collect" | "booking_confirm" | "knowledge_upload" | "analytics" | "auto_learn" | "provider_google_calendar" | "provider_local_calendar" | "provider_manual" | "provider_amocrm" | "provider_bitrix";
+        OnboardingAutopilotRequest: {
+            /** Format: uuid */
+            company_id?: string | null;
+            company_name?: string | null;
+            /** Format: uuid */
+            client_id?: string | null;
+            client_slug?: string | null;
+            /** Format: uuid */
+            branch_id?: string | null;
+            branch_slug?: string | null;
+            branch_name?: string | null;
+            timezone?: string | null;
+            phone: string;
+            instance_id: string;
+            /** @enum {string|null} */
+            payment_status?: "pending" | "confirmed" | "rejected" | null;
+            domain_slug?: string | null;
+            purchased?: components["schemas"]["CapabilitiesPayload"];
+            purchased_services?: components["schemas"]["OnboardingPurchasedService"][] | null;
+            client_data_text?: string | null;
+            client_data_json?: {
+                [key: string]: unknown;
+            } | null;
+            activate_branch?: boolean | null;
+            auto_create_reference_pack?: boolean | null;
+            auto_publish_knowledge?: boolean | null;
+        };
+        OnboardingAutopilotIntake: {
+            knowledge_tag: string;
+            draft_saved: boolean;
+            published: boolean;
+            /** Format: uuid */
+            published_version_id?: string | null;
+            missing_fields: string[];
+            missing_questions: string[];
+            payload: {
+                [key: string]: unknown;
+            };
+        };
+        OnboardingAutopilotResponse: {
+            company: components["schemas"]["Company"];
+            client: components["schemas"]["Client"];
+            branch: components["schemas"]["Branch"];
+            capabilities: components["schemas"]["CapabilitiesRecord"];
+            onboarding_contract: components["schemas"]["OnboardingContractRecord"];
+            /** @enum {string} */
+            payment_status: "pending" | "confirmed" | "rejected";
+            webhook_secret: string;
+            webhook_url: string;
+            reference_pack?: components["schemas"]["ReferencePack"];
+            onboarding_status: components["schemas"]["OnboardingStatusResponse"];
+            go_no_go_missing: string[];
+            intake: components["schemas"]["OnboardingAutopilotIntake"];
+            actions: string[];
+        };
+        WebhookSecretResponse: {
+            /** Format: uuid */
+            client_id: string;
+            /** Format: uuid */
+            branch_id: string;
+            instance_id: string;
+            webhook_secret: string;
+            webhook_url: string;
+        };
+        ReferencePack: {
+            /** Format: uuid */
+            id?: string;
+            domain_slug?: string;
+            title?: string;
+            description?: string | null;
+            schema_version?: string;
+            /** @enum {string} */
+            status?: "active" | "disabled";
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Format: uuid */
+            created_by?: string | null;
+            /** Format: date-time */
+            created_at?: string | null;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        ReferencePackListResponse: {
+            items?: components["schemas"]["ReferencePack"][];
+        };
+        ReferencePackUpsertRequest: {
+            title: string;
+            description?: string | null;
+            schema_version?: string | null;
+            /** @enum {string|null} */
+            status?: "active" | "disabled" | null;
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
         };
         TelegramTrail: {
             message_id?: number | null;
@@ -3476,6 +3727,186 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CapabilitiesRecord"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    getAdminOnboardingContract: {
+        parameters: {
+            query?: {
+                /** @description Optional branch override for branch-scoped operations. */
+                branch_id?: components["parameters"]["branch_id_query"];
+            };
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Onboarding contract response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingContractResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    patchAdminOnboardingContract: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OnboardingContractPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated onboarding contract record */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingContractRecord"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    getAdminWebhookSecret: {
+        parameters: {
+            query?: {
+                /** @description Optional branch override for branch-scoped operations. */
+                branch_id?: components["parameters"]["branch_id_query"];
+            };
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Webhook secret response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookSecretResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    runAdminOnboardingAutopilot: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OnboardingAutopilotRequest"];
+            };
+        };
+        responses: {
+            /** @description Autopilot completed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingAutopilotResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listAdminReferencePacks: {
+        parameters: {
+            query?: {
+                domain_slug?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reference packs list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferencePackListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    upsertAdminReferencePack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                domain_slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferencePackUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Reference pack upserted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferencePack"];
                 };
             };
             400: components["responses"]["BadRequest"];

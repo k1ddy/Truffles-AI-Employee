@@ -5,6 +5,7 @@ import pytest
 
 import app.services.onboarding_state as onboarding_state
 from app.schemas.capabilities import CapabilitiesPayload
+from app.schemas.onboarding_contract import OnboardingContractPayload
 from app.services.console_errors import ConsoleAPIError
 from app.services.onboarding_state import (
     OnboardingInputs,
@@ -18,7 +19,21 @@ def _make_inputs(*, capabilities: CapabilitiesPayload, has_capabilities: bool = 
     return OnboardingInputs(
         has_capabilities=has_capabilities,
         capabilities=capabilities,
+        has_onboarding_contract=overrides.get("has_onboarding_contract", True),
+        onboarding_contract=overrides.get(
+            "onboarding_contract",
+            OnboardingContractPayload.model_validate({"purchased": {}}),
+        ),
+        payment_status=overrides.get("payment_status", "confirmed"),
+        payment_confirmed=overrides.get("payment_confirmed", True),
+        payment_confirmed_at=overrides.get("payment_confirmed_at", None),
+        payment_confirmed_by=overrides.get("payment_confirmed_by", None),
+        has_webhook_secret=overrides.get("has_webhook_secret", True),
+        has_reference_pack=overrides.get("has_reference_pack", True),
+        reference_pack_domain_slug=overrides.get("reference_pack_domain_slug", "beauty"),
+        capability_mismatches=overrides.get("capability_mismatches", []),
         has_instance_id=overrides.get("has_instance_id", False),
+        has_phone=overrides.get("has_phone", True),
         branch_is_active=overrides.get("branch_is_active", False),
         has_team=overrides.get("has_team", False),
         has_telegram_chat=overrides.get("has_telegram_chat", False),
@@ -79,6 +94,66 @@ def test_go_no_go_includes_missing_pack_fields():
 
     missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
     assert "client_pack.salon.address.full" in missing
+
+
+def test_go_no_go_requires_payment_confirmation():
+    capabilities = CapabilitiesPayload.model_validate({"channels": {"whatsapp": True}})
+    inputs = _make_inputs(
+        capabilities=capabilities,
+        has_instance_id=True,
+        branch_is_active=True,
+        payment_confirmed=False,
+    )
+    missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
+    assert "payment_confirmed" in missing
+
+
+def test_go_no_go_requires_reference_pack():
+    capabilities = CapabilitiesPayload.model_validate({"channels": {"whatsapp": True}})
+    inputs = _make_inputs(
+        capabilities=capabilities,
+        has_instance_id=True,
+        branch_is_active=True,
+        has_reference_pack=False,
+        reference_pack_domain_slug="beauty",
+    )
+    missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
+    assert "reference_pack" in missing
+
+
+def test_go_no_go_includes_capability_mismatches():
+    capabilities = CapabilitiesPayload.model_validate({"channels": {"whatsapp": True}})
+    inputs = _make_inputs(
+        capabilities=capabilities,
+        has_instance_id=True,
+        branch_is_active=True,
+        capability_mismatches=["channels.whatsapp"],
+    )
+    missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
+    assert "capability_mismatch:channels.whatsapp" in missing
+
+
+def test_integrations_requires_phone():
+    capabilities = CapabilitiesPayload.model_validate({"channels": {"whatsapp": True}})
+    inputs = _make_inputs(
+        capabilities=capabilities,
+        has_instance_id=True,
+        has_phone=False,
+    )
+    missing = missing_prerequisites(OnboardingStep.INTEGRATIONS, inputs)
+    assert "phone" in missing
+
+
+def test_go_no_go_requires_phone_when_whatsapp_enabled():
+    capabilities = CapabilitiesPayload.model_validate({"channels": {"whatsapp": True}})
+    inputs = _make_inputs(
+        capabilities=capabilities,
+        has_instance_id=True,
+        has_phone=False,
+        branch_is_active=True,
+    )
+    missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
+    assert "phone" in missing
 
 
 def test_ensure_onboarding_step_requires_previous(monkeypatch):

@@ -4,19 +4,28 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
 from app.models.branch import Branch
 from app.models.client_capability import ClientCapability
+from app.models.client_onboarding_contract import ClientOnboardingContract
+from app.models.client_settings import ClientSettings
+from app.models.reference_pack import ReferencePack
 from app.models.specialist import Specialist
 from app.schemas.capabilities import CapabilitiesPayload
+from app.schemas.onboarding_contract import OnboardingContractPayload
 from app.services.audit_service import record_audit_event
 from app.services.capabilities_service import merge_capabilities
 from app.services.console_errors import ConsoleAPIError
 from app.services.knowledge_registry_service import get_current_published
 from app.services.knowledge_validation import get_missing_required_fields
+from app.services.onboarding_contract_service import (
+    find_capability_mismatches,
+    merge_onboarding_contract,
+)
 
 
 class OnboardingStep(str, Enum):
@@ -49,10 +58,31 @@ class CapabilitiesContext:
 
 
 @dataclass(frozen=True)
+class OnboardingContractContext:
+    has_records: bool
+    payload: OnboardingContractPayload
+    payment_status: str
+    payment_confirmed: bool
+    payment_confirmed_at: Optional[datetime]
+    payment_confirmed_by: Optional[UUID]
+
+
+@dataclass(frozen=True)
 class OnboardingInputs:
     has_capabilities: bool
     capabilities: CapabilitiesPayload
+    has_onboarding_contract: bool
+    onboarding_contract: OnboardingContractPayload
+    payment_status: str
+    payment_confirmed: bool
+    payment_confirmed_at: Optional[datetime]
+    payment_confirmed_by: Optional[UUID]
+    has_webhook_secret: bool
+    has_reference_pack: bool
+    reference_pack_domain_slug: Optional[str]
+    capability_mismatches: list[str]
     has_instance_id: bool
+    has_phone: bool
     branch_is_active: bool
     has_team: bool
     has_telegram_chat: bool
@@ -90,9 +120,9 @@ def _parse_onboarding_state(value: Optional[str]) -> Optional[OnboardingStep]:
 def _get_latest_capability(
     db: Session,
     *,
-    client_id,
+    client_id: UUID,
     scope: str,
-    branch_id: Optional,
+    branch_id: Optional[UUID],
 ) -> Optional[ClientCapability]:
     query = db.query(ClientCapability).filter(
         ClientCapability.client_id == client_id,
@@ -134,6 +164,73 @@ def _load_capabilities(db: Session, branch: Branch) -> CapabilitiesContext:
     return CapabilitiesContext(has_records=has_records, payload=payload)
 
 
+def _get_latest_onboarding_contract(
+    db: Session,
+    *,
+    client_id: UUID,
+    scope: str,
+    branch_id: Optional[UUID],
+) -> Optional[ClientOnboardingContract]:
+    query = db.query(ClientOnboardingContract).filter(
+        ClientOnboardingContract.client_id == client_id,
+        ClientOnboardingContract.scope == scope,
+    )
+    if branch_id:
+        query = query.filter(ClientOnboardingContract.branch_id == branch_id)
+    else:
+        query = query.filter(ClientOnboardingContract.branch_id.is_(None))
+    return query.order_by(
+        ClientOnboardingContract.updated_at.desc(),
+        ClientOnboardingContract.created_at.desc(),
+    ).first()
+
+
+def _load_onboarding_contract(db: Session, branch: Branch) -> OnboardingContractContext:
+    client_record = _get_latest_onboarding_contract(
+        db,
+        client_id=branch.client_id,
+        scope="client",
+        branch_id=None,
+    )
+    branch_record = _get_latest_onboarding_contract(
+        db,
+        client_id=branch.client_id,
+        scope="branch",
+        branch_id=branch.id,
+    )
+
+    client_payload = (
+        client_record.payload_json if client_record and client_record.status == "active" else None
+    )
+    branch_payload = (
+        branch_record.payload_json if branch_record and branch_record.status == "active" else None
+    )
+    payload = OnboardingContractPayload.model_validate(
+        merge_onboarding_contract(client_payload, branch_payload)
+    )
+    has_records = bool(client_payload or branch_payload)
+
+    payment_source = None
+    if branch_record and branch_record.status == "active":
+        payment_source = branch_record
+    elif client_record and client_record.status == "active":
+        payment_source = client_record
+
+    payment_status = payment_source.payment_status if payment_source else "pending"
+    payment_confirmed = payment_status == "confirmed"
+    payment_confirmed_at = payment_source.payment_confirmed_at if payment_source else None
+    payment_confirmed_by = payment_source.payment_confirmed_by if payment_source else None
+
+    return OnboardingContractContext(
+        has_records=has_records,
+        payload=payload,
+        payment_status=payment_status,
+        payment_confirmed=payment_confirmed,
+        payment_confirmed_at=payment_confirmed_at,
+        payment_confirmed_by=payment_confirmed_by,
+    )
+
+
 def _has_non_empty_dict(value: Optional[dict]) -> bool:
     if not value or not isinstance(value, dict):
         return False
@@ -142,6 +239,7 @@ def _has_non_empty_dict(value: Optional[dict]) -> bool:
 
 def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
     capabilities = _load_capabilities(db, branch)
+    onboarding_contract = _load_onboarding_contract(db, branch)
 
     has_team = (
         db.query(Agent)
@@ -171,10 +269,48 @@ def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
         is not None
     )
 
+    has_webhook_secret = bool((getattr(branch, "webhook_secret", None) or "").strip())
+    if not has_webhook_secret:
+        settings = db.query(ClientSettings).filter(ClientSettings.client_id == branch.client_id).first()
+        has_webhook_secret = bool(settings and (settings.webhook_secret or "").strip())
+
+    reference_pack_domain_slug = (
+        onboarding_contract.payload.domain_slug or capabilities.payload.domain_slug
+    )
+    has_reference_pack = False
+    if reference_pack_domain_slug:
+        has_reference_pack = (
+            db.query(ReferencePack)
+            .filter(
+                ReferencePack.domain_slug == reference_pack_domain_slug,
+                ReferencePack.status == "active",
+            )
+            .first()
+            is not None
+        )
+
+    capability_mismatches: list[str] = []
+    if capabilities.has_records and onboarding_contract.has_records:
+        capability_mismatches = find_capability_mismatches(
+            purchased=onboarding_contract.payload.purchased,
+            effective=capabilities.payload,
+        )
+
     return OnboardingInputs(
         has_capabilities=capabilities.has_records,
         capabilities=capabilities.payload,
+        has_onboarding_contract=onboarding_contract.has_records,
+        onboarding_contract=onboarding_contract.payload,
+        payment_status=onboarding_contract.payment_status,
+        payment_confirmed=onboarding_contract.payment_confirmed,
+        payment_confirmed_at=onboarding_contract.payment_confirmed_at,
+        payment_confirmed_by=onboarding_contract.payment_confirmed_by,
+        has_webhook_secret=has_webhook_secret,
+        has_reference_pack=has_reference_pack,
+        reference_pack_domain_slug=reference_pack_domain_slug,
+        capability_mismatches=capability_mismatches,
         has_instance_id=bool(branch.instance_id),
+        has_phone=bool(branch.phone),
         branch_is_active=bool(branch.is_active),
         has_team=has_team,
         has_telegram_chat=bool(branch.telegram_chat_id),
@@ -209,6 +345,8 @@ def missing_prerequisites(step: OnboardingStep, inputs: OnboardingInputs) -> lis
     if step == OnboardingStep.INTEGRATIONS:
         if not inputs.has_instance_id:
             missing.append("instance_id")
+        if not inputs.has_phone:
+            missing.append("phone")
         return missing
 
     if step == OnboardingStep.TEAM:
@@ -241,18 +379,36 @@ def missing_prerequisites(step: OnboardingStep, inputs: OnboardingInputs) -> lis
 
     if step == OnboardingStep.GO_NO_GO:
         if not inputs.has_capabilities:
-            return ["capabilities"]
+            missing.append("capabilities")
+        if not inputs.has_onboarding_contract:
+            missing.append("onboarding_contract")
+        if not inputs.payment_confirmed:
+            missing.append("payment_confirmed")
+        if not inputs.has_webhook_secret:
+            missing.append("webhook_secret")
+        if not inputs.reference_pack_domain_slug:
+            missing.append("reference_pack_domain")
+        elif not inputs.has_reference_pack:
+            missing.append("reference_pack")
+        if inputs.capability_mismatches:
+            missing.extend([f"capability_mismatch:{item}" for item in inputs.capability_mismatches])
 
-        if inputs.capabilities.channels.whatsapp is True:
+        if inputs.has_capabilities and inputs.capabilities.channels.whatsapp is True:
             if not inputs.has_instance_id:
                 missing.append("instance_id")
+            if not inputs.has_phone:
+                missing.append("phone")
             if not inputs.branch_is_active:
                 missing.append("branch_active")
 
-        if inputs.capabilities.channels.telegram is True and not inputs.has_telegram_chat:
+        if (
+            inputs.has_capabilities
+            and inputs.capabilities.channels.telegram is True
+            and not inputs.has_telegram_chat
+        ):
             missing.append("telegram_chat_id")
 
-        if inputs.capabilities.features.knowledge_upload is True:
+        if inputs.has_capabilities and inputs.capabilities.features.knowledge_upload is True:
             if not inputs.has_knowledge_tag:
                 missing.append("knowledge_tag")
             if not inputs.has_published_knowledge:
@@ -260,7 +416,7 @@ def missing_prerequisites(step: OnboardingStep, inputs: OnboardingInputs) -> lis
             if inputs.has_published_knowledge and inputs.missing_pack_fields:
                 missing.extend(inputs.missing_pack_fields)
 
-        if inputs.capabilities.features.booking_mode is not None:
+        if inputs.has_capabilities and inputs.capabilities.features.booking_mode is not None:
             if not inputs.has_working_hours:
                 missing.append("working_hours")
             if not inputs.has_booking_settings:

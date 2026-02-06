@@ -17,7 +17,7 @@ from app.logging_config import get_logger
 from app.models import Branch, Client, ClientSettings
 from app.routers.webhook.media import _extract_media_info
 from app.routers.webhook.parsing import _parse_webhook_request
-from app.routers.webhook.secrets import _get_client_webhook_secret, _get_request_webhook_secret
+from app.routers.webhook.secrets import _get_request_webhook_secret, _resolve_expected_webhook_secret
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services import reasoning_core
 from app.services.alert_service import alert_warning
@@ -88,13 +88,6 @@ def _run_preflight(
         return WebhookResponse(success=False, message=f"Client '{payload.client_slug}' not found"), {}
 
     settings = db.query(ClientSettings).filter(ClientSettings.client_id == client.id).first()
-    if enforce_secret:
-        expected_secret = _get_client_webhook_secret(settings)
-        if expected_secret:
-            if not provided_secret or provided_secret != expected_secret:
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
-        elif not provided_secret:
-            alert_warning("Webhook secret missing", {"client_slug": payload.client_slug})
 
     body = payload.body
     metadata = body.metadata
@@ -243,6 +236,23 @@ def _run_preflight(
                     db.commit()
                 return WebhookResponse(success=False, message="Unknown instanceId"), {}
 
+    if enforce_secret:
+        expected_secret = _resolve_expected_webhook_secret(
+            settings=settings,
+            branch=resolved_branch,
+        )
+        if expected_secret:
+            if not provided_secret or provided_secret != expected_secret:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
+        elif not provided_secret:
+            alert_warning(
+                "Webhook secret missing",
+                {
+                    "client_slug": payload.client_slug,
+                    "branch_id": str(resolved_branch.id) if resolved_branch else None,
+                },
+            )
+
     return (
         None,
         {
@@ -309,7 +319,23 @@ async def handle_webhook_direct(client_slug: str, request: Request, db: Session 
         return WebhookResponse(success=False, message=f"Client '{parsed.client_slug}' not found")
 
     settings = db.query(ClientSettings).filter(ClientSettings.client_id == client.id).first()
-    expected_secret = _get_client_webhook_secret(settings)
+    metadata = parsed.body.metadata
+    instance_id = metadata.instanceId if metadata else None
+    resolved_branch = None
+    if instance_id:
+        resolved_branch = (
+            db.query(Branch)
+            .filter(
+                Branch.client_id == client.id,
+                Branch.instance_id == instance_id,
+                Branch.is_active == True,
+            )
+            .first()
+        )
+    expected_secret = _resolve_expected_webhook_secret(
+        settings=settings,
+        branch=resolved_branch,
+    )
     if expected_secret:
         if not provided_secret or provided_secret != expected_secret:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")

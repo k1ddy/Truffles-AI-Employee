@@ -1511,6 +1511,174 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /admin/onboarding-contract:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+    get:
+      operationId: getAdminOnboardingContract
+      tags: [admin]
+      summary: Get effective onboarding contract
+      parameters:
+        - $ref: "#/components/parameters/branch_id_query"
+      responses:
+        "200":
+          description: Onboarding contract response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingContractResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    patch:
+      operationId: patchAdminOnboardingContract
+      tags: [admin]
+      summary: Upsert onboarding contract record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OnboardingContractPatchRequest"
+      responses:
+        "200":
+          description: Updated onboarding contract record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingContractRecord"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/webhook-secret:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+    get:
+      operationId: getAdminWebhookSecret
+      tags: [admin]
+      summary: Get or generate webhook secret from branch instance_id
+      parameters:
+        - $ref: "#/components/parameters/branch_id_query"
+      responses:
+        "200":
+          description: Webhook secret response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSecretResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/onboarding/autopilot:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+    post:
+      operationId: runAdminOnboardingAutopilot
+      tags: [admin]
+      summary: Run single-operator onboarding autopilot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OnboardingAutopilotRequest"
+      responses:
+        "200":
+          description: Autopilot completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingAutopilotResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/reference-packs:
+    get:
+      operationId: listAdminReferencePacks
+      tags: [admin]
+      summary: List niche reference packs
+      parameters:
+        - name: domain_slug
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reference packs list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReferencePackListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/reference-packs/{domain_slug}:
+    put:
+      operationId: upsertAdminReferencePack
+      tags: [admin]
+      summary: Create or update niche reference pack
+      parameters:
+        - name: domain_slug
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReferencePackUpsertRequest"
+      responses:
+        "200":
+          description: Reference pack upserted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReferencePack"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
 # ════════════════════════════════════════════════════════════════════
 # COMPONENTS
 # ════════════════════════════════════════════════════════════════════
@@ -3225,6 +3393,364 @@ components:
           nullable: true
         payload:
           $ref: "#/components/schemas/CapabilitiesPayload"
+
+    OnboardingContractPayload:
+      type: object
+      additionalProperties: false
+      properties:
+        domain_slug:
+          type: string
+          nullable: true
+        purchased:
+          $ref: "#/components/schemas/CapabilitiesPayload"
+
+    OnboardingContractRecord:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        client_id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        scope:
+          type: string
+          enum: [client, branch]
+        status:
+          type: string
+          enum: [active, disabled]
+        schema_version:
+          type: string
+        payment_status:
+          type: string
+          enum: [pending, confirmed, rejected]
+        payment_confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        payment_confirmed_by:
+          type: string
+          format: uuid
+          nullable: true
+        payload:
+          $ref: "#/components/schemas/OnboardingContractPayload"
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    OnboardingContractResponse:
+      type: object
+      properties:
+        client_id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        effective:
+          $ref: "#/components/schemas/OnboardingContractPayload"
+        payment_status:
+          type: string
+          enum: [pending, confirmed, rejected]
+        payment_confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        payment_confirmed_by:
+          type: string
+          format: uuid
+          nullable: true
+        capability_mismatches:
+          type: array
+          items:
+            type: string
+        client_contract:
+          $ref: "#/components/schemas/OnboardingContractRecord"
+          nullable: true
+        branch_contract:
+          $ref: "#/components/schemas/OnboardingContractRecord"
+          nullable: true
+
+    OnboardingContractPatchRequest:
+      type: object
+      additionalProperties: false
+      required: [scope, payload]
+      properties:
+        scope:
+          type: string
+          enum: [client, branch]
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+          enum: [active, disabled]
+          nullable: true
+        schema_version:
+          type: string
+          nullable: true
+        payment_status:
+          type: string
+          enum: [pending, confirmed, rejected]
+          nullable: true
+        payload:
+          $ref: "#/components/schemas/OnboardingContractPayload"
+
+    OnboardingPurchasedService:
+      type: string
+      enum:
+        - whatsapp
+        - telegram
+        - instagram
+        - booking_collect
+        - booking_confirm
+        - knowledge_upload
+        - analytics
+        - auto_learn
+        - provider_google_calendar
+        - provider_local_calendar
+        - provider_manual
+        - provider_amocrm
+        - provider_bitrix
+
+    OnboardingAutopilotRequest:
+      type: object
+      required: [phone, instance_id]
+      additionalProperties: false
+      properties:
+        company_id:
+          type: string
+          format: uuid
+          nullable: true
+        company_name:
+          type: string
+          nullable: true
+        client_id:
+          type: string
+          format: uuid
+          nullable: true
+        client_slug:
+          type: string
+          nullable: true
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        branch_slug:
+          type: string
+          nullable: true
+        branch_name:
+          type: string
+          nullable: true
+        timezone:
+          type: string
+          nullable: true
+        phone:
+          type: string
+        instance_id:
+          type: string
+        payment_status:
+          type: string
+          enum: [pending, confirmed, rejected]
+          nullable: true
+        domain_slug:
+          type: string
+          nullable: true
+        purchased:
+          $ref: "#/components/schemas/CapabilitiesPayload"
+          nullable: true
+        purchased_services:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/OnboardingPurchasedService"
+        client_data_text:
+          type: string
+          nullable: true
+        client_data_json:
+          type: object
+          nullable: true
+          additionalProperties: true
+        activate_branch:
+          type: boolean
+          nullable: true
+        auto_create_reference_pack:
+          type: boolean
+          nullable: true
+        auto_publish_knowledge:
+          type: boolean
+          nullable: true
+
+    OnboardingAutopilotIntake:
+      type: object
+      required: [knowledge_tag, draft_saved, published, missing_fields, missing_questions, payload]
+      properties:
+        knowledge_tag:
+          type: string
+        draft_saved:
+          type: boolean
+        published:
+          type: boolean
+        published_version_id:
+          type: string
+          format: uuid
+          nullable: true
+        missing_fields:
+          type: array
+          items:
+            type: string
+        missing_questions:
+          type: array
+          items:
+            type: string
+        payload:
+          type: object
+          additionalProperties: true
+
+    OnboardingAutopilotResponse:
+      type: object
+      required:
+        - company
+        - client
+        - branch
+        - capabilities
+        - onboarding_contract
+        - payment_status
+        - webhook_secret
+        - webhook_url
+        - onboarding_status
+        - go_no_go_missing
+        - intake
+        - actions
+      properties:
+        company:
+          $ref: "#/components/schemas/Company"
+        client:
+          $ref: "#/components/schemas/Client"
+        branch:
+          $ref: "#/components/schemas/Branch"
+        capabilities:
+          $ref: "#/components/schemas/CapabilitiesRecord"
+        onboarding_contract:
+          $ref: "#/components/schemas/OnboardingContractRecord"
+        payment_status:
+          type: string
+          enum: [pending, confirmed, rejected]
+        webhook_secret:
+          type: string
+        webhook_url:
+          type: string
+        reference_pack:
+          $ref: "#/components/schemas/ReferencePack"
+          nullable: true
+        onboarding_status:
+          $ref: "#/components/schemas/OnboardingStatusResponse"
+        go_no_go_missing:
+          type: array
+          items:
+            type: string
+        intake:
+          $ref: "#/components/schemas/OnboardingAutopilotIntake"
+        actions:
+          type: array
+          items:
+            type: string
+
+    WebhookSecretResponse:
+      type: object
+      required: [client_id, branch_id, instance_id, webhook_secret, webhook_url]
+      properties:
+        client_id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        instance_id:
+          type: string
+        webhook_secret:
+          type: string
+        webhook_url:
+          type: string
+
+    ReferencePack:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        domain_slug:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        schema_version:
+          type: string
+        status:
+          type: string
+          enum: [active, disabled]
+        metadata:
+          type: object
+          additionalProperties: true
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ReferencePackListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReferencePack"
+
+    ReferencePackUpsertRequest:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+          nullable: true
+        schema_version:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [active, disabled]
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+          additionalProperties: true
 
     TelegramTrail:
       type: object

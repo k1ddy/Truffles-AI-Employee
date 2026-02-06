@@ -155,3 +155,4 @@
 | 2026-02-05-business-ready-pack-a11 | done | feat/2026-02-05-business-ready-pack-a11 | /home/zhan/worktrees/2026-02-05-business-ready-pack-a11 | docs/TASK_PACKAGES/TP-2026-02-05-business-ready-pack.md | 2026-02-05 |
 | 2026-02-05-onboarding-billing-support-a11 | done | feat/2026-02-05-onboarding-billing-support-a11 | /home/zhan/worktrees/2026-02-05-onboarding-billing-support-a11 | docs/TASK_PACKAGES/TP-2026-02-05-onboarding-billing-support-audit.md | 2026-02-05 |
 | 2026-02-05-legal-docs-rk-align-a11 | done | feat/2026-02-05-legal-docs-rk-align-a11 | /home/zhan/worktrees/2026-02-05-legal-docs-rk-align-a11 | docs/TASK_PACKAGES/TP-2026-02-05-legal-docs-rk-align.md | 2026-02-05 |
+| 2026-02-06-onboarding-flow-canon-a12 | active | feat/2026-02-06-onboarding-flow-canon-a12 | /home/zhan/worktrees/2026-02-06-onboarding-flow-canon-a12 | docs/TASK_PACKAGES/TP-2026-02-05-onboarding-billing-support-audit.md | 2026-02-06 |

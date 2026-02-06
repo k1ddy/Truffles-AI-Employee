@@ -85,8 +85,37 @@ Rules:
 
 **Phase 2 UI contract (Provisioning + Capabilities):**
 - UI location: `Settings → Provisioning Wizard` (owner/admin write; support read‑only, остальные без доступа).
+- Wizard режимы разделены явно:
+  - `Автопроцесс (Recommended)` для single-operator потока.
+  - `Ручной по шагам` для детальной донастройки и диагностики.
+- Single-operator mode: `Settings → Provisioning Wizard → Single-Operator Autopilot`.
+- Required input for autopilot:
+  - `phone` (maps to `branches.phone`)
+  - `instance_id` (maps to `branches.instance_id`)
+  - `client_data_text` or `client_data_json` (source for intake normalization)
+  - `purchased_services` (at least one)
+  - `company_id` or `company_name`
+  - `client_id` or `client_slug`
+  - `branch_name` (required when creating a new branch; optional when `branch_id` is provided)
+- Optional input for autopilot:
+  - `branch_slug`, `timezone`, `domain_slug`, `payment_status` (editable by `platform_admin`)
+- Webhook secret is generated automatically from `instance_id`.
+- Autopilot API: `POST /console/v1/admin/onboarding/autopilot`.
+- Webhook secret API: `GET /console/v1/admin/webhook-secret?branch_id=...`.
+- Autopilot output: created/linked `company|client|branch`, saved `capabilities + onboarding_contract`,
+  intake draft payload, `missing_fields`, `missing_questions`, `go_no_go_missing`.
+- Field links/constraints:
+  - `1 phone = 1 branch` within client scope (unique branch phone)
+  - `1 instance_id = 1 branch` within client scope (unique branch instance)
+  - `webhook_secret` is persisted in `branches.webhook_secret` and derived from `instance_id`
+- Fool-proof guards currently enforced:
+  - UI blocks autopilot run while required inputs are missing.
+  - API rejects invalid activation (`instance_id` required for active branch).
+  - API onboarding state machine blocks out-of-order step transition (`ONBOARDING_STEP_REQUIRED`).
+  - Destructive branch changes require confirmation (`confirmation_id` flow).
 - Provisioning flow: Create Branch (Draft) → Integrations (`instance_id`) → Team → Telegram (`telegram_chat_id`)
   → Knowledge (`knowledge_tag` / branch‑pack) → Booking (`working_hours` / `booking_settings` / specialists) → Go/No‑Go.
+- Manual Integrations gate: для WhatsApp обязательны оба поля `instance_id` и `phone`; иначе шаг не считается завершенным.
 - Go/No‑Go gate: проверяем только поля, нужные для включённых capabilities; без `instance_id` ветка остаётся draft.
 - Server‑side onboarding: `/console/v1/onboarding/status` и `/console/v1/onboarding/advance`, порядок шагов enforced API.
 - Ошибка порядка: `ONBOARDING_STEP_REQUIRED` (409) с `required_step/current_step/missing`.
@@ -99,6 +128,28 @@ Rules:
 - API capabilities: `GET/PATCH /console/v1/admin/capabilities` (client через `X-Client-Id`, branch через `branch_id`).
 - Schema: `contracts/capabilities/capabilities.v1.jsonschema`.
 - Fail‑closed: без явного tenant‑контекста действия недоступны.
+
+**Phase 2 delivery notes (implemented, 2026-02-06):**
+- Added single-operator autopilot endpoint: `POST /console/v1/admin/onboarding/autopilot`.
+- Added onboarding contract API (`GET/PATCH /console/v1/admin/onboarding-contract`) with purchased-services payload and payment status guard (`platform_admin` only).
+- Added reference pack API (`GET /console/v1/admin/reference-packs`, `PUT /console/v1/admin/reference-packs/{domain_slug}`) for niche gate.
+- Added deterministic webhook secret flow: `GET /console/v1/admin/webhook-secret?branch_id=...`, secret stored in `branches.webhook_secret` and derived from `instance_id`.
+- Added explicit wizard mode split in UI (`Автопроцесс` vs `Ручной по шагам`) with field-contract help blocks.
+- Added WhatsApp integration guard: both `phone` and `instance_id` are required in manual Integrations step and in onboarding state checks.
+- Added Go/No-Go mismatch diagnostics (`capability_mismatch:*`) from onboarding contract vs effective capabilities.
+- Added build diagnostics in Settings header (`NEXT_PUBLIC_BUILD_SHA`, `NEXT_PUBLIC_BUILD_TIME`) to detect stale deploys quickly.
+
+**Why this was done (for future improvements):**
+- To remove onboarding ambiguity for a single platform operator and make required inputs explicit before API calls.
+- To enforce fail-closed launch policy: incomplete or contract-mismatched setups stay blocked at Go/No-Go.
+- To keep multi-branch setups deterministic (`phone` + `instance_id` uniqueness and secret isolation per branch).
+- To make post-release debugging measurable (build stamp shown in UI).
+
+**Regression checks to keep in CI:**
+- `truffles-api/tests/test_console_onboarding_state.py`
+- `truffles-api/tests/test_console_onboarding_contract_api.py`
+- `truffles-api/tests/test_onboarding_contract_service.py`
+- `truffles-api/tests/test_onboarding_intake_service.py`
 
 **Phase 3 UI contract (Knowledge Studio):**
 - UI location: `Knowledge` (owner/admin write; manager read‑only).

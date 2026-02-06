@@ -7,6 +7,7 @@ from app.models.booking import Booking
 from app.models.branch import Branch
 from app.models.client import Client
 from app.models.client_capability import ClientCapability
+from app.models.client_onboarding_contract import ClientOnboardingContract
 from app.models.client_settings import ClientSettings
 from app.models.company import Company
 from app.models.console_confirmation import ConsoleConfirmation
@@ -21,6 +22,7 @@ from app.models.message import Message
 from app.models.outbox_message import OutboxMessage
 from app.models.outbox_status_event import OutboxStatusEvent
 from app.models.prompt import Prompt
+from app.models.reference_pack import ReferencePack
 from app.models.specialist import Specialist
 from app.models.user import User
 
@@ -28,6 +30,7 @@ __all__ = [
     "Company",
     "Client",
     "ClientCapability",
+    "ClientOnboardingContract",
     "Agent",
     "AgentMembership",
     "AgentIdentity",
@@ -45,6 +48,7 @@ __all__ = [
     "ConsoleIdempotencyKey",
     "ConsoleMacro",
     "Prompt",
+    "ReferencePack",
     "OutboxMessage",
     "OutboxStatusEvent",
     "LearnedResponse",
