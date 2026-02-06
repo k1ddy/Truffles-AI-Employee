@@ -624,7 +624,7 @@ def _apply_expected_reply_contract(
         )
         if expected_reply_reason == "booking_prompt":
             allow_deterministic_match = True
-        deterministic_matched = False
+        deterministic_available = False
         deterministic_value = None
         normalization_flags: list[str] = []
         promotion_request = False
@@ -653,7 +653,7 @@ def _apply_expected_reply_contract(
         expected_reply_text = expected_reply_text or ""
         if expected_reply_text:
             (
-                deterministic_matched,
+                deterministic_available,
                 deterministic_value,
                 normalization_flags,
             ) = _match_expected_reply_candidates(
@@ -661,15 +661,13 @@ def _apply_expected_reply_contract(
                 message_text=expected_reply_text,
                 client_slug=client_slug,
             )
-        if not allow_deterministic_match:
-            deterministic_matched = False
-            deterministic_value = None
-            normalization_flags = []
+        deterministic_matched = deterministic_available if allow_deterministic_match else False
         answer_result = None
         answer_confidence = 0.0
         answer_slot = ""
         answer_value = ""
         answer_error = "blocked_by_info"
+        answer_interpreter_attempted = False
         if expected_reply_blocked_by_info:
             answer_meta = {
                 "answer_interpreter_used": False,
@@ -715,6 +713,7 @@ def _apply_expected_reply_contract(
                     "answer_error": "deterministic_match",
                 }
             else:
+                answer_interpreter_attempted = True
                 question_context = {
                     "prompt_hint": prompt_hint,
                     "booking": booking_context,
@@ -772,6 +771,18 @@ def _apply_expected_reply_contract(
         answer_used = answer_confidence_ok or answer_valid
         answer_value_validated = True
         expected_slot_key = _expected_reply_slot_key(expected_reply_type)
+        if (
+            not deterministic_matched
+            and deterministic_available
+            and answer_interpreter_attempted
+            and answer_error in {"error", "timeout", "invalid_json", "invalid_schema", "empty_response", "prompt_missing"}
+        ):
+            deterministic_matched = True
+            if expected_slot_key:
+                answer_slot = expected_slot_key
+            if isinstance(deterministic_value, str) and deterministic_value.strip():
+                answer_value = deterministic_value
+            answer_used = False
         if answer_used and expected_slot_key and answer_slot and answer_slot != expected_slot_key:
             answer_used = False
             answer_confidence = 0.0
