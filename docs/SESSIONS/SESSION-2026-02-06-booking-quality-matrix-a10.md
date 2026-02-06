@@ -13,6 +13,8 @@
   - Обновлён `booking_confirm_verify.sh`: safe‑JID выбор (не branch‑номера), timeouts для livecheck, evidence‑SQL с `specialist_id`.
   - Обновлён `ops/diagnose.py` (CA12 summary берёт `appointment_id` из decision_meta).
   - Выполнен booking confirm verify + evidence.
+  - Устранён CI‑фейл в booking: `_resolve_default_specialist_id` теперь безопасно обрабатывает mock/row результаты и не подставляет фиктивный specialist_id.
+  - Исправлен порядок импортов (ruff I001) в `tool_registry_service.py`.
 - next:
   - Прогнать LLM‑quality матрицу (если нужно по цели).
   - Разобрать intermittent timeouts в livecheck (если повторятся).
@@ -23,4 +25,5 @@
   - /tmp/booking-confirm-20260206-112240/sql_appointment_audit.txt
   - /tmp/booking-confirm-20260206-112240/sql_outbox_booking_send.txt
   - /tmp/booking-confirm-20260206-112240/sql_outbox_calendar_sync.txt
+  - /tmp/pytest_booking_appointments_collect_preferences_20260206.txt
 - last_updated: 2026-02-06

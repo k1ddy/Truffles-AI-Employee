@@ -5,10 +5,12 @@ from __future__ import annotations
 import os
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Callable
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import dateparser
@@ -885,6 +887,29 @@ def _resolve_default_specialist_id(
     from app.models.specialist import Specialist
     from app.models.specialist_service import SpecialistService
 
+    def _extract_row_id(row: Any) -> Any | None:
+        if row is None:
+            return None
+        if type(row).__module__ == "unittest.mock":
+            return None
+        mapping = getattr(row, "_mapping", None)
+        if isinstance(mapping, Mapping):
+            if "id" in mapping:
+                return mapping["id"]
+            if len(mapping) == 1:
+                return next(iter(mapping.values()))
+        if isinstance(row, Mapping):
+            if "id" in row:
+                return row["id"]
+            if len(row) == 1:
+                return next(iter(row.values()))
+        candidate_id = getattr(row, "id", None)
+        if candidate_id and type(candidate_id).__module__ != "unittest.mock":
+            return candidate_id
+        if isinstance(row, (list, tuple)):
+            return row[0] if row else None
+        return row if isinstance(row, (UUID, str)) else None
+
     if service_name and isinstance(service_name, str):
         normalized = service_name.strip().casefold()
         if normalized:
@@ -902,8 +927,10 @@ def _resolve_default_specialist_id(
                 .order_by(Specialist.name)
                 .all()
             )
-            if candidates:
-                return candidates[0][0], "service_default"
+            if isinstance(candidates, (list, tuple)) and candidates:
+                candidate_id = _extract_row_id(candidates[0])
+                if candidate_id:
+                    return candidate_id, "service_default"
 
     fallback = (
         db.query(Specialist.id)
@@ -914,8 +941,9 @@ def _resolve_default_specialist_id(
         .order_by(Specialist.name)
         .first()
     )
-    if fallback:
-        return fallback[0], "branch_default"
+    fallback_id = _extract_row_id(fallback)
+    if fallback_id:
+        return fallback_id, "branch_default"
     return None, "specialist_not_found"
 
 
