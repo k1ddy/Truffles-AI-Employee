@@ -22,6 +22,7 @@ from app.services.appointment_reminder_service import (
 )
 from app.services.appointment_service import AppointmentConflictError, SchedulingService
 from app.services.calendar_sync_service import enqueue_appointment_sync, get_provider_health
+from app.services.capabilities_runtime import get_runtime_capabilities
 
 CALENDAR_TOOL_ACTIONS = {
     "calendar.list_slots",
@@ -622,34 +623,41 @@ def execute_tool_action(
         )
 
     if tool_action == "calendar.list_slots":
+        availability_provider = None
         if isinstance(branch.booking_settings, dict):
             availability_provider = branch.booking_settings.get("availability_provider")
-            if availability_provider == "google_calendar":
-                health = get_provider_health(
-                    db,
-                    client_id=branch.client_id,
-                    branch_id=branch.id,
+            if isinstance(availability_provider, str) and not availability_provider.strip():
+                availability_provider = None
+        if availability_provider is None:
+            runtime = get_runtime_capabilities()
+            if runtime:
+                availability_provider = runtime.payload.providers.availability_provider
+        if availability_provider == "google_calendar":
+            health = get_provider_health(
+                db,
+                client_id=branch.client_id,
+                branch_id=branch.id,
+            )
+            if not health.ready:
+                return ToolExecutionResult(
+                    handled=True,
+                    ok=False,
+                    response_text=(
+                        "Сейчас календарь недоступен. Напишите удобное время, и мы уточним."
+                    ),
+                    error_code="provider_unavailable",
+                    decision_meta={
+                        "tool_action": tool_action,
+                        "tool_decision": "provider_unavailable",
+                        "provider_reason": health.reason,
+                    },
+                    trace={
+                        "stage": "tool_registry",
+                        "decision": "provider_unavailable",
+                        "tool_action": tool_action,
+                        "provider_reason": health.reason,
+                    },
                 )
-                if not health.ready:
-                    return ToolExecutionResult(
-                        handled=True,
-                        ok=False,
-                        response_text=(
-                            "Сейчас календарь недоступен. Напишите удобное время, и мы уточним."
-                        ),
-                        error_code="provider_unavailable",
-                        decision_meta={
-                            "tool_action": tool_action,
-                            "tool_decision": "provider_unavailable",
-                            "provider_reason": health.reason,
-                        },
-                        trace={
-                            "stage": "tool_registry",
-                            "decision": "provider_unavailable",
-                            "tool_action": tool_action,
-                            "provider_reason": health.reason,
-                        },
-                    )
         raw_date = tool_args.get("date") or tool_args.get("start_at")
         duration = tool_args.get("duration_min") or _resolve_service_duration(
             db, service_name=service_query, branch=branch

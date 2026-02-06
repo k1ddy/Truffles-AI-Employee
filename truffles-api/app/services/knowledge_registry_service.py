@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -505,11 +506,45 @@ def _split_into_chunks(
 ) -> list[dict]:
     import re
 
+    max_chunk_chars = int(os.environ.get("QDRANT_CHUNK_CHARS", "2000"))
+    min_chunk_chars = 50
+
+    def _append_chunks(section_text: str, *, section_index: int, section_title: str) -> list[dict]:
+        section_text = section_text.strip()
+        if len(section_text) < min_chunk_chars:
+            return []
+
+        if len(section_text) <= max_chunk_chars:
+            return [section_text]
+
+        parts = [part.strip() for part in re.split(r"\n\\s*\\n", section_text) if part.strip()]
+        assembled: list[str] = []
+        buffer = ""
+        for part in parts:
+            candidate = f"{buffer}\\n\\n{part}" if buffer else part
+            if len(candidate) <= max_chunk_chars:
+                buffer = candidate
+                continue
+            if buffer:
+                assembled.append(buffer)
+                buffer = ""
+            if len(part) <= max_chunk_chars:
+                buffer = part
+                continue
+            for idx in range(0, len(part), max_chunk_chars):
+                chunk = part[idx : idx + max_chunk_chars]
+                if len(chunk) >= min_chunk_chars:
+                    assembled.append(chunk)
+        if buffer:
+            assembled.append(buffer)
+
+        return [chunk for chunk in assembled if len(chunk) >= min_chunk_chars]
+
     chunks = []
     sections = re.split(r"\n(?=##?\\s)", text)
     for index, section in enumerate(sections):
         section = section.strip()
-        if len(section) < 50:
+        if len(section) < min_chunk_chars:
             continue
         lines = section.split("\n")
         title = lines[0].replace("#", "").strip() if lines else f"Section {index}"
@@ -524,7 +559,12 @@ def _split_into_chunks(
             metadata["branch_id"] = branch_id
         if knowledge_tag:
             metadata["knowledge_tag"] = knowledge_tag
-        chunks.append({"content": section, "metadata": metadata})
+        for offset, chunk_text in enumerate(
+            _append_chunks(section, section_index=index, section_title=title)
+        ):
+            if offset:
+                metadata = {**metadata, "chunk_index": offset}
+            chunks.append({"content": chunk_text, "metadata": metadata})
     return chunks
 
 
