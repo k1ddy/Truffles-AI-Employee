@@ -238,6 +238,9 @@ def test_preflight_resolves_branch_instance_id():
     assert response is None
     assert preflight_payload.get("resolved_branch_id") == branch.id
     assert preflight_payload.get("resolved_knowledge_tag") == "branch-tag"
+    assert preflight_payload.get("tenant_context", {}).get("client_id") == str(client.id)
+    assert preflight_payload.get("tenant_context", {}).get("branch_id") == str(branch.id)
+    assert preflight_payload.get("tenant_context", {}).get("instance_id") == "inst-123"
 
 
 def test_preflight_drops_branch_sender():
@@ -379,3 +382,129 @@ def test_preflight_accepts_media_only_payload():
     assert response is None
     assert preflight_payload["is_media_without_text"] is True
     assert preflight_payload["message_text"] == "[audio]"
+
+
+def test_preflight_rejects_tenant_context_client_mismatch():
+    client = SimpleNamespace(id=uuid4(), name="demo_salon", company_id=None)
+    settings = SimpleNamespace(branch_resolution_mode="hybrid", webhook_secret=None)
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    branch_query = Mock()
+    branch_query.filter.return_value.all.return_value = []
+
+    def _query_side_effect(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Branch or getattr(model, "key", None) == "phone":
+            return branch_query
+        return Mock()
+
+    db = Mock()
+    db.query.side_effect = _query_side_effect
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="hello",
+            messageType="text",
+            metadata=WebhookMetadata(remoteJid="77000000000@s.whatsapp.net"),
+        ),
+        tenant_context={"client_id": str(uuid4()), "client_slug": "demo_salon"},
+    )
+
+    with patch("app.routers.webhook.http._lookup_sender_branch", return_value=None):
+        response, preflight_payload = _run_preflight(
+            payload,
+            db,
+            provided_secret=None,
+            enforce_secret=False,
+            conversation_id=None,
+            resolve_trace_conversation=lambda **_: None,
+            record_early_trace=lambda *args, **kwargs: False,
+        )
+
+    assert response is not None
+    assert response.success is False
+    assert response.message == "Tenant mismatch"
+    assert preflight_payload == {}
+
+
+def test_preflight_rejects_tenant_context_branch_mismatch():
+    client = SimpleNamespace(id=uuid4(), name="demo_salon", company_id=None)
+    settings = SimpleNamespace(branch_resolution_mode="hybrid", webhook_secret=None)
+    resolved_branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=client.id,
+        instance_id="inst-123",
+        knowledge_tag="branch-a",
+        slug="branch-a",
+        is_active=True,
+    )
+    tenant_branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=client.id,
+        instance_id="inst-999",
+        knowledge_tag="branch-b",
+        slug="branch-b",
+        is_active=True,
+    )
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    branch_query = Mock()
+    branch_query.filter.return_value.first.side_effect = [resolved_branch, tenant_branch]
+    branch_query.filter.return_value.all.return_value = []
+
+    def _query_side_effect(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Branch or getattr(model, "key", None) == "phone":
+            return branch_query
+        return Mock()
+
+    db = Mock()
+    db.query.side_effect = _query_side_effect
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="hello",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                instanceId="inst-123",
+            ),
+        ),
+        tenant_context={
+            "client_id": str(client.id),
+            "client_slug": "demo_salon",
+            "branch_id": str(tenant_branch.id),
+        },
+    )
+
+    with patch("app.routers.webhook.http._lookup_sender_branch", return_value=None):
+        response, preflight_payload = _run_preflight(
+            payload,
+            db,
+            provided_secret=None,
+            enforce_secret=False,
+            conversation_id=None,
+            resolve_trace_conversation=lambda **_: None,
+            record_early_trace=lambda *args, **kwargs: False,
+        )
+
+    assert response is not None
+    assert response.success is False
+    assert response.message == "Tenant mismatch"
+    assert preflight_payload == {}

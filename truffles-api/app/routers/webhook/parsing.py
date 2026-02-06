@@ -27,7 +27,16 @@ def _coerce_remote_jid(value) -> str | None:
     return f"{digits}@s.whatsapp.net"
 
 
-def _normalize_chatflow_payload(payload: dict, client_slug: str | None) -> tuple[dict, str]:
+def _extract_tenant_context(payload: dict, body: dict) -> dict | None:
+    for source in (payload, body):
+        for key in ("tenant_context", "tenantContext"):
+            value = source.get(key)
+            if isinstance(value, dict):
+                return dict(value)
+    return None
+
+
+def _normalize_chatflow_payload(payload: dict, client_slug: str | None) -> tuple[dict, str, dict | None]:
     body = payload.get("body")
     if not isinstance(body, dict):
         body = payload
@@ -111,8 +120,9 @@ def _normalize_chatflow_payload(payload: dict, client_slug: str | None) -> tuple
         body["message"] = message
 
     body["metadata"] = metadata
+    tenant_context = _extract_tenant_context(payload, body)
     slug = client_slug or payload.get("client_slug") or "truffles"
-    return body, slug
+    return body, slug, tenant_context
 
 
 async def _parse_webhook_request(
@@ -149,7 +159,7 @@ async def _parse_webhook_request(
     if not isinstance(payload, dict):
         return WebhookResponse(success=False, message="Invalid payload format")
 
-    body, slug = _normalize_chatflow_payload(payload, client_slug)
+    body, slug, tenant_context = _normalize_chatflow_payload(payload, client_slug)
 
     query_instance_id = (
         request.query_params.get("instanceId")
@@ -160,6 +170,8 @@ async def _parse_webhook_request(
         metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
         metadata["instanceId"] = query_instance_id
         body["metadata"] = metadata
+        if isinstance(tenant_context, dict):
+            tenant_context.setdefault("instance_id", query_instance_id)
 
     metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
     if not metadata.get("remoteJid") or not body.get("message"):
@@ -177,7 +189,7 @@ async def _parse_webhook_request(
         )
 
     try:
-        return WebhookRequest(body=body, client_slug=slug)
+        return WebhookRequest(body=body, client_slug=slug, tenant_context=tenant_context)
     except Exception as exc:
         logger.warning("Webhook payload validation failed", extra={"context": {"error": str(exc)}})
         return WebhookResponse(success=False, message="Invalid webhook payload")

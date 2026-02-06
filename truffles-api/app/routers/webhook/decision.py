@@ -4453,6 +4453,7 @@ async def _handle_webhook_payload(
     media_info = preflight_payload["media_info"]
     resolved_branch_id = preflight_payload.get("resolved_branch_id")
     resolved_knowledge_tag = preflight_payload.get("resolved_knowledge_tag")
+    tenant_context = preflight_payload.get("tenant_context")
 
     runtime_capabilities = build_runtime_capabilities(
         db,
@@ -4799,6 +4800,8 @@ async def _handle_webhook_payload(
             message_metadata["message_type"] = message_type
         if has_media:
             message_metadata["has_media"] = True
+        if isinstance(tenant_context, dict) and tenant_context:
+            message_metadata["tenant_context"] = dict(tenant_context)
         if media_info:
             media_meta = {
                 "type": media_info.media_type,

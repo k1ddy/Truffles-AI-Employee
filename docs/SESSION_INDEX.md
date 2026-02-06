@@ -4,6 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-02-06-tenant-context-runtime-a13 | active | feat/2026-02-06-tenant-context-runtime-a13 | /home/zhan/worktrees/2026-02-06-tenant-context-runtime-a13 | docs/TASK_PACKAGES/TP-2026-02-06-tenant-context-runtime-a13.md | 2026-02-06 |
 | 2026-02-03-booking-full-cycle-gcal-a1 | active | feat/2026-02-03-booking-full-cycle-gcal-a1 | /home/zhan/worktrees/2026-02-03-booking-full-cycle-gcal-a1 | docs/TASK_PACKAGES/TP-2026-02-03-booking-full-cycle-gcal.md | 2026-02-03 |
 | 2026-01-30-console-web-deploy-inbox-ux-v3-a1 | done | main | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-01-30-console-web-deploy-inbox-ux-v3.md | 2026-01-30 |
 | 2026-01-27-inbox-service-tp-arch | done | docs/2026-01-27-inbox-service-tp-arch | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-01-27-inbox-service-shadow.md | 2026-01-27 |

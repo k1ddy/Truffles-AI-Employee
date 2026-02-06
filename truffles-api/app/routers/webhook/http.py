@@ -90,6 +90,7 @@ def _run_preflight(
     settings = db.query(ClientSettings).filter(ClientSettings.client_id == client.id).first()
 
     body = payload.body
+    incoming_tenant_context = payload.tenant_context
     metadata = body.metadata
     message_id = metadata.messageId if metadata else None
     if not metadata or not metadata.remoteJid:
@@ -109,6 +110,24 @@ def _run_preflight(
         return WebhookResponse(success=False, message="Missing metadata.remoteJid"), {}
 
     remote_jid = metadata.remoteJid
+
+    def _reject_tenant_context(reason: str, *, message: str = "Tenant mismatch", meta: dict | None = None):
+        trace_conversation = resolve_trace_conversation(
+            trace_client=client,
+            trace_conversation_id=conversation_id,
+            trace_message_id=message_id,
+            trace_remote_jid=remote_jid,
+        )
+        if record_early_trace(
+            trace_conversation,
+            stage="preflight",
+            decision="reject",
+            reason=reason,
+            meta=meta,
+        ):
+            db.commit()
+        return WebhookResponse(success=False, message=message), {}
+
     sender_branch = _lookup_sender_branch(db, remote_jid)
     if sender_branch:
         trace_conversation = resolve_trace_conversation(
@@ -236,6 +255,88 @@ def _run_preflight(
                     db.commit()
                 return WebhookResponse(success=False, message="Unknown instanceId"), {}
 
+    if incoming_tenant_context:
+        if incoming_tenant_context.client_id and incoming_tenant_context.client_id != client.id:
+            return _reject_tenant_context(
+                "tenant_context_client_mismatch",
+                meta={
+                    "tenant_client_id": str(incoming_tenant_context.client_id),
+                    "expected_client_id": str(client.id),
+                },
+            )
+
+        tenant_client_slug = (incoming_tenant_context.client_slug or "").strip()
+        if tenant_client_slug and tenant_client_slug != client.name:
+            return _reject_tenant_context(
+                "tenant_context_client_slug_mismatch",
+                meta={
+                    "tenant_client_slug": tenant_client_slug,
+                    "expected_client_slug": client.name,
+                },
+            )
+
+        tenant_instance_id = (incoming_tenant_context.instance_id or "").strip()
+        if tenant_instance_id and instance_id and tenant_instance_id != instance_id:
+            return _reject_tenant_context(
+                "tenant_context_instance_mismatch",
+                meta={
+                    "tenant_instance_id": tenant_instance_id,
+                    "instance_id": instance_id,
+                },
+            )
+
+        tenant_branch = None
+        if incoming_tenant_context.branch_id:
+            tenant_branch = (
+                db.query(Branch)
+                .filter(
+                    Branch.id == incoming_tenant_context.branch_id,
+                    Branch.client_id == client.id,
+                    Branch.is_active == True,
+                )
+                .first()
+            )
+            if not tenant_branch:
+                return _reject_tenant_context(
+                    "tenant_context_branch_invalid",
+                    meta={
+                        "tenant_branch_id": str(incoming_tenant_context.branch_id),
+                    },
+                )
+            if resolved_branch and tenant_branch.id != resolved_branch.id:
+                return _reject_tenant_context(
+                    "tenant_context_branch_mismatch",
+                    meta={
+                        "tenant_branch_id": str(tenant_branch.id),
+                        "resolved_branch_id": str(resolved_branch.id),
+                    },
+                )
+            if not resolved_branch and branch_mode != "by_instance":
+                resolved_branch = tenant_branch
+
+    effective_instance_id = instance_id
+    if not effective_instance_id and incoming_tenant_context:
+        effective_instance_id = incoming_tenant_context.instance_id
+
+    tenant_source = "webhook"
+    if incoming_tenant_context and incoming_tenant_context.source:
+        source_value = incoming_tenant_context.source.strip()
+        if source_value:
+            tenant_source = source_value
+
+    effective_tenant_context = {
+        "company_id": str(getattr(client, "company_id", None)) if getattr(client, "company_id", None) else None,
+        "client_id": str(client.id),
+        "client_slug": client.name,
+        "source": tenant_source,
+        "instance_id": effective_instance_id or None,
+        "branch_id": str(resolved_branch.id) if resolved_branch else None,
+        "branch_slug": getattr(resolved_branch, "slug", None) if resolved_branch else None,
+    }
+    effective_tenant_context = {
+        key: value for key, value in effective_tenant_context.items() if value is not None
+    }
+
     if enforce_secret:
         expected_secret = _resolve_expected_webhook_secret(
             settings=settings,
@@ -269,6 +370,7 @@ def _run_preflight(
             "media_info": media_info,
             "resolved_branch_id": resolved_branch.id if resolved_branch else None,
             "resolved_knowledge_tag": resolved_branch.knowledge_tag if resolved_branch else None,
+            "tenant_context": effective_tenant_context,
         },
     )
 

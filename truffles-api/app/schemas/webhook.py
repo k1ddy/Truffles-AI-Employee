@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, Field
 
+from app.schemas.outbox_payload import TenantContext
+
 
 class WebhookMetadata(BaseModel):
     sender: Optional[str] = None
@@ -45,6 +47,7 @@ class WebhookBody(BaseModel):
 class WebhookRequest(BaseModel):
     body: WebhookBody
     client_slug: Optional[str] = "truffles"
+    tenant_context: TenantContext | None = None
 
 
 class WebhookResponse(BaseModel):
