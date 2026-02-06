@@ -7401,6 +7401,7 @@ async def _handle_webhook_payload(
                     expected_reply_type=expected_reply_type,
                     expected_reply_matched=expected_reply_matched,
                     expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
+                    expected_reply_blocked_by_info=expected_reply_blocked_by_info,
                     batch_non_booking_message=batch_non_booking_message,
                     booking_messages=booking_messages,
                     booking_context=booking_context,
@@ -8311,7 +8312,7 @@ async def _handle_webhook_payload(
             multi_intent_other_followup = multi_intent_followup
 
     booking_interrupt_response = None
-    if not expected_reply_type:
+    if not expected_reply_type or expected_reply_blocked_by_info:
         booking_interrupt_response = _handle_booking_interrupt(
             db=db,
             conversation=conversation,
@@ -8330,6 +8331,7 @@ async def _handle_webhook_payload(
             expected_reply_type=expected_reply_type,
             expected_reply_matched=expected_reply_matched,
             expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
+            expected_reply_blocked_by_info=expected_reply_blocked_by_info,
             batch_non_booking_message=batch_non_booking_message,
             booking_messages=booking_messages,
             booking_context=booking_context,

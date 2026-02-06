@@ -1272,6 +1272,7 @@ def _handle_booking_interrupt(
     expected_reply_type: str | None,
     expected_reply_matched: bool | None,
     expected_reply_shortcircuit: bool,
+    expected_reply_blocked_by_info: bool,
     batch_non_booking_message: str | None,
     booking_messages: list[str],
     booking_context: dict | None,
@@ -1300,7 +1301,7 @@ def _handle_booking_interrupt(
     booking_state = booking if isinstance(booking, dict) else legacy._get_booking_context(booking_context or {})
     if booking_state.get("active") and all(booking_state.get(key) for key in BOOKING_SLOT_ORDER):
         return None
-    if expected_reply_type:
+    if expected_reply_type and not expected_reply_blocked_by_info:
         return None
 
     booking_interrupt_text = batch_non_booking_message or message_text
