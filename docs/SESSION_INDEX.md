@@ -150,3 +150,8 @@
 | 2026-02-05-llm-quality-judge-a1 | done | feat/2026-02-05-llm-quality-judge-a1 | /home/zhan/worktrees/2026-02-05-llm-quality-judge-a1 | docs/TASK_PACKAGES/TP-2026-02-05-llm-quality-runner.md | 2026-02-05 |
 | 2026-02-05-llm-quality-evidence-a1 | done | feat/2026-02-05-llm-quality-evidence-a1 | /home/zhan/worktrees/2026-02-05-llm-quality-evidence-a1 | docs/TASK_PACKAGES/TP-2026-02-05-llm-quality-runner.md | 2026-02-05 |
 | 2026-02-05-llm-quality-p1p4-a1 | done | feat/2026-02-05-llm-quality-p1p4-a1 | /home/zhan/worktrees/2026-02-05-llm-quality-p1p4-a1 | docs/TASK_PACKAGES/TP-2026-02-05-llm-quality-p1p4.md | 2026-02-06 |
+| 2026-02-05-legal-rk-fill-a10 | done | feat/2026-02-05-legal-rk-fill-a10 | /home/zhan/worktrees/2026-02-05-legal-rk-fill-a10 | docs/TASK_PACKAGES/TP-2026-02-05-legal-rk-fill.md | 2026-02-05 |
+| 2026-02-05-doc-templates-a11 | done | feat/2026-02-05-doc-templates-a11 | /home/zhan/worktrees/2026-02-05-doc-templates-a11 | docs/TASK_PACKAGES/TP-2026-02-05-doc-templates.md | 2026-02-05 |
+| 2026-02-05-business-ready-pack-a11 | done | feat/2026-02-05-business-ready-pack-a11 | /home/zhan/worktrees/2026-02-05-business-ready-pack-a11 | docs/TASK_PACKAGES/TP-2026-02-05-business-ready-pack.md | 2026-02-05 |
+| 2026-02-05-onboarding-billing-support-a11 | done | feat/2026-02-05-onboarding-billing-support-a11 | /home/zhan/worktrees/2026-02-05-onboarding-billing-support-a11 | docs/TASK_PACKAGES/TP-2026-02-05-onboarding-billing-support-audit.md | 2026-02-05 |
+| 2026-02-05-legal-docs-rk-align-a11 | done | feat/2026-02-05-legal-docs-rk-align-a11 | /home/zhan/worktrees/2026-02-05-legal-docs-rk-align-a11 | docs/TASK_PACKAGES/TP-2026-02-05-legal-docs-rk-align.md | 2026-02-05 |
