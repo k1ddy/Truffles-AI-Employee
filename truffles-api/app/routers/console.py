@@ -170,6 +170,7 @@ from app.services.onboarding_contract_service import (
     merge_onboarding_contract,
     onboarding_contract_payload_to_dict,
 )
+from app.services.onboarding_intake_service import build_intake_payload, evaluate_intake_payload
 from app.services.onboarding_state import (
     OnboardingStep,
     advance_onboarding_step,
@@ -178,7 +179,6 @@ from app.services.onboarding_state import (
     ensure_onboarding_step,
     missing_prerequisites,
 )
-from app.services.onboarding_intake_service import build_intake_payload, evaluate_intake_payload
 from app.services.pack_compiler_service import (
     PackCompilerError,
     build_compiled_pack_meta,
