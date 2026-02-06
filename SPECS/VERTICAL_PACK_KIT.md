@@ -88,4 +88,4 @@
 **Allowed outcomes**
 - `FACT`, `COLLECT`, `HANDOFF` only.
 - `FACT` — только из подтверждённых pack‑фактов; без inference и без booking‑commit.
-
+- SAFE_MODE — только runtime fallback; он не может считаться статусом readiness/go-live для онбординга.
