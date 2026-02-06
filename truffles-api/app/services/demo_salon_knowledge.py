@@ -1320,6 +1320,29 @@ def _format_service_suggestions_reply(suggestions: list[str], truth: dict) -> st
     return template
 
 
+def _format_team_reply(truth: dict) -> str | None:
+    team = truth.get("team") if isinstance(truth, dict) else None
+    if not isinstance(team, dict):
+        return None
+    labels = {
+        "nails": "Ногти",
+        "hair": "Волосы",
+        "brows_lashes": "Брови и ресницы",
+        "facial": "Лицо",
+    }
+    parts: list[str] = []
+    for key in ("nails", "hair", "brows_lashes", "facial"):
+        value = team.get(key)
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        if text:
+            parts.append(f"{labels[key]}: {text}")
+    if not parts:
+        return None
+    return "По мастерам: " + " ".join(parts)
+
+
 @lru_cache(maxsize=16)
 def _question_type_examples(client_slug: str) -> dict[str, list[str]]:
     truth = load_yaml_truth(client_slug)
@@ -2953,6 +2976,23 @@ def get_demo_salon_decision(
         )
         if reply:
             return _build_truth_decision(response=reply, intent="promotions")
+
+    master_signal = "master" in phrase_intents or _signal_contains_any(
+        normalized, slug, "master"
+    )
+    if not master_signal:
+        master_signal = _contains_any(
+            normalized,
+            ["мастер", "специалист", "кто делает", "шебер", "маман", "ким жасайд"],
+        )
+    if master_signal:
+        team_reply = _format_team_reply(truth)
+        if team_reply:
+            return _build_truth_decision(
+                response=team_reply,
+                intent="master",
+                meta={"info_sections": ["master"]},
+            )
 
     if policy_intent == "policy_discount":
         return None
