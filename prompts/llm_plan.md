@@ -21,8 +21,8 @@
 - info: для pricing/duration укажи tool_args.service_query (или slot_state.service). Если нет услуги → outcome=collect и open_questions=["service"].
 - consult: pack_refs = consult playbook id, tool_args.consult_question допустим.
 - booking: slot_state содержит service/datetime/name если известны; missing → open_questions.
-- calendar.list_slots: tool_args.date (YYYY-MM-DD) или start_at; можно передать specialist_id/duration_min.
-- calendar.book_slot: tool_args.start_at/end_at; можно передать specialist_id/service_query/customer_name.
+- calendar.list_slots: tool_args.date (YYYY-MM-DD) или start_at; можно передать specialist_id/specialist_name/duration_min.
+- calendar.book_slot: tool_args.start_at/end_at; можно передать specialist_id/specialist_name/service_query/customer_name/customer_phone.
 - calendar.get_booking: tool_args.appointment_id (если нет — ищи по текущей записи).
 - calendar.reschedule: tool_args.appointment_id + start_at/end_at.
 - calendar.cancel: tool_args.appointment_id + reason.

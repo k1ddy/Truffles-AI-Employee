@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 import dateparser
 from rapidfuzz import fuzz, process
+from sqlalchemy import func
 
 from app.schemas.webhook import WebhookResponse
 from app.services.appointment_service import SchedulingService
@@ -829,8 +830,26 @@ def _normalize_phone_digits(value: str | None) -> str | None:
 def _parse_booking_datetime(value: str | None, *, tz_name: str | None, now: datetime) -> datetime | None:
     if not value or not value.strip():
         return None
-    settings = {"PREFER_DATES_FROM": "future", "RELATIVE_BASE": now}
-    parsed = dateparser.parse(value, languages=["ru"], settings=settings)
+    raw = value.strip()
+    iso_match = re.match(
+        r"^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})(?:[ T](?P<hour>\d{1,2}):(?P<minute>\d{2}))?$",
+        raw,
+    )
+    parsed = None
+    if iso_match:
+        try:
+            parsed = datetime(
+                int(iso_match.group("year")),
+                int(iso_match.group("month")),
+                int(iso_match.group("day")),
+                int(iso_match.group("hour") or 0),
+                int(iso_match.group("minute") or 0),
+            )
+        except ValueError:
+            parsed = None
+    if parsed is None:
+        settings = {"PREFER_DATES_FROM": "future", "RELATIVE_BASE": now}
+        parsed = dateparser.parse(raw, languages=["ru"], settings=settings)
     if not parsed:
         return None
     if parsed.tzinfo is None:
@@ -854,6 +873,50 @@ def _resolve_booking_settings(settings: dict | None, *, provider_ready: bool | N
     if booking_mode == "confirm_slots" and provider_ready is False:
         effective_mode = "collect_preferences"
     return booking_mode, availability_provider, effective_mode
+
+
+def _resolve_default_specialist_id(
+    db: Session,
+    *,
+    branch_id: Any,
+    service_name: str | None,
+) -> tuple[Any | None, str]:
+    from app.models.service import Service
+    from app.models.specialist import Specialist
+    from app.models.specialist_service import SpecialistService
+
+    if service_name and isinstance(service_name, str):
+        normalized = service_name.strip().casefold()
+        if normalized:
+            candidates = (
+                db.query(Specialist.id)
+                .join(SpecialistService, SpecialistService.specialist_id == Specialist.id)
+                .join(Service, Service.id == SpecialistService.service_id)
+                .filter(
+                    Specialist.branch_id == branch_id,
+                    Specialist.is_active == True,
+                    Service.branch_id == branch_id,
+                    Service.is_active == True,
+                    func.lower(Service.name) == normalized,
+                )
+                .order_by(Specialist.name)
+                .all()
+            )
+            if candidates:
+                return candidates[0][0], "service_default"
+
+    fallback = (
+        db.query(Specialist.id)
+        .filter(
+            Specialist.branch_id == branch_id,
+            Specialist.is_active == True,
+        )
+        .order_by(Specialist.name)
+        .first()
+    )
+    if fallback:
+        return fallback[0], "branch_default"
+    return None, "specialist_not_found"
 
 
 def _create_booking_appointment(
@@ -996,11 +1059,20 @@ def _create_booking_appointment(
     if effective_mode == "confirm_slots" and confirmation_policy == "client":
         appointment_status = "CONFIRMED"
 
+    specialist_id, specialist_selection = _resolve_default_specialist_id(
+        db,
+        branch_id=branch_id,
+        service_name=service_name,
+    )
+    meta["specialist_selection"] = specialist_selection
+    if specialist_id:
+        meta["specialist_id"] = str(specialist_id)
+
     try:
         appointment = SchedulingService(db).create_appointment(
             client_id=conversation.client_id,
             branch_id=branch_id,
-            specialist_id=None,
+            specialist_id=specialist_id,
             start_at=start_at,
             end_at=end_at,
             customer_name=customer_name,
@@ -1196,6 +1268,12 @@ def _handle_booking_interrupt(
     from app.services.demo_salon_knowledge import DemoSalonDecision, compose_multi_truth_reply
 
     from . import _legacy as legacy
+
+    booking_state = booking if isinstance(booking, dict) else legacy._get_booking_context(booking_context or {})
+    if booking_state.get("active") and all(booking_state.get(key) for key in BOOKING_SLOT_ORDER):
+        return None
+    if expected_reply_type:
+        return None
 
     booking_interrupt_text = batch_non_booking_message or message_text
     booking_time_service_candidate = (
@@ -1855,6 +1933,8 @@ def _handle_booking_flow(
         and (booking_wants_flow or booking_active or booking_signal)
     ):
         truth_gate = policy_handler.get("truth_gate") if isinstance(policy_handler, dict) else None
+        if expected_reply_type:
+            truth_gate = None
         if truth_gate:
             decision = truth_gate(message_text, client_slug=client_slug)
             if (

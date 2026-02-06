@@ -20,6 +20,8 @@ Options:
   --db-container <name>        Default: truffles_postgres_1
   --db-user <user>             Default: POSTGRES_USER from DB container
   --db-name <name>             Default: parsed from DATABASE_URL or chatbot
+  --livecheck-timeout <sec>    Default: 25
+  --livecheck-poll-timeout <sec> Default: 30
   -h, --help                   Show help
 
 Notes:
@@ -33,6 +35,10 @@ die() { echo "[error] $*" >&2; exit 1; }
 
 sql_escape() {
   printf "%s" "$1" | sed "s/'/''/g"
+}
+
+normalize_digits() {
+  printf "%s" "$1" | tr -cd '0-9'
 }
 
 require_cmd() {
@@ -49,6 +55,8 @@ DB_NAME=""
 INSTANCE_ID=""
 JID_COMMIT=""
 JID_FULL=""
+LIVECHECK_TIMEOUT="25"
+LIVECHECK_POLL_TIMEOUT="30"
 APPLY=0
 CANCEL_APPOINTMENTS=0
 NO_LIVECHECK=0
@@ -70,6 +78,8 @@ while [[ $# -gt 0 ]]; do
     --db-container) DB_CONTAINER="$2"; shift 2;;
     --db-user) DB_USER="$2"; shift 2;;
     --db-name) DB_NAME="$2"; shift 2;;
+    --livecheck-timeout) LIVECHECK_TIMEOUT="$2"; shift 2;;
+    --livecheck-poll-timeout) LIVECHECK_POLL_TIMEOUT="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) die "Unknown arg: $1";;
   esac
@@ -148,7 +158,7 @@ info "Evidence dir: $EVIDENCE_DIR"
 
 curl -s "${BASE_URL}/admin/health" | tee "${EVIDENCE_DIR}/admin_health.json" >/dev/null
 
-branch_row="$(psql_scalar "select id, client_id, instance_id, timezone from branches where slug='$(sql_escape "$BRANCH_SLUG")';")"
+branch_row="$(psql_scalar "select id, client_id, instance_id, timezone, phone from branches where slug='$(sql_escape "$BRANCH_SLUG")';")"
 if [[ -z "$branch_row" ]]; then
   die "Branch not found: ${BRANCH_SLUG}"
 fi
@@ -156,12 +166,14 @@ branch_id="$(echo "$branch_row" | cut -f1)"
 client_id="$(echo "$branch_row" | cut -f2)"
 branch_instance_id="$(echo "$branch_row" | cut -f3)"
 branch_tz="$(echo "$branch_row" | cut -f4)"
+branch_phone="$(echo "$branch_row" | cut -f5)"
 
 {
   echo "branch_id=${branch_id}"
   echo "client_id=${client_id}"
   echo "branch_instance_id=${branch_instance_id}"
   echo "branch_timezone=${branch_tz}"
+  echo "branch_phone=${branch_phone}"
 } | tee "${EVIDENCE_DIR}/branch_meta.txt" >/dev/null
 
 if [[ -z "$INSTANCE_ID" ]]; then
@@ -176,11 +188,62 @@ if [[ -z "$allowlist" ]]; then
   die "OUTBOUND_ALLOWLIST_JIDS is empty in ${API_CONTAINER}"
 fi
 IFS=',' read -r -a allowlist_arr <<< "$allowlist"
+
+blocked_digits_raw="$(psql_scalar "select regexp_replace(phone, '\\\\D', '', 'g') from branches where phone is not null;")"
+mapfile -t blocked_digits_arr <<< "$blocked_digits_raw"
+
+jid_is_blocked() {
+  local jid="$1"
+  local digits
+  digits="$(normalize_digits "$jid")"
+  if [[ -z "$digits" ]]; then
+    return 0
+  fi
+  for blocked in "${blocked_digits_arr[@]}"; do
+    local blocked_digits
+    blocked_digits="$(normalize_digits "$blocked")"
+    if [[ -n "$blocked_digits" && "$digits" == "$blocked_digits" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 if [[ -z "$JID_COMMIT" ]]; then
-  JID_COMMIT="${allowlist_arr[0]}"
+  for jid in "${allowlist_arr[@]}"; do
+    jid="${jid//[[:space:]]/}"
+    if [[ -n "$jid" ]] && ! jid_is_blocked "$jid"; then
+      JID_COMMIT="$jid"
+      break
+    fi
+  done
+else
+  if jid_is_blocked "$JID_COMMIT"; then
+    die "jid_commit is a branch number; choose a non-branch allowlist JID"
+  fi
+fi
+if [[ -z "$JID_COMMIT" ]]; then
+  die "No safe allowlist JID found for jid_commit"
 fi
 if [[ -z "$JID_FULL" ]]; then
-  JID_FULL="${allowlist_arr[1]:-${allowlist_arr[0]}}"
+  for jid in "${allowlist_arr[@]}"; do
+    jid="${jid//[[:space:]]/}"
+    if [[ -z "$jid" ]] || [[ "$jid" == "$JID_COMMIT" ]]; then
+      continue
+    fi
+    if ! jid_is_blocked "$jid"; then
+      JID_FULL="$jid"
+      break
+    fi
+  done
+  if [[ -z "$JID_FULL" ]]; then
+    JID_FULL="$JID_COMMIT"
+    info "Only one safe allowlist JID found; using it for CA12 as well."
+  fi
+else
+  if jid_is_blocked "$JID_FULL"; then
+    die "jid_full is a branch number; choose a non-branch allowlist JID"
+  fi
 fi
 {
   echo "jid_commit=${JID_COMMIT}"
@@ -313,16 +376,22 @@ if [[ "$NO_LIVECHECK" -eq 0 ]]; then
   TEST_MODE=1 INSTANCE_ID="$INSTANCE_ID" python3 ops/diagnose.py livecheck-auto \
     --suite ca05-booking-commit \
     --client-slug "$CLIENT_SLUG" \
+    --branch-slug "$BRANCH_SLUG" \
     --base-url "$BASE_URL" \
     --noise none \
+    --timeout "$LIVECHECK_TIMEOUT" \
+    --poll-timeout "$LIVECHECK_POLL_TIMEOUT" \
     --remote-jid "$JID_COMMIT" \
     --reset-before-suite | tee "${EVIDENCE_DIR}/livecheck_ca05_booking_commit.jsonl"
 
   TEST_MODE=1 INSTANCE_ID="$INSTANCE_ID" python3 ops/diagnose.py livecheck-auto \
     --suite ca12-booking-full \
     --client-slug "$CLIENT_SLUG" \
+    --branch-slug "$BRANCH_SLUG" \
     --base-url "$BASE_URL" \
     --noise none \
+    --timeout "$LIVECHECK_TIMEOUT" \
+    --poll-timeout "$LIVECHECK_POLL_TIMEOUT" \
     --remote-jid "$JID_FULL" \
     --reset-before-suite | tee "${EVIDENCE_DIR}/livecheck_ca12_booking_full.jsonl"
 else
@@ -428,7 +497,7 @@ if [[ "${#appointment_ids[@]}" -gt 0 ]]; then
     ids_sql+="'${escaped}'"
   done
   psql_to_file "${EVIDENCE_DIR}/sql_appointments.txt" \
-    "select id, status, confirmation_policy, start_at, end_at, source, created_at from appointments where id in (${ids_sql});"
+    "select id, conversation_id, status, confirmation_policy, start_at, end_at, source, specialist_id, created_at from appointments where id in (${ids_sql});"
   psql_to_file "${EVIDENCE_DIR}/sql_appointment_sync_states.txt" \
     "select appointment_id, provider, state, last_error, updated_at from appointment_sync_states where appointment_id in (${ids_sql});"
   psql_to_file "${EVIDENCE_DIR}/sql_appointment_audit.txt" \

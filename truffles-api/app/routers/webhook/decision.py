@@ -563,6 +563,13 @@ def _apply_expected_reply_contract(
         last_question_type = session_memory.get("last_question_type")
         if isinstance(last_question_type, str):
             last_question_type = last_question_type.strip()
+        is_short_reply = legacy._is_short_reply(message_text)
+        if (
+            not is_short_reply
+            and last_question_type == legacy.EXPECTED_REPLY_TIME
+            and legacy._extract_datetime(message_text)
+        ):
+            is_short_reply = True
         if (
             (not memory_active_goal or not current_goal or memory_active_goal == current_goal)
             and last_question_type
@@ -571,7 +578,7 @@ def _apply_expected_reply_contract(
                 legacy.EXPECTED_REPLY_TIME,
                 legacy.EXPECTED_REPLY_NAME,
             }
-            and legacy._is_short_reply(message_text)
+            and is_short_reply
             and not legacy._looks_like_info_query(message_text, client_slug=client_slug)
             and not legacy._looks_like_policy_topic(
                 message_text,
@@ -610,6 +617,9 @@ def _apply_expected_reply_contract(
         legacy.EXPECTED_REPLY_TIME,
         legacy.EXPECTED_REPLY_NAME,
     }:
+        deterministic_matched = False
+        deterministic_value = None
+        normalization_flags: list[str] = []
         if message_text:
             normalized_message = legacy._normalize_service_text(message_text)
             expected_reply_blocked_by_info = (
@@ -624,6 +634,16 @@ def _apply_expected_reply_contract(
             ):
                 expected_reply_blocked_by_info = False
         expected_reply_text = expected_reply_text or ""
+        if expected_reply_text:
+            (
+                deterministic_matched,
+                deterministic_value,
+                normalization_flags,
+            ) = _match_expected_reply_candidates(
+                expected_reply_type=expected_reply_type,
+                message_text=expected_reply_text,
+                client_slug=client_slug,
+            )
         answer_result = None
         answer_confidence = 0.0
         answer_slot = ""
@@ -664,6 +684,15 @@ def _apply_expected_reply_contract(
                     "answer_slot": "",
                     "answer_value": "",
                     "answer_error": "booking_confirm_pending",
+                }
+            elif deterministic_matched:
+                answer_error = "deterministic_match"
+                answer_meta = {
+                    "answer_interpreter_used": False,
+                    "answer_confidence": 0.0,
+                    "answer_slot": "",
+                    "answer_value": "",
+                    "answer_error": "deterministic_match",
                 }
             else:
                 question_context = {
@@ -735,15 +764,6 @@ def _apply_expected_reply_contract(
         slot_confidence = 0.0
         slot_validation_error = None
         use_llm_slot = _is_booking_confirm_enabled()
-        (
-            deterministic_matched,
-            deterministic_value,
-            normalization_flags,
-        ) = _match_expected_reply_candidates(
-            expected_reply_type=expected_reply_type,
-            message_text=expected_reply_text,
-            client_slug=client_slug,
-        )
         if deterministic_matched:
             if answer_used and isinstance(answer_value, str) and isinstance(deterministic_value, str):
                 if answer_value != deterministic_value:
@@ -8277,45 +8297,47 @@ async def _handle_webhook_payload(
         else:
             multi_intent_other_followup = multi_intent_followup
 
-    booking_interrupt_response = _handle_booking_interrupt(
-        db=db,
-        conversation=conversation,
-        user=user,
-        message_text=message_text,
-        saved_message=saved_message,
-        client_slug=payload.client_slug,
-        routing=routing,
-        bypass_domain_flows=bypass_domain_flows,
-        booking_wants_flow=booking_wants_flow,
-        consult_intent=consult_intent,
-        intent_decomp_used=intent_decomp_used,
-        intent_decomp_set=intent_decomp_set,
-        intent_decomp_payload=intent_decomp_payload,
-        info_class_intents=info_class_intents,
-        expected_reply_type=expected_reply_type,
-        expected_reply_matched=expected_reply_matched,
-        expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
-        batch_non_booking_message=batch_non_booking_message,
-        booking_messages=booking_messages,
-        booking_context=booking_context,
-        booking=booking,
-        current_goal=current_goal,
-        basic_info_message=basic_info_message,
-        session_memory_reset_reason=session_memory_reset_reason,
-        memory_expected_reply_type=memory_expected_reply_type,
-        policy_handler=policy_handler,
-        policy_type=policy_type,
-        now=now,
-        message_count=message_count,
-        consult_return_pending=consult_return_pending,
-        consult_return_prompt=consult_return_prompt,
-        consult_context=consult_context,
-        consult_return_reason=consult_return_reason,
-        maybe_apply_fact_guard=_maybe_apply_fact_guard,
-        send_and_save=_send_and_save,
-        send_response=_send_response,
-        finalize_response=_finalize_bot_response,
-    )
+    booking_interrupt_response = None
+    if not expected_reply_type:
+        booking_interrupt_response = _handle_booking_interrupt(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message_text=message_text,
+            saved_message=saved_message,
+            client_slug=payload.client_slug,
+            routing=routing,
+            bypass_domain_flows=bypass_domain_flows,
+            booking_wants_flow=booking_wants_flow,
+            consult_intent=consult_intent,
+            intent_decomp_used=intent_decomp_used,
+            intent_decomp_set=intent_decomp_set,
+            intent_decomp_payload=intent_decomp_payload,
+            info_class_intents=info_class_intents,
+            expected_reply_type=expected_reply_type,
+            expected_reply_matched=expected_reply_matched,
+            expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
+            batch_non_booking_message=batch_non_booking_message,
+            booking_messages=booking_messages,
+            booking_context=booking_context,
+            booking=booking,
+            current_goal=current_goal,
+            basic_info_message=basic_info_message,
+            session_memory_reset_reason=session_memory_reset_reason,
+            memory_expected_reply_type=memory_expected_reply_type,
+            policy_handler=policy_handler,
+            policy_type=policy_type,
+            now=now,
+            message_count=message_count,
+            consult_return_pending=consult_return_pending,
+            consult_return_prompt=consult_return_prompt,
+            consult_context=consult_context,
+            consult_return_reason=consult_return_reason,
+            maybe_apply_fact_guard=_maybe_apply_fact_guard,
+            send_and_save=_send_and_save,
+            send_response=_send_response,
+            finalize_response=_finalize_bot_response,
+        )
     if booking_interrupt_response:
         return booking_interrupt_response
 

@@ -1,0 +1,26 @@
+# SESSION 2026-02-06-booking-quality-matrix-a10 — Session 2026-02-06-booking-quality-matrix-a10
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-06-booking-quality-matrix.md
+- branch: feat/2026-02-06-booking-quality-matrix-a10
+- worktree: /home/zhan/worktrees/2026-02-06-booking-quality-matrix-a10
+- base_ref: origin/main
+- scope: booking quality matrix; real booking confirm with DB evidence; expected-reply stabilization for booking slots.
+- done:
+  - Добавлен deterministic fast‑path для expected_reply (без LLM) и fallback по session_memory для time‑ответов (time slot), чтобы не блокироваться на embed/LLM.
+  - Исправлен парсинг ISO‑дат `YYYY-MM-DD` в booking (dateparser больше не меняет месяц/день).
+  - Обновлён `booking_confirm_verify.sh`: safe‑JID выбор (не branch‑номера), timeouts для livecheck, evidence‑SQL с `specialist_id`.
+  - Обновлён `ops/diagnose.py` (CA12 summary берёт `appointment_id` из decision_meta).
+  - Выполнен booking confirm verify + evidence.
+- next:
+  - Прогнать LLM‑quality матрицу (если нужно по цели).
+  - Разобрать intermittent timeouts в livecheck (если повторятся).
+- evidence:
+  - /tmp/booking-confirm-20260206-112240 (CA05/CA12, SQL evidence)
+  - /tmp/booking-confirm-20260206-112240/sql_appointments_with_specialist.txt
+  - /tmp/booking-confirm-20260206-112240/sql_appointments.txt
+  - /tmp/booking-confirm-20260206-112240/sql_appointment_audit.txt
+  - /tmp/booking-confirm-20260206-112240/sql_outbox_booking_send.txt
+  - /tmp/booking-confirm-20260206-112240/sql_outbox_calendar_sync.txt
+- last_updated: 2026-02-06

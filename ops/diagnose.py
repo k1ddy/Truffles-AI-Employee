@@ -2541,12 +2541,24 @@ def _llm_quality_extract_expectations(turn):
             expected_reply = None
     if not isinstance(expected_reply, bool):
         expected_reply = None
+    allow_booking_stall = expect.get("allow_booking_stall")
+    if isinstance(allow_booking_stall, str):
+        token = allow_booking_stall.strip().lower()
+        if token in {"true", "yes", "1"}:
+            allow_booking_stall = True
+        elif token in {"false", "no", "0"}:
+            allow_booking_stall = False
+        else:
+            allow_booking_stall = None
+    if not isinstance(allow_booking_stall, bool):
+        allow_booking_stall = False
     return {
         "action": action,
         "info_sections": [section.lower() for section in info_sections],
         "reply_type": reply_type or None,
         "state": state or None,
         "expected_reply": expected_reply,
+        "allow_booking_stall": allow_booking_stall,
     }
 
 def _llm_quality_expected_section_answered(expected_sections, meta, trace_entries):
@@ -3006,6 +3018,7 @@ def _llm_quality_evaluate_turn(
     info_answered,
     booking_active,
     booking_progressed,
+    allow_booking_stall,
 ):
     reasons = []
     if meta is None:
@@ -3048,7 +3061,7 @@ def _llm_quality_evaluate_turn(
         reasons.append("handover_missing")
     if info_tags and not any(info_answered.values()) and state not in {"pending", "manager_active"}:
         reasons.append("info_section_miss")
-    if booking_active and booking_progressed is False:
+    if booking_active and booking_progressed is False and not allow_booking_stall:
         reasons.append("booking_slot_stall")
     return reasons
 
@@ -3078,6 +3091,7 @@ def _parse_livecheck_auto_args(argv):
         "--client-slug",
         default=os.environ.get("TRUFFLES_CLIENT_SLUG", "demo_salon"),
     )
+    parser.add_argument("--branch-slug", default=os.environ.get("TRUFFLES_BRANCH_SLUG"))
     parser.add_argument("--suite", default="ca01-core", choices=sorted(LIVECHECK_SUITES.keys()))
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--min-wait", type=float, default=1.0)
@@ -3358,6 +3372,7 @@ def _parse_llm_quality_args(argv):
         "--client-slug",
         default=os.environ.get("TRUFFLES_CLIENT_SLUG", "demo_salon"),
     )
+    parser.add_argument("--branch-slug", default=os.environ.get("TRUFFLES_BRANCH_SLUG"))
     parser.add_argument("--count", type=int, default=5)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--mode", choices=["template", "llm"], default="llm")
@@ -3800,13 +3815,18 @@ def _parse_iso_datetime(value):
     except ValueError:
         return None
 
-def _fetch_client_meta(db_user, client_slug):
+def _fetch_client_meta(db_user, client_slug, *, branch_slug=None):
     safe_slug = _escape_sql_literal(client_slug)
+    branch_filter = ""
+    if branch_slug:
+        safe_branch = _escape_sql_literal(branch_slug)
+        branch_filter = f"AND b.slug = '{safe_branch}' "
     query = (
         "SELECT c.id, c.config->>'instance_id', b.id, b.instance_id, "
         "cs.telegram_chat_id, cs.owner_telegram_id "
         "FROM clients c "
         "LEFT JOIN branches b ON b.client_id = c.id AND b.is_active = TRUE "
+        f"{branch_filter}"
         "LEFT JOIN client_settings cs ON cs.client_id = c.id "
         f"WHERE c.name = '{safe_slug}' "
         "ORDER BY b.created_at DESC NULLS LAST "
@@ -4947,6 +4967,7 @@ def _ensure_bot_active_before_suite(args, context):
                 "message": preflight_text,
                 "metadata": {
                     "sender": "LivecheckAuto",
+                    "simulation_mode": False,
                     "timestamp": int(time.time()),
                     "messageId": preflight_message_id,
                     "remoteJid": remote_jid,
@@ -5020,7 +5041,9 @@ def _run_llm_quality(args):
         raise SystemExit("llm-quality: allowlist-jids required for state mode")
 
     db_user = _resolve_db_user_simple()
-    client_meta, client_error = _fetch_client_meta(db_user, client_slug)
+    client_meta, client_error = _fetch_client_meta(
+        db_user, client_slug, branch_slug=args.branch_slug
+    )
     if client_error:
         raise SystemExit(f"llm-quality: client meta lookup failed ({client_error})")
     client_id = (client_meta or {}).get("client_id")
@@ -5751,6 +5774,7 @@ def _run_llm_quality(args):
                 expected_reply_type = expectations.get("reply_type")
                 expected_state = expectations.get("state")
                 expected_reply = expectations.get("expected_reply")
+                allow_booking_stall = expectations.get("allow_booking_stall", False)
                 info_tags = [tag for tag in turn_tags if tag in LLM_QUALITY_INFO_TAGS]
                 if not info_tags:
                     info_tags = sorted(_llm_quality_infer_info_tags(text))
@@ -5835,6 +5859,7 @@ def _run_llm_quality(args):
                     info_answered=info_answered,
                     booking_active=booking_active,
                     booking_progressed=booking_progressed,
+                    allow_booking_stall=allow_booking_stall,
                 )
                 if evaluation_reasons:
                     stats["turns_failed"] += 1
@@ -6660,7 +6685,9 @@ def _run_chaos_sim(args):
         raise SystemExit("chaos-sim: missing admin token for outbox/process")
 
     db_user = _resolve_db_user_simple()
-    client_meta, client_error = _fetch_client_meta(db_user, client_slug)
+    client_meta, client_error = _fetch_client_meta(
+        db_user, client_slug, branch_slug=args.branch_slug
+    )
     if client_error:
         raise SystemExit(f"chaos-sim: client meta lookup failed ({client_error})")
     instance_id = None
@@ -7787,8 +7814,8 @@ def _run_dialog_report(args):
     print(json.dumps({"output": output_path, "conversations": len(conv_ids)}, ensure_ascii=False))
 
 
-def _resolve_booking_commit_steps(case):
-    now = datetime.now(timezone.utc) + timedelta(days=2)
+def _resolve_booking_commit_steps(case, *, time_shift_minutes: int = 0):
+    now = datetime.now(timezone.utc) + timedelta(days=2, minutes=time_shift_minutes)
     now = now.replace(minute=0, second=0, microsecond=0)
     booking_time = now.strftime("%Y-%m-%d %H:%M")
     booking_name = "Алия"
@@ -7842,6 +7869,7 @@ def _run_livecheck_ca05_booking(args, context):
                 "message": f"{reset_text} [{reset_marker}]",
                 "metadata": {
                     "sender": "LivecheckAuto",
+                    "simulation_mode": False,
                     "timestamp": int(time.time()),
                     "messageId": reset_message_id,
                     "remoteJid": remote_jid,
@@ -7923,6 +7951,7 @@ def _run_livecheck_ca05_booking(args, context):
 
         metadata = {
             "sender": "LivecheckAuto",
+            "simulation_mode": False,
             "timestamp": int(time.time()),
             "messageId": message_id,
             "remoteJid": remote_jid,
@@ -8050,7 +8079,7 @@ def _run_livecheck_ca05_booking(args, context):
 def _run_livecheck_ca05_booking_commit(args, context):
     rng = context["rng"]
     case = context["cases"][0]
-    steps, booking_values = _resolve_booking_commit_steps(case)
+    steps, booking_values = _resolve_booking_commit_steps(case, time_shift_minutes=0)
     if not steps:
         raise SystemExit("livecheck-auto: CA05 booking-commit missing steps")
     timestamp = context["timestamp"]
@@ -8096,6 +8125,7 @@ def _run_livecheck_ca05_booking_commit(args, context):
 
         metadata = {
             "sender": "LivecheckAuto",
+            "simulation_mode": False,
             "timestamp": int(time.time()),
             "messageId": message_id,
             "remoteJid": remote_jid,
@@ -8258,7 +8288,7 @@ def _run_livecheck_ca05_booking_commit(args, context):
 def _run_livecheck_ca12_booking_full(args, context):
     rng = context["rng"]
     case = context["cases"][0]
-    steps, booking_values = _resolve_booking_commit_steps(case)
+    steps, booking_values = _resolve_booking_commit_steps(case, time_shift_minutes=60)
     if not steps:
         raise SystemExit("livecheck-auto: CA12 booking-full missing steps")
     timestamp = context["timestamp"]
@@ -8296,6 +8326,7 @@ def _run_livecheck_ca12_booking_full(args, context):
     outbox_summary = None
     outbox_rows = None
     commit_message_id = None
+    commit_meta = None
     booking_confirm_prompted = False
     booking_confirmed = False
     booking_confirm_decision = None
@@ -8313,6 +8344,7 @@ def _run_livecheck_ca12_booking_full(args, context):
 
         metadata = {
             "sender": "LivecheckAuto",
+            "simulation_mode": False,
             "timestamp": int(time.time()),
             "messageId": message_id,
             "remoteJid": remote_jid,
@@ -8424,6 +8456,10 @@ def _run_livecheck_ca12_booking_full(args, context):
             }
         )
 
+        if step.get("expect_booking_commit"):
+            commit_message_id = message_id
+            commit_meta = meta
+
         needs_confirmation = bool(
             (meta or {}).get("action") == "booking_confirm"
             or (meta or {}).get("slot_confirmation_required")
@@ -8438,6 +8474,7 @@ def _run_livecheck_ca12_booking_full(args, context):
                     "message": confirm_reply,
                     "metadata": {
                         "sender": "LivecheckAuto",
+                        "simulation_mode": False,
                         "timestamp": int(time.time()),
                         "messageId": confirm_message_id,
                         "remoteJid": remote_jid,
@@ -8564,7 +8601,9 @@ def _run_livecheck_ca12_booking_full(args, context):
         if commit_required and not booking_commit_trace:
             raise SystemExit("livecheck-auto: CA12 booking_commit trace missing")
         if commit_required:
-            appointment_id = (booking_commit_trace or {}).get("appointment_id")
+            appointment_id = (commit_meta or {}).get("appointment_id") or (
+                booking_commit_trace or {}
+            ).get("appointment_id")
             if not appointment_id:
                 raise SystemExit("livecheck-auto: CA12 appointment_id missing")
             appointment_row, appointment_error = _fetch_appointment_row(db_user, appointment_id)
@@ -8622,6 +8661,7 @@ def _run_livecheck_ca12_booking_full(args, context):
                     "message": f"{handover_message} [{handover_marker}]",
                     "metadata": {
                         "sender": "LivecheckAuto",
+                        "simulation_mode": False,
                         "timestamp": int(time.time()),
                         "messageId": handover_message_id,
                         "remoteJid": remote_jid,
@@ -8802,6 +8842,7 @@ def _run_livecheck_ca06_reset(args, context, *, suite_label="CA06"):
             "message": f"{reset_text} [{reset_marker}]",
             "metadata": {
                 "sender": "LivecheckAuto",
+                "simulation_mode": False,
                 "timestamp": int(time.time()),
                 "messageId": reset_message_id,
                 "remoteJid": remote_jid,
@@ -8892,6 +8933,7 @@ def _run_livecheck_ca08_state(args, context):
 
     metadata = {
         "sender": "LivecheckAuto",
+        "simulation_mode": False,
         "timestamp": int(time.time()),
         "messageId": message_id,
         "remoteJid": remote_jid,
@@ -8962,6 +9004,7 @@ def _run_livecheck_ca08_state(args, context):
             "message": ack_text,
             "metadata": {
                 "sender": "LivecheckAuto",
+                "simulation_mode": False,
                 "timestamp": int(time.time()),
                 "messageId": ack_message_id,
                 "remoteJid": remote_jid,
@@ -9070,6 +9113,7 @@ def _run_livecheck_ca09_manager(args, context):
     message_id = f"LC-AUTO-{timestamp}-CA09-{uuid.uuid4().hex[:8]}"
     metadata = {
         "sender": "LivecheckAuto",
+        "simulation_mode": False,
         "timestamp": int(time.time()),
         "messageId": message_id,
         "remoteJid": remote_jid,
@@ -9281,6 +9325,7 @@ def _run_livecheck_ca10_outbox(args, context):
                 "message": f"{message} [SEQ:{seq:02d}]",
                 "metadata": {
                     "sender": "LivecheckAuto",
+                    "simulation_mode": False,
                     "timestamp": int(time.time()),
                     "messageId": message_id,
                     "remoteJid": remote_jid,
@@ -9381,7 +9426,9 @@ def _run_livecheck_auto(args):
         raise SystemExit("livecheck-auto: missing admin token")
 
     db_user = _resolve_db_user_simple()
-    client_meta, client_error = _fetch_client_meta(db_user, client_slug)
+    client_meta, client_error = _fetch_client_meta(
+        db_user, client_slug, branch_slug=args.branch_slug
+    )
     if client_error:
         raise SystemExit(f"livecheck-auto: client meta lookup failed ({client_error})")
     if not client_meta or not client_meta.get("client_id"):
@@ -9556,6 +9603,7 @@ def _run_livecheck_auto(args):
             )
         metadata = {
             "sender": "LivecheckAuto",
+            "simulation_mode": False,
             "timestamp": int(time.time()),
             "messageId": message_id,
             "remoteJid": remote_jid,
@@ -9646,6 +9694,7 @@ def _run_livecheck_auto(args):
                         "message": ack_text,
                         "metadata": {
                             "sender": "LivecheckAuto",
+                            "simulation_mode": False,
                             "timestamp": int(time.time()),
                             "messageId": ack_message_id,
                             "remoteJid": remote_jid,
