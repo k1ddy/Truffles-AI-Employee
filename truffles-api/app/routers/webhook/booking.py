@@ -1529,6 +1529,8 @@ def _handle_booking_interrupt(
                     and isinstance(info_decision.intent, str)
                 ):
                     trace_info_intents = [info_decision.intent]
+                if not booking_info_intents and trace_info_intents:
+                    booking_info_intents = list(trace_info_intents)
                 info_sections = _merge_info_sections(info_meta, trace_info_intents)
                 if info_sections:
                     info_meta["info_sections"] = info_sections
@@ -1643,6 +1645,8 @@ def _handle_booking_interrupt(
                     and isinstance(info_decision.intent, str)
                 ):
                     trace_info_intents = [info_decision.intent]
+                if not booking_info_intents and trace_info_intents:
+                    booking_info_intents = list(trace_info_intents)
                 info_sections = _merge_info_sections(info_meta, trace_info_intents)
                 if info_sections:
                     info_meta["info_sections"] = info_sections

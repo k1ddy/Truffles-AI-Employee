@@ -15,6 +15,7 @@
   - Выполнен booking confirm verify + evidence.
   - Устранён CI‑фейл в booking: `_resolve_default_specialist_id` теперь безопасно обрабатывает mock/row результаты и не подставляет фиктивный specialist_id.
   - Исправлен порядок импортов (ruff I001) в `tool_registry_service.py`.
+  - Исправлены core‑eval регрессии: booking‑interrupt теперь сохраняет `booking_info_intents`, а deterministic expected‑reply ограничен booking‑контекстом (info‑flow снова использует answer_interpreter).
 - next:
   - Прогнать LLM‑quality матрицу (если нужно по цели).
   - Разобрать intermittent timeouts в livecheck (если повторятся).
@@ -26,4 +27,5 @@
   - /tmp/booking-confirm-20260206-112240/sql_outbox_booking_send.txt
   - /tmp/booking-confirm-20260206-112240/sql_outbox_calendar_sync.txt
   - /tmp/pytest_booking_appointments_collect_preferences_20260206.txt
+  - /tmp/pytest_demo_salon_eval_booking_interrupt_20260206.txt
 - last_updated: 2026-02-06

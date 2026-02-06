@@ -617,6 +617,13 @@ def _apply_expected_reply_contract(
         legacy.EXPECTED_REPLY_TIME,
         legacy.EXPECTED_REPLY_NAME,
     }:
+        booking_context = legacy._get_booking_context(context)
+        expected_reply_reason = legacy._get_expected_reply_reason(context)
+        allow_deterministic_match = bool(booking_context.get("active")) or (
+            current_goal == "booking"
+        )
+        if expected_reply_reason == "booking_prompt":
+            allow_deterministic_match = True
         deterministic_matched = False
         deterministic_value = None
         normalization_flags: list[str] = []
@@ -654,6 +661,10 @@ def _apply_expected_reply_contract(
                 message_text=expected_reply_text,
                 client_slug=client_slug,
             )
+        if not allow_deterministic_match:
+            deterministic_matched = False
+            deterministic_value = None
+            normalization_flags = []
         answer_result = None
         answer_confidence = 0.0
         answer_slot = ""
@@ -672,7 +683,6 @@ def _apply_expected_reply_contract(
         else:
             answer_error = "invalid_result"
             prompt_hint = None
-            booking_context = legacy._get_booking_context(context)
             last_question = booking_context.get("last_question")
             if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
                 prompt_hint = (
