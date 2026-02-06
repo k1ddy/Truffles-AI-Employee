@@ -618,12 +618,6 @@ def _apply_expected_reply_contract(
         legacy.EXPECTED_REPLY_NAME,
     }:
         booking_context = legacy._get_booking_context(context)
-        expected_reply_reason = legacy._get_expected_reply_reason(context)
-        allow_deterministic_match = bool(booking_context.get("active")) or (
-            current_goal == "booking"
-        )
-        if expected_reply_reason == "booking_prompt":
-            allow_deterministic_match = True
         deterministic_available = False
         deterministic_value = None
         normalization_flags: list[str] = []
@@ -661,7 +655,7 @@ def _apply_expected_reply_contract(
                 message_text=expected_reply_text,
                 client_slug=client_slug,
             )
-        deterministic_matched = deterministic_available if allow_deterministic_match else False
+        deterministic_matched = False
         answer_result = None
         answer_confidence = 0.0
         answer_slot = ""
@@ -702,15 +696,6 @@ def _apply_expected_reply_contract(
                     "answer_slot": "",
                     "answer_value": "",
                     "answer_error": "booking_confirm_pending",
-                }
-            elif deterministic_matched:
-                answer_error = "deterministic_match"
-                answer_meta = {
-                    "answer_interpreter_used": False,
-                    "answer_confidence": 0.0,
-                    "answer_slot": "",
-                    "answer_value": "",
-                    "answer_error": "deterministic_match",
                 }
             else:
                 answer_interpreter_attempted = True

@@ -17,6 +17,7 @@
   - Исправлен порядок импортов (ruff I001) в `tool_registry_service.py`.
   - Исправлены core‑eval регрессии: booking‑interrupt теперь сохраняет `booking_info_intents`, а deterministic expected‑reply ограничен booking‑контекстом (info‑flow снова использует answer_interpreter).
   - Добавлен deterministic fallback при ошибке answer_interpreter (LLM недоступен): info‑flow продолжает матчить сервис и отдаёт цену.
+  - Убран deterministic short‑circuit в expected_reply: теперь LLM пытается парсить service/time/name, а при ошибке падает в deterministic fallback (нужно для core‑eval E361a+).
 - next:
   - Прогнать LLM‑quality матрицу (если нужно по цели).
   - Разобрать intermittent timeouts в livecheck (если повторятся).
@@ -30,4 +31,5 @@
   - /tmp/pytest_booking_appointments_collect_preferences_20260206.txt
   - /tmp/pytest_demo_salon_eval_booking_interrupt_20260206.txt
   - /tmp/booking_e361_local_20260206.txt
+  - /tmp/booking_e361a_local_20260206.txt
 - last_updated: 2026-02-06
