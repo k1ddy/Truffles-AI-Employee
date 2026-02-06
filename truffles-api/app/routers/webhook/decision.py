@@ -296,8 +296,8 @@ from app.services.ai_service import (
     rewrite_for_service_match,
     transcribe_audio_with_fallback,
 )
-from app.services.chatflow_service import get_instance_id
 from app.services.capabilities_runtime import build_runtime_capabilities, set_runtime_capabilities
+from app.services.chatflow_service import get_instance_id
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.demo_salon_knowledge import (
     DemoSalonDecision,

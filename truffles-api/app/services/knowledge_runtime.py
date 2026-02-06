@@ -1,11 +1,10 @@
 from __future__ import annotations
 
+import os
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
-
-import os
 
 from app.services.knowledge_registry_service import get_current_published
 from app.services.pack_compiler_service import extract_compiled_artifacts
