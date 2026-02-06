@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+import os
 import re
 import secrets
 from datetime import date as dt_date
@@ -20,6 +23,7 @@ from app.models import (
     Branch,
     Client,
     ClientCapability,
+    ClientOnboardingContract,
     ClientSettings,
     Company,
     Conversation,
@@ -28,6 +32,7 @@ from app.models import (
     LearnedResponse,
     Message,
     OutboxMessage,
+    ReferencePack,
     User,
 )
 from app.models import (
@@ -93,6 +98,12 @@ from app.schemas.console import (
     ConsoleMessageListResponse,
     ConsoleMetricsDailyResponse,
     ConsoleOnboardingAdvanceRequest,
+    ConsoleOnboardingAutopilotIntake,
+    ConsoleOnboardingAutopilotRequest,
+    ConsoleOnboardingAutopilotResponse,
+    ConsoleOnboardingContractPatchRequest,
+    ConsoleOnboardingContractRecord,
+    ConsoleOnboardingContractResponse,
     ConsoleOnboardingStatusResponse,
     ConsoleOnboardingStepStatus,
     ConsoleOutboxCounts,
@@ -100,6 +111,9 @@ from app.schemas.console import (
     ConsoleOutboxListResponse,
     ConsoleOutboxRetryRequest,
     ConsoleOutboxRetryResponse,
+    ConsoleReferencePack,
+    ConsoleReferencePackListResponse,
+    ConsoleReferencePackUpsertRequest,
     ConsoleSettingsResponse,
     ConsoleSettingsUpdateRequest,
     ConsoleSettingsUpdateResponse,
@@ -111,10 +125,12 @@ from app.schemas.console import (
     ConsoleTelegramTrail,
     ConsoleTelegramVerifyRequest,
     ConsoleTelegramVerifyResponse,
+    ConsoleWebhookSecretResponse,
 )
 from app.schemas.console import (
     ConsoleMacro as ConsoleMacroSchema,
 )
+from app.schemas.onboarding_contract import ONBOARDING_CONTRACT_SCHEMA_VERSION, OnboardingContractPayload
 from app.schemas.outbox_payload import validate_outbox_payload
 from app.services.agent_link_service import build_telegram_deep_link, create_agent_link_token
 from app.services.audit_service import record_audit_event
@@ -149,12 +165,20 @@ from app.services.manager_message_service import (
     notify_client_manager_status,
     process_console_media_upload,
 )
+from app.services.onboarding_contract_service import (
+    find_capability_mismatches,
+    merge_onboarding_contract,
+    onboarding_contract_payload_to_dict,
+)
 from app.services.onboarding_state import (
     OnboardingStep,
     advance_onboarding_step,
+    build_onboarding_inputs,
     build_onboarding_status,
     ensure_onboarding_step,
+    missing_prerequisites,
 )
+from app.services.onboarding_intake_service import build_intake_payload, evaluate_intake_payload
 from app.services.pack_compiler_service import (
     PackCompilerError,
     build_compiled_pack_meta,
@@ -4788,13 +4812,26 @@ async def create_branch(
         updated_at=now,
     )
     db.add(branch)
+    webhook_secret_changed = False
+    if instance_id:
+        _secret, _url, webhook_secret_changed = _ensure_client_webhook_secret_from_instance(
+            db,
+            client=client,
+            branch=branch,
+            instance_id=instance_id,
+        )
     record_audit_event(
         db,
         actor=context.agent,
         event_type="branch_created",
         entity_type="branch",
         entity_id=branch.id,
-        payload={"slug": slug, "name": name, "is_active": is_active},
+        payload={
+            "slug": slug,
+            "name": name,
+            "is_active": is_active,
+            "webhook_secret_generated": webhook_secret_changed,
+        },
         client_id=client.id,
         branch_id=branch.id,
     )
@@ -4828,6 +4865,7 @@ async def update_branch(
 
     confirmation = None
     previous_instance_id = branch.instance_id
+    webhook_secret_changed = False
 
     fields_set = body.model_fields_set
     if "instance_id" in fields_set:
@@ -4936,7 +4974,17 @@ async def update_branch(
         branch.is_active = is_active
         updated_fields.append("is_active")
 
-    if updated_fields:
+    if instance_id and "instance_id" in fields_set:
+        client_record = db.query(Client).filter(Client.id == branch.client_id).first()
+        if client_record:
+            _secret, _url, webhook_secret_changed = _ensure_client_webhook_secret_from_instance(
+                db,
+                client=client_record,
+                branch=branch,
+                instance_id=instance_id,
+            )
+
+    if updated_fields or webhook_secret_changed:
         branch.updated_at = datetime.now(timezone.utc)
         record_audit_event(
             db,
@@ -4944,7 +4992,10 @@ async def update_branch(
             event_type="branch_updated",
             entity_type="branch",
             entity_id=branch.id,
-            payload={"updated_fields": updated_fields},
+            payload={
+                "updated_fields": updated_fields,
+                "webhook_secret_generated": webhook_secret_changed,
+            },
             client_id=branch.client_id,
             branch_id=branch.id,
         )
@@ -5261,3 +5312,992 @@ async def patch_capabilities(
     db.commit()
 
     return _serialize_capabilities_record(record)
+
+
+def _get_latest_onboarding_contract(
+    db: Session,
+    *,
+    client_id: UUID,
+    scope: str,
+    branch_id: Optional[UUID],
+) -> Optional[ClientOnboardingContract]:
+    query = db.query(ClientOnboardingContract).filter(
+        ClientOnboardingContract.client_id == client_id,
+        ClientOnboardingContract.scope == scope,
+    )
+    if branch_id:
+        query = query.filter(ClientOnboardingContract.branch_id == branch_id)
+    else:
+        query = query.filter(ClientOnboardingContract.branch_id.is_(None))
+    return query.order_by(
+        ClientOnboardingContract.updated_at.desc(),
+        ClientOnboardingContract.created_at.desc(),
+    ).first()
+
+
+def _serialize_onboarding_contract_record(
+    record: ClientOnboardingContract,
+) -> ConsoleOnboardingContractRecord:
+    try:
+        payload = OnboardingContractPayload.model_validate(record.payload_json or {})
+    except ValidationError as exc:
+        raise ConsoleAPIError(
+            500,
+            "ONBOARDING_CONTRACT_INVALID",
+            "Stored onboarding contract payload is invalid",
+        ) from exc
+    return ConsoleOnboardingContractRecord(
+        id=record.id,
+        client_id=record.client_id,
+        branch_id=record.branch_id,
+        scope=record.scope,
+        status=record.status,
+        schema_version=record.schema_version,
+        payment_status=record.payment_status,
+        payment_confirmed_at=record.payment_confirmed_at.isoformat()
+        if record.payment_confirmed_at
+        else None,
+        payment_confirmed_by=record.payment_confirmed_by,
+        payload=payload,
+        created_by=record.created_by,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
+def _resolve_onboarding_payment_source(
+    *,
+    client_record: Optional[ClientOnboardingContract],
+    branch_record: Optional[ClientOnboardingContract],
+) -> Optional[ClientOnboardingContract]:
+    if branch_record and branch_record.status == "active":
+        return branch_record
+    if client_record and client_record.status == "active":
+        return client_record
+    return None
+
+
+def _serialize_reference_pack(record: ReferencePack) -> ConsoleReferencePack:
+    return ConsoleReferencePack(
+        id=record.id,
+        domain_slug=record.domain_slug,
+        title=record.title,
+        description=record.description,
+        schema_version=record.schema_version,
+        status=record.status,
+        metadata=record.metadata_json or {},
+        created_by=record.created_by,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        updated_at=record.updated_at.isoformat() if record.updated_at else None,
+    )
+
+
+_AUTOPILOT_DEFAULT_TIMEZONE = "Asia/Almaty"
+_WEBHOOK_SECRET_PREFIX = "whs_v1_"
+
+
+def _get_webhook_secret_salt() -> str:
+    return (
+        os.environ.get("WEBHOOK_SECRET_PEPPER")
+        or os.environ.get("SECRET_KEY")
+        or "truffles-webhook-secret-v1"
+    )
+
+
+def _derive_webhook_secret_from_instance(instance_id: str) -> str:
+    normalized_instance = _normalize_required_text(instance_id, "instance_id")
+    digest = hmac.new(
+        _get_webhook_secret_salt().encode("utf-8"),
+        normalized_instance.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{_WEBHOOK_SECRET_PREFIX}{digest[:40]}"
+
+
+def _build_webhook_url(*, client_slug: str, webhook_secret: str) -> str:
+    base_url = (
+        os.environ.get("WEBHOOK_PUBLIC_BASE_URL")
+        or os.environ.get("PUBLIC_API_BASE_URL")
+        or "https://api.truffles.kz"
+    ).rstrip("/")
+    normalized_client_slug = _normalize_slug(client_slug, "client_slug")
+    return f"{base_url}/webhook/{normalized_client_slug}?webhook_secret={webhook_secret}"
+
+
+def _ensure_client_webhook_secret_from_instance(
+    db: Session,
+    *,
+    client: Client,
+    branch: Branch,
+    instance_id: str,
+) -> tuple[str, str, bool]:
+    secret = _derive_webhook_secret_from_instance(instance_id)
+    changed = (branch.webhook_secret or "").strip() != secret
+    branch.webhook_secret = secret
+    webhook_url = _build_webhook_url(client_slug=client.name, webhook_secret=secret)
+    return secret, webhook_url, changed
+
+
+def _slugify_seed(value: Optional[str], *, fallback_prefix: str, fallback_suffix: str) -> str:
+    if isinstance(value, str):
+        candidate = re.sub(r"[^a-z0-9_-]+", "-", value.strip().lower())
+        candidate = re.sub(r"-{2,}", "-", candidate).strip("-_")
+    else:
+        candidate = ""
+    if not candidate:
+        suffix = re.sub(r"\D+", "", fallback_suffix)
+        suffix = suffix[-6:] if suffix else ""
+        candidate = f"{fallback_prefix}-{suffix}" if suffix else fallback_prefix
+    return _normalize_slug(candidate, fallback_prefix)
+
+
+def _next_available_branch_slug(
+    db: Session,
+    *,
+    client_id: UUID,
+    preferred_slug: str,
+    exclude_branch_id: Optional[UUID] = None,
+) -> str:
+    slug = preferred_slug
+    suffix = 2
+    while True:
+        query = db.query(Branch).filter(Branch.client_id == client_id, Branch.slug == slug)
+        if exclude_branch_id:
+            query = query.filter(Branch.id != exclude_branch_id)
+        if not query.first():
+            return slug
+        slug = f"{preferred_slug}-{suffix}"
+        suffix += 1
+
+
+def _build_capabilities_from_purchased_services(
+    *,
+    purchased_services: Optional[list[str]],
+    purchased_payload: Optional[CapabilitiesPayload],
+    domain_slug: Optional[str],
+) -> CapabilitiesPayload:
+    services = set(purchased_services or [])
+    base = CapabilitiesPayload()
+
+    if "whatsapp" in services:
+        base.channels.whatsapp = True
+    if "telegram" in services:
+        base.channels.telegram = True
+    if "instagram" in services:
+        base.channels.instagram = True
+
+    if "booking_collect" in services:
+        base.features.booking_mode = "collect_preferences"
+    if "booking_confirm" in services:
+        base.features.booking_mode = "confirm_slots"
+
+    if "knowledge_upload" in services:
+        base.features.knowledge_upload = True
+    if "analytics" in services:
+        base.features.analytics = True
+    if "auto_learn" in services:
+        base.features.auto_learn = True
+
+    provider_map = {
+        "provider_google_calendar": "google_calendar",
+        "provider_local_calendar": "local",
+        "provider_manual": "manual",
+    }
+    for key, provider in provider_map.items():
+        if key in services:
+            base.providers.calendar_provider = provider
+            if provider == "manual":
+                base.providers.availability_provider = "manual"
+
+    if "provider_amocrm" in services:
+        base.providers.crm_provider = "amocrm"
+    if "provider_bitrix" in services:
+        base.providers.crm_provider = "bitrix"
+
+    if domain_slug:
+        base.domain_slug = domain_slug
+
+    merged = merge_capabilities(
+        payload_to_dict(base),
+        payload_to_dict(purchased_payload) if purchased_payload else None,
+    )
+    result = CapabilitiesPayload.model_validate(merged)
+    if domain_slug:
+        result.domain_slug = domain_slug
+    return result
+
+
+def _build_client_schema(client: Client, company: Optional[Company]) -> ConsoleClient:
+    return ConsoleClient(
+        id=client.id,
+        slug=client.name,
+        name=client.name,
+        status=client.status,
+        company_id=client.company_id,
+        company_name=company.name if company else None,
+    )
+
+
+@router.get(
+    "/admin/onboarding-contract",
+    response_model=ConsoleOnboardingContractResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def get_onboarding_contract(
+    request: Request,
+    branch_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleOnboardingContractResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin/support can access provisioning",
+    )
+
+    if branch_id:
+        branch = (
+            db.query(Branch)
+            .filter(Branch.id == branch_id, Branch.client_id == context.client.id)
+            .first()
+        )
+        if not branch:
+            raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Access to this branch denied")
+
+    client_record = _get_latest_onboarding_contract(
+        db,
+        client_id=context.client.id,
+        scope="client",
+        branch_id=None,
+    )
+    branch_record = None
+    if branch_id:
+        branch_record = _get_latest_onboarding_contract(
+            db,
+            client_id=context.client.id,
+            scope="branch",
+            branch_id=branch_id,
+        )
+
+    client_payload = (
+        client_record.payload_json
+        if client_record and client_record.status == "active"
+        else None
+    )
+    branch_payload = (
+        branch_record.payload_json
+        if branch_record and branch_record.status == "active"
+        else None
+    )
+    effective_payload = OnboardingContractPayload.model_validate(
+        merge_onboarding_contract(client_payload, branch_payload)
+    )
+
+    client_capability_record = _get_latest_capability(
+        db,
+        client_id=context.client.id,
+        scope="client",
+        branch_id=None,
+    )
+    branch_capability_record = None
+    if branch_id:
+        branch_capability_record = _get_latest_capability(
+            db,
+            client_id=context.client.id,
+            scope="branch",
+            branch_id=branch_id,
+        )
+    client_capability_payload = (
+        client_capability_record.payload_json
+        if client_capability_record and client_capability_record.status == "active"
+        else None
+    )
+    branch_capability_payload = (
+        branch_capability_record.payload_json
+        if branch_capability_record and branch_capability_record.status == "active"
+        else None
+    )
+    effective_capabilities = CapabilitiesPayload.model_validate(
+        merge_capabilities(client_capability_payload, branch_capability_payload)
+    )
+    capability_mismatches = []
+    if client_capability_payload or branch_capability_payload:
+        capability_mismatches = find_capability_mismatches(
+            purchased=effective_payload.purchased,
+            effective=effective_capabilities,
+        )
+
+    payment_source = _resolve_onboarding_payment_source(
+        client_record=client_record,
+        branch_record=branch_record,
+    )
+    payment_status = payment_source.payment_status if payment_source else "pending"
+    payment_confirmed_at = payment_source.payment_confirmed_at if payment_source else None
+    payment_confirmed_by = payment_source.payment_confirmed_by if payment_source else None
+
+    return ConsoleOnboardingContractResponse(
+        client_id=context.client.id,
+        branch_id=branch_id,
+        effective=effective_payload,
+        payment_status=payment_status,
+        payment_confirmed_at=payment_confirmed_at.isoformat() if payment_confirmed_at else None,
+        payment_confirmed_by=payment_confirmed_by,
+        capability_mismatches=capability_mismatches,
+        client_contract=_serialize_onboarding_contract_record(client_record) if client_record else None,
+        branch_contract=_serialize_onboarding_contract_record(branch_record) if branch_record else None,
+    )
+
+
+@router.patch(
+    "/admin/onboarding-contract",
+    response_model=ConsoleOnboardingContractRecord,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def patch_onboarding_contract(
+    request: Request,
+    body: ConsoleOnboardingContractPatchRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleOnboardingContractRecord:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage onboarding contract",
+    )
+    if body.payment_status is not None and context.role != "platform_admin":
+        raise ConsoleAPIError(
+            403,
+            "ACCESS_DENIED",
+            "Only platform admin can update payment status",
+        )
+
+    schema_version = body.schema_version or ONBOARDING_CONTRACT_SCHEMA_VERSION
+    if schema_version != ONBOARDING_CONTRACT_SCHEMA_VERSION:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported schema_version")
+
+    if body.scope == "branch":
+        if not body.branch_id:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id required for branch scope")
+        branch = (
+            db.query(Branch)
+            .filter(Branch.id == body.branch_id, Branch.client_id == context.client.id)
+            .first()
+        )
+        if not branch:
+            raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Access to this branch denied")
+    elif body.branch_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id is only valid for branch scope")
+
+    record = _get_latest_onboarding_contract(
+        db,
+        client_id=context.client.id,
+        scope=body.scope,
+        branch_id=body.branch_id,
+    )
+    payload_dict = onboarding_contract_payload_to_dict(body.payload)
+    status_value = body.status or (record.status if record else "active")
+
+    now = datetime.now(timezone.utc)
+    if record:
+        record.payload_json = payload_dict
+        record.schema_version = schema_version
+        record.status = status_value
+    else:
+        record = ClientOnboardingContract(
+            client_id=context.client.id,
+            branch_id=body.branch_id,
+            scope=body.scope,
+            payload_json=payload_dict,
+            schema_version=schema_version,
+            status=status_value,
+            created_by=context.agent.id,
+        )
+        db.add(record)
+
+    if body.payment_status is not None:
+        record.payment_status = body.payment_status
+        if body.payment_status == "confirmed":
+            record.payment_confirmed_at = now
+            record.payment_confirmed_by = context.agent.id
+        else:
+            record.payment_confirmed_at = None
+            record.payment_confirmed_by = None
+    elif not record.payment_status:
+        record.payment_status = "pending"
+        record.payment_confirmed_at = None
+        record.payment_confirmed_by = None
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="onboarding_contract_updated",
+        entity_type="client_onboarding_contract",
+        entity_id=record.id,
+        branch_id=record.branch_id,
+        payload={
+            "scope": record.scope,
+            "client_id": str(context.client.id),
+            "branch_id": str(record.branch_id) if record.branch_id else None,
+            "schema_version": record.schema_version,
+            "status": record.status,
+            "payment_status": record.payment_status,
+        },
+    )
+    db.commit()
+    return _serialize_onboarding_contract_record(record)
+
+
+@router.get(
+    "/admin/webhook-secret",
+    response_model=ConsoleWebhookSecretResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def get_webhook_secret(
+    request: Request,
+    branch_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleWebhookSecretResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin/support can access provisioning",
+    )
+
+    branch = _resolve_branch_for_onboarding(context, branch_id=branch_id)
+    if not branch.instance_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "instance_id is required before webhook secret generation")
+
+    client = db.query(Client).filter(Client.id == branch.client_id).first()
+    if not client:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+
+    webhook_secret, webhook_url, changed = _ensure_client_webhook_secret_from_instance(
+        db,
+        client=client,
+        branch=branch,
+        instance_id=branch.instance_id,
+    )
+    if changed:
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="webhook_secret_generated",
+            entity_type="branch",
+            entity_id=branch.id,
+            payload={
+                "client_id": str(client.id),
+                "branch_id": str(branch.id),
+                "instance_id": branch.instance_id,
+            },
+            client_id=client.id,
+            branch_id=branch.id,
+        )
+        db.commit()
+
+    return ConsoleWebhookSecretResponse(
+        client_id=client.id,
+        branch_id=branch.id,
+        instance_id=branch.instance_id,
+        webhook_secret=webhook_secret,
+        webhook_url=webhook_url,
+    )
+
+
+@router.post(
+    "/admin/onboarding/autopilot",
+    response_model=ConsoleOnboardingAutopilotResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def run_onboarding_autopilot(
+    request: Request,
+    body: ConsoleOnboardingAutopilotRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleOnboardingAutopilotResponse:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can run onboarding autopilot",
+    )
+
+    now = datetime.now(timezone.utc)
+    actions: list[str] = []
+
+    phone = _normalize_required_text(body.phone, "phone")
+    instance_id = _normalize_required_text(body.instance_id, "instance_id")
+    requested_payment_status = body.payment_status or "pending"
+    if context.role != "platform_admin":
+        requested_payment_status = "pending"
+
+    company: Optional[Company] = None
+    if body.company_id:
+        company = db.query(Company).filter(Company.id == body.company_id).first()
+        if not company:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
+    else:
+        company_name = _normalize_optional_text(body.company_name)
+        if company_name:
+            company = db.query(Company).filter(func.lower(Company.name) == company_name.lower()).first()
+            if not company:
+                company = Company(
+                    id=uuid4(),
+                    name=company_name,
+                    billing_info={},
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(company)
+                db.flush()
+                actions.append("company_created")
+        elif context.client and context.client.company_id:
+            company = db.query(Company).filter(Company.id == context.client.company_id).first()
+
+    if not company:
+        default_company_name = _normalize_optional_text(body.company_name) or f"Company {phone[-4:]}"
+        company = db.query(Company).filter(func.lower(Company.name) == default_company_name.lower()).first()
+        if not company:
+            company = Company(
+                id=uuid4(),
+                name=default_company_name,
+                billing_info={},
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(company)
+            db.flush()
+            actions.append("company_created")
+
+    client: Optional[Client] = None
+    if body.client_id:
+        client = db.query(Client).filter(Client.id == body.client_id).first()
+        if not client:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+    else:
+        slug_seed = _normalize_optional_text(body.client_slug) or _normalize_optional_text(body.company_name)
+        client_slug = _slugify_seed(slug_seed, fallback_prefix="client", fallback_suffix=phone)
+        client = db.query(Client).filter(func.lower(Client.name) == client_slug.lower()).first()
+        if not client:
+            client = Client(
+                id=uuid4(),
+                name=client_slug,
+                status="active",
+                config={},
+                created_at=now,
+                updated_at=now,
+                company_id=company.id if company else None,
+            )
+            db.add(client)
+            db.flush()
+            actions.append("client_created")
+
+    if not client:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unable to resolve client")
+
+    if company and client.company_id != company.id:
+        client.company_id = company.id
+        client.updated_at = now
+        actions.append("client_company_updated")
+
+    existing_phone_branch = db.query(Branch).filter(Branch.phone == phone).first()
+    if existing_phone_branch and (not body.branch_id or existing_phone_branch.id != body.branch_id):
+        raise ConsoleAPIError(400, "INVALID_PARAM", "phone already linked to another branch")
+    existing_instance_branch = db.query(Branch).filter(Branch.instance_id == instance_id).first()
+    if existing_instance_branch and (not body.branch_id or existing_instance_branch.id != body.branch_id):
+        raise ConsoleAPIError(400, "INVALID_PARAM", "instance_id already linked to another branch")
+
+    branch: Optional[Branch] = None
+    if body.branch_id:
+        branch = db.query(Branch).filter(Branch.id == body.branch_id).first()
+        if not branch:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+        if branch.client_id != client.id:
+            raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Branch belongs to another client")
+    else:
+        if existing_phone_branch and existing_phone_branch.client_id == client.id:
+            branch = existing_phone_branch
+            actions.append("branch_matched_by_phone")
+        elif existing_instance_branch and existing_instance_branch.client_id == client.id:
+            branch = existing_instance_branch
+            actions.append("branch_matched_by_instance")
+
+    if not branch:
+        slug_seed = _normalize_optional_text(body.branch_slug) or _normalize_optional_text(body.branch_name) or client.name
+        preferred_slug = _slugify_seed(slug_seed, fallback_prefix="branch", fallback_suffix=phone)
+        branch_slug = _next_available_branch_slug(db, client_id=client.id, preferred_slug=preferred_slug)
+        branch_name = _normalize_optional_text(body.branch_name) or branch_slug.replace("-", " ").title()
+        branch = Branch(
+            id=uuid4(),
+            client_id=client.id,
+            slug=branch_slug,
+            name=branch_name,
+            instance_id=instance_id,
+            phone=phone,
+            timezone=_normalize_optional_text(body.timezone) or _AUTOPILOT_DEFAULT_TIMEZONE,
+            working_hours={},
+            booking_settings={},
+            is_active=bool(body.activate_branch if body.activate_branch is not None else True),
+            onboarding_state=OnboardingStep.BRANCH_DRAFT.value,
+            onboarding_updated_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(branch)
+        db.flush()
+        actions.append("branch_created")
+    else:
+        branch_slug = (
+            _slugify_seed(body.branch_slug, fallback_prefix="branch", fallback_suffix=phone)
+            if _normalize_optional_text(body.branch_slug)
+            else branch.slug
+        )
+        branch.slug = _next_available_branch_slug(
+            db,
+            client_id=client.id,
+            preferred_slug=branch_slug,
+            exclude_branch_id=branch.id,
+        )
+        branch_name = _normalize_optional_text(body.branch_name)
+        if branch_name:
+            branch.name = branch_name
+        branch.phone = phone
+        branch.instance_id = instance_id
+        branch.timezone = _normalize_optional_text(body.timezone) or branch.timezone or _AUTOPILOT_DEFAULT_TIMEZONE
+        if body.activate_branch is not None:
+            branch.is_active = body.activate_branch
+        if not branch.onboarding_state:
+            branch.onboarding_state = OnboardingStep.BRANCH_DRAFT.value
+            branch.onboarding_updated_at = now
+        branch.updated_at = now
+        actions.append("branch_updated")
+
+    if branch.is_active and not branch.instance_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "instance_id required to activate branch")
+
+    if not branch.knowledge_tag:
+        knowledge_seed = _normalize_optional_text(body.client_slug) or client.name
+        branch.knowledge_tag = _slugify_seed(knowledge_seed, fallback_prefix="knowledge", fallback_suffix=phone)
+        actions.append("knowledge_tag_generated")
+
+    webhook_secret, webhook_url, webhook_secret_changed = _ensure_client_webhook_secret_from_instance(
+        db,
+        client=client,
+        branch=branch,
+        instance_id=instance_id,
+    )
+    if webhook_secret_changed:
+        actions.append("webhook_secret_generated")
+
+    domain_slug = _normalize_optional_text(body.domain_slug)
+    purchased_capabilities = _build_capabilities_from_purchased_services(
+        purchased_services=body.purchased_services,
+        purchased_payload=body.purchased,
+        domain_slug=domain_slug,
+    )
+    if not purchased_capabilities.domain_slug and domain_slug:
+        purchased_capabilities.domain_slug = domain_slug
+
+    capability_record = _get_latest_capability(
+        db,
+        client_id=client.id,
+        scope="branch",
+        branch_id=branch.id,
+    )
+    if capability_record:
+        capability_record.payload_json = payload_to_dict(purchased_capabilities)
+        capability_record.schema_version = CAPABILITIES_SCHEMA_VERSION
+        capability_record.status = "active"
+    else:
+        capability_record = ClientCapability(
+            client_id=client.id,
+            branch_id=branch.id,
+            scope="branch",
+            payload_json=payload_to_dict(purchased_capabilities),
+            schema_version=CAPABILITIES_SCHEMA_VERSION,
+            status="active",
+            created_by=context.agent.id,
+        )
+        db.add(capability_record)
+    actions.append("capabilities_upserted")
+
+    contract_payload = OnboardingContractPayload.model_validate(
+        {
+            "domain_slug": domain_slug or purchased_capabilities.domain_slug,
+            "purchased": payload_to_dict(purchased_capabilities),
+        }
+    )
+    contract_record = _get_latest_onboarding_contract(
+        db,
+        client_id=client.id,
+        scope="branch",
+        branch_id=branch.id,
+    )
+    if contract_record:
+        contract_record.payload_json = onboarding_contract_payload_to_dict(contract_payload)
+        contract_record.schema_version = ONBOARDING_CONTRACT_SCHEMA_VERSION
+        contract_record.status = "active"
+    else:
+        contract_record = ClientOnboardingContract(
+            client_id=client.id,
+            branch_id=branch.id,
+            scope="branch",
+            payload_json=onboarding_contract_payload_to_dict(contract_payload),
+            schema_version=ONBOARDING_CONTRACT_SCHEMA_VERSION,
+            status="active",
+            created_by=context.agent.id,
+        )
+        db.add(contract_record)
+    contract_record.payment_status = requested_payment_status
+    if requested_payment_status == "confirmed":
+        contract_record.payment_confirmed_at = now
+        contract_record.payment_confirmed_by = context.agent.id
+    else:
+        contract_record.payment_confirmed_at = None
+        contract_record.payment_confirmed_by = None
+    actions.append("onboarding_contract_upserted")
+
+    reference_pack: Optional[ReferencePack] = None
+    effective_domain_slug = contract_payload.domain_slug or purchased_capabilities.domain_slug
+    if effective_domain_slug:
+        reference_pack = (
+            db.query(ReferencePack)
+            .filter(ReferencePack.domain_slug == effective_domain_slug)
+            .first()
+        )
+        if (
+            not reference_pack
+            and body.auto_create_reference_pack
+            and context.role == "platform_admin"
+        ):
+            reference_pack = ReferencePack(
+                domain_slug=effective_domain_slug,
+                title=f"Reference pack: {effective_domain_slug}",
+                description="Auto-created by onboarding autopilot",
+                schema_version="v1",
+                status="active",
+                metadata_json={"source": "onboarding_autopilot"},
+                created_by=context.agent.id,
+            )
+            db.add(reference_pack)
+            db.flush()
+            actions.append("reference_pack_created")
+
+    intake_payload = build_intake_payload(
+        client_data_json=body.client_data_json or {},
+        client_data_text=body.client_data_text,
+    )
+    if isinstance(intake_payload.get("client_pack"), dict):
+        salon = intake_payload["client_pack"].setdefault("salon", {})
+        if isinstance(salon, dict) and not salon.get("name"):
+            salon["name"] = branch.name
+        communication = salon.setdefault("communication", {}) if isinstance(salon, dict) else {}
+        languages = communication.get("languages") if isinstance(communication, dict) else None
+        if not isinstance(languages, list):
+            communication["languages"] = []
+        if not salon.get("city"):
+            salon["city"] = ""
+        address = salon.setdefault("address", {}) if isinstance(salon, dict) else {}
+        if isinstance(address, dict) and "full" not in address:
+            address["full"] = ""
+
+    draft_version = upsert_draft(
+        db,
+        branch_id=branch.id,
+        client_id=client.id,
+        payload_json=intake_payload,
+        actor_id=context.agent.id,
+    )
+    missing_fields, missing_questions = evaluate_intake_payload(intake_payload)
+    actions.append("knowledge_draft_saved")
+
+    published = False
+    published_version_id: Optional[UUID] = None
+    if body.auto_publish_knowledge and not missing_fields:
+        try:
+            published_version = publish_version(
+                db,
+                branch=branch,
+                payload_json=intake_payload,
+                actor_id=context.agent.id,
+                source_version_id=draft_version.id if draft_version else None,
+            )
+            sync_qdrant_from_pack(
+                client_id=client.id,
+                branch_id=branch.id,
+                payload_json=published_version.payload_json,
+                knowledge_tag=branch.knowledge_tag,
+            )
+            compiled = extract_compiled_artifacts(
+                published_version.payload_json,
+                compile_if_missing=False,
+            )
+            pack_index = compiled.get("pack_index") if isinstance(compiled, dict) else None
+            if isinstance(pack_index, dict):
+                compiled_at = parse_compiled_at(compiled.get("compiled_at")) or published_version.published_at or now
+                apply_pack_index_to_client_config(
+                    client,
+                    pack_index=pack_index,
+                    version_id=published_version.id,
+                    compiled_at=compiled_at,
+                    source="onboarding_autopilot",
+                    compiled_meta=build_compiled_pack_meta(
+                        compiled,
+                        version_id=published_version.id,
+                        compiled_at=compiled_at,
+                        source="onboarding_autopilot",
+                    ),
+                )
+            published = True
+            published_version_id = published_version.id
+            missing_fields, missing_questions = evaluate_intake_payload(published_version.payload_json)
+            actions.append("knowledge_published")
+        except Exception:
+            actions.append("knowledge_publish_failed")
+
+    inputs = build_onboarding_inputs(db, branch)
+    go_no_go_missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
+    onboarding_status = build_onboarding_status(db, branch)
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="onboarding_autopilot_run",
+        entity_type="branch",
+        entity_id=branch.id,
+        payload={
+            "company_id": str(company.id) if company else None,
+            "client_id": str(client.id),
+            "branch_id": str(branch.id),
+            "actions": actions,
+            "missing_count": len(missing_fields),
+            "go_no_go_missing_count": len(go_no_go_missing),
+        },
+        client_id=client.id,
+        branch_id=branch.id,
+    )
+    db.commit()
+
+    return ConsoleOnboardingAutopilotResponse(
+        company=ConsoleCompany(
+            id=company.id,
+            name=company.name,
+            billing_info=company.billing_info,
+        ),
+        client=_build_client_schema(client, company),
+        branch=_serialize_branch(branch),
+        capabilities=_serialize_capabilities_record(capability_record),
+        onboarding_contract=_serialize_onboarding_contract_record(contract_record),
+        payment_status=contract_record.payment_status,
+        webhook_secret=webhook_secret,
+        webhook_url=webhook_url,
+        reference_pack=_serialize_reference_pack(reference_pack) if reference_pack else None,
+        onboarding_status=_serialize_onboarding_status(branch, onboarding_status),
+        go_no_go_missing=go_no_go_missing,
+        intake=ConsoleOnboardingAutopilotIntake(
+            knowledge_tag=branch.knowledge_tag or "",
+            draft_saved=True,
+            published=published,
+            published_version_id=published_version_id,
+            missing_fields=missing_fields,
+            missing_questions=missing_questions,
+            payload=intake_payload,
+        ),
+        actions=actions,
+    )
+
+
+@router.get(
+    "/admin/reference-packs",
+    response_model=ConsoleReferencePackListResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def list_reference_packs(
+    request: Request,
+    domain_slug: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleReferencePackListResponse:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin/support can access provisioning",
+    )
+
+    query = db.query(ReferencePack)
+    if domain_slug:
+        normalized_domain_slug = _normalize_slug(domain_slug, "domain_slug")
+        query = query.filter(ReferencePack.domain_slug == normalized_domain_slug)
+
+    items = query.order_by(ReferencePack.domain_slug.asc()).all()
+    return ConsoleReferencePackListResponse(items=[_serialize_reference_pack(item) for item in items])
+
+
+@router.put(
+    "/admin/reference-packs/{domain_slug}",
+    response_model=ConsoleReferencePack,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def upsert_reference_pack(
+    domain_slug: str,
+    body: ConsoleReferencePackUpsertRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleReferencePack:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage reference packs",
+    )
+    if context.role != "platform_admin":
+        raise ConsoleAPIError(
+            403,
+            "ACCESS_DENIED",
+            "Only platform admin can manage reference packs",
+        )
+
+    normalized_domain_slug = _normalize_slug(domain_slug, "domain_slug")
+    title = _normalize_required_text(body.title, "title")
+    schema_version = body.schema_version or "v1"
+    status_value = body.status or "active"
+    metadata_json = body.metadata or {}
+
+    record = db.query(ReferencePack).filter(ReferencePack.domain_slug == normalized_domain_slug).first()
+    if record:
+        record.title = title
+        record.description = _normalize_optional_text(body.description)
+        record.schema_version = schema_version
+        record.status = status_value
+        record.metadata_json = metadata_json
+    else:
+        record = ReferencePack(
+            domain_slug=normalized_domain_slug,
+            title=title,
+            description=_normalize_optional_text(body.description),
+            schema_version=schema_version,
+            status=status_value,
+            metadata_json=metadata_json,
+            created_by=context.agent.id,
+        )
+        db.add(record)
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="reference_pack_upserted",
+        entity_type="reference_pack",
+        entity_id=record.id,
+        payload={
+            "domain_slug": normalized_domain_slug,
+            "status": record.status,
+            "schema_version": record.schema_version,
+        },
+    )
+    db.commit()
+    return _serialize_reference_pack(record)

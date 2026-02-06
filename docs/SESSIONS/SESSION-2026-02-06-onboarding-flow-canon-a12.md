@@ -1,6 +1,6 @@
 # SESSION 2026-02-06-onboarding-flow-canon-a12 — Session 2026-02-06-onboarding-flow-canon-a12
 
-- status: done
+- status: active
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-05-onboarding-billing-support-audit.md
 - branch: feat/2026-02-06-onboarding-flow-canon-a12
@@ -9,10 +9,11 @@
 - scope: Canonize onboarding contract from signed documents to support, including 0..8 flow, hard Go-Live gate, and account-entity linkage.
 - done:
   - Session created.
-  - Updated `docs/PROCESSES.md` sections 2.4-2.6 with step-by-step onboarding contract (0..8).
+  - Updated `docs/PROCESSES.md` sections 2.4-2.7 with step-by-step onboarding contract (0..8), runbook, and implementation notes.
   - Added explicit full-launch gate (data 100% + payment + WA + calendar) and no safe-mode launch rule.
   - Added runtime account entities mapping (OIDC staff, specialists, inbound users, company/client/branch provisioning).
-  - Added operational runbook section 2.7 with executable onboarding steps, stop conditions, and account-creation linkage table.
+  - Added operational runbook section 2.7 with executable onboarding steps, stop conditions, account-creation linkage table, and current automation boundaries.
+  - Added Control Plane onboarding implementation in API/UI (autopilot, onboarding contract, reference packs, webhook secret, wizard field contracts, Go/No-Go guards).
 - next:
   - Keep `docs/PROCESSES.md` in sync with future Console API changes.
 - evidence:

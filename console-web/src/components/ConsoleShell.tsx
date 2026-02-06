@@ -876,15 +876,20 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                 </div>
                             )}
                             {!isLoading && !error && data && showGate && (
-                                <div className="flex min-h-[320px] items-center justify-center">
-                                    <SelectionGate
-                                        me={data}
-                                        clients={visibleClients}
-                                        onConfirmCompany={handleSelectCompany}
-                                        onConfirmClient={handleSelectClient}
-                                        onConfirmBranch={handleSelectBranch}
-                                        isSubmitting={isSubmitting || isFetching}
-                                    />
+                                <div
+                                    className="fixed inset-0 z-[10000] flex items-center justify-center bg-background/80 p-6 backdrop-blur-sm"
+                                    data-testid="selection-gate-overlay"
+                                >
+                                    <div className="pointer-events-auto max-w-xl w-full">
+                                        <SelectionGate
+                                            me={data}
+                                            clients={visibleClients}
+                                            onConfirmCompany={handleSelectCompany}
+                                            onConfirmClient={handleSelectClient}
+                                            onConfirmBranch={handleSelectBranch}
+                                            isSubmitting={isSubmitting || isFetching}
+                                        />
+                                    </div>
                                 </div>
                             )}
                             {!isLoading && !error && data && !showGate && children}

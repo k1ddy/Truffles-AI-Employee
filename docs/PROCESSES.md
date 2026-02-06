@@ -268,7 +268,7 @@ POST /console/v1/cases/{case_id}/return
 - Company name, client, branch.
 - Phone number.
 - `instanceId` (from ChatFlow).
-- Client-level `webhook_secret` (token).
+- Branch-level `webhook_secret` (token, auto-derived from `instanceId`).
 - Optional: manager contact (`telegram_id` / phone).
 
 **Mandatory branch data (100% required before go-live)**
@@ -286,11 +286,15 @@ POST /console/v1/cases/{case_id}/return
 1. **Intake:** collect client input from file/form and map into canonical niche fields.
 2. **Normalization:** semantic mapping + autofill from context; if fields are missing, launch COLLECT questions until full completion.
 3. **Hard validation (100%):** validate mandatory fields (address/hours/services+prices/durations/policies/disclaimers/RU+KK/contacts). If not 100%, launch is blocked.
-4. **Provisioning (auto path):** create company/client/branch, bind `phone + instance_id + webhook_secret`, enforce uniqueness (`1 phone = 1 branch`, unique `instance_id`).
+4. **Provisioning (auto path):** create company/client/branch, bind `phone + instance_id + branch_webhook_secret`, enforce uniqueness (`1 phone = 1 branch`, unique `instance_id`).
 5. **Owner manual steps (explicit):** configure WhatsApp in ChatFlow and provide `instanceId/token/phone`; fill branch calendar; confirm payment manually.
 6. **Knowledge publish (auto path):** `generate pack -> validate -> publish -> sync`; run test dialog for `FACT/COLLECT/HANDOFF` and verify trace/outbox.
 7. **Go-Live decision:** allow launch only when all four are true: data=100%, payment confirmed, WA configured, calendar filled.
 8. **Support and changes:** every data change goes through the same pipeline (`intake -> normalize -> validate -> publish`); escalations via Telegram/Console.
+
+**Wizard separation (UI)**
+- `Автопроцесс`: single-operator запуск от минимальных входов (`phone`, `instance_id`, `client_data_text`, purchased services).
+- `Ручной по шагам`: детальная настройка; на шаге Integrations для WA обязательны и `phone`, и `instance_id`.
 
 **Blocking rules (hard no-go)**
 - Missing mandatory data (any field from the required set) -> no launch.
@@ -325,7 +329,7 @@ POST /console/v1/cases/{case_id}/return
 - Для ниши есть актуальный reference pack (шаг 0 из раздела 2.4).
 - Созданы company/client/branch; `branches.instance_id` и `phone` заполнены и уникальны (см. раздел 2.4).
 - Обязательные данные branch-pack заполнены и валидированы на 100% (address/hours/services/pricing/durations/policies/disclaimers/ru/kk/contacts) — см. раздел 2.4.
-- `webhook_secret` задан на уровне клиента, webhook URL передан в ChatFlow, inbound проверен внешним номером (см. раздел 2.4).
+- `webhook_secret` задан на уровне филиала (`branches.webhook_secret`), webhook URL передан в ChatFlow для конкретного instance, inbound проверен внешним номером (см. раздел 2.4).
 
 **C. Control Plane и Knowledge**
 - Provisioning/onboarding шаги проходят через консоль и/или API, порядок шагов соблюден (см. `SPECS/CONTROL_PLANE.md`).
@@ -383,7 +387,7 @@ POST /console/v1/cases/{case_id}/return
 - Выход: валидный branch pack без пробелов.
 
 **Этап 4-5 — Provisioning + manual owner actions**
-- Truffles (Owner): создать company/client/branch, связать `phone + instance_id + webhook_secret`, проверить уникальность.
+- Truffles (Owner): создать company/client/branch, связать `phone + instance_id + branch_webhook_secret`, проверить уникальность.
 - Клиент (Owner/Admin): вручную настроить WA в ChatFlow, передать `instanceId/token/phone`, заполнить календарь филиала, подтвердить оплату.
 - Выход: технический контур и коммерческий контур готовы.
 
@@ -491,11 +495,11 @@ POST /console/v1/cases/{case_id}/return
 3) **Configure channel bindings (WA + Telegram + webhook secret)**
 - Branch-level:
   - `PATCH /console/v1/admin/branches/{branch_id}` -> `instance_id`, `phone`, `telegram_chat_id`, timezone.
-- Client-level:
-  - `client_settings.webhook_secret` должен быть установлен.
-  - Текущая реализация: отдельного Console endpoint для `webhook_secret` нет, задаётся через DB/ops-процедуру.
+- Branch-level:
+  - `branches.webhook_secret` должен быть установлен.
+  - Через Console endpoint: `GET /console/v1/admin/webhook-secret?branch_id=...` (секрет генерируется из `instance_id`).
 - ChatFlow:
-  - webhook URL формата `/webhook/{client_slug}?webhook_secret=<secret>&instanceId=<instanceId>`.
+  - webhook URL формата `/webhook/{client_slug}?webhook_secret=<secret>` для конкретного instance (у каждого branch свой secret).
 - Контроль:
   - unknown `instanceId` блокируется в runtime;
   - один phone не может обслуживать несколько branch в strict isolation.
@@ -594,6 +598,27 @@ POST /console/v1/cases/{case_id}/return
 - **Top Architect/Brain:** утверждают канон шагов и DoD.
 - **Hands/OPS:** исполняют runbook, собирают evidence.
 - **Owner (Жанбол):** финальное решение Go/No-Go и коммерческое подтверждение.
+
+#### 2.7.6 What is implemented now and why
+
+**Implemented in Control Plane (fact):**
+- Автопроцесс онбординга принимает минимальный набор (`phone`, `instance_id`, `client_data_text`, purchased services) и создаёт/связывает `company -> client -> branch`.
+- Contract gate реализован через onboarding contract + capability mismatch check (`capability_mismatch:*` в Go/No-Go).
+- Niche gate реализован через reference pack API и проверку наличия эталона перед Go/No-Go.
+- Webhook secret выдаётся системой из `instance_id` и хранится на уровне branch (`branches.webhook_secret`).
+- Порядок шагов enforced сервером (`/console/v1/onboarding/status`, `/console/v1/onboarding/advance`) с ошибкой `ONBOARDING_STEP_REQUIRED`.
+- В Integrations и Go/No-Go добавлена обязательность `phone` вместе с `instance_id` для WhatsApp.
+
+**Why this architecture decision was made:**
+- Чтобы запуск не зависел от памяти оператора: UI и API дают одинаковые обязательные поля и одинаковые блокирующие условия.
+- Чтобы избежать cross-branch routing ошибок: связка `phone + instance_id + webhook_secret` фиксируется на branch-уровне.
+- Чтобы масштабироваться на разные ниши: onboarding проверяет не только “данные есть”, но и “данные соответствуют купленным возможностям”.
+- Чтобы тесты были стабильными: правила гейтов и переходов закреплены в state-machine и покрыты отдельными API/service тестами.
+
+**Current boundaries (still manual):**
+- Payment confirmation остаётся ручным действием platform admin.
+- Specialist create/update остаётся ops/manual до появления write API в Console.
+- Настройка ChatFlow workflow (вставка webhook URL/secret в ChatFlow) остаётся внешним действием после выдачи секрета из системы.
 
 ---
 
