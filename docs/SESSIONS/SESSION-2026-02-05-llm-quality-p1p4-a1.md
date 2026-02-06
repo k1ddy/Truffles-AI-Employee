@@ -8,6 +8,7 @@
 - base_ref: feat/2026-02-05-llm-quality-evidence-a1
 - scope: P1/P4: add chaos coverage axes + tool hooks + taxonomy/regression gates; update runbook; run allowlist llm-quality and record evidence.
 - done:
+  - Finalize LLM-quality P1/P4: master info runtime+evaluator stabilization, baseline refresh 20260206-064148, and scenario expect-override regression test.
   - Session created.
   - Added chaos coverage axes (state/trace/modality/tools) + taxonomy tracking + tool hook args in llm-quality runner.
   - Updated booking confirm runbook with taxonomy/coverage/tool hooks.
@@ -16,6 +17,7 @@
   - Added pack truth + consult playbook context for LLM-judge; extended tool hooks to auto cancel/calendar.
   - Updated runbook to describe pack-truth judge + cancel/calendar tool hooks.
   - Attempted allowlist LLM-quality run; failed due to OpenAI timeout (baseline not updated).
+  - Added runtime/evaluator fixes for booking-info quality (master info intent + info-tag dedupe + booking progress gating), refreshed baseline from run_id 20260206-064148, and added regression tests for master info and scenario expect-override.
 - next:
   - Session end + commit.
 - evidence:
@@ -24,4 +26,7 @@
   - /tmp/booking_quality/20260205-114556/responses.jsonl
   - /tmp/booking_quality/20260205-114556/trace_bundle.jsonl
   - /tmp/booking_quality/20260205-114556/scenarios.json
-- last_updated: 2026-02-05
+  - /tmp/booking_quality/20260206-064148/summary.json
+  - /tmp/pytest_master_info_flow_20260206.txt
+  - /tmp/pytest_booking_interrupt_info_20260206.txt
+- last_updated: 2026-02-06

@@ -97,6 +97,28 @@ def _detect_info_class_intents(
     )
     hours_phrases = get_signal_lexicon_list(client_slug, "hours_keywords")
     hours_signal = bool(hours_phrases) and any(phrase in normalized for phrase in hours_phrases)
+    master_signal = False
+    if normalized and any(
+        keyword in normalized
+        for keyword in (
+            "мастер",
+            "специалист",
+            "кто делает",
+            "шебер",
+            "маман",
+            "ким жасайд",
+        )
+    ):
+        master_signal = True
+    if not master_signal and message_text and client_slug:
+        try:
+            from app.services.demo_salon_knowledge import phrase_match_intent
+
+            master_signal = "master" in phrase_match_intent(
+                message_text, client_slug=client_slug
+            )
+        except Exception:
+            master_signal = False
 
     if "location" in anchor_intents and (question_like or short_query or intent_decomp_set):
         location_signal = True
@@ -107,6 +129,8 @@ def _detect_info_class_intents(
         intents.add("location")
     if hours_signal:
         intents.add("hours")
+    if master_signal:
+        intents.add("master")
     question_type = None
     try:
         question_type = legacy.semantic_question_type(message_text, include_kinds=legacy.INFO_INTENTS)
@@ -127,6 +151,7 @@ def _detect_info_class_intents(
         "guest": guest_signal,
         "location": location_signal,
         "hours": hours_signal,
+        "master": master_signal,
     }
     return intents, meta
 
@@ -143,7 +168,7 @@ def _looks_like_info_query(message_text: str | None, *, client_slug: str | None 
     if isinstance(info_signals, dict):
         if any(
             info_signals.get(signal)
-            for signal in ("parking", "guest", "location", "hours")
+            for signal in ("parking", "guest", "location", "hours", "master")
         ):
             return True
     if message_text:
@@ -182,6 +207,7 @@ def _build_info_intent_reply(
         format_reply_from_truth,
         get_demo_salon_decision,
         get_demo_salon_service_hint,
+        load_yaml_truth,
     )
 
     from . import _legacy as legacy
@@ -223,6 +249,39 @@ def _build_info_intent_reply(
             fact_intents=[intent],
         )
         return reply, meta or None
+    if intent == "master":
+        truth = load_yaml_truth(client_slug)
+        team = truth.get("team") if isinstance(truth, dict) else None
+        if isinstance(team, dict):
+            labels = {
+                "nails": "Ногти",
+                "hair": "Волосы",
+                "brows_lashes": "Брови и ресницы",
+                "facial": "Лицо",
+            }
+            parts: list[str] = []
+            for key in ("nails", "hair", "brows_lashes", "facial"):
+                value = team.get(key)
+                if not isinstance(value, str):
+                    continue
+                text = value.strip()
+                if text:
+                    parts.append(f"{labels[key]}: {text}")
+            if parts:
+                reply = "По мастерам: " + " ".join(parts)
+                meta = _build_fact_meta(
+                    fact_source="truth",
+                    fact_intents=["master"],
+                    info_sections=["master"],
+                )
+                return reply, meta
+        fallback = "Можно к конкретному мастеру, если он свободен на выбранное время."
+        meta = _build_fact_meta(
+            fact_source="truth",
+            fact_intents=["master"],
+            info_sections=["master"],
+        )
+        return fallback, meta
     if intent in {"pricing", "duration"} and not service_query and message_text:
         service_query = get_demo_salon_service_hint(message_text, client_slug=client_slug)
         if not service_query:

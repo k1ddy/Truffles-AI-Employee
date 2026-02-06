@@ -653,7 +653,7 @@ LLM_QUALITY_INFO_SECTION_MAP = {
     "price": {"pricing", "price", "payment_info", "payment"},
     "location": {"address", "location"},
     "hours": {"hours", "working_hours", "schedule"},
-    "promo": {"discounts", "discount", "promo", "promotion"},
+    "promo": {"discounts", "discount", "promo", "promotion", "promotions"},
     "duration": {"duration", "service_duration"},
     "parking": {"parking"},
     "master": {"master", "specialist"},
@@ -669,6 +669,7 @@ LLM_QUALITY_INTENT_TAG_MAP = {
     "discount_haggle": {"promo"},
     "promo": {"promo"},
     "promotion": {"promo"},
+    "promotions": {"promo"},
     "hours": {"hours"},
     "working_hours": {"hours"},
     "schedule": {"hours"},
@@ -755,6 +756,30 @@ LLM_QUALITY_NOISE_RE = re.compile("|".join(LLM_QUALITY_NOISE_HINTS), re.IGNORECA
 LLM_QUALITY_BUNDLE_INTENTS = {"info_bundle", "multi_intent_info"}
 LLM_QUALITY_KNOWN_STATES = {"bot_active", "pending", "manager_active"}
 LLM_QUALITY_BOOKING_SLOTS = ("service", "datetime", "name", "phone")
+LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE = {
+    "service_choice": {"booking", "service", "multi_service"},
+    "time": {"booking", "time", "time_alt"},
+    "name": {"name"},
+}
+LLM_QUALITY_PROGRESS_SKIP_TAGS = {
+    "interrupt",
+    "noise",
+    "media",
+    "delay",
+    "handoff",
+    "hand_off",
+    "human",
+    "pending",
+    "channel",
+    "consult",
+    "price",
+    "promo",
+    "location",
+    "hours",
+    "duration",
+    "parking",
+    "master",
+}
 LLM_QUALITY_FAILURE_LIMIT = 50
 LLM_QUALITY_THRESHOLDS = {
     "reply_rate": 0.9,
@@ -2480,6 +2505,26 @@ def _llm_quality_extract_turn_tags(turn):
             tags.append(tag.strip())
     return tags
 
+
+def _llm_quality_should_expect_booking_progress(expected_reply_type, turn_tags):
+    if expected_reply_type not in CHAOS_BOOKING_REPLY_TYPES:
+        return False
+    normalized_tags = {
+        str(tag).strip().lower()
+        for tag in (turn_tags or [])
+        if isinstance(tag, str) and tag.strip()
+    }
+    if not normalized_tags:
+        return True
+    required_tags = LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE.get(expected_reply_type, set())
+    if required_tags and normalized_tags.intersection(required_tags):
+        return True
+    if normalized_tags.intersection(LLM_QUALITY_PROGRESS_SKIP_TAGS):
+        return False
+    if expected_reply_type == "name":
+        return False
+    return True
+
 def _llm_quality_normalize_expect_token(token: str | None):
     if token is None:
         return None
@@ -2697,6 +2742,11 @@ def _llm_quality_collect_info_signals(meta, trace_entries):
         intent = entry.get("intent")
         if isinstance(intent, str) and intent.strip():
             intents.add(intent.strip().lower())
+        entry_intents = entry.get("info_intents")
+        if isinstance(entry_intents, list):
+            for item in entry_intents:
+                if isinstance(item, str) and item.strip():
+                    intents.add(item.strip().lower())
         sections = entry.get("info_sections")
         if isinstance(sections, list):
             for section in sections:
@@ -3017,6 +3067,7 @@ def _llm_quality_evaluate_turn(
     info_tags,
     info_answered,
     booking_active,
+    booking_progress_expected,
     booking_progressed,
     allow_booking_stall,
 ):
@@ -3061,7 +3112,12 @@ def _llm_quality_evaluate_turn(
         reasons.append("handover_missing")
     if info_tags and not any(info_answered.values()) and state not in {"pending", "manager_active"}:
         reasons.append("info_section_miss")
-    if booking_active and booking_progressed is False and not allow_booking_stall:
+    if (
+        booking_active
+        and booking_progress_expected
+        and booking_progressed is False
+        and not allow_booking_stall
+    ):
         reasons.append("booking_slot_stall")
     return reasons
 
@@ -3658,6 +3714,48 @@ def _resolve_allowlist_jids(explicit, container_name):
             if jids:
                 return jids
     return []
+
+def _fetch_client_branch_sender_jids(db_user, client_id):
+    if not client_id:
+        return set(), None
+    safe_client = _escape_sql_literal(client_id)
+    query = (
+        "SELECT b.phone "
+        "FROM branches b "
+        f"WHERE b.client_id = '{safe_client}' "
+        "AND b.is_active = TRUE "
+        "AND b.phone IS NOT NULL;"
+    )
+    rows_raw, error = _run_psql_query(db_user, query)
+    if error:
+        return set(), error
+    sender_jids = set()
+    for line in (rows_raw or "").splitlines():
+        phone = line.strip()
+        if not phone:
+            continue
+        remote_jid = _normalize_remote_jid(phone)
+        if remote_jid:
+            sender_jids.add(remote_jid)
+    return sender_jids, None
+
+def _filter_sender_jids(allowlist_jids, blocked_sender_jids):
+    if not allowlist_jids:
+        return [], []
+    blocked = {
+        (_normalize_remote_jid(jid) or str(jid).strip())
+        for jid in (blocked_sender_jids or set())
+        if jid
+    }
+    filtered = []
+    dropped = []
+    for jid in allowlist_jids:
+        normalized = _normalize_remote_jid(jid) or str(jid).strip()
+        if normalized in blocked:
+            dropped.append(jid)
+            continue
+        filtered.append(jid)
+    return filtered, dropped
 
 def _select_allowlist_jid(allowlist_jids, suite_name, seed):
     if not allowlist_jids:
@@ -5047,6 +5145,46 @@ def _run_llm_quality(args):
     if client_error:
         raise SystemExit(f"llm-quality: client meta lookup failed ({client_error})")
     client_id = (client_meta or {}).get("client_id")
+    branch_sender_jids, branch_sender_error = _fetch_client_branch_sender_jids(
+        db_user, client_id
+    )
+    if branch_sender_error:
+        print(
+            json.dumps(
+                {
+                    "stage": "allowlist_filter_branch_sender",
+                    "warning": branch_sender_error,
+                },
+                ensure_ascii=False,
+            )
+        )
+    else:
+        if args.remote_jid:
+            remote_jid_normalized = _normalize_remote_jid(args.remote_jid)
+            if remote_jid_normalized and remote_jid_normalized in branch_sender_jids:
+                raise SystemExit(
+                    f"llm-quality: remote-jid {args.remote_jid} matches active branch sender"
+                )
+        filtered_allowlist, dropped_sender_jids = _filter_sender_jids(
+            allowlist_jids, branch_sender_jids
+        )
+        if dropped_sender_jids:
+            print(
+                json.dumps(
+                    {
+                        "stage": "allowlist_filter_branch_sender",
+                        "dropped_jids": dropped_sender_jids,
+                        "dropped_count": len(dropped_sender_jids),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        if filtered_allowlist:
+            allowlist_jids = filtered_allowlist
+        elif allowlist_jids and not args.allow_non_allowlist:
+            raise SystemExit(
+                "llm-quality: allowlist-jids contains only active branch sender JIDs"
+            )
     instance_id = (
         args.instance_id
         or (client_meta or {}).get("branch_instance_id")
@@ -5101,8 +5239,6 @@ def _run_llm_quality(args):
             console_headers["X-Client-Id"] = client_meta.get("client_id")
 
     judge_mode = args.judge_mode
-    if judge_mode == "off" and args.judge_sample and args.judge_sample > 0:
-        judge_mode = "sample"
     judge_api_key = args.judge_api_key or os.environ.get("OPENAI_API_KEY")
     judge_enabled = judge_mode != "off"
     judge_skip_reason = None
@@ -5441,6 +5577,65 @@ def _run_llm_quality(args):
             "response": (body or "")[:200] if body else None,
         }
 
+    def _send_session_reset(remote_jid):
+        if args.dry_run:
+            return None
+        message_id = f"LLM-QUAL-RESET-{run_id}-{uuid.uuid4().hex[:6]}"
+        metadata = {
+            "sender": "LLMQuality",
+            "timestamp": int(time.time()),
+            "messageId": message_id,
+            "remoteJid": remote_jid,
+            "simulation_mode": True,
+            "simulation_id": run_id,
+            "simulation_action": "session_reset",
+        }
+        if instance_id:
+            metadata["instanceId"] = instance_id
+        payload = {
+            "body": {
+                "messageType": "text",
+                "message": "начнем сначала",
+                "metadata": metadata,
+            }
+        }
+        status, body, error = _send_webhook_payload(webhook_url, payload, webhook_secret, args.timeout)
+        if not skip_outbox and not args.dry_run:
+            _post_admin_outbox_with_wait(
+                f"{base_url}/admin/outbox/process",
+                admin_token,
+                args.timeout,
+                outbox_wait_seconds,
+            )
+        hook_conv_id = None
+        hook_meta = None
+        hook_meta_error = None
+        hook_trace = None
+        hook_trace_error = None
+        hook_conv_id, hook_meta, hook_meta_error = _poll_decision_meta(
+            db_user,
+            message_id,
+            args.poll_timeout,
+            args.poll_interval,
+        )
+        if hook_conv_id:
+            _, hook_trace, hook_trace_error = _poll_decision_trace(
+                db_user,
+                hook_conv_id,
+                args.trace_timeout,
+                args.trace_interval,
+            )
+        return {
+            "action": "session_reset",
+            "message_id": message_id,
+            "conversation_id": hook_conv_id,
+            "status": status,
+            "error": error or hook_meta_error or hook_trace_error,
+            "response": (body or "")[:200] if body else None,
+            "decision_meta": hook_meta,
+            "decision_trace": hook_trace,
+        }
+
     def _send_tool_hook(remote_jid, text, action):
         if args.tool_hooks != "auto":
             return None
@@ -5537,6 +5732,10 @@ def _run_llm_quality(args):
             if state_after == "bot_active":
                 cleared = True
                 break
+        if state_after == "bot_active":
+            reset_result = _send_session_reset(remote_jid)
+            if reset_result:
+                actions.append(reset_result)
         return {
             "action": "preflight_clear",
             "state_before": state,
@@ -5703,6 +5902,9 @@ def _run_llm_quality(args):
                 expected_reply_type_value = _chaos_extract_expected_reply(
                     (conv_meta or {}).get("context")
                 )
+                expected_reply_matched = (
+                    (meta or {}).get("expected_reply_matched") if isinstance(meta, dict) else None
+                )
                 if expected_reply_type_value:
                     coverage_stats["expected_reply_type"][expected_reply_type_value] = (
                         coverage_stats["expected_reply_type"].get(expected_reply_type_value, 0) + 1
@@ -5788,15 +5990,19 @@ def _run_llm_quality(args):
                         expected_info_sections, meta, trace_entries
                     )
                     actual_section_set = set(info_sections) | set(info_intents)
+                    tag_hits = {}
                     for section in expected_info_sections:
-                        info_answered[section] = section in actual_section_set
+                        section_hit = section in actual_section_set
+                        info_answered[section] = section_hit
                         tag = LLM_QUALITY_SECTION_TAG_MAP.get(section)
                         if tag:
-                            info_stats["by_tag"][tag]["requested"] += 1
-                            if section in actual_section_set:
-                                info_stats["by_tag"][tag]["answered"] += 1
-                            else:
-                                info_stats["by_tag"][tag]["missed"] += 1
+                            tag_hits[tag] = bool(tag_hits.get(tag)) or section_hit
+                    for tag, tag_hit in tag_hits.items():
+                        info_stats["by_tag"][tag]["requested"] += 1
+                        if tag_hit:
+                            info_stats["by_tag"][tag]["answered"] += 1
+                        else:
+                            info_stats["by_tag"][tag]["missed"] += 1
                     if answered_any:
                         info_stats["turns_info_answered"] += 1
                     else:
@@ -5826,16 +6032,26 @@ def _run_llm_quality(args):
 
                 booking_active = _llm_quality_booking_active(conv_meta)
                 booking_slots = _llm_quality_extract_booking_slots(meta, conv_meta)
+                progress_expected = False
                 booking_progressed = None
                 if booking_active:
                     booking_stats["turns"] += 1
-                    booking_stats["progress_opportunities"] += 1
                     progress_key = conversation_id or f"dialog-{dialog_idx}"
                     prev_count = booking_progress.get(progress_key, 0)
                     slot_count = len(booking_slots)
-                    booking_progressed = slot_count > prev_count
-                    if booking_progressed:
-                        booking_stats["progressed"] += 1
+                    progress_expected = _llm_quality_should_expect_booking_progress(
+                        expected_reply_type_value,
+                        turn_tags,
+                    )
+                    if progress_expected and info_tags and expected_reply_matched is not True:
+                        progress_expected = False
+                    if progress_expected:
+                        booking_stats["progress_opportunities"] += 1
+                        booking_progressed = slot_count > prev_count
+                        if not booking_progressed and expected_reply_matched is True:
+                            booking_progressed = True
+                        if booking_progressed:
+                            booking_stats["progressed"] += 1
                     booking_progress[progress_key] = max(prev_count, slot_count)
                     booking_stats["filled_slots_total"] = max(
                         booking_stats["filled_slots_total"], slot_count
@@ -5858,6 +6074,7 @@ def _run_llm_quality(args):
                     info_tags=info_tags,
                     info_answered=info_answered,
                     booking_active=booking_active,
+                    booking_progress_expected=progress_expected,
                     booking_progressed=booking_progressed,
                     allow_booking_stall=allow_booking_stall,
                 )

@@ -55,6 +55,24 @@ EXPECT_REPLY_TYPE_BY_TAG = {
 EXPECT_STATE_BY_TAG = {
     "handoff": "pending",
 }
+CANONICAL_EXPECT_ACTIONS = sorted(
+    {action for actions in EXPECT_ACTION_BY_TAG.values() for action in actions}
+)
+CANONICAL_EXPECT_STATES = sorted(
+    set(EXPECT_STATE_BY_TAG.values()) | {"bot_active", "pending", "manager_active"}
+)
+CANONICAL_EXPECT_REPLY_TYPES = sorted(
+    set(EXPECT_REPLY_TYPE_BY_TAG.values()) | {"service_choice"}
+)
+CANONICAL_EXPECT_INFO_SECTIONS = sorted(
+    {section for sections in EXPECT_INFO_SECTIONS.values() for section in sections}
+)
+REQUIRED_LLM_TAGS = ["booking", "time", "name"]
+REQUIRED_LLM_TURNS = {
+    "booking": {"text": "{greet}, хочу записаться на {service}.", "tags": ["booking"]},
+    "time": {"text": "Можно {time_exact}?", "tags": ["time"]},
+    "name": {"text": "Меня зовут {name}.", "tags": ["name"]},
+}
 
 WRONG_TIME_TURN = {
     "text": "Меня зовут {name}.",
@@ -255,6 +273,29 @@ def _build_context(rng: random.Random) -> dict[str, str]:
         "noise": rng.choice([item["text"] for item in NOISE]),
     }
 
+def _infer_context_from_dialog(dialog: dict[str, Any], rng: random.Random) -> dict[str, str]:
+    ctx = _build_context(rng)
+    combined = " ".join(
+        [turn.get("text", "") for turn in (dialog.get("turns") or []) if isinstance(turn, dict)]
+    ).lower()
+    for service in SERVICES:
+        if service in combined:
+            ctx["service"] = service
+            break
+    for candidate in TIME_EXACT:
+        if candidate in combined:
+            ctx["time_exact"] = candidate
+            break
+    for candidate in TIME_RANGES:
+        if candidate in combined:
+            ctx["time_range"] = candidate
+            break
+    for candidate in DAYS:
+        if candidate in combined:
+            ctx["day"] = candidate
+            break
+    return ctx
+
 
 def _format_turn(turn: dict[str, Any], ctx: dict[str, str]) -> dict[str, Any]:
     text = turn["text"].format(**ctx)
@@ -319,6 +360,117 @@ def _default_expect() -> dict[str, Any]:
         "allow_booking_stall": False,
     }
 
+def _prune_turns(turns: list[dict[str, Any]], max_turns: int, required_tags: set[str]) -> list[dict[str, Any]]:
+    if len(turns) <= max_turns:
+        return turns
+    keep_indices = []
+    for idx, turn in enumerate(turns):
+        tags = set(turn.get("tags") or [])
+        if tags & required_tags or "media" in tags:
+            keep_indices.append(idx)
+    selected: list[dict[str, Any]] = []
+    used = set()
+    for idx in keep_indices:
+        if len(selected) >= max_turns:
+            return selected[:max_turns]
+        selected.append(turns[idx])
+        used.add(idx)
+    if len(selected) >= max_turns:
+        return selected[:max_turns]
+    for idx, turn in enumerate(turns):
+        if idx in used:
+            continue
+        selected.append(turn)
+        if len(selected) >= max_turns:
+            break
+    return selected
+
+def _ensure_required_tags(
+    turns: list[dict[str, Any]],
+    ctx: dict[str, str],
+    *,
+    max_turns: int,
+) -> list[dict[str, Any]]:
+    existing = {tag for turn in turns for tag in (turn.get("tags") or [])}
+    missing = [tag for tag in REQUIRED_LLM_TAGS if tag not in existing]
+    if missing:
+        for tag in missing:
+            template = REQUIRED_LLM_TURNS.get(tag)
+            if not template:
+                continue
+            formatted = _format_turn(template, ctx)
+            if tag == "booking":
+                turns.insert(0, formatted)
+            else:
+                turns.append(formatted)
+    return _prune_turns(turns, max_turns, set(REQUIRED_LLM_TAGS))
+
+def _normalize_expect_token(token: Any, allowed: set[str] | None) -> str | None:
+    if token is None:
+        return None
+    value = str(token).strip()
+    if not value:
+        return None
+    lowered = value.lower()
+    if lowered in {"none", "null"}:
+        return None
+    if allowed is not None and lowered not in allowed:
+        return None
+    return lowered
+
+def _normalize_expect_value(value: Any, allowed: set[str] | None) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        tokens = [item.strip() for item in value.split(",") if item.strip()]
+    elif isinstance(value, list):
+        tokens = [str(item).strip() for item in value if str(item).strip()]
+    else:
+        return None
+    normalized = []
+    for token in tokens:
+        clean = _normalize_expect_token(token, allowed)
+        if clean is not None:
+            normalized.append(clean)
+    if not normalized:
+        return None
+    if len(normalized) == 1:
+        return normalized[0]
+    return normalized
+
+def _normalize_expected_reply(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "yes", "1"}:
+            return True
+        if lowered in {"false", "no", "0"}:
+            return False
+    return None
+
+def _normalize_llm_expect_override(override: Any) -> dict[str, Any]:
+    if not isinstance(override, dict):
+        return {}
+    action = _normalize_expect_value(override.get("action"), set(CANONICAL_EXPECT_ACTIONS))
+    info_sections = _normalize_expect_value(
+        override.get("info_sections"), set(CANONICAL_EXPECT_INFO_SECTIONS)
+    )
+    if isinstance(info_sections, str):
+        info_sections = [info_sections]
+    reply_type = _normalize_expect_value(
+        override.get("reply_type"), set(CANONICAL_EXPECT_REPLY_TYPES)
+    )
+    state = _normalize_expect_value(override.get("state"), set(CANONICAL_EXPECT_STATES))
+    expected_reply = _normalize_expected_reply(override.get("expected_reply"))
+    return {
+        "action": action,
+        "info_sections": info_sections,
+        "reply_type": reply_type,
+        "state": state,
+        "expected_reply": expected_reply,
+    }
+
 
 def _merge_expectations(tags: list[str], override: Any) -> dict[str, Any]:
     expect = _default_expect()
@@ -339,9 +491,16 @@ def _merge_expectations(tags: list[str], override: Any) -> dict[str, Any]:
                 info_sections.append(value)
     expect["info_sections"] = info_sections
     if isinstance(override, dict):
-        for key in expect:
-            if key in override and override[key] not in (None, "", []):
-                expect[key] = override[key]
+        override = _normalize_llm_expect_override(override)
+        for key in ("action", "reply_type", "state", "expected_reply"):
+            if override.get(key) is not None:
+                expect[key] = override.get(key)
+        extra_sections = override.get("info_sections") or []
+        if isinstance(extra_sections, str):
+            extra_sections = [extra_sections]
+        for section in extra_sections:
+            if section and section not in expect["info_sections"]:
+                expect["info_sections"].append(section)
     return expect
 
 
@@ -462,7 +621,7 @@ def _call_openai(prompt: str, *, api_key: str, model: str, base_url: str) -> str
     return body["choices"][0]["message"]["content"]
 
 
-def _parse_llm_json(content: str) -> dict[str, Any]:
+def _parse_llm_json(content: str, *, repair_fn=None) -> dict[str, Any]:
     text = (content or "").strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
@@ -473,8 +632,33 @@ def _parse_llm_json(content: str) -> dict[str, Any]:
         start = text.find("{")
         end = text.rfind("}")
         if start != -1 and end != -1 and end > start:
-            return json.loads(text[start : end + 1])
+            try:
+                return json.loads(text[start : end + 1])
+            except json.JSONDecodeError:
+                pass
+        if repair_fn:
+            repaired = repair_fn(text)
+            if repaired:
+                return _parse_llm_json(repaired, repair_fn=None)
         raise
+
+
+def _repair_llm_json(content: str, *, api_key: str, model: str, base_url: str) -> str | None:
+    if not content:
+        return None
+    payload = content
+    if len(payload) > 20000:
+        payload = payload[:20000]
+    prompt = (
+        "Repair the JSON below and return only a valid JSON object. "
+        "Keep the same schema with key 'dialogs'. "
+        "Do not add commentary or markdown.\n\n"
+        f"Broken JSON:\n{payload}"
+    )
+    try:
+        return _call_openai(prompt, api_key=api_key, model=model, base_url=base_url)
+    except Exception:
+        return None
 
 
 def _generate_llm_dialogs(
@@ -496,7 +680,17 @@ def _generate_llm_dialogs(
         "Generate JSON with key 'dialogs' as a list. "
         "Each dialog: {dialog_id, goal, turns}. "
         "turns is a list of {kind,text,tags,expect} with 10-15 client messages. "
+        "Tags must be chosen from: booking, interrupt, price, duration, location, hours, parking, "
+        "promo, master, time, time_alt, consult, channel, delay, media, noise, handoff. "
         "expect must include keys: action, info_sections, reply_type, state, expected_reply, allow_booking_stall. "
+        "Use canonical tokens only in expect (no natural language): "
+        "action: null or one of [booking_escalated, escalate, handoff]; "
+        "info_sections: array from [pricing, price, payment_info, payment, address, location, "
+        "hours, working_hours, schedule, discounts, discount, promo, promotion, duration, "
+        "service_duration, parking, master, specialist]; "
+        "reply_type: null or one of [service_choice, time, name]; "
+        "state: null or one of [bot_active, pending, manager_active]; "
+        "expected_reply: true/false/null. "
         "Include interruptions (price/location/noise), wrong slot answers, time/name swaps, and at least one media reference. "
         "Beauty salon domain, Russian language, natural chat. "
         f"Count={count}, turns_range={min_turns}-{max_turns}. "
@@ -505,7 +699,12 @@ def _generate_llm_dialogs(
         f"seed={seed}."
     )
     content = _call_openai(prompt, api_key=api_key, model=model, base_url=base_url)
-    payload = _parse_llm_json(content)
+    payload = _parse_llm_json(
+        content,
+        repair_fn=lambda raw: _repair_llm_json(
+            raw, api_key=api_key, model=model, base_url=base_url
+        ),
+    )
     dialogs = payload.get("dialogs") or []
     if not isinstance(dialogs, list):
         return []
@@ -514,10 +713,14 @@ def _generate_llm_dialogs(
         for turn in turns:
             tags = list(turn.get("tags") or [])
             turn["expect"] = _merge_expectations(tags, turn.get("expect"))
+        ctx = _infer_context_from_dialog(dialog, rng)
+        turns = _ensure_required_tags(turns, ctx, max_turns=max_turns)
+        dialog["turns"] = turns
         if include_media and all("media" not in (turn.get("tags") or []) for turn in dialog.get("turns", [])):
             dialog.setdefault("turns", []).insert(
-                1, _media_turn(_build_context(rng), mode=media_mode, kind=media_kind)
+                1, _media_turn(ctx, mode=media_mode, kind=media_kind)
             )
+            dialog["turns"] = _prune_turns(dialog["turns"], max_turns, set(REQUIRED_LLM_TAGS))
     return dialogs
 
 

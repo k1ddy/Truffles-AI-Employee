@@ -620,6 +620,7 @@ def _apply_expected_reply_contract(
         deterministic_matched = False
         deterministic_value = None
         normalization_flags: list[str] = []
+        promotion_request = False
         if message_text:
             normalized_message = legacy._normalize_service_text(message_text)
             expected_reply_blocked_by_info = (
@@ -627,6 +628,15 @@ def _apply_expected_reply_contract(
                 or legacy._has_price_signal(normalized_message, message_text)
                 or legacy._has_duration_signal(normalized_message, message_text)
             )
+            promotion_request = _looks_like_promotions_request(
+                message_text,
+                policy_type=policy_type,
+                policy_pack=policy_pack,
+                client_slug=client_slug,
+            )
+            # Promo questions should not be forced into expected-reply defer mode.
+            if promotion_request:
+                expected_reply_blocked_by_info = False
             if (
                 expected_reply_blocked_by_info
                 and expected_reply_type == legacy.EXPECTED_REPLY_TIME
@@ -2987,8 +2997,8 @@ def _looks_like_time_only_request(message_text: str | None) -> bool:
     return has_time_token
 
 
-BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration"}
-INFO_INTENTS = {"pricing", "hours", "duration", "location", "promotions"}
+BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration", "master"}
+INFO_INTENTS = {"pricing", "hours", "duration", "location", "promotions", "master"}
 LLM_PLAN_ALLOWED_OUTCOMES = {"fact", "collect", "handoff"}
 LLM_PLAN_ALLOWED_TOOL_ACTIONS = {
     "info",
@@ -3011,8 +3021,8 @@ LLM_POLICY_CORE_ENABLED = _is_env_enabled(
     os.environ.get("LLM_POLICY_CORE_ENABLED"), default=True
 )
 CONSULT_INTERRUPT_INTENTS = {"booking", "pricing", "duration", "location", "hours"}
-INFO_INTENT_PRIORITY_SERVICE = ("pricing", "duration", "location", "hours")
-INFO_INTENT_PRIORITY_GENERIC = ("location", "hours", "pricing", "duration")
+INFO_INTENT_PRIORITY_SERVICE = ("pricing", "duration", "location", "hours", "master")
+INFO_INTENT_PRIORITY_GENERIC = ("location", "hours", "pricing", "duration", "master")
 BOOKING_TIME_SERVICE_INTENTS = {
     "service_match",
     "service_not_found",
@@ -5613,9 +5623,7 @@ async def _handle_webhook_payload(
     expected_reply_shortcircuit = expected_reply_state.expected_reply_shortcircuit
     expected_reply_blocked_by_info = expected_reply_state.expected_reply_blocked_by_info
     memory_expected_reply_type = expected_reply_state.memory_expected_reply_type
-    expected_reply_shortcircuit_effective = bool(
-        expected_reply_shortcircuit and not llm_policy_core_guard_only
-    )
+    expected_reply_shortcircuit_effective = bool(expected_reply_shortcircuit)
 
     # 4.5 Branch routing (instance_id -> branch, or ask user)
     branch_response = _handle_branch_selection_gate(
@@ -7031,7 +7039,6 @@ async def _handle_webhook_payload(
         and routing["allow_bot_reply"]
         and not bypass_domain_flows
         and message_text
-        and not llm_policy_core_guard_only
     ):
         class_router_result = _resolve_class_router_result(
             info_intents=info_class_intents,

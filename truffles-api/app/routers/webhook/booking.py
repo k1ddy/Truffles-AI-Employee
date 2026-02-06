@@ -1281,6 +1281,22 @@ def _handle_booking_interrupt(
         and expected_reply_matched is False
         and message_text
     )
+
+    def _merge_info_sections(info_meta: dict[str, Any], intents: list[str]) -> list[str]:
+        sections: list[str] = []
+        existing = info_meta.get("info_sections")
+        if isinstance(existing, list):
+            for section in existing:
+                if isinstance(section, str) and section.strip():
+                    key = section.strip().lower()
+                    if key not in sections:
+                        sections.append(key)
+        for intent in intents or []:
+            if isinstance(intent, str) and intent.strip():
+                key = intent.strip().lower()
+                if key not in sections:
+                    sections.append(key)
+        return sections
     if (
         routing.get("allow_booking_flow")
         and not bypass_domain_flows
@@ -1304,22 +1320,44 @@ def _handle_booking_interrupt(
             booking_info_intents = sorted(anchor_intents)
         if (
             not booking_info_intents
-            and booking_time_service_candidate
             and info_class_intents
+            and (
+                booking_time_service_candidate
+                or expected_reply_type
+                in {
+                    legacy.EXPECTED_REPLY_SERVICE,
+                    legacy.EXPECTED_REPLY_TIME,
+                    legacy.EXPECTED_REPLY_NAME,
+                }
+            )
         ):
             booking_info_intents = sorted(info_class_intents)
-        if not booking_info_intents and message_text:
+        promotions_signal = False
+        if message_text:
             policy_pack = (
                 policy_handler.get("policy_pack") if isinstance(policy_handler, dict) else None
             )
             from app.routers.webhook.policy import _looks_like_promotions_request
 
-            if _looks_like_promotions_request(
+            promotions_signal = _looks_like_promotions_request(
                 message_text,
                 policy_pack=policy_pack,
                 client_slug=client_slug,
-            ):
-                booking_info_intents = ["promotions"]
+            )
+        if promotions_signal and "promotions" not in booking_info_intents:
+            booking_info_intents = [*booking_info_intents, "promotions"]
+        master_signal = False
+        if booking_interrupt_text and client_slug:
+            try:
+                from app.services.demo_salon_knowledge import phrase_match_intent
+
+                master_signal = "master" in phrase_match_intent(
+                    booking_interrupt_text, client_slug=client_slug
+                )
+            except Exception:
+                master_signal = False
+        if master_signal and "master" not in booking_info_intents:
+            booking_info_intents = [*booking_info_intents, "master"]
         guest_policy_hit = bool(
             booking_interrupt_text
             and legacy._matches_guest_policy_lexicon(
@@ -1369,7 +1407,9 @@ def _handle_booking_interrupt(
                             meta=multi_meta if isinstance(multi_meta, dict) else None,
                         )
                         info_source = "multi_truth"
-                prefer_truth_gate = bool({"pricing", "duration"} & set(booking_info_intents))
+                prefer_truth_gate = bool(
+                    {"pricing", "duration", "promotions", "master"} & set(booking_info_intents)
+                )
                 if not info_decision and prefer_truth_gate:
                     truth_gate = policy_handler.get("truth_gate")
                     if truth_gate:
@@ -1461,6 +1501,9 @@ def _handle_booking_interrupt(
                     and isinstance(info_decision.intent, str)
                 ):
                     trace_info_intents = [info_decision.intent]
+                info_sections = _merge_info_sections(info_meta, trace_info_intents)
+                if info_sections:
+                    info_meta["info_sections"] = info_sections
                 trace_payload = {
                     "stage": "booking_interrupt",
                     "decision": info_decision.action,
@@ -1470,6 +1513,8 @@ def _handle_booking_interrupt(
                 }
                 if trace_info_intents:
                     trace_payload["info_intents"] = list(trace_info_intents)
+                if info_sections:
+                    trace_payload["info_sections"] = info_sections
                 if info_source == "truth_gate":
                     gate_trace = {
                         "stage": "truth_gate",
@@ -1570,6 +1615,9 @@ def _handle_booking_interrupt(
                     and isinstance(info_decision.intent, str)
                 ):
                     trace_info_intents = [info_decision.intent]
+                info_sections = _merge_info_sections(info_meta, trace_info_intents)
+                if info_sections:
+                    info_meta["info_sections"] = info_sections
                 guard_response = maybe_apply_fact_guard(
                     decision_meta=info_meta,
                     intent=info_decision.intent,
@@ -1777,6 +1825,8 @@ def _handle_booking_interrupt(
                 }
                 if booking_interrupt_info:
                     trace_payload["booking_interrupt_info"] = True
+                if info_sections:
+                    trace_payload["info_sections"] = info_sections
                 legacy._record_decision_trace(conversation, trace_payload)
 
                 if info_source == "service_matcher":
