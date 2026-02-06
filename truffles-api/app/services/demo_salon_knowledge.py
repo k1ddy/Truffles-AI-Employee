@@ -15,6 +15,7 @@ import httpx
 import yaml
 
 from app.logging_config import get_logger
+from app.services.knowledge_runtime import get_runtime_truth
 from app.services.knowledge_service import get_embedding
 from app.services.pack_compiler_service import compile_pack_payload
 
@@ -367,13 +368,32 @@ def get_system_anchor_groups(intent: str) -> list[tuple[str, ...]]:
     return _normalize_anchor_groups(groups.get(intent))
 
 @lru_cache(maxsize=8)
-def load_yaml_truth(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:
+def _load_yaml_truth_cached(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:
     raw = _load_yaml(_truth_path(client_slug))
     if not raw:
         return {}
     compiled = compile_pack_payload(raw)
     effective = compiled.get("effective_pack") if isinstance(compiled, dict) else None
     return effective if isinstance(effective, dict) else raw
+
+
+def load_yaml_truth(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:
+    runtime_truth = get_runtime_truth()
+    if runtime_truth is not None:
+        runtime_slug = runtime_truth.client_slug
+        if runtime_slug and client_slug:
+            normalized = _normalize_client_slug(client_slug)
+            if normalized and normalized != runtime_slug:
+                if not runtime_truth.allow_fallback:
+                    return {}
+                return _load_yaml_truth_cached(client_slug)
+        if isinstance(runtime_truth.truth, dict):
+            if runtime_truth.allow_fallback and not runtime_truth.truth:
+                return _load_yaml_truth_cached(client_slug)
+            return runtime_truth.truth
+        if not runtime_truth.allow_fallback:
+            return {}
+    return _load_yaml_truth_cached(client_slug)
 
 
 def load_policy_pack(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:

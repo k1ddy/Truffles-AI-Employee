@@ -1,0 +1,35 @@
+# SESSION 2026-02-06-runtime-capabilities-a10 — Session 2026-02-06-runtime-capabilities-a10
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-06-runtime-capabilities.md
+- branch: feat/2026-02-06-runtime-capabilities-a10
+- worktree: /home/zhan/worktrees/2026-02-06-runtime-capabilities-a10
+- base_ref: origin/main
+- scope: Runtime capabilities context + booking/tool registry fallback to client_capabilities.
+- done:
+  - Added runtime capabilities context + builder (client_capabilities merge).
+  - Wired runtime capabilities into webhook decision and booking/tool registry fallbacks.
+  - Wired published pack runtime truth into demo_salon resolver (no file fallback by default).
+  - Enforced tenant_context in outbox payload validation (client/branch).
+  - Added unit tests for runtime capabilities + booking fallback.
+  - `pytest -q truffles-api/tests/test_capabilities_runtime.py` passed.
+  - `pytest -q truffles-api/tests/test_knowledge_runtime.py` passed.
+  - `pytest -q truffles-api/tests/test_outbox_payload_contract.py` passed.
+  - Added branch-RAG backfill script (dry-run default); dry-run executed via container network.
+  - Added size-based chunking for pack indexing to avoid single huge chunk.
+  - Added unit test for knowledge chunking.
+  - Branch-RAG backfill executed successfully for demo_salon branches.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-06-runtime-capabilities.md
+  - docs/TASK_PACKAGES/TP-2026-02-06-branch-rag-backfill.md
+  - /tmp/pytest_capabilities_runtime_20260206.txt
+  - /tmp/pytest_knowledge_runtime_20260206.txt
+  - /tmp/pytest_outbox_payload_contract_20260206.txt
+  - /tmp/pytest_knowledge_registry_chunking_20260206.txt
+  - /tmp/backfill_branch_rag_dryrun_20260206.txt
+  - /tmp/backfill_branch_rag_execute_20260206.txt
+  - /tmp/backfill_branch_rag_execute_branch_b_20260206.txt
+  - /tmp/backfill_branch_rag_execute_branch_b_20260206_retry.txt
+  - /tmp/backfill_branch_rag_execute_20260206_v2.txt
+- last_updated: 2026-02-06

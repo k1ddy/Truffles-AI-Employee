@@ -16,6 +16,7 @@ from rapidfuzz import fuzz, process
 
 from app.schemas.webhook import WebhookResponse
 from app.services.appointment_service import SchedulingService
+from app.services.capabilities_runtime import get_runtime_capabilities
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -844,10 +845,27 @@ def _parse_booking_datetime(value: str | None, *, tz_name: str | None, now: date
     return parsed
 
 
+def _normalize_booking_setting(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
 def _resolve_booking_settings(settings: dict | None, *, provider_ready: bool | None = None) -> tuple[str, str, str]:
     raw = settings if isinstance(settings, dict) else {}
-    booking_mode = raw.get("booking_mode", "collect_preferences")
-    availability_provider = raw.get("availability_provider", "none")
+    booking_mode = _normalize_booking_setting(raw.get("booking_mode"))
+    availability_provider = _normalize_booking_setting(raw.get("availability_provider"))
+    if booking_mode is None or availability_provider is None:
+        runtime = get_runtime_capabilities()
+        if runtime:
+            if booking_mode is None:
+                booking_mode = runtime.payload.features.booking_mode
+            if availability_provider is None:
+                availability_provider = runtime.payload.providers.availability_provider
+    booking_mode = booking_mode or "collect_preferences"
+    availability_provider = availability_provider or "none"
     effective_mode = booking_mode
     if booking_mode == "confirm_slots" and availability_provider in {"none", "", None}:
         effective_mode = "collect_preferences"
@@ -900,19 +918,26 @@ def _create_booking_appointment(
         return existing, meta
 
     provider_ready = None
+    availability_provider = None
     if isinstance(branch.booking_settings, dict):
-        availability_provider = branch.booking_settings.get("availability_provider")
-        if availability_provider == "google_calendar":
-            from app.services.calendar_sync_service import get_provider_health
+        availability_provider = _normalize_booking_setting(
+            branch.booking_settings.get("availability_provider")
+        )
+    if availability_provider is None:
+        runtime = get_runtime_capabilities()
+        if runtime:
+            availability_provider = runtime.payload.providers.availability_provider
+    if availability_provider == "google_calendar":
+        from app.services.calendar_sync_service import get_provider_health
 
-            health = get_provider_health(
-                db,
-                client_id=conversation.client_id,
-                branch_id=branch_id,
-            )
-            provider_ready = health.ready
-            meta["provider_ready"] = health.ready
-            meta["provider_reason"] = health.reason
+        health = get_provider_health(
+            db,
+            client_id=conversation.client_id,
+            branch_id=branch_id,
+        )
+        provider_ready = health.ready
+        meta["provider_ready"] = health.ready
+        meta["provider_reason"] = health.reason
 
     booking_mode, availability_provider, effective_mode = _resolve_booking_settings(
         branch.booking_settings,
