@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.appointment import Appointment
@@ -116,6 +118,157 @@ def _resolve_service_duration(
             return int(duration)
     return SchedulingService.DEFAULT_SLOT_DURATION
 
+
+def _clean_specialist_name(value: str | None) -> str | None:
+    if not value or not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    cleaned = re.sub(r"^(мастер|мастеру|master)\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned or None
+
+
+def _resolve_specialist_by_name(
+    db: Session,
+    *,
+    branch: Branch,
+    specialist_name: str,
+) -> tuple[Specialist | None, str | None]:
+    cleaned = _clean_specialist_name(specialist_name)
+    if not cleaned:
+        return None, "specialist_not_found"
+    normalized = cleaned.casefold()
+    base_query = (
+        db.query(Specialist)
+        .filter(
+            Specialist.branch_id == branch.id,
+            Specialist.is_active == True,
+        )
+    )
+    exact = base_query.filter(func.lower(Specialist.name) == normalized).all()
+    if len(exact) == 1:
+        return exact[0], None
+    if len(exact) > 1:
+        return None, "specialist_ambiguous"
+    prefix = base_query.filter(func.lower(Specialist.name).like(normalized + "%")).all()
+    if len(prefix) == 1:
+        return prefix[0], None
+    if len(prefix) > 1:
+        return None, "specialist_ambiguous"
+    return None, "specialist_not_found"
+
+
+def _resolve_specialists_for_service(
+    db: Session,
+    *,
+    branch: Branch,
+    service_name: str | None,
+) -> list[Specialist]:
+    if not service_name or not isinstance(service_name, str):
+        return []
+    normalized = service_name.strip().casefold()
+    if not normalized:
+        return []
+    return (
+        db.query(Specialist)
+        .join(SpecialistService, SpecialistService.specialist_id == Specialist.id)
+        .join(Service, Service.id == SpecialistService.service_id)
+        .filter(
+            Specialist.branch_id == branch.id,
+            Specialist.is_active == True,
+            Service.branch_id == branch.id,
+            Service.is_active == True,
+            func.lower(Service.name) == normalized,
+        )
+        .order_by(Specialist.name)
+        .all()
+    )
+
+
+def _resolve_specialist_filter(
+    db: Session,
+    *,
+    branch: Branch,
+    specialist_id: str | None,
+    specialist_name: str | None,
+) -> tuple[UUID | None, str | None, str | None]:
+    if specialist_id:
+        try:
+            specialist_uuid = UUID(str(specialist_id))
+        except (ValueError, TypeError):
+            return None, None, "specialist_not_found"
+        specialist = (
+            db.query(Specialist)
+            .filter(
+                Specialist.id == specialist_uuid,
+                Specialist.branch_id == branch.id,
+                Specialist.is_active == True,
+            )
+            .first()
+        )
+        if not specialist:
+            return None, None, "specialist_not_found"
+        return specialist.id, "explicit_id", None
+    if specialist_name:
+        specialist, error = _resolve_specialist_by_name(
+            db,
+            branch=branch,
+            specialist_name=specialist_name,
+        )
+        if specialist:
+            return specialist.id, "explicit_name", None
+        return None, None, error
+    return None, None, None
+
+
+def _resolve_specialist_for_booking(
+    db: Session,
+    *,
+    branch: Branch,
+    service_name: str | None,
+    specialist_id: str | None,
+    specialist_name: str | None,
+) -> tuple[Specialist | None, str | None, str | None]:
+    specialist_uuid, selection_reason, error = _resolve_specialist_filter(
+        db,
+        branch=branch,
+        specialist_id=specialist_id,
+        specialist_name=specialist_name,
+    )
+    if error:
+        return None, None, error
+    if specialist_uuid:
+        specialist = (
+            db.query(Specialist)
+            .filter(
+                Specialist.id == specialist_uuid,
+                Specialist.branch_id == branch.id,
+                Specialist.is_active == True,
+            )
+            .first()
+        )
+        if specialist:
+            return specialist, selection_reason, None
+        return None, None, "specialist_not_found"
+
+    candidates = _resolve_specialists_for_service(db, branch=branch, service_name=service_name)
+    if candidates:
+        return candidates[0], "service_default", None
+
+    fallback = (
+        db.query(Specialist)
+        .filter(
+            Specialist.branch_id == branch.id,
+            Specialist.is_active == True,
+        )
+        .order_by(Specialist.name)
+        .first()
+    )
+    if fallback:
+        return fallback, "branch_default", None
+    return None, None, "specialist_not_found"
 
 
 def _format_slot_list(slots_by_specialist: dict[str, list[str]]) -> str:
@@ -510,7 +663,35 @@ def execute_tool_action(
             db, service_name=service_query, branch=branch
         )
         specialist_id = tool_args.get("specialist_id")
-        specialist_uuid = UUID(specialist_id) if isinstance(specialist_id, str) else None
+        specialist_name = tool_args.get("specialist_name")
+        specialist_uuid, _, specialist_error = _resolve_specialist_filter(
+            db,
+            branch=branch,
+            specialist_id=specialist_id,
+            specialist_name=specialist_name,
+        )
+        if specialist_error:
+            message = (
+                "Нашла несколько мастеров с таким именем. Уточните, пожалуйста."
+                if specialist_error == "specialist_ambiguous"
+                else "Не нашла такого мастера. Уточните, пожалуйста."
+            )
+            return ToolExecutionResult(
+                handled=True,
+                ok=False,
+                response_text=message,
+                error_code=specialist_error,
+                decision_meta={
+                    "tool_action": tool_action,
+                    "tool_decision": "specialist_missing",
+                },
+                trace={
+                    "stage": "tool_registry",
+                    "decision": "specialist_missing",
+                    "tool_action": tool_action,
+                    "specialist_name": specialist_name,
+                },
+            )
         response, error = _list_slots(
             db,
             branch=branch,
@@ -612,12 +793,41 @@ def execute_tool_action(
         start_at = _parse_datetime(tool_args.get("start_at"), fallback_tz=branch.timezone)
         end_at = _parse_datetime(tool_args.get("end_at"), fallback_tz=branch.timezone)
         specialist_id = tool_args.get("specialist_id")
-        specialist_uuid = UUID(specialist_id) if isinstance(specialist_id, str) else None
+        specialist_name = tool_args.get("specialist_name")
+        specialist, specialist_selection, specialist_error = _resolve_specialist_for_booking(
+            db,
+            branch=branch,
+            service_name=service_query,
+            specialist_id=specialist_id,
+            specialist_name=specialist_name,
+        )
+        if specialist_error:
+            message = (
+                "Нашла несколько мастеров с таким именем. Уточните, пожалуйста."
+                if specialist_error == "specialist_ambiguous"
+                else "Не нашла такого мастера. Уточните, пожалуйста."
+            )
+            return ToolExecutionResult(
+                handled=True,
+                ok=False,
+                response_text=message,
+                error_code=specialist_error,
+                decision_meta={
+                    "tool_action": tool_action,
+                    "tool_decision": "specialist_missing",
+                },
+                trace={
+                    "stage": "tool_registry",
+                    "decision": "specialist_missing",
+                    "tool_action": tool_action,
+                    "specialist_name": specialist_name,
+                },
+            )
         try:
             appointment, error = _book_slot(
                 db,
                 branch=branch,
-                specialist_id=specialist_uuid,
+                specialist_id=specialist.id if specialist else None,
                 start_at=start_at,
                 end_at=end_at,
                 service_name=service_query,
@@ -678,6 +888,9 @@ def execute_tool_action(
                 "tool_decision": "ok",
                 "appointment_id": str(appointment.id),
                 "reminder_jobs_scheduled": len(scheduled),
+                "specialist_id": str(specialist.id) if specialist else None,
+                "specialist_name": specialist.name if specialist else None,
+                "specialist_selection": specialist_selection,
             },
             trace={
                 "stage": "tool_registry",
@@ -685,6 +898,8 @@ def execute_tool_action(
                 "tool_action": tool_action,
                 "appointment_id": str(appointment.id),
                 "reminder_jobs_scheduled": len(scheduled),
+                "specialist_id": str(specialist.id) if specialist else None,
+                "specialist_selection": specialist_selection,
             },
         )
 

@@ -1,0 +1,43 @@
+# SESSION 2026-02-06-booking-quality-matrix-a10 — Session 2026-02-06-booking-quality-matrix-a10
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-06-booking-quality-matrix.md
+- branch: feat/2026-02-06-booking-quality-matrix-a10
+- worktree: /home/zhan/worktrees/2026-02-06-booking-quality-matrix-a10
+- base_ref: origin/main
+- scope: booking quality matrix; real booking confirm with DB evidence; expected-reply stabilization for booking slots.
+- done:
+  - Добавлен deterministic fast‑path для expected_reply (без LLM) и fallback по session_memory для time‑ответов (time slot), чтобы не блокироваться на embed/LLM.
+  - Исправлен парсинг ISO‑дат `YYYY-MM-DD` в booking (dateparser больше не меняет месяц/день).
+  - Обновлён `booking_confirm_verify.sh`: safe‑JID выбор (не branch‑номера), timeouts для livecheck, evidence‑SQL с `specialist_id`.
+  - Обновлён `ops/diagnose.py` (CA12 summary берёт `appointment_id` из decision_meta).
+  - Выполнен booking confirm verify + evidence.
+  - Устранён CI‑фейл в booking: `_resolve_default_specialist_id` теперь безопасно обрабатывает mock/row результаты и не подставляет фиктивный specialist_id.
+  - Исправлен порядок импортов (ruff I001) в `tool_registry_service.py`.
+  - Исправлены core‑eval регрессии: booking‑interrupt теперь сохраняет `booking_info_intents`, а deterministic expected‑reply ограничен booking‑контекстом (info‑flow снова использует answer_interpreter).
+  - Добавлен deterministic fallback при ошибке answer_interpreter (LLM недоступен): info‑flow продолжает матчить сервис и отдаёт цену.
+  - Убран deterministic short‑circuit в expected_reply: теперь LLM пытается парсить service/time/name, а при ошибке падает в deterministic fallback (нужно для core‑eval E361a+).
+  - Booking‑interrupt теперь допускается при `expected_reply_blocked_by_info`, чтобы info‑вопросы в активном booking не ломали info‑ответы (core‑eval E436).
+  - Core‑eval (CI tier) прогнан локально после merge — зелёный.
+  - Deterministic fallback теперь срабатывает при не‑`ok` ответе answer_interpreter (stubbed/ошибки), чтобы слот‑логика закрывалась и `expected_reply_type` очищался в chaos‑тесте.
+- next:
+  - Прогнать LLM‑quality матрицу (если нужно по цели).
+  - Разобрать intermittent timeouts в livecheck (если повторятся).
+- evidence:
+  - /tmp/booking-confirm-20260206-112240 (CA05/CA12, SQL evidence)
+  - /tmp/booking-confirm-20260206-112240/sql_appointments_with_specialist.txt
+  - /tmp/booking-confirm-20260206-112240/sql_appointments.txt
+  - /tmp/booking-confirm-20260206-112240/sql_appointment_audit.txt
+  - /tmp/booking-confirm-20260206-112240/sql_outbox_booking_send.txt
+  - /tmp/booking-confirm-20260206-112240/sql_outbox_calendar_sync.txt
+  - /tmp/pytest_booking_appointments_collect_preferences_20260206.txt
+  - /tmp/pytest_demo_salon_eval_booking_interrupt_20260206.txt
+  - /tmp/booking_e361_local_20260206.txt
+  - /tmp/booking_e361a_local_20260206.txt
+  - /tmp/booking_e436_local_20260206b.txt
+  - /tmp/pytest_demo_salon_eval_core_20260206.txt
+  - /tmp/pytest_demo_salon_eval_core_20260206b.txt
+  - /tmp/pytest_demo_salon_eval_core_20260206c.txt
+  - /tmp/pytest_booking_chaos_dialogs_20260206.txt
+- last_updated: 2026-02-06

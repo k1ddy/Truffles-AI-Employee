@@ -13,16 +13,16 @@ import urllib.request
 from typing import Any
 
 SERVICES = [
-    "стрижку",
-    "мужскую стрижку",
-    "женскую стрижку",
-    "окрашивание",
     "маникюр",
     "педикюр",
-    "коррекцию бровей",
+    "стрижку",
+    "окрашивание",
+    "брови и ресницы",
+    "депиляцию",
+    "уход за лицом",
 ]
 
-MASTERS = ["Алия", "Айжан", "Мария", "Диана", "Салтанат"]
+MASTERS = ["Алия", "Айжан", "Мария"]
 NAMES = ["Лена", "Айгуль", "Амина", "Катя", "Динара", "Марина"]
 PHONES = [
     "+7 701 111 22 33",
@@ -74,6 +74,32 @@ REQUIRED_LLM_TURNS = {
     "name": {"text": "Меня зовут {name}.", "tags": ["name"]},
 }
 
+WRONG_TIME_TURN = {
+    "text": "Меня зовут {name}.",
+    "tags": ["wrong_slot", "name"],
+    "expect": {"reply_type": "time", "allow_booking_stall": True},
+}
+WRONG_NAME_TURN = {
+    "text": "эээ...",
+    "tags": ["wrong_slot", "noise"],
+    "expect": {"reply_type": "name", "allow_booking_stall": True},
+}
+WRONG_SERVICE_TURN = {
+    "text": "Хочу {service}.",
+    "tags": ["wrong_slot", "service"],
+    "expect": {"reply_type": "time", "allow_booking_stall": True},
+}
+WRONG_DATE_TURN = {
+    "text": "Давайте {day}.",
+    "tags": ["wrong_slot", "date"],
+    "expect": {"reply_type": "time", "allow_booking_stall": True},
+}
+WRONG_PHONE_TURN = {
+    "text": "Телефон {phone}.",
+    "tags": ["wrong_slot", "phone"],
+    "expect": {"reply_type": "name", "allow_booking_stall": True},
+}
+
 INTERRUPTIONS = [
     {"text": "Сколько стоит {service}?", "tags": ["interrupt", "price"]},
     {"text": "Сколько длится процедура?", "tags": ["interrupt", "duration"]},
@@ -110,8 +136,13 @@ SCENARIOS = [
             {"text": "{greet}! Хочу записаться на {service} {day} {time_range}, есть свободное?", "tags": ["booking"]},
             {"text": "{interrupt_price}", "tags": ["interrupt", "price"]},
             {"text": "{interrupt_location}", "tags": ["interrupt", "location"]},
+            WRONG_SERVICE_TURN,
+            WRONG_DATE_TURN,
+            WRONG_TIME_TURN,
             {"text": "Любой мастер подойдет.", "tags": ["master"]},
             {"text": "Можно {time_exact}?", "tags": ["time"]},
+            WRONG_NAME_TURN,
+            WRONG_PHONE_TURN,
             {"text": "Меня зовут {name}.", "tags": ["name"]},
             {"text": "Телефон {phone}.", "tags": ["phone"]},
             {"text": "Да, все верно.", "tags": ["confirm"]},
@@ -124,9 +155,14 @@ SCENARIOS = [
         "coverage": ["booking", "info", "interrupt"],
         "turns": [
             {"text": "{greet}, хочу записаться на {service} {day}.", "tags": ["booking"]},
+            WRONG_SERVICE_TURN,
+            WRONG_DATE_TURN,
+            WRONG_TIME_TURN,
             {"text": "Можно {time_exact}?", "tags": ["time"]},
             {"text": "{noise}", "tags": ["noise"]},
             {"text": "Кстати, сколько стоит {service}?", "tags": ["interrupt", "price"]},
+            WRONG_NAME_TURN,
+            WRONG_PHONE_TURN,
             {"text": "Имя {name}.", "tags": ["name"]},
             {"text": "Телефон {phone}.", "tags": ["phone"]},
             {"text": "Да, подтверждаю.", "tags": ["confirm"]},
@@ -141,7 +177,12 @@ SCENARIOS = [
             {"text": "{greet}! Можно записаться на {service} {day} {time_range}?", "tags": ["booking"]},
             {"text": "Хотелось бы к {master}, но если занято, то любой.", "tags": ["master"]},
             {"text": "А где вы находитесь?", "tags": ["interrupt", "location"]},
+            WRONG_SERVICE_TURN,
+            WRONG_DATE_TURN,
+            WRONG_TIME_TURN,
             {"text": "Можно {time_exact}?", "tags": ["time"]},
+            WRONG_NAME_TURN,
+            WRONG_PHONE_TURN,
             {"text": "Если нет, то {time_exact_alt}.", "tags": ["time"]},
             {"text": "Меня зовут {name}.", "tags": ["name"]},
             {"text": "Телефон {phone}.", "tags": ["phone"]},
@@ -157,8 +198,13 @@ SCENARIOS = [
             {"text": "{greet}! {service} керек, {day} {time_range} бар ма?", "tags": ["booking"]},
             {"text": "Бағасы қанша?", "tags": ["interrupt", "price"]},
             {"text": "Адресіңіз қайда?", "tags": ["interrupt", "location"]},
+            WRONG_SERVICE_TURN,
+            WRONG_DATE_TURN,
+            WRONG_TIME_TURN,
             {"text": "Любой мастер подойдет.", "tags": ["master"]},
             {"text": "Можно {time_exact}?", "tags": ["time"]},
+            WRONG_NAME_TURN,
+            WRONG_PHONE_TURN,
             {"text": "Аты {name}.", "tags": ["name"]},
             {"text": "Номер {phone}.", "tags": ["phone"]},
             {"text": "Иә, дұрыс.", "tags": ["confirm"]},
@@ -173,7 +219,12 @@ SCENARIOS = [
             {"text": "{greet}, хочу {service} и маникюр {day} {time_range}.", "tags": ["booking"]},
             {"text": "Можно сначала {service}, потом маникюр?", "tags": ["interrupt", "multi_service"]},
             {"text": "А сколько длится?", "tags": ["interrupt", "duration"]},
+            WRONG_SERVICE_TURN,
+            WRONG_DATE_TURN,
+            WRONG_TIME_TURN,
             {"text": "Можно {time_exact}?", "tags": ["time"]},
+            WRONG_NAME_TURN,
+            WRONG_PHONE_TURN,
             {"text": "Меня зовут {name}.", "tags": ["name"]},
             {"text": "Телефон {phone}.", "tags": ["phone"]},
             {"text": "Да, подтверждаю.", "tags": ["confirm"]},
@@ -188,7 +239,12 @@ SCENARIOS = [
             {"text": "{greet}! Хочу записаться на {service}.", "tags": ["booking"]},
             {"text": "Можно связаться с менеджером?", "tags": ["handoff", "human"]},
             {"text": "Спасибо, жду.", "tags": ["pending"]},
-            {"text": "Давайте продолжим запись, можно {time_exact}?", "tags": ["booking", "time"]},
+            WRONG_SERVICE_TURN,
+            WRONG_DATE_TURN,
+            WRONG_TIME_TURN,
+            {"text": "Давайте продолжим запись, можно {time_exact}?", "tags": ["time"]},
+            WRONG_NAME_TURN,
+            WRONG_PHONE_TURN,
             {"text": "Имя {name}.", "tags": ["name"]},
             {"text": "Телефон {phone}.", "tags": ["phone"]},
             {"text": "Да, подтверждаю.", "tags": ["confirm"]},
@@ -301,6 +357,7 @@ def _default_expect() -> dict[str, Any]:
         "reply_type": None,
         "state": None,
         "expected_reply": None,
+        "allow_booking_stall": False,
     }
 
 def _prune_turns(turns: list[dict[str, Any]], max_turns: int, required_tags: set[str]) -> list[dict[str, Any]]:
@@ -534,7 +591,7 @@ def _validate_dialog(dialog: dict[str, Any], *, min_turns: int, max_turns: int) 
         if not isinstance(expect, dict):
             warnings.append("missing_expect_block")
             break
-        for key in ("action", "info_sections", "reply_type", "state", "expected_reply"):
+        for key in ("action", "info_sections", "reply_type", "state", "expected_reply", "allow_booking_stall"):
             if key not in expect:
                 warnings.append("expect_missing_key")
                 break
@@ -625,7 +682,7 @@ def _generate_llm_dialogs(
         "turns is a list of {kind,text,tags,expect} with 10-15 client messages. "
         "Tags must be chosen from: booking, interrupt, price, duration, location, hours, parking, "
         "promo, master, time, time_alt, consult, channel, delay, media, noise, handoff. "
-        "expect must include keys: action, info_sections, reply_type, state, expected_reply. "
+        "expect must include keys: action, info_sections, reply_type, state, expected_reply, allow_booking_stall. "
         "Use canonical tokens only in expect (no natural language): "
         "action: null or one of [booking_escalated, escalate, handoff]; "
         "info_sections: array from [pricing, price, payment_info, payment, address, location, "
@@ -634,7 +691,7 @@ def _generate_llm_dialogs(
         "reply_type: null or one of [service_choice, time, name]; "
         "state: null or one of [bot_active, pending, manager_active]; "
         "expected_reply: true/false/null. "
-        "Include interruptions (price/location/noise), time/name swaps, and at least one media reference. "
+        "Include interruptions (price/location/noise), wrong slot answers, time/name swaps, and at least one media reference. "
         "Beauty salon domain, Russian language, natural chat. "
         f"Count={count}, turns_range={min_turns}-{max_turns}. "
         f"media_mode={media_mode}, media_kind={media_kind}. "
