@@ -93,6 +93,13 @@ user_messages AS (
     AND m.created_at >= b.start_ts
     AND m.created_at < b.end_ts
     AND COALESCE((m.metadata->>'simulation_mode')::boolean, FALSE) = FALSE
+    AND (
+      NULLIF(TRIM(m.metadata->'tenant_context'->>'client_id'), '') IS NULL
+      OR (
+        TRIM(m.metadata->'tenant_context'->>'client_id') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        AND (TRIM(m.metadata->'tenant_context'->>'client_id'))::uuid = b.client_id
+      )
+    )
 ),
 bot_messages AS (
   SELECT
@@ -288,6 +295,13 @@ user_messages AS (
     AND m.created_at >= b.start_ts
     AND m.created_at < b.end_ts
     AND COALESCE((m.metadata->>'simulation_mode')::boolean, FALSE) = FALSE
+    AND (
+      NULLIF(TRIM(m.metadata->'tenant_context'->>'client_id'), '') IS NULL
+      OR (
+        TRIM(m.metadata->'tenant_context'->>'client_id') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        AND (TRIM(m.metadata->'tenant_context'->>'client_id'))::uuid = b.client_id
+      )
+    )
 ),
 inbound_conversations AS (
   SELECT

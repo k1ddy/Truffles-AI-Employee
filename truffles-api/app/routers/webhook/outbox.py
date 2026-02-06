@@ -461,14 +461,14 @@ async def _process_outbox_rows(
         payload_json = row.get("payload_json") or {}
         created_at = row.get("created_at")
         conversation_id = row.get("conversation_id")
-        branch_id = None
+        branch_id = row.get("branch_id")
         if conversation_id:
             conversation = (
                 db.query(Conversation)
                 .filter(Conversation.id == conversation_id)
                 .first()
             )
-            if conversation:
+            if conversation and conversation.branch_id:
                 branch_id = conversation.branch_id
         inbound_message_id = row.get("inbound_message_id")
         client_id = row.get("client_id")
@@ -579,6 +579,70 @@ async def _process_outbox_rows(
             outbox_id,
             {"contract_error": reason},
         )
+
+    def _validate_outbox_row_tenant_context(*, row: dict, payload_json: dict, outbox_id: str) -> str | None:
+        if not isinstance(payload_json, dict):
+            return None
+
+        row_client_id = None
+        row_client_raw = row.get("client_id")
+        if row_client_raw:
+            try:
+                row_client_id = UUID(str(row_client_raw))
+            except (TypeError, ValueError):
+                row_client_id = None
+
+        row_branch_id = None
+        row_branch_raw = pick_info.get(outbox_id, {}).get("branch_id")
+        if row_branch_raw:
+            try:
+                row_branch_id = UUID(str(row_branch_raw))
+            except (TypeError, ValueError):
+                row_branch_id = None
+
+        payload_client_id_raw = payload_json.get("client_id")
+        if payload_client_id_raw:
+            try:
+                payload_client_id = UUID(str(payload_client_id_raw))
+            except (TypeError, ValueError):
+                return "event:invalid_client_id"
+            if row_client_id and payload_client_id != row_client_id:
+                return "event:client_id_mismatch"
+
+        payload_branch_id_raw = payload_json.get("branch_id")
+        if payload_branch_id_raw:
+            try:
+                payload_branch_id = UUID(str(payload_branch_id_raw))
+            except (TypeError, ValueError):
+                return "event:invalid_branch_id"
+            if row_branch_id and payload_branch_id != row_branch_id:
+                return "event:branch_id_mismatch"
+
+        tenant_context = payload_json.get("tenant_context")
+        if tenant_context is None:
+            return None
+        if not isinstance(tenant_context, dict):
+            return "event:invalid_tenant_context"
+
+        tenant_client_id_raw = tenant_context.get("client_id")
+        if tenant_client_id_raw:
+            try:
+                tenant_client_id = UUID(str(tenant_client_id_raw))
+            except (TypeError, ValueError):
+                return "event:invalid_tenant_context_client_id"
+            if row_client_id and tenant_client_id != row_client_id:
+                return "event:tenant_context_client_mismatch"
+
+        tenant_branch_id_raw = tenant_context.get("branch_id")
+        if tenant_branch_id_raw:
+            try:
+                tenant_branch_id = UUID(str(tenant_branch_id_raw))
+            except (TypeError, ValueError):
+                return "event:invalid_tenant_context_branch_id"
+            if row_branch_id and tenant_branch_id != row_branch_id:
+                return "event:tenant_context_branch_mismatch"
+
+        return None
 
     def _record_outbox_action_error(*, outbox_id: str, error: str) -> None:
         info = pick_info.get(outbox_id, {})
@@ -804,6 +868,31 @@ async def _process_outbox_rows(
         client_slug = payload_json.get("client_slug")
         outbox_ids = [outbox_id_str]
         timing_start = time.monotonic()
+
+        tenant_guard_error = _validate_outbox_row_tenant_context(
+            row=row,
+            payload_json=payload_json,
+            outbox_id=outbox_id_str,
+        )
+        if tenant_guard_error:
+            _record_outbox_payload_error(outbox_id=outbox_id_str, reason=tenant_guard_error)
+            mark_outbox_status(
+                db,
+                outbox_id=outbox_id,
+                status="FAILED",
+                last_error=f"invalid_payload:{tenant_guard_error}"[:500],
+                next_attempt_at=None,
+            )
+            _notify_outbox_failure(
+                outbox_id=outbox_id_str,
+                reason="invalid_payload",
+                error=tenant_guard_error,
+                provider=payload_json.get("provider") or "internal",
+                attempts=int(row.get("attempts") or 0),
+            )
+            results["failed"] += 1
+            return
+
         sim_info = pick_info.get(outbox_id_str, {})
         message = _resolve_outbox_message(outbox_id_str)
         if sim_info.get("simulation_mode"):

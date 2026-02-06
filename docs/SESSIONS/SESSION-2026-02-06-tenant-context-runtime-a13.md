@@ -1,0 +1,22 @@
+# SESSION 2026-02-06-tenant-context-runtime-a13 — Runtime tenant_context enforcement + cross-tenant coverage
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-06-tenant-context-runtime-a13.md
+- branch: feat/2026-02-06-tenant-context-runtime-a13
+- worktree: /home/zhan/worktrees/2026-02-06-tenant-context-runtime-a13
+- base_ref: origin/main
+- scope: Вшить tenant_context в runtime webhook/outbox/metrics и закрыть тестовые GAP для cross-tenant вне Console.
+- done:
+  - Добавлен `tenant_context` в `WebhookRequest` + parsing extraction.
+  - Preflight webhook валидирует tenant_context mismatch (client/slug/instance/branch).
+  - Effective tenant_context пишется в metadata inbound user-message.
+  - Добавлен outbox row tenant guard (`client_id`/`branch_id`/`tenant_context`).
+  - Metrics daily/analytics SQL фильтрует user_messages по `metadata.tenant_context.client_id`.
+  - Добавлены тесты для webhook/outbox/audit tenant isolation.
+- next:
+  - Прогнать финальный `session_check` и оформить merge/close.
+- evidence:
+  - /tmp/pytest_tenant_context_runtime_20260206_a13.txt
+  - STATE.md (NOW)
+- last_updated: 2026-02-06
