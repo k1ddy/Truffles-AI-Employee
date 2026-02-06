@@ -297,6 +297,7 @@ from app.services.ai_service import (
     transcribe_audio_with_fallback,
 )
 from app.services.chatflow_service import get_instance_id
+from app.services.capabilities_runtime import build_runtime_capabilities, set_runtime_capabilities
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.demo_salon_knowledge import (
     DemoSalonDecision,
@@ -344,6 +345,11 @@ from app.services.intent_service import (
     should_escalate,
 )
 from app.services.knowledge_registry_service import get_current_published
+from app.services.knowledge_runtime import (
+    build_runtime_truth,
+    set_runtime_truth,
+    should_allow_truth_fallback,
+)
 from app.services.knowledge_validation import (
     MINIMUM_DATA_CONTRACT_VERSION,
     MinimumDataContractStatus,
@@ -4412,6 +4418,47 @@ async def _handle_webhook_payload(
     resolved_branch_id = preflight_payload.get("resolved_branch_id")
     resolved_knowledge_tag = preflight_payload.get("resolved_knowledge_tag")
 
+    runtime_capabilities = build_runtime_capabilities(
+        db,
+        client_id=client.id,
+        branch_id=resolved_branch_id,
+    )
+    set_runtime_capabilities(runtime_capabilities)
+
+    def _apply_runtime_capabilities(branch_id: UUID | None) -> None:
+        nonlocal runtime_capabilities
+        if runtime_capabilities and runtime_capabilities.branch_id == branch_id:
+            return
+        runtime_capabilities = build_runtime_capabilities(
+            db,
+            client_id=client.id,
+            branch_id=branch_id,
+        )
+        set_runtime_capabilities(runtime_capabilities)
+
+    allow_truth_fallback = should_allow_truth_fallback()
+    runtime_truth = build_runtime_truth(
+        db,
+        client_slug=payload.client_slug,
+        client_id=client.id,
+        branch_id=resolved_branch_id,
+        allow_fallback=allow_truth_fallback,
+    )
+    set_runtime_truth(runtime_truth)
+
+    def _apply_runtime_truth(branch_id: UUID | None) -> None:
+        nonlocal runtime_truth
+        if runtime_truth and runtime_truth.branch_id == branch_id:
+            return
+        runtime_truth = build_runtime_truth(
+            db,
+            client_slug=payload.client_slug,
+            client_id=client.id,
+            branch_id=branch_id,
+            allow_fallback=allow_truth_fallback,
+        )
+        set_runtime_truth(runtime_truth)
+
     if not skip_persist:
         record_inbound_count(payload.client_slug)
 
@@ -4645,6 +4692,8 @@ async def _handle_webhook_payload(
         )
         if skip_response:
             return skip_response
+        if conversation and conversation.branch_id:
+            _apply_runtime_truth(conversation.branch_id)
     else:
         dedup_start = time.monotonic()
         with start_span("webhook.dedup", context=timing_context) as span:
@@ -4688,6 +4737,8 @@ async def _handle_webhook_payload(
                 "whatsapp",
                 branch_id=resolved_branch_id,
             )
+        if conversation and conversation.branch_id:
+            _apply_runtime_truth(conversation.branch_id)
         timing_context["conversation_id"] = str(conversation.id)
         if metadata and conversation:
             sim_context = apply_simulation_context(conversation, metadata)
@@ -5613,6 +5664,8 @@ async def _handle_webhook_payload(
         return branch_response
 
     if conversation.branch_id:
+        _apply_runtime_capabilities(conversation.branch_id)
+        _apply_runtime_truth(conversation.branch_id)
         timing_context["branch_id"] = str(conversation.branch_id)
         if "knowledge_tag" not in timing_context:
             branch = (
