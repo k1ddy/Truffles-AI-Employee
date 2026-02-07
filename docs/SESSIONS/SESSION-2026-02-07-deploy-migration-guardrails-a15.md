@@ -1,0 +1,23 @@
+# SESSION 2026-02-07-deploy-migration-guardrails-a15 — Session 2026-02-07-deploy-migration-guardrails-a15
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-07-deploy-migration-guardrails-a15.md
+- branch: feat/2026-02-07-deploy-migration-guardrails-a15
+- worktree: /home/zhan/worktrees/2026-02-07-deploy-migration-guardrails-a15
+- base_ref: origin/main
+- scope: Deploy migration guardrails (migration runner + CI/restart wiring + docs updates)
+- done:
+  - Session created.
+  - Added SQL migration runner with `schema_migrations` tracking + checksum guard.
+  - Added canonical `scripts/restart_api.sh` with pre-switch migration gate.
+  - Updated CI deploy flow to run migrations before restart and avoid early API container removal.
+  - Updated deploy docs to canonical restart script path and `RUN_MIGRATIONS=1`.
+  - Added target tests for migration runner and executed local + test-compose checks.
+- next:
+  - Prepare PR bundle (status/diff/evidence) and run CI.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-07-deploy-migration-guardrails-a15.md
+  - pytest -q truffles-api/tests/test_apply_sql_migrations.py
+  - PYTEST_ARGS='/app/tests/test_apply_sql_migrations.py' scripts/test_api_container.sh
+- last_updated: 2026-02-08

@@ -41,7 +41,7 @@ runtime:
     evidence:
       - "TECH.md:11-14"
   deploy:
-    api_restart_script: "/home/zhan/restart_api.sh"
+    api_restart_script: "/home/zhan/truffles-main/scripts/restart_api.sh"
     build_required_for_code_changes: true
     evidence:
       - "STATE.md:27"

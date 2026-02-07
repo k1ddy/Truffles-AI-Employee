@@ -44,6 +44,7 @@
 | `.github/workflows/session-gate.yml` | CI gate: session log + doc-only policy | Brain/Architect |
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
 | `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (outbox/sentinel) | OPS |
+| `scripts/restart_api.sh` | Канонический деплой API (migration gate + version verify) | OPS |
 | `scripts/session_start.sh` | Создать worktree/branch и session log (agent suffix обязателен) | Все роли |
 | `scripts/session_check.sh` | Проверка сессии перед commit/push | Все роли |
 | `scripts/session_end.sh` | Закрытие сессии + index обновление | Все роли |
@@ -70,6 +71,7 @@
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
 | `truffles-api/` | Backend API + workers | Backend |
 | `truffles-api/docker-compose.test.yml` | Test‑compose overrides (test containers, no prod env) | Backend/QA |
+| `truffles-api/scripts/apply_sql_migrations.py` | SQL migration runner (`schema_migrations` + checksum guard) | Backend/OPS |
 | `truffles-api/app/services/onboarding_state.py` | Server-side onboarding state machine (Console) | Backend |
 | `truffles-api/app/services/console_confirmations.py` | Confirmation safeguards for destructive Console actions | Backend |
 | `truffles-api/app/services/capabilities_runtime.py` | Runtime capabilities context (client_capabilities → decision/booking) | Backend |
@@ -356,7 +358,7 @@
 | `dev` | webhook + services | `truffles-api/app/routers/webhook/`, `truffles-api/app/services/*` |
 | `data` | eval + facts | `truffles-api/app/knowledge/demo_salon/EVAL.yaml`, `truffles-api/app/knowledge/demo_salon/EVAL_GOLDEN.yaml`, `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml` |
 | `docs` | specs + состояния | `SPECS/*`, `STATE.md`, `STRUCTURE.md`, `AGENTS.md` |
-| `ops` | CI + deploy | `.github/workflows/*`, `TECH.md`, `/home/zhan/restart_api.sh`, infra compose (не в этом репо) |
+| `ops` | CI + deploy | `.github/workflows/*`, `TECH.md`, `/home/zhan/truffles-main/scripts/restart_api.sh`, infra compose (не в этом репо) |
 
 ---
 

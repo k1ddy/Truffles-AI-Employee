@@ -60,13 +60,13 @@
 
 **Стандарт (CI/GHCR):**
 ```bash
-ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 bash ~/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 RUN_MIGRATIONS=1 bash /home/zhan/truffles-main/scripts/restart_api.sh"
 ```
 
 **Fallback (локальная сборка):**
 ```bash
 ssh -p 222 zhan@5.188.241.234 "docker build -t truffles-api_truffles-api /home/zhan/truffles-main/truffles-api"
-ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "RUN_MIGRATIONS=1 bash /home/zhan/truffles-main/scripts/restart_api.sh"
 ```
 
 **Логи:**

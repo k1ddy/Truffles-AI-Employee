@@ -41,7 +41,7 @@ hostname; whoami; pwd; curl -s https://ifconfig.me
 | bge-m3 | text-embeddings-inference | Embeddings |
 | truffles-traefik | traefik:v2.11 | Reverse proxy |
 
-**Важно:** Инфраструктура разделена: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`). API в проде деплоится через `/home/zhan/restart_api.sh`. В `/home/zhan/truffles-main/docker-compose.yml` — заглушка (не использовать). Ранее был кейс ошибки `KeyError: 'ContainerConfig'` на `up/build`.
+**Важно:** Инфраструктура разделена: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`). API в проде деплоится через `/home/zhan/truffles-main/scripts/restart_api.sh`. В `/home/zhan/truffles-main/docker-compose.yml` — заглушка (не использовать). Ранее был кейс ошибки `KeyError: 'ContainerConfig'` на `up/build`.
 
 ---
 
@@ -518,12 +518,13 @@ ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 100"
 ssh -p 222 zhan@5.188.241.234 "sed -i 's/^APP_VERSION=.*/APP_VERSION=main/' /home/zhan/truffles-main/truffles-api/.env"
 
 # CI build/push → pull image (prod standard)
-ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 REQUIRE_GHCR=1 VERIFY_VERSION=1 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main bash ~/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 RUN_MIGRATIONS=1 REQUIRE_GHCR=1 VERIFY_VERSION=1 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main bash /home/zhan/truffles-main/scripts/restart_api.sh"
 
 # ❌ Запрещено на проде: локальная docker-compose build/run для API
 # restart_api.sh по умолчанию использует GHCR и требует GHCR-образ (REQUIRE_GHCR=1).
+# По умолчанию RUN_MIGRATIONS=1: SQL миграции применяются до переключения контейнера.
 ```
-`restart_api.sh` поддерживает `IMAGE_NAME`, `PULL_IMAGE=1`, `REQUIRE_GHCR=1`, `VERIFY_VERSION=1`, `EXPECTED_GIT_COMMIT`, `EXPECTED_VERSION`.
+`restart_api.sh` поддерживает `IMAGE_NAME`, `PULL_IMAGE=1`, `RUN_MIGRATIONS=1`, `REQUIRE_GHCR=1`, `VERIFY_VERSION=1`, `EXPECTED_GIT_COMMIT`, `EXPECTED_VERSION`.
 
 После деплоя обязательно перезапустить воркеры на том же образе, чтобы не было дрейфа:
 ```bash
@@ -544,7 +545,7 @@ ssh -p 222 zhan@5.188.241.234 "curl -s http://127.0.0.1:8011/health"
 
 ### Перезапуск API (без обновления кода)
 ```bash
-ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "RUN_MIGRATIONS=1 bash /home/zhan/truffles-main/scripts/restart_api.sh"
 ```
 По умолчанию перезапуск идёт с GHCR `:main` (REQUIRE_GHCR=1); локальные образы на проде запрещены.
 **Важно:** воркеры (`truffles-outbox`, `truffles-sentinel`) запускаются отдельно; `restart_api.sh` их не перезапускает.

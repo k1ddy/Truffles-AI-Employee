@@ -195,12 +195,12 @@ FROM agents a WHERE a.name = 'manager';"
 
 ### Standard Restart (no code change)
 ```bash
-ssh -p 222 zhan@5.188.241.234 "REQUIRE_GHCR=1 bash ~/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "RUN_MIGRATIONS=1 REQUIRE_GHCR=1 bash /home/zhan/truffles-main/scripts/restart_api.sh"
 ```
 
 ### Restart with new image
 ```bash
-ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 REQUIRE_GHCR=1 bash ~/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 RUN_MIGRATIONS=1 REQUIRE_GHCR=1 bash /home/zhan/truffles-main/scripts/restart_api.sh"
 ```
 
 ### Verify restart
@@ -223,7 +223,7 @@ ssh -p 222 zhan@5.188.241.234 "docker stop truffles-api && docker rm truffles-ap
 ```
 2) **Start new API container** (no embedded workers):
 ```bash
-ssh -p 222 zhan@5.188.241.234 "REQUIRE_GHCR=1 bash ~/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "RUN_MIGRATIONS=1 REQUIRE_GHCR=1 bash /home/zhan/truffles-main/scripts/restart_api.sh"
 ```
 3) **Start workers**:
 ```bash

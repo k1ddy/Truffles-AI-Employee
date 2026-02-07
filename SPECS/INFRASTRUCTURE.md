@@ -350,7 +350,7 @@ jobs:
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            IMAGE_NAME=${{ env.IMAGE_NAME }}:main PULL_IMAGE=1 bash ~/restart_api.sh
+            IMAGE_NAME=${{ env.IMAGE_NAME }}:main PULL_IMAGE=1 RUN_MIGRATIONS=1 bash /home/zhan/truffles-main/scripts/restart_api.sh
 ```
 
 ### Секреты в GitHub
