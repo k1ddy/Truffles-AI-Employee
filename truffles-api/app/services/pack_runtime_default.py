@@ -1,11 +1,8 @@
-"""Neutral pack runtime facade.
-
-Runtime callers depend on this module instead of concrete pack implementation.
-"""
+"""Default pack runtime adapter backed by the current demo implementation."""
 
 from __future__ import annotations
 
-from app.services.pack_runtime_default import (
+from app.services.demo_salon_knowledge import (
     _detect_promotion_intent,
     _has_duration_signal,
     _has_price_signal,
@@ -30,14 +27,8 @@ from app.services.pack_runtime_default import (
     semantic_question_type,
     semantic_service_match,
 )
-from app.services.pack_runtime_types import PackDecision
-
-# Backward compatibility alias for existing imports.
-DemoSalonDecision = PackDecision
 
 __all__ = [
-    "PackDecision",
-    "DemoSalonDecision",
     "_detect_promotion_intent",
     "_has_duration_signal",
     "_has_price_signal",

@@ -21,7 +21,13 @@ from app.routers.webhook import response as webhook_response
 from app.routers.webhook.session_memory import _is_session_reset_only_message
 from app.schemas.consult import ConsultControllerOutput
 from app.schemas.message import MessageRequest, MessageResponse
-from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest, WebhookResponse
+from app.schemas.webhook import (
+    WebhookBody,
+    WebhookMetadata,
+    WebhookRequest,
+    WebhookResponse,
+    WebhookTenantContext,
+)
 from app.services import escalation_service
 from app.services.demo_salon_knowledge import (
     DemoSalonDecision,
@@ -1818,7 +1824,8 @@ def test_consult_pack_flow_records_trace_and_meta():
     saved_message = Mock()
     saved_message.message_metadata = {}
 
-    client = SimpleNamespace(id="client-123", name="generic", config={})
+    client_id = uuid4()
+    client = SimpleNamespace(id=client_id, name="generic", config={})
     settings = SimpleNamespace(
         webhook_secret=None,
         branch_resolution_mode="disabled",
@@ -1870,6 +1877,7 @@ def test_consult_pack_flow_records_trace_and_meta():
 
     payload = WebhookRequest(
         client_slug="generic",
+        tenant_context=WebhookTenantContext(client_id=client_id, client_slug="generic"),
         body=WebhookBody(
             message="Подскажите, что можно сделать для улучшения ухода?",
             messageType="text",
@@ -1982,7 +1990,8 @@ def test_consult_snapshot_shadow_disabled():
     saved_message = Mock()
     saved_message.message_metadata = {}
 
-    client = SimpleNamespace(id="client-123", name="generic", config={})
+    client_id = uuid4()
+    client = SimpleNamespace(id=client_id, name="generic", config={})
     settings = SimpleNamespace(
         webhook_secret=None,
         branch_resolution_mode="disabled",
@@ -2034,6 +2043,7 @@ def test_consult_snapshot_shadow_disabled():
 
     payload = WebhookRequest(
         client_slug="generic",
+        tenant_context=WebhookTenantContext(client_id=client_id, client_slug="generic"),
         body=WebhookBody(
             message="Подскажите, как ухаживать после процедуры?",
             messageType="text",
