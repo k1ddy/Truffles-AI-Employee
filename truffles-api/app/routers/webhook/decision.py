@@ -627,7 +627,6 @@ def _apply_expected_reply_contract(
         deterministic_available = False
         deterministic_value = None
         normalization_flags: list[str] = []
-        promotion_request = False
         if message_text:
             normalized_message = legacy._normalize_service_text(message_text)
             expected_reply_blocked_by_info = (
@@ -635,15 +634,6 @@ def _apply_expected_reply_contract(
                 or legacy._has_price_signal(normalized_message, message_text)
                 or legacy._has_duration_signal(normalized_message, message_text)
             )
-            promotion_request = _looks_like_promotions_request(
-                message_text,
-                policy_type=policy_type,
-                policy_pack=policy_pack,
-                client_slug=client_slug,
-            )
-            # Promo questions should not be forced into expected-reply defer mode.
-            if promotion_request:
-                expected_reply_blocked_by_info = False
             if (
                 expected_reply_blocked_by_info
                 and expected_reply_type == legacy.EXPECTED_REPLY_TIME
@@ -1209,6 +1199,7 @@ def _run_intent_decomposition(
         info_class_intents, info_class_meta = legacy._detect_info_class_intents(
             message_text,
             intent_decomp_set=intent_decomp_set,
+            client_slug=client_slug,
         )
         if legacy._matches_guest_policy_lexicon(message_text, client_slug=client_slug):
             if not isinstance(info_class_meta, dict):
@@ -6345,6 +6336,11 @@ async def _handle_webhook_payload(
         return handover_response
 
     batch_messages = _coerce_batch_messages(message_text, batch_messages)
+    # Recompute after debounce/normalization so booking interrupts use current turn anchors.
+    batch_non_booking_message = _select_last_non_booking_message(
+        batch_messages,
+        client_slug=payload.client_slug,
+    )
     booking_messages = batch_messages
     booking_context = None
     booking = None
@@ -6792,6 +6788,7 @@ async def _handle_webhook_payload(
         early_info_intents, early_info_meta = _detect_info_class_intents(
             message_text,
             intent_decomp_set=intent_decomp_set,
+            client_slug=payload.client_slug,
         )
         if not (
             is_greeting_message(message_text)

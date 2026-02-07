@@ -190,18 +190,19 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 
 **Что делаем (как):**
 1) **Lock-run (один раз):** фиксируем baseline с неизменными параметрами; сохраняем `scenarios.json`, `summary.json`, `brief.md`.
-2) **Replay-run (на каждую правку):** запускаем только по lock-сценариям (`--scenarios-file`) и сравниваем только с lock-summary (`--baseline-summary`), с fail-fast (`--max-failures`) для скорости.
+2) **Replay-run (на каждую правку):** запускаем только по lock-сценариям (`--scenarios-file`) и сравниваем только с lock-summary (`--baseline-summary`), с fail-fast (`--max-failures`) для скорости; обязательно `--reset-before-dialog`, чтобы не тянуть state/trace из прошлых прогонов.
 3) **Handoff:** в session/STATE кладём `summary.json` + `brief.md` + top-failures + replay command.
 
 **Короткая памятка (не нарушать):**
 - Нельзя сравнивать прогоны с разными сценариями/seed/параметрами.
+- Нельзя делать replay без `--reset-before-dialog` (иначе ложный дрейф из старых conversation/trace).
 - Нельзя обновлять baseline маленькими случайными прогонами.
 - Нельзя начинать новый фикс без `brief.md` от предыдущего прогона.
 - Если реплей хуже baseline — stop-the-line, сначала root cause, потом новый фикс.
 
 **Командный шаблон:**
 - lock: `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --seed 42 --run-id booking-lock-42`
-- replay: `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json --count 10 --tool-hooks auto --max-failures 20`
+- replay: `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json --count 10 --tool-hooks auto --reset-before-dialog --max-failures 20`
 
 **Локальные тесты:**
 - локально можно запускать для скорости,

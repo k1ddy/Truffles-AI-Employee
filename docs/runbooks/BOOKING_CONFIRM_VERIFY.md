@@ -190,6 +190,7 @@ TEST_MODE=1 python3 ops/diagnose.py llm-quality \
   --count 10 \
   --allowlist-jids "$OUTBOUND_ALLOWLIST_JIDS" \
   --tool-hooks auto \
+  --reset-before-dialog \
   --max-failures 20
 ```
 

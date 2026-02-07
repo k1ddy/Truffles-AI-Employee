@@ -661,6 +661,69 @@ def _select_last_non_booking_message(messages: list[str], *, client_slug: str | 
     return None
 
 
+def _select_booking_interrupt_text(
+    *,
+    message_text: str | None,
+    batch_non_booking_message: str | None,
+    client_slug: str | None,
+) -> str | None:
+    if not message_text:
+        return batch_non_booking_message
+    if not batch_non_booking_message:
+        return message_text
+    if _is_booking_related_message(
+        message_text,
+        client_slug,
+        allow_name=False,
+        allow_service=False,
+    ):
+        return batch_non_booking_message
+    return message_text
+
+
+def _resolve_booking_info_intents(
+    *,
+    intent_decomp_used: bool,
+    intent_decomp_set: set[str],
+    info_class_intents: set[str],
+    expected_reply_type: str | None,
+    booking_time_service_candidate: bool,
+    expected_reply_shortcircuit: bool,
+    booking_interrupt_text: str | None,
+    client_slug: str | None,
+) -> list[str]:
+    from . import _legacy as legacy
+
+    booking_info_intents: list[str] = []
+    should_prefer_info_class = bool(
+        info_class_intents
+        and (
+            booking_time_service_candidate
+            or expected_reply_type
+            in {
+                legacy.EXPECTED_REPLY_SERVICE,
+                legacy.EXPECTED_REPLY_TIME,
+                legacy.EXPECTED_REPLY_NAME,
+            }
+        )
+    )
+    if should_prefer_info_class:
+        booking_info_intents = sorted(info_class_intents)
+    elif intent_decomp_used:
+        booking_info_intents = sorted(intent_decomp_set & legacy.INFO_INTENTS)
+
+    if expected_reply_shortcircuit and booking_interrupt_text:
+        anchor_intents, _ = legacy._detect_info_class_intents(
+            booking_interrupt_text,
+            intent_decomp_set=set(),
+            client_slug=client_slug,
+        )
+        if anchor_intents:
+            booking_info_intents = sorted(anchor_intents)
+
+    return booking_info_intents
+
+
 def _select_expected_reply_message(
     messages: list[str],
     *,
@@ -1329,7 +1392,11 @@ def _handle_booking_interrupt(
     if expected_reply_type and not expected_reply_blocked_by_info:
         return None
 
-    booking_interrupt_text = batch_non_booking_message or message_text
+    booking_interrupt_text = _select_booking_interrupt_text(
+        message_text=message_text,
+        batch_non_booking_message=batch_non_booking_message,
+        client_slug=client_slug,
+    )
     booking_time_service_candidate = (
         expected_reply_type == legacy.EXPECTED_REPLY_TIME
         and expected_reply_matched is False
@@ -1363,29 +1430,16 @@ def _handle_booking_interrupt(
             or expected_reply_shortcircuit
         )
     ):
-        booking_info_intents = (
-            sorted(intent_decomp_set & legacy.INFO_INTENTS) if intent_decomp_used else []
+        booking_info_intents = _resolve_booking_info_intents(
+            intent_decomp_used=intent_decomp_used,
+            intent_decomp_set=intent_decomp_set,
+            info_class_intents=info_class_intents,
+            expected_reply_type=expected_reply_type,
+            booking_time_service_candidate=booking_time_service_candidate,
+            expected_reply_shortcircuit=expected_reply_shortcircuit,
+            booking_interrupt_text=booking_interrupt_text,
+            client_slug=client_slug,
         )
-        if expected_reply_shortcircuit and booking_interrupt_text:
-            anchor_intents, _ = legacy._detect_info_class_intents(
-                booking_interrupt_text,
-                intent_decomp_set=set(),
-            )
-            booking_info_intents = sorted(anchor_intents)
-        if (
-            not booking_info_intents
-            and info_class_intents
-            and (
-                booking_time_service_candidate
-                or expected_reply_type
-                in {
-                    legacy.EXPECTED_REPLY_SERVICE,
-                    legacy.EXPECTED_REPLY_TIME,
-                    legacy.EXPECTED_REPLY_NAME,
-                }
-            )
-        ):
-            booking_info_intents = sorted(info_class_intents)
         promotions_signal = False
         if message_text:
             policy_pack = (

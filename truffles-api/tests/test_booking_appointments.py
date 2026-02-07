@@ -11,6 +11,7 @@ from app.models.service import Service
 
 pytest.importorskip("dateparser")
 from app.routers.webhook import booking as booking_router
+from app.routers.webhook import _legacy as legacy
 
 
 def _make_query(result):
@@ -180,3 +181,48 @@ def test_select_last_non_booking_message_ignores_booking_intake():
     )
 
     assert selected is None
+
+
+def test_select_booking_interrupt_text_prefers_current_info_message():
+    selected = booking_router._select_booking_interrupt_text(
+        message_text="Где находится ваш салон?",
+        batch_non_booking_message="Сколько стоит маникюр?",
+        client_slug="demo_salon",
+    )
+
+    assert selected == "Где находится ваш салон?"
+
+
+def test_select_booking_interrupt_text_falls_back_for_booking_intake():
+    selected = booking_router._select_booking_interrupt_text(
+        message_text="Я хочу записаться на стрижку.",
+        batch_non_booking_message="Сколько стоит маникюр?",
+        client_slug="demo_salon",
+    )
+
+    assert selected == "Сколько стоит маникюр?"
+
+
+def test_select_booking_interrupt_text_uses_batch_when_message_missing():
+    selected = booking_router._select_booking_interrupt_text(
+        message_text=None,
+        batch_non_booking_message="Сколько стоит маникюр?",
+        client_slug="demo_salon",
+    )
+
+    assert selected == "Сколько стоит маникюр?"
+
+
+def test_resolve_booking_info_intents_prefers_info_class_over_intent_decomp():
+    resolved = booking_router._resolve_booking_info_intents(
+        intent_decomp_used=True,
+        intent_decomp_set={"pricing", "duration"},
+        info_class_intents={"location", "pricing"},
+        expected_reply_type=legacy.EXPECTED_REPLY_TIME,
+        booking_time_service_candidate=False,
+        expected_reply_shortcircuit=False,
+        booking_interrupt_text=None,
+        client_slug="demo_salon",
+    )
+
+    assert resolved == ["location", "pricing"]
