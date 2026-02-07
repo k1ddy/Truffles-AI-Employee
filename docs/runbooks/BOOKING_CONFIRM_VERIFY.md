@@ -210,6 +210,7 @@ Evaluation contract (state-aware)
 - Manager callbacks (simulate mode): `take` -> `manager_active` + `handover.status=active`; `resolve` -> `bot_active` + `resolved`; `return` -> `bot_active` + `bot_handling`.
 - Info requests must match `info_sections`/intents (price/location/hours/promo/duration/parking/master).
 - Booking-active turns should show slot progress; stalls are flagged.
+- `booking_slot_stall` checks only slot-relevant turns (service/time/date/no-tag), not generic booking noise.
 - Booking `expected_reply_type` is limited to `service_choice`/`time`/`name` (phone/confirm are not expected_reply_type).
 
 Reason codes (summary.failures / failure_counts)

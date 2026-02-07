@@ -757,8 +757,8 @@ LLM_QUALITY_BUNDLE_INTENTS = {"info_bundle", "multi_intent_info"}
 LLM_QUALITY_KNOWN_STATES = {"bot_active", "pending", "manager_active"}
 LLM_QUALITY_BOOKING_SLOTS = ("service", "datetime", "name", "phone")
 LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE = {
-    "service_choice": {"booking", "service", "multi_service"},
-    "time": {"booking", "time", "time_alt"},
+    "service_choice": {"service", "multi_service"},
+    "time": {"time", "time_alt", "date"},
     "name": {"name"},
 }
 LLM_QUALITY_PROGRESS_SKIP_TAGS = {
@@ -2517,8 +2517,13 @@ def _llm_quality_should_expect_booking_progress(expected_reply_type, turn_tags):
     if not normalized_tags:
         return True
     required_tags = LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE.get(expected_reply_type, set())
-    if required_tags and normalized_tags.intersection(required_tags):
-        return True
+    if required_tags:
+        if normalized_tags.intersection(required_tags):
+            return True
+        if normalized_tags.intersection(LLM_QUALITY_PROGRESS_SKIP_TAGS):
+            return False
+        # Unknown tags should not force slot-stall checks for this turn.
+        return False
     if normalized_tags.intersection(LLM_QUALITY_PROGRESS_SKIP_TAGS):
         return False
     if expected_reply_type == "name":

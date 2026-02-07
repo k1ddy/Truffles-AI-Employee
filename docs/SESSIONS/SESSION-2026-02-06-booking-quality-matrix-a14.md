@@ -14,10 +14,13 @@
   - Verified smoke run with replay mode and fail-fast (`/tmp/booking_quality/20260206-234902/*`).
   - Executed lock+replay cycle (timeboxed): `booking-lock-42-fast1` and `booking-replay-42-fast1` with fixed scenarios + explicit baseline_summary.
   - Captured repeatable top failure: `missing_bot_reply` (5/5 turns in replay), with replay command in generated brief.
+  - Re-ran replay with default timeouts and confirmed `missing_bot_reply` was timeout artifact, not runtime regression (`booking-replay-42-default1`).
+  - Tightened booking progress gate in llm-quality evaluator and added regression test (`test_booking_quality_progress_gate.py`).
+  - Verified after fix: `booking_slot_stall` removed from top failures; replay pass_rate improved to `0.8333` (`booking-replay-42-default2`).
 - next:
   - Run full lock+replay matrix (`count=10`, seeds 42/1337/2026) after stabilizing outbox reply path.
   - Apply next core fix only against locked scenarios (no mixed baselines).
-  - Investigate `missing_bot_reply` via outbox_summary/outbox_payload_status on replay turns.
+  - Resolve remaining info misses for booking interrupts (`parking`, `promo`) in booking-active turns.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-06-booking-quality-matrix.md
   - /tmp/booking_quality/20260206-234902/summary.json
@@ -26,4 +29,6 @@
   - /tmp/booking_quality/booking-lock-42-fast1/brief.md
   - /tmp/booking_quality/booking-replay-42-fast1/summary.json
   - /tmp/booking_quality/booking-replay-42-fast1/brief.md
+  - /tmp/booking_quality/booking-replay-42-default1/summary.json
+  - /tmp/booking_quality/booking-replay-42-default2/summary.json
 - last_updated: 2026-02-07
