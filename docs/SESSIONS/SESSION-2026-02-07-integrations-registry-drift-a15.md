@@ -1,0 +1,26 @@
+# SESSION 2026-02-07-integrations-registry-drift-a15 — Session 2026-02-07-integrations-registry-drift-a15
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-07-integrations-registry-drift-a15.md
+- branch: feat/2026-02-07-integrations-registry-drift-a15
+- worktree: /home/zhan/worktrees/2026-02-07-integrations-registry-drift-a15
+- base_ref: origin/main
+- scope: Console Integrations registry (WhatsApp/Telegram per branch) with drift detection/audit/alert and UI surface.
+- done:
+  - Added backend schemas for integrations registry status list.
+  - Implemented `/console/v1/admin/integrations` with drift classification (`instance_id_mismatch`, `invalid_webhook_url`, `no_recent_inbound`) and stale threshold query param.
+  - Added drift state-change signaling with audit events (`integration_drift_detected`/`integration_drift_cleared`) and warning alerts on detect.
+  - Added backend tests for integration status builder and drift signal state transitions.
+  - Updated OpenAPI contract and regenerated console-web API types.
+  - Added console-web Integrations page (`/integrations`) and navigation entry with provisioning read gate.
+- next:
+  - Await review/merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-07-integrations-registry-drift-a15.md
+  - `PYTEST_ARGS='/app/tests/test_console_integrations_registry.py' scripts/test_api_container.sh` (5 passed)
+  - `python3 truffles-api/scripts/generate_openapi.py --check`
+  - `cd console-web && npm run generate:api`
+  - `cd console-web && npm run lint`
+  - `cd console-web && npm run build`
+- last_updated: 2026-02-07

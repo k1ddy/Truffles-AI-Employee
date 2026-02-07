@@ -465,6 +465,8 @@ export type SettingsResponse = components["schemas"]["SettingsResponse"];
 export type AuditEvent = components["schemas"]["AuditEvent"];
 export type AuditListResponse = components["schemas"]["AuditListResponse"];
 export type AgentListResponse = components["schemas"]["AgentListResponse"];
+export type BranchIntegrationStatus = components["schemas"]["BranchIntegrationStatus"];
+export type IntegrationsListResponse = components["schemas"]["IntegrationsListResponse"];
 export type TelegramVerifyRequest = components["schemas"]["TelegramVerifyRequest"];
 export type TelegramVerifyResponse = components["schemas"]["TelegramVerifyResponse"];
 export type TelegramTestRequest = components["schemas"]["TelegramTestRequest"];
@@ -513,6 +515,7 @@ export type ListLearningCandidatesParams = operations["listLearningCandidates"][
 export type ListCompaniesParams = operations["listAdminCompanies"]["parameters"]["query"];
 export type ListClientsParams = operations["listAdminClients"]["parameters"]["query"];
 export type ListBranchesParams = operations["listAdminBranches"]["parameters"]["query"];
+export type ListIntegrationsParams = operations["listAdminIntegrations"]["parameters"]["query"];
 export type ListReferencePacksParams = operations["listAdminReferencePacks"]["parameters"]["query"];
 
 // ═══════════════════════════════════════════════════════════════════
@@ -616,6 +619,8 @@ export const adminApi = {
         apiClient.get<components["schemas"]["ClientListResponse"]>("/admin/clients", { params }),
     listBranches: (params?: ListBranchesParams) =>
         apiClient.get<components["schemas"]["BranchListResponse"]>("/admin/branches", { params }),
+    listIntegrations: (params?: ListIntegrationsParams) =>
+        apiClient.get<components["schemas"]["IntegrationsListResponse"]>("/admin/integrations", { params }),
     createCompany: (data: components["schemas"]["CompanyCreateRequest"]) =>
         apiClient.post<components["schemas"]["CompanyCreateResponse"]>("/admin/companies", data),
     patchCompany: (companyId: string, data: components["schemas"]["CompanyUpdateRequest"]) =>

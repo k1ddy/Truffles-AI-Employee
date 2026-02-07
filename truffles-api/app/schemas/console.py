@@ -658,6 +658,35 @@ class ConsoleWebhookSecretResponse(BaseModel):
     webhook_url: str
 
 
+class ConsoleBranchIntegrationStatus(BaseModel):
+    branch_id: UUID
+    branch_slug: str
+    branch_name: str
+    is_active: bool
+    instance_id: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    webhook_url: Optional[str] = None
+    webhook_url_valid: bool = False
+    whatsapp_status: Literal[
+        "ok",
+        "inactive",
+        "missing_instance_id",
+        "instance_id_mismatch",
+        "invalid_webhook_url",
+        "no_recent_inbound",
+    ]
+    telegram_status: Literal["ok", "inactive", "missing_bot_token", "missing_chat_id"]
+    last_inbound_at: Optional[str] = None
+    last_inbound_instance_id: Optional[str] = None
+    drift_issues: list[str] = []
+    status: Literal["ok", "warn", "error"]
+
+
+class ConsoleIntegrationsListResponse(BaseModel):
+    stale_after_minutes: int
+    items: list[ConsoleBranchIntegrationStatus]
+
+
 class ConsoleAgentListResponse(BaseModel):
     items: list[ConsoleAgentWithIdentities]
 
