@@ -69,6 +69,7 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
     { label: "Тенанты", href: "/tenants", section: "tenants", action: "read", testId: "nav-tenants" },
+    { label: "Интеграции", href: "/integrations", section: "provisioning", action: "read", testId: "nav-integrations" },
     { label: "Заявки", href: "/", section: "inbox", action: "read", testId: "nav-cases" },
     { label: "Записи", href: "/calendar", section: "calendar", action: "read", testId: "nav-calendar" },
     { label: "Знания", href: "/knowledge", section: "knowledge", action: "read", testId: "nav-knowledge" },
@@ -112,6 +113,14 @@ const NAV_ICONS: Partial<Record<ConsoleSection, ReactNode>> = {
             <path d="M4 20h16" />
             <rect x="6" y="6" width="12" height="14" rx="2" />
             <path d="M9 10h2M13 10h2M9 14h2M13 14h2" />
+        </NavIcon>
+    ),
+    provisioning: (
+        <NavIcon>
+            <rect x="3" y="5" width="6" height="6" rx="1.5" />
+            <rect x="15" y="5" width="6" height="6" rx="1.5" />
+            <rect x="9" y="13" width="6" height="6" rx="1.5" />
+            <path d="M9 8h6M12 11v2" />
         </NavIcon>
     ),
     inbox: (

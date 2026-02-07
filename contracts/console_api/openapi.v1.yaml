@@ -1522,6 +1522,36 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /admin/integrations:
+    get:
+      operationId: listAdminIntegrations
+      tags: [integrations]
+      summary: List branch integration status and drift signals
+      parameters:
+        - name: stale_after_minutes
+          in: query
+          schema:
+            type: integer
+            minimum: 5
+            maximum: 1440
+            default: 60
+          description: Mark branch as stale when no inbound for this many minutes.
+      responses:
+        "200":
+          description: Integrations registry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationsListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /admin/agents:
     post:
       operationId: createAdminAgent
@@ -2348,6 +2378,74 @@ components:
           nullable: true
         has_more:
           type: boolean
+
+    BranchIntegrationStatus:
+      type: object
+      required:
+        [
+          branch_id,
+          branch_slug,
+          branch_name,
+          is_active,
+          webhook_url_valid,
+          whatsapp_status,
+          telegram_status,
+          drift_issues,
+          status,
+        ]
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        branch_slug:
+          type: string
+        branch_name:
+          type: string
+        is_active:
+          type: boolean
+        instance_id:
+          type: string
+          nullable: true
+        telegram_chat_id:
+          type: string
+          nullable: true
+        webhook_url:
+          type: string
+          nullable: true
+        webhook_url_valid:
+          type: boolean
+        whatsapp_status:
+          type: string
+          enum:
+            [ok, inactive, missing_instance_id, instance_id_mismatch, invalid_webhook_url, no_recent_inbound]
+        telegram_status:
+          type: string
+          enum: [ok, inactive, missing_bot_token, missing_chat_id]
+        last_inbound_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_inbound_instance_id:
+          type: string
+          nullable: true
+        drift_issues:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [ok, warn, error]
+
+    IntegrationsListResponse:
+      type: object
+      required: [stale_after_minutes, items]
+      properties:
+        stale_after_minutes:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BranchIntegrationStatus"
 
     OnboardingStepStatus:
       type: object

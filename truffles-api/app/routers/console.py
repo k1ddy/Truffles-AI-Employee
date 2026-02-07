@@ -6,7 +6,9 @@ import secrets
 from datetime import date as dt_date
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Optional
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
@@ -52,6 +54,7 @@ from app.schemas.console import (
     ConsoleBranch,
     ConsoleBranchCreateRequest,
     ConsoleBranchCreateResponse,
+    ConsoleBranchIntegrationStatus,
     ConsoleBranchListResponse,
     ConsoleBranchUpdateRequest,
     ConsoleCapabilitiesPatchRequest,
@@ -76,6 +79,7 @@ from app.schemas.console import (
     ConsoleConfirmationResponse,
     ConsoleErrorResponse,
     ConsoleHealthResponse,
+    ConsoleIntegrationsListResponse,
     ConsoleKnowledgeCurrentResponse,
     ConsoleKnowledgeHistoryItem,
     ConsoleKnowledgeHistoryResponse,
@@ -134,6 +138,7 @@ from app.schemas.console import (
 from app.schemas.onboarding_contract import ONBOARDING_CONTRACT_SCHEMA_VERSION, OnboardingContractPayload
 from app.schemas.outbox_payload import validate_outbox_payload
 from app.services.agent_link_service import build_telegram_deep_link, create_agent_link_token
+from app.services.alert_service import alert_warning
 from app.services.audit_service import record_audit_event
 from app.services.capabilities_service import merge_capabilities, payload_to_dict
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
@@ -883,6 +888,12 @@ _CLIENT_STATUS_ACTIVE = "active"
 _CLIENT_STATUS_ARCHIVED = "deleted"
 _CLIENT_LIFECYCLE_REASON_MAX_LEN = 500
 _CLIENT_ARCHIVE_SAMPLE_LIMIT = 20
+_INTEGRATION_DEFAULT_STALE_MINUTES = 60
+_INTEGRATION_MIN_STALE_MINUTES = 5
+_INTEGRATION_MAX_STALE_MINUTES = 24 * 60
+_INTEGRATION_ALERT_ISSUES = {"instance_id_mismatch", "invalid_webhook_url", "no_recent_inbound"}
+_INTEGRATION_DRIFT_STATE: dict[str, str] = {}
+_INTEGRATION_DRIFT_LOCK = Lock()
 
 
 def _parse_tenant_lifecycle_param(value: Optional[str]) -> str:
@@ -931,6 +942,212 @@ def _collect_client_archive_blockers(db: Session, client_id: UUID) -> dict[str, 
         "active_membership_ids": [str(membership.id) for membership in active_memberships],
         "active_branch_ids": [str(branch.id) for branch in active_branches],
     }
+
+
+def _is_valid_webhook_url(value: Optional[str]) -> bool:
+    url = (value or "").strip()
+    if not url:
+        return False
+    parsed = urlparse(url)
+    return bool(parsed.netloc) and parsed.scheme in {"http", "https"} and parsed.path.startswith("/webhook/")
+
+
+def _extract_instance_id_from_metadata(metadata: Optional[dict]) -> Optional[str]:
+    if not isinstance(metadata, dict):
+        return None
+    direct = metadata.get("instanceId") or metadata.get("instance_id")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+    nested = metadata.get("metadata")
+    if isinstance(nested, dict):
+        nested_value = nested.get("instanceId") or nested.get("instance_id")
+        if isinstance(nested_value, str) and nested_value.strip():
+            return nested_value.strip()
+    return None
+
+
+def _load_latest_branch_inbound_observations(
+    db: Session,
+    *,
+    client_id: UUID,
+) -> dict[UUID, tuple[datetime, Optional[str]]]:
+    ranked = (
+        db.query(
+            Conversation.branch_id.label("branch_id"),
+            Message.created_at.label("created_at"),
+            Message.message_metadata.label("metadata"),
+            func.row_number()
+            .over(
+                partition_by=Conversation.branch_id,
+                order_by=Message.created_at.desc(),
+            )
+            .label("rank"),
+        )
+        .join(Message, Message.conversation_id == Conversation.id)
+        .filter(
+            Conversation.client_id == client_id,
+            Conversation.branch_id.isnot(None),
+            Message.role == "user",
+        )
+        .subquery()
+    )
+    rows = (
+        db.query(
+            ranked.c.branch_id,
+            ranked.c.created_at,
+            ranked.c.metadata,
+        )
+        .filter(ranked.c.rank == 1)
+        .all()
+    )
+    observations: dict[UUID, tuple[datetime, Optional[str]]] = {}
+    for row in rows:
+        branch_id = row.branch_id
+        created_at = row.created_at
+        if not branch_id or not created_at:
+            continue
+        instance_id = _extract_instance_id_from_metadata(row.metadata)
+        observations[branch_id] = (created_at, instance_id)
+    return observations
+
+
+def _build_branch_integration_status(
+    *,
+    client_slug: str,
+    branch: Branch,
+    has_telegram_bot_token: bool,
+    stale_after_minutes: int,
+    last_inbound_at: Optional[datetime],
+    last_inbound_instance_id: Optional[str],
+    now: datetime,
+) -> ConsoleBranchIntegrationStatus:
+    branch_instance_id = _normalize_optional_text(branch.instance_id)
+    branch_telegram_chat_id = _normalize_optional_text(branch.telegram_chat_id)
+    webhook_url: Optional[str] = None
+    webhook_url_valid = False
+    drift_issues: list[str] = []
+
+    if branch_instance_id:
+        webhook_secret = _normalize_optional_text(branch.webhook_secret) or _derive_webhook_secret_from_instance(
+            branch_instance_id
+        )
+        webhook_url = _build_webhook_url(client_slug=client_slug, webhook_secret=webhook_secret)
+        webhook_url_valid = _is_valid_webhook_url(webhook_url)
+
+    if not branch.is_active:
+        whatsapp_status = "inactive"
+    elif not branch_instance_id:
+        whatsapp_status = "missing_instance_id"
+        drift_issues.append("missing_instance_id")
+    elif last_inbound_instance_id and last_inbound_instance_id != branch_instance_id:
+        whatsapp_status = "instance_id_mismatch"
+        drift_issues.append("instance_id_mismatch")
+    elif not webhook_url_valid:
+        whatsapp_status = "invalid_webhook_url"
+        drift_issues.append("invalid_webhook_url")
+    else:
+        stale_cutoff = now - timedelta(minutes=stale_after_minutes)
+        if not last_inbound_at or last_inbound_at < stale_cutoff:
+            whatsapp_status = "no_recent_inbound"
+            drift_issues.append("no_recent_inbound")
+        else:
+            whatsapp_status = "ok"
+
+    if not branch.is_active:
+        telegram_status = "inactive"
+    elif not has_telegram_bot_token:
+        telegram_status = "missing_bot_token"
+    elif not branch_telegram_chat_id:
+        telegram_status = "missing_chat_id"
+    else:
+        telegram_status = "ok"
+
+    status = "ok"
+    if branch.is_active and whatsapp_status in {"missing_instance_id", "instance_id_mismatch", "invalid_webhook_url"}:
+        status = "error"
+    elif branch.is_active and (whatsapp_status == "no_recent_inbound" or telegram_status in {"missing_bot_token", "missing_chat_id"}):
+        status = "warn"
+
+    return ConsoleBranchIntegrationStatus(
+        branch_id=branch.id,
+        branch_slug=branch.slug,
+        branch_name=branch.name,
+        is_active=bool(branch.is_active),
+        instance_id=branch_instance_id,
+        telegram_chat_id=branch_telegram_chat_id,
+        webhook_url=webhook_url,
+        webhook_url_valid=webhook_url_valid,
+        whatsapp_status=whatsapp_status,
+        telegram_status=telegram_status,
+        last_inbound_at=last_inbound_at.isoformat() if last_inbound_at else None,
+        last_inbound_instance_id=last_inbound_instance_id,
+        drift_issues=drift_issues,
+        status=status,
+    )
+
+
+def _emit_integration_drift_signals(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    statuses: list[ConsoleBranchIntegrationStatus],
+) -> None:
+    has_updates = False
+    for item in statuses:
+        branch_key = str(item.branch_id)
+        signature = ",".join(sorted(item.drift_issues))
+        with _INTEGRATION_DRIFT_LOCK:
+            previous_signature = _INTEGRATION_DRIFT_STATE.get(branch_key, "")
+            if signature:
+                _INTEGRATION_DRIFT_STATE[branch_key] = signature
+            else:
+                _INTEGRATION_DRIFT_STATE.pop(branch_key, None)
+        if signature == previous_signature:
+            continue
+        if signature:
+            record_audit_event(
+                db,
+                actor=context.agent,
+                event_type="integration_drift_detected",
+                entity_type="branch",
+                entity_id=item.branch_id,
+                payload={
+                    "drift_issues": item.drift_issues,
+                    "status": item.status,
+                    "whatsapp_status": item.whatsapp_status,
+                    "telegram_status": item.telegram_status,
+                    "last_inbound_at": item.last_inbound_at,
+                    "last_inbound_instance_id": item.last_inbound_instance_id,
+                    "configured_instance_id": item.instance_id,
+                },
+                client_id=context.client.id,
+                branch_id=item.branch_id,
+            )
+            if any(issue in _INTEGRATION_ALERT_ISSUES for issue in item.drift_issues):
+                alert_warning(
+                    "Integration drift detected",
+                    {
+                        "client_id": str(context.client.id),
+                        "branch_id": str(item.branch_id),
+                        "branch_slug": item.branch_slug,
+                        "issues": ",".join(item.drift_issues),
+                    },
+                )
+        else:
+            record_audit_event(
+                db,
+                actor=context.agent,
+                event_type="integration_drift_cleared",
+                entity_type="branch",
+                entity_id=item.branch_id,
+                payload={"status": item.status},
+                client_id=context.client.id,
+                branch_id=item.branch_id,
+            )
+        has_updates = True
+
+    if has_updates:
+        db.commit()
 
 
 def _parse_date_param(name: str, value: Optional[str]) -> Optional[dt_date]:
@@ -4568,6 +4785,72 @@ async def list_branches(
         items=[_serialize_branch(branch) for branch in items],
         cursor=next_cursor,
         has_more=has_more,
+    )
+
+
+@router.get(
+    "/admin/integrations",
+    response_model=ConsoleIntegrationsListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_integrations(
+    request: Request,
+    stale_after_minutes: int = Query(
+        _INTEGRATION_DEFAULT_STALE_MINUTES,
+        ge=_INTEGRATION_MIN_STALE_MINUTES,
+        le=_INTEGRATION_MAX_STALE_MINUTES,
+    ),
+    db: Session = Depends(get_db),
+) -> ConsoleIntegrationsListResponse:
+    context = get_console_context(request, db, require_selection=False, include_inactive_tenants=True)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin/support can access provisioning",
+    )
+    _reject_unknown_query_params(request, {"stale_after_minutes"})
+
+    branches = (
+        db.query(Branch)
+        .filter(Branch.client_id == context.client.id)
+        .order_by(Branch.name.asc(), Branch.created_at.asc())
+        .all()
+    )
+    settings = db.query(ClientSettings).filter(ClientSettings.client_id == context.client.id).first()
+    has_telegram_bot_token = bool(_normalize_optional_text(settings.telegram_bot_token) if settings else None)
+
+    inbound_observations = _load_latest_branch_inbound_observations(
+        db,
+        client_id=context.client.id,
+    )
+    now = datetime.now(timezone.utc)
+    items = []
+    for branch in branches:
+        last_inbound_at: Optional[datetime] = None
+        last_inbound_instance_id: Optional[str] = None
+        observed = inbound_observations.get(branch.id)
+        if observed:
+            last_inbound_at, last_inbound_instance_id = observed
+        item = _build_branch_integration_status(
+            client_slug=context.client.name,
+            branch=branch,
+            has_telegram_bot_token=has_telegram_bot_token,
+            stale_after_minutes=stale_after_minutes,
+            last_inbound_at=last_inbound_at,
+            last_inbound_instance_id=last_inbound_instance_id,
+            now=now,
+        )
+        items.append(item)
+
+    _emit_integration_drift_signals(
+        db,
+        context=context,
+        statuses=items,
+    )
+    return ConsoleIntegrationsListResponse(
+        stale_after_minutes=stale_after_minutes,
+        items=items,
     )
 
 

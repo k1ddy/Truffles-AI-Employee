@@ -435,6 +435,7 @@ jobs:
             --exclude-path /admin/companies \
             --exclude-path /admin/clients \
             --exclude-path /admin/branches \
+            --exclude-path /admin/integrations \
             --exclude-path /admin/capabilities \
             --exclude-path /admin/reference-packs \
             --exclude-path /admin/onboarding-contract \
