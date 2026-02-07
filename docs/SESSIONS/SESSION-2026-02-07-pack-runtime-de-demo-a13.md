@@ -1,0 +1,24 @@
+# SESSION 2026-02-07-pack-runtime-de-demo-a13 — Session 2026-02-07-pack-runtime-de-demo-a13
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-07-pack-runtime-de-demo-a13.md
+- branch: feat/2026-02-07-pack-runtime-de-demo-a13
+- worktree: /home/zhan/worktrees/2026-02-07-pack-runtime-de-demo-a13
+- base_ref: origin/main
+- scope: De-demoization of pack runtime facade (neutral adapter/types + back-compat) with targeted runtime/tests evidence.
+- done:
+  - Session created.
+  - Added `truffles-api/app/services/pack_runtime_types.py` (`PackDecision` + compat alias `DemoSalonDecision`).
+  - Added `truffles-api/app/services/pack_runtime_default.py` as neutral default adapter over current implementation.
+  - Refactored `truffles-api/app/services/pack_runtime_service.py` to import from neutral adapter/types (no direct `demo_salon_knowledge` import).
+  - Switched `truffles-api/app/services/demo_salon_knowledge.py` to use `PackDecision` alias for `DemoSalonDecision`.
+  - Added `truffles-api/tests/test_pack_runtime_service.py` (adapter re-export + alias compatibility checks).
+  - Updated two consult smoke tests in `truffles-api/tests/test_message_endpoint.py` with valid `tenant_context.client_id` UUID to match contract gate.
+  - Updated `STATE.md` with DONE evidence for this step.
+- next:
+  - Run `scripts/session_check.sh`, commit, push, open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-07-pack-runtime-de-demo-a13.md
+  - /tmp/pytest_pack_runtime_de_demo_20260207.txt
+- last_updated: 2026-02-07

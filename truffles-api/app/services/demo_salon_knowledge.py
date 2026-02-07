@@ -18,6 +18,7 @@ from app.logging_config import get_logger
 from app.services.knowledge_runtime import get_runtime_truth
 from app.services.knowledge_service import get_embedding
 from app.services.pack_compiler_service import compile_pack_payload
+from app.services.pack_runtime_types import PackDecision as DemoSalonDecision
 
 _KNOWLEDGE_BASE_DIR = Path(__file__).resolve().parents[1] / "knowledge"
 _DEFAULT_CLIENT_SLUG = "demo_salon"
@@ -62,15 +63,6 @@ _QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 CONSULT_CLARIFY_TEXT = "Я могу помочь по услугам салона. Какая услуга интересует?"
 
 logger = get_logger("demo_salon_knowledge")
-
-
-@dataclass(frozen=True)
-class DemoSalonDecision:
-    action: str
-    response: str
-    intent: str | None = None
-    collect: list[str] | None = None
-    meta: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
