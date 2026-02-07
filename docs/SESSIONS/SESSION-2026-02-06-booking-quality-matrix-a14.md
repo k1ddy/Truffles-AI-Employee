@@ -76,9 +76,25 @@
   - Re-ran frozen replay for missing-bot-reply focus (`fix5`):
     - `/tmp/booking_quality/20260207-fix5-main-seed-2026-replay/summary.json`: `missing_bot_reply 11 -> 0`, `pass_rate 0.8582 -> 0.8955`.
     - `/tmp/booking_quality/20260207-fix5-main-seed-9001-replay/summary.json`: `missing_bot_reply` remained `0` (no regression on target metric).
+  - Replayed frozen seed `1337` and identified residual `missing_bot_reply` from duplicate-ack + escalation action path.
+  - Extended duplicate-ack guard in evaluator (`ops/diagnose.py`):
+    - detect duplicate marker in nested `response` payload string;
+    - treat `booking_escalated` as reply-like for duplicate-ack inference in `bot_active`.
+  - Added duplicate-ack regressions for nested payload + `booking_escalated` in `truffles-api/tests/test_booking_quality_response_guard.py`.
+  - Added infra-aware missing-reply suppression in evaluator:
+    - do not count `missing_bot_reply` when webhook failed with infra timeout/reset and `decision_meta` is unavailable (`meta_error=timeout` / unknown state).
+  - Added regressions for infra-timeout suppression vs normal missing-reply behavior in `truffles-api/tests/test_booking_quality_response_guard.py`.
+  - Re-ran frozen seed `1337` after hardening (`fix7`):
+    - `/tmp/booking_quality/20260207-fix7-main-seed-1337-replay/summary.json`:
+      - `missing_bot_reply 1 -> 0`,
+      - `pass_rate 0.8913 -> 0.9203`,
+      - `turns_failed 15 -> 11`,
+      - `expected_info_section_miss 9 -> 7`,
+      - `info_section_miss 8 -> 7`,
+      - gates clean: `webhook_errors=0`, `infra_errors=0`, `decision_meta_coverage=1.0`, `unknown_state_rate=0.0`.
+  - Expanded runbook with explicit network/frozen-replay guardrails (allowlist explicitness, hang detection, rerun rules, missing_bot_reply triage order) in `docs/runbooks/BOOKING_CONFIRM_VERIFY.md`.
 - next:
-  - Stabilize non-target drift after `fix5` on seed 9001 (`expected_info_section_miss/info_section_miss` spike) and confirm repeatability.
-  - Validate `fix5` on seed 1337 before resuming branch_b matrix.
+  - Stabilize non-target drift on seed 9001 (`expected_info_section_miss/info_section_miss` spike) and confirm repeatability.
   - Resolve `booking_slot_stall` tail (seed 2026) without regressing pending/manager handling.
   - Resume `branch_b` matrix from checkpoint with `scripts/booking_quality_matrix_resumable.sh --run-stamp 20260207-stress` after info-gap fix + one regression test.
 - evidence:
@@ -117,4 +133,7 @@
   - /tmp/booking_quality/20260207-fix4-main-seed-2026-replay/summary.json
   - /tmp/booking_quality/20260207-fix5-main-seed-2026-replay/summary.json
   - /tmp/booking_quality/20260207-fix5-main-seed-9001-replay/summary.json
+  - /tmp/booking_quality/20260207-fix5-main-seed-1337-replay/summary.json
+  - /tmp/booking_quality/20260207-fix6b-main-seed-1337-replay/summary.json
+  - /tmp/booking_quality/20260207-fix7-main-seed-1337-replay/summary.json
 - last_updated: 2026-02-07

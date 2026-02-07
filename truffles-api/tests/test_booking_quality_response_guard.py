@@ -235,6 +235,64 @@ def test_booking_slot_stall_reported_in_bot_active_state():
     assert "booking_slot_stall" in reasons
 
 
+def test_missing_bot_reply_suppressed_for_infra_timeout_without_meta():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta=None,
+        trace_entries=[],
+        state=None,
+        conv_meta={},
+        handover_meta={},
+        bot_response=False,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        meta_error="timeout",
+        webhook_error="ConnectionResetError: [Errno 104] Connection reset by peer",
+    )
+    assert "missing_bot_reply" not in reasons
+    assert "decision_meta_missing" in reasons
+    assert "unknown_state" in reasons
+
+
+def test_missing_bot_reply_kept_without_infra_signals():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "reply"},
+        trace_entries=[{"stage": "consult"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=False,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        meta_error=None,
+        webhook_error=None,
+    )
+    assert "missing_bot_reply" in reasons
+
+
 def test_state_fallback_allows_pending_when_expected_bot_active():
     helpers = _load_expectation_helpers()
     fn = helpers["_llm_quality_state_matches_expected"]
@@ -307,6 +365,7 @@ def test_duplicate_ack_helper_detects_payload_message():
     helpers = _load_duplicate_ack_helpers()
     fn = helpers["_llm_quality_payload_is_duplicate_ack"]
     assert fn({"success": True, "message": "Duplicate message_id"})
+    assert fn({"response": "{\"success\":true,\"message\":\"Duplicate message_id\"}"})
     assert not fn({"success": True, "message": "ok"})
 
 
@@ -319,6 +378,20 @@ def test_duplicate_ack_helper_inferrs_bot_response_for_reply_action():
         response_payload={"success": True, "message": "Duplicate message_id"},
         attempts=2,
         meta={"action": "booking_prompt"},
+        meta_error=None,
+        state="bot_active",
+    )
+
+
+def test_duplicate_ack_helper_inferrs_bot_response_for_booking_escalated_action():
+    helpers = _load_duplicate_ack_helpers()
+    fn = helpers["_llm_quality_should_infer_bot_response_from_duplicate_ack"]
+    assert fn(
+        bot_response=False,
+        expected_response=True,
+        response_payload={"success": True, "message": "Duplicate message_id"},
+        attempts=2,
+        meta={"action": "booking_escalated"},
         meta_error=None,
         state="bot_active",
     )

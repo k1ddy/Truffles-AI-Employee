@@ -3377,6 +3377,8 @@ def _llm_quality_evaluate_turn(
     booking_progress_expected,
     booking_progressed,
     allow_booking_stall,
+    meta_error=None,
+    webhook_error=None,
 ):
     reasons = []
     if meta is None:
@@ -3427,7 +3429,31 @@ def _llm_quality_evaluate_turn(
         if not expected_answered:
             reasons.append("expected_info_section_miss")
     if expected_response and not bot_response:
-        reasons.append("missing_bot_reply")
+        suppress_missing_reply = False
+        if isinstance(webhook_error, str) and webhook_error.strip():
+            lowered = webhook_error.casefold()
+            infra_markers = (
+                "remote_disconnected",
+                "timeout",
+                "timed out",
+                "connection refused",
+                "connection reset",
+                "network is unreachable",
+                "temporary failure",
+                "name or service not known",
+                "connection aborted",
+                "broken pipe",
+            )
+            if any(marker in lowered for marker in infra_markers):
+                suppress_missing_reply = True
+        if not suppress_missing_reply and not isinstance(meta, dict):
+            if isinstance(meta_error, str) and meta_error.casefold() in {
+                "timeout",
+                "conversation_not_found",
+            } and state not in LLM_QUALITY_KNOWN_STATES:
+                suppress_missing_reply = True
+        if not suppress_missing_reply:
+            reasons.append("missing_bot_reply")
     if state == "manager_active" and bot_response:
         reasons.append("unexpected_bot_reply_manager")
     if state == "manager_active" and not handover_meta:
@@ -4495,12 +4521,26 @@ def _llm_quality_retry_outbox_for_expected_reply(
 
 
 def _llm_quality_payload_is_duplicate_ack(response_payload):
+    marker = "duplicate message_id"
+    if isinstance(response_payload, str):
+        return marker in response_payload.casefold()
     if not isinstance(response_payload, dict):
         return False
-    message = response_payload.get("message")
-    if not isinstance(message, str):
-        return False
-    return "duplicate message_id" in message.casefold()
+    for field in ("message", "error"):
+        value = response_payload.get(field)
+        if isinstance(value, str) and marker in value.casefold():
+            return True
+    nested_response = response_payload.get("response")
+    if isinstance(nested_response, str):
+        if marker in nested_response.casefold():
+            return True
+        try:
+            nested_payload = json.loads(nested_response)
+        except Exception:
+            nested_payload = None
+        if _llm_quality_payload_is_duplicate_ack(nested_payload):
+            return True
+    return False
 
 
 def _llm_quality_should_infer_bot_response_from_duplicate_ack(
@@ -4530,7 +4570,6 @@ def _llm_quality_should_infer_bot_response_from_duplicate_ack(
         return False
     if action in {
         "escalate",
-        "booking_escalated",
         "booking_captured_pending",
         "booking_reuse_handover",
         "booking_paused",
@@ -4538,7 +4577,14 @@ def _llm_quality_should_infer_bot_response_from_duplicate_ack(
         return False
     # Duplicate-ack after infra retry usually means the first attempt was processed;
     # for reply-like actions we avoid counting a false missing_bot_reply.
-    return action in {"reply", "match", "booking_prompt", "smalltalk", "booking_confirm"}
+    return action in {
+        "reply",
+        "match",
+        "booking_prompt",
+        "smalltalk",
+        "booking_confirm",
+        "booking_escalated",
+    }
 
 def _fetch_outbox_rows(db_user, client_id, inbound_message_id, limit=5):
     safe_client = _escape_sql_literal(client_id)
@@ -6577,6 +6623,8 @@ def _run_llm_quality(args):
                     booking_progress_expected=progress_expected,
                     booking_progressed=booking_progressed,
                     allow_booking_stall=allow_booking_stall,
+                    meta_error=meta_error,
+                    webhook_error=response_error,
                 )
                 if evaluation_reasons:
                     stats["turns_failed"] += 1

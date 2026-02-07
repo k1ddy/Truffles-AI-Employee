@@ -299,6 +299,25 @@ Detailed operator workflow (future agents + humans)
    - Explicit callout: which failures improved and which worsened.
    - Exact next command for continuation.
 
+Network failure and frozen-replay guardrails (must follow)
+1. Always set allowlist explicitly in long runs (do not rely on empty env):
+   - `--allowlist-jids "77015705555@s.whatsapp.net,77785890765@s.whatsapp.net,77000000001@s.whatsapp.net,77000000002@s.whatsapp.net"`
+2. Detect hang before killing process:
+   - `responses_lines` not growing for >10 min AND no `summary.json`.
+   - Confirm process is still alive via `ps`.
+3. If hung:
+   - Stop current run.
+   - Re-run the exact same replay command with the same `--scenarios-file` and same output dir only when `summary.json` is absent.
+   - If `summary.json` exists, do not rerun; treat as completed artifact.
+4. `missing_bot_reply` triage order:
+   - `webhook.response` contains `Duplicate message_id` and `attempts > 1`:
+     expect `bot_response_inferred_duplicate_ack=true` for reply-like bot_active actions.
+   - `webhook.error` is infra (`timeout`, `connection reset`, etc.) and `decision_meta_error=timeout`:
+     this is infra instability, not product reply regression.
+5. Quick row checks after replay:
+   - `python3 - <<'PY'` (count `missing_bot_reply` from `responses.jsonl` and print offending rows).
+   - Verify `inferred_duplicate_ack_rows` count and check that `missing_bot_reply_rows` is not inflated by infra timeouts.
+
 Artifacts
 - `/tmp/booking_quality/<stamp>/scenarios.json`
 - `/tmp/booking_quality/<stamp>/responses.jsonl`
