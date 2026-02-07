@@ -653,10 +653,10 @@ def _select_last_non_booking_message(messages: list[str], *, client_slug: str | 
     for message in reversed(messages or []):
         if not message:
             continue
-        if legacy._looks_like_info_query(message, client_slug=client_slug):
-            return message
         if _is_booking_related_message(message, client_slug, allow_name=False, allow_service=False):
             continue
+        if legacy._looks_like_info_query(message, client_slug=client_slug):
+            return message
         return message
     return None
 

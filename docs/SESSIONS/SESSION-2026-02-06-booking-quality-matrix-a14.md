@@ -1,0 +1,29 @@
+# SESSION 2026-02-06-booking-quality-matrix-a14 — Session 2026-02-06-booking-quality-matrix-a14
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-06-booking-quality-matrix.md
+- branch: feat/2026-02-06-booking-quality-matrix-a14
+- worktree: /home/zhan/worktrees/2026-02-06-booking-quality-matrix-a14
+- base_ref: origin/main
+- scope: Stabilize llm-quality loop with deterministic replay, explicit baseline compare, fail-fast stop rule, and auto-handoff brief.
+- done:
+  - Added llm-quality replay controls in `ops/diagnose.py`: `--scenarios-file`, `--baseline-summary`, `--max-failures`, `--brief-file`.
+  - Added llm-quality artifacts: `summary.scenario_source`, `summary.baseline_source`, `summary.top_failures`, `summary.replay_command`, `summary.stop_reason`; auto-generated `brief.md`.
+  - Updated runbook/task package with deterministic lock+replay protocol and handoff artifact requirements.
+  - Verified smoke run with replay mode and fail-fast (`/tmp/booking_quality/20260206-234902/*`).
+  - Executed lock+replay cycle (timeboxed): `booking-lock-42-fast1` and `booking-replay-42-fast1` with fixed scenarios + explicit baseline_summary.
+  - Captured repeatable top failure: `missing_bot_reply` (5/5 turns in replay), with replay command in generated brief.
+- next:
+  - Run full lock+replay matrix (`count=10`, seeds 42/1337/2026) after stabilizing outbox reply path.
+  - Apply next core fix only against locked scenarios (no mixed baselines).
+  - Investigate `missing_bot_reply` via outbox_summary/outbox_payload_status on replay turns.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-06-booking-quality-matrix.md
+  - /tmp/booking_quality/20260206-234902/summary.json
+  - /tmp/booking_quality/20260206-234902/brief.md
+  - /tmp/booking_quality/booking-lock-42-fast1/summary.json
+  - /tmp/booking_quality/booking-lock-42-fast1/brief.md
+  - /tmp/booking_quality/booking-replay-42-fast1/summary.json
+  - /tmp/booking_quality/booking-replay-42-fast1/brief.md
+- last_updated: 2026-02-07

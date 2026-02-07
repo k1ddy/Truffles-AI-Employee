@@ -169,3 +169,14 @@ def test_create_booking_appointment_missing_branch_skips():
     assert created is None
     assert meta["appointment_skip_reason"] == "missing_branch"
     scheduling_cls.assert_not_called()
+
+
+def test_select_last_non_booking_message_ignores_booking_intake():
+    messages = ["Здравствуйте! Я хочу записаться на стрижку."]
+
+    selected = booking_router._select_last_non_booking_message(
+        messages,
+        client_slug="demo_salon",
+    )
+
+    assert selected is None

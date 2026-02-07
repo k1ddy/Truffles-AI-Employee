@@ -168,11 +168,37 @@ python3 ops/diagnose.py llm-quality \
   --update-baseline
 ```
 
+Deterministic bugfix loop (lock + replay)
+```bash
+# 1) Lock comparable baseline once (generates scenarios.json + summary.json)
+TEST_MODE=1 python3 ops/diagnose.py llm-quality \
+  --mode llm \
+  --count 10 \
+  --min-turns 10 \
+  --max-turns 15 \
+  --include-media \
+  --allowlist-jids "$OUTBOUND_ALLOWLIST_JIDS" \
+  --scenario-coverage booking,info,interrupt,handoff \
+  --tool-hooks auto \
+  --seed 42 \
+  --run-id booking-lock-42
+
+# 2) After each code fix: replay the same scenarios, compare to locked summary, stop early on obvious regressions
+TEST_MODE=1 python3 ops/diagnose.py llm-quality \
+  --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json \
+  --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json \
+  --count 10 \
+  --allowlist-jids "$OUTBOUND_ALLOWLIST_JIDS" \
+  --tool-hooks auto \
+  --max-failures 20
+```
+
 Artifacts
 - `/tmp/booking_quality/<stamp>/scenarios.json`
 - `/tmp/booking_quality/<stamp>/responses.jsonl`
 - `/tmp/booking_quality/<stamp>/trace_bundle.jsonl`
 - `/tmp/booking_quality/<stamp>/summary.json` (includes baseline_metrics + delta + coverage + judge)
+- `/tmp/booking_quality/<stamp>/brief.md` (top failures + replay command + next-step hint)
 - Baseline + history: `ops/results/booking_quality.json`
 
 Evaluation contract (state-aware)
@@ -252,6 +278,10 @@ Continuity / no-drift rules
 - If baseline is empty (first run), a small bootstrap run is acceptable; replace with `--count >= 5` on the next accepted run.
 - Do not update baseline on tiny runs after bootstrap; use `--count >= 5` for baseline updates.
 - Keep `--count`, `--min-turns`, `--max-turns`, `--mode`, `--include-media` stable across comparisons.
+- For bugfix iterations, compare only against an explicit locked run:
+  `--scenarios-file <lock>/scenarios.json --baseline-summary <lock>/summary.json`.
+- Use `--max-failures` for fail-fast loops to cap runtime during regressions.
+- Attach `brief.md` from the latest run into session handoff so the next agent starts from concrete top failures.
 - For gates, add `--fail-on-thresholds` and `--fail-on-regression --regression-tolerance 0.02`.
 - Use `--append-history` to track failure trends in `ops/results/booking_quality.json`.
 - Always record the run in `STATE.md` with the `summary.json` path and keep `ops/results/booking_quality.json` in git.
