@@ -568,3 +568,71 @@ def test_preflight_rejects_tenant_context_branch_mismatch(client_slug: str):
     assert response.success is False
     assert response.message == "Tenant mismatch"
     assert preflight_payload == {}
+
+
+@pytest.mark.parametrize("client_slug", ["demo_salon", "generic"])
+def test_preflight_rejects_tenant_context_instance_mismatch(client_slug: str):
+    client = SimpleNamespace(id=uuid4(), name=client_slug, company_id=None)
+    settings = SimpleNamespace(branch_resolution_mode="hybrid", webhook_secret=None)
+    resolved_branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=client.id,
+        instance_id="inst-123",
+        knowledge_tag="branch-a",
+        slug="branch-a",
+        is_active=True,
+    )
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    branch_query = Mock()
+    branch_query.filter.return_value.first.return_value = resolved_branch
+    branch_query.filter.return_value.all.return_value = []
+
+    def _query_side_effect(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Branch or getattr(model, "key", None) == "phone":
+            return branch_query
+        return Mock()
+
+    db = Mock()
+    db.query.side_effect = _query_side_effect
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug=client_slug,
+        body=WebhookBody(
+            message="hello",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                instanceId="inst-123",
+            ),
+        ),
+        tenant_context={
+            "client_id": str(client.id),
+            "client_slug": client_slug,
+            "instance_id": "inst-999",
+        },
+    )
+
+    with patch("app.routers.webhook.http._lookup_sender_branch", return_value=None):
+        response, preflight_payload = _run_preflight(
+            payload,
+            db,
+            provided_secret=None,
+            enforce_secret=False,
+            conversation_id=None,
+            resolve_trace_conversation=lambda **_: None,
+            record_early_trace=lambda *args, **kwargs: False,
+        )
+
+    assert response is not None
+    assert response.success is False
+    assert response.message == "Tenant mismatch"
+    assert preflight_payload == {}

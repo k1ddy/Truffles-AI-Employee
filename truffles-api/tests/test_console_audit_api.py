@@ -47,6 +47,13 @@ def _has_filter(query: _Query, column_name: str) -> bool:
     return False
 
 
+def _filter_value(query: _Query, column_name: str):
+    for expr in query.filters:
+        if getattr(getattr(expr, "left", None), "name", None) == column_name:
+            return getattr(getattr(expr, "right", None), "value", None)
+    return None
+
+
 @pytest.mark.asyncio
 async def test_list_audit_events_applies_client_and_branch_filters(monkeypatch):
     client_id = uuid4()
@@ -127,3 +134,37 @@ async def test_list_audit_events_rejects_invalid_entity_type(monkeypatch):
         )
 
     assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.asyncio
+async def test_list_audit_events_enforces_selected_client_filter_even_without_branch_restriction(monkeypatch):
+    selected_client_id = uuid4()
+    other_client_id = uuid4()
+    now = datetime.now(timezone.utc)
+    row = SimpleNamespace(
+        id=uuid4(),
+        created_at=now,
+        client_id=other_client_id,
+        branch_id=None,
+        event_type="case_taken",
+        actor_name="Agent",
+        entity_type="case",
+        entity_id=uuid4(),
+        payload={},
+    )
+    query = _Query([row])
+    db = Mock()
+    db.query.return_value = query
+
+    context = _mock_context(client_id=selected_client_id, branch_ids=(), branch_restricted=False)
+    monkeypatch.setattr(console_router, "get_console_context", lambda request, db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    await console_router.list_audit_events(
+        request=Mock(query_params={}),
+        db=db,
+        limit=50,
+    )
+
+    assert _has_filter(query, "client_id")
+    assert _filter_value(query, "client_id") == selected_client_id

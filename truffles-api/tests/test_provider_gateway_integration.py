@@ -40,7 +40,7 @@ def _make_db(outbox: OutboxMessage | None = None, conversation: Conversation | N
     return db
 
 
-def _make_status(*, outbox_id: str, client_id: str) -> ProviderStatus:
+def _make_status(*, outbox_id: str, client_id: str, branch_id: str | None = None) -> ProviderStatus:
     return ProviderStatus.model_validate(
         {
             "provider": "chatflow",
@@ -50,6 +50,7 @@ def _make_status(*, outbox_id: str, client_id: str) -> ProviderStatus:
                 "client_id": client_id,
                 "client_slug": "demo_salon",
                 "instance_id": "demo-instance",
+                "branch_id": branch_id,
             },
             "status": "sent",
             "status_at": datetime.now(timezone.utc).isoformat(),
@@ -91,6 +92,31 @@ def test_provider_status_rejects_tenant_mismatch():
     )
     db = _make_db(outbox=outbox)
     status = _make_status(outbox_id=str(outbox.id), client_id=str(uuid4()))
+
+    ok, message = update_outbox_status_from_provider(db, status=status)
+
+    assert ok is False
+    assert message == "tenant_mismatch"
+    assert "provider_status" not in outbox.meta
+
+
+def test_provider_status_rejects_branch_tenant_mismatch():
+    branch_id = uuid4()
+    outbox = OutboxMessage(
+        id=uuid4(),
+        client_id=uuid4(),
+        branch_id=branch_id,
+        inbound_message_id="msg-1",
+        payload_json={},
+        status="PENDING",
+        meta={},
+    )
+    db = _make_db(outbox=outbox)
+    status = _make_status(
+        outbox_id=str(outbox.id),
+        client_id=str(outbox.client_id),
+        branch_id=str(uuid4()),
+    )
 
     ok, message = update_outbox_status_from_provider(db, status=status)
 

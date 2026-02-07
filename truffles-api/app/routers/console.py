@@ -150,7 +150,7 @@ from app.services.knowledge_registry_service import (
     list_history,
     publish_version,
     restore_version,
-    sync_qdrant_from_pack,
+    sync_published_branch_docs,
     upsert_draft,
     validate_draft,
 )
@@ -3834,12 +3834,12 @@ async def publish_knowledge(
 
     now = datetime.now(timezone.utc)
     try:
-        sync_qdrant_from_pack(
-            payload,
+        sync_published_branch_docs(
+            db,
             client_slug=context.client.name,
-            branch_id=branch.id,
-            knowledge_tag=branch.knowledge_tag,
-            version_id=version.id,
+            branch=branch,
+            version=version,
+            backfill_other_branches=True,
         )
         compiled = extract_compiled_artifacts(version.payload_json, compile_if_missing=False)
         pack_index = compiled.get("pack_index") if isinstance(compiled, dict) else None
@@ -4004,12 +4004,12 @@ async def rollback_knowledge(
 
     now = datetime.now(timezone.utc)
     try:
-        sync_qdrant_from_pack(
-            version.payload_json,
+        sync_published_branch_docs(
+            db,
             client_slug=context.client.name,
-            branch_id=branch.id,
-            knowledge_tag=branch.knowledge_tag,
-            version_id=restored.id,
+            branch=branch,
+            version=restored,
+            backfill_other_branches=True,
         )
         compiled = extract_compiled_artifacts(restored.payload_json, compile_if_missing=False)
         pack_index = compiled.get("pack_index") if isinstance(compiled, dict) else None
@@ -6159,11 +6159,12 @@ async def run_onboarding_autopilot(
                 actor_id=context.agent.id,
                 source_version_id=draft_version.id if draft_version else None,
             )
-            sync_qdrant_from_pack(
-                client_id=client.id,
-                branch_id=branch.id,
-                payload_json=published_version.payload_json,
-                knowledge_tag=branch.knowledge_tag,
+            sync_published_branch_docs(
+                db,
+                client_slug=client.name,
+                branch=branch,
+                version=published_version,
+                backfill_other_branches=True,
             )
             compiled = extract_compiled_artifacts(
                 published_version.payload_json,
