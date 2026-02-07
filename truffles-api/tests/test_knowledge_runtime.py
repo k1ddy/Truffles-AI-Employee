@@ -65,3 +65,35 @@ def test_load_yaml_truth_uses_runtime_truth():
         assert truth.get("salon", {}).get("name") == "FromDB"
     finally:
         set_runtime_truth(None)
+
+
+def test_load_yaml_truth_uses_runtime_truth_for_generic_slug():
+    runtime_truth = RuntimeTruth(
+        truth={"salon": {"name": "GenericFromDB"}},
+        client_slug="generic",
+        branch_id=uuid4(),
+        source="knowledge_versions",
+        allow_fallback=False,
+    )
+    set_runtime_truth(runtime_truth)
+    try:
+        truth = load_yaml_truth("generic")
+        assert truth.get("salon", {}).get("name") == "GenericFromDB"
+    finally:
+        set_runtime_truth(None)
+
+
+def test_load_yaml_truth_blocks_slug_mismatch_without_fallback():
+    runtime_truth = RuntimeTruth(
+        truth={"salon": {"name": "TenantScoped"}},
+        client_slug="generic",
+        branch_id=uuid4(),
+        source="knowledge_versions",
+        allow_fallback=False,
+    )
+    set_runtime_truth(runtime_truth)
+    try:
+        truth = load_yaml_truth("demo_salon")
+        assert truth == {}
+    finally:
+        set_runtime_truth(None)
