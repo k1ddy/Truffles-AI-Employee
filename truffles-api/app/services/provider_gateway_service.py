@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlparse
 from uuid import UUID
 
 from app.models import OutboxMessage
+from app.schemas.channel import parse_channel
 from app.schemas.outbox_payload import TenantContext
 from app.schemas.provider_gateway import (
     ProviderInbound,
@@ -138,6 +139,9 @@ def build_provider_outbound_payload(
         return None, "missing_outbox_id"
     if not idempotency_key:
         return None, "missing_idempotency_key"
+    channel_value = parse_channel(channel)
+    if not channel_value:
+        return None, "invalid_channel"
 
     if not isinstance(tenant_context, TenantContext):
         try:
@@ -173,7 +177,7 @@ def build_provider_outbound_payload(
     outbound = ProviderOutbound(
         outbox_id=outbox_id,
         provider=provider,
-        channel=channel,
+        channel=channel_value,
         tenant_context=tenant_context,
         to=ProviderOutboundRecipient(jid=remote_jid),
         content=content,

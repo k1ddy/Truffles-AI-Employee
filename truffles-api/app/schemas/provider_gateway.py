@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.channel import Channel
 from app.schemas.outbox_payload import TenantContext
 
 
@@ -43,7 +44,7 @@ class ProviderInbound(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: str = Field(..., min_length=1)
-    channel: str = Field(..., min_length=1)
+    channel: Channel
     provider_message_id: str = Field(..., min_length=1)
     tenant_context: TenantContext
     received_at: str = Field(..., min_length=1)
@@ -92,7 +93,7 @@ class ProviderOutbound(BaseModel):
 
     outbox_id: str = Field(..., min_length=1)
     provider: str = Field(..., min_length=1)
-    channel: str = Field(..., min_length=1)
+    channel: Channel
     tenant_context: TenantContext
     to: ProviderOutboundRecipient
     content: ProviderOutboundContent
@@ -107,7 +108,7 @@ class ProviderStatus(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: str = Field(..., min_length=1)
-    channel: str = Field(..., min_length=1)
+    channel: Channel
     provider_message_id: str = Field(..., min_length=1)
     tenant_context: TenantContext
     status: str = Field(..., min_length=1)
