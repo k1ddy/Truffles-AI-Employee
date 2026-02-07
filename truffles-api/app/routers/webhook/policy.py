@@ -9,8 +9,14 @@ from sqlalchemy.orm import Session
 
 from app.models import Client, Conversation, Message, User
 from app.schemas.webhook import WebhookResponse
-from app.services.demo_salon_knowledge import DemoSalonDecision
 from app.services.intent_service import Intent
+from app.services.pack_runtime_service import (
+    DemoSalonDecision,
+    get_pack_decision,
+    get_pack_price_item,
+    get_pack_price_reply,
+    load_policy_pack,
+)
 
 _POLICY_SECTIONS = (
     "payment_info",
@@ -117,8 +123,6 @@ def _should_escalate_to_pending(policy: dict[str, bool], intent: Intent) -> bool
 
 
 def _load_policy_pack(*, policy_type: str | None, client_slug: str | None) -> dict | None:
-    from app.services.demo_salon_knowledge import load_policy_pack
-
     slug = policy_type or client_slug
     if not slug:
         return None
@@ -515,8 +519,6 @@ def _format_discounts_policy_reply(
 
 
 def _pack_escalation_gate(messages: list[str], *, client_slug: str | None):
-    from app.services.demo_salon_knowledge import get_pack_decision
-
     from . import _legacy as legacy
 
     for message in messages:
@@ -534,8 +536,6 @@ def _pack_price_sidecar(
     *,
     client_slug: str | None,
 ) -> tuple[str | None, str | None]:
-    from app.services.demo_salon_knowledge import get_pack_price_item, get_pack_price_reply
-
     for message in messages:
         price_reply = get_pack_price_reply(message, client_slug=client_slug)
         if price_reply:

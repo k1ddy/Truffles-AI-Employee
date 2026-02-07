@@ -404,7 +404,7 @@
 | `truffles-api/app/services/state_service.py`, `state_machine.py` | Статусы/переходы |
 | `truffles-api/app/services/escalation_service.py`, `manager_message_service.py`, `reminder_service.py` | Эскалация/SLA |
 | `truffles-api/app/services/agent_link_service.py` | Telegram linking tokens |
-| `truffles-api/app/services/knowledge_service.py`, `demo_salon_knowledge.py`, `intent_service.py`, `ai_service.py` | Facts/Intent/LLM |
+| `truffles-api/app/services/knowledge_service.py`, `pack_runtime_service.py`, `demo_salon_knowledge.py`, `intent_service.py`, `ai_service.py` | Facts/Intent/LLM (`demo_salon_knowledge.py` остаётся adapter-совместимостью) |
 | `truffles-api/app/services/outbox_service.py`, `alert_service.py`, `health_service.py` | Надежность/алерты |
 | `truffles-api/app/services/console_idempotency.py` | Идемпотентность мутаций Console API |
 
@@ -503,6 +503,7 @@ truffles-api/
 │   ├── services/
 │   │   ├── ai_service.py            # LLM + RAG thresholds + guardrails
 │   │   ├── alert_service.py         # Telegram alerts (errors/warnings)
+│   │   ├── pack_runtime_service.py  # Neutral runtime facade (delegates to demo adapter)
 │   │   ├── demo_salon_knowledge.py  # Truth/policy/phrases для demo_salon
 │   │   ├── message_service.py        # save_message + generate_bot_response
 │   │   ├── intent_service.py         # Классификация интентов
