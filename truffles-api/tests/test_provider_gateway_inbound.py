@@ -158,3 +158,22 @@ def test_provider_inbound_rejects_invalid_tenant_context_source(client, monkeypa
 def test_provider_inbound_contract_valid():
     payload = _build_payload()
     _validate_schema("contracts/integrations/provider_inbound.v1.jsonschema", payload)
+
+
+def test_provider_inbound_contract_rejects_invalid_channel():
+    payload = _build_payload({"channel": "sms"})
+    with pytest.raises(Exception):
+        _validate_schema("contracts/integrations/provider_inbound.v1.jsonschema", payload)
+
+
+def test_provider_inbound_rejects_invalid_channel(client, monkeypatch):
+    monkeypatch.setenv("PROVIDER_GATEWAY_INBOUND_ENABLED", "1")
+    monkeypatch.delenv("PROVIDER_GATEWAY_TOKEN", raising=False)
+
+    payload = _build_payload({"channel": "sms"})
+    response = client.post("/provider/inbound", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is False
+    assert data["message"] == "Invalid provider inbound payload"

@@ -20,7 +20,7 @@
     },
     "channel": {
       "type": "string",
-      "minLength": 1
+      "enum": ["whatsapp", "telegram", "instagram", "web"]
     },
     "provider_message_id": {
       "type": "string",

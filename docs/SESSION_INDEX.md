@@ -162,3 +162,4 @@
 | 2026-02-06-booking-quality-matrix-a14 | active | feat/2026-02-06-booking-quality-matrix-a14 | /home/zhan/worktrees/2026-02-06-booking-quality-matrix-a14 | docs/TASK_PACKAGES/TP-2026-02-06-booking-quality-matrix.md | 2026-02-06 |
 | 2026-02-07-decision-safe-degrade-a13 | active | feat/2026-02-07-decision-safe-degrade-a13 | /home/zhan/worktrees/2026-02-07-decision-safe-degrade-a13 | docs/TASK_PACKAGES/TP-2026-02-06-tenant-context-runtime-a13.md | 2026-02-07 |
 | 2026-02-07-tenant-context-schema-gate-a13 | active | feat/2026-02-07-tenant-context-schema-gate-a13 | /home/zhan/worktrees/2026-02-07-tenant-context-schema-gate-a13 | docs/TASK_PACKAGES/TP-2026-02-07-tenant-context-schema-gate.md | 2026-02-07 |
+| 2026-02-07-provider-channel-model-v1-a13 | active | feat/2026-02-07-provider-channel-model-v1-a13 | /home/zhan/worktrees/2026-02-07-provider-channel-model-v1-a13 | docs/TASK_PACKAGES/TP-2026-02-07-provider-channel-model-v1.md | 2026-02-07 |
