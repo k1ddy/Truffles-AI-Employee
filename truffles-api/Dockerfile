@@ -16,6 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY truffles-api/pyproject.toml .
 COPY truffles-api/app/ ./app/
 COPY truffles-api/tests/ ./tests/
+COPY truffles-api/migrations/ ./migrations/
+COPY truffles-api/scripts/ ./scripts/
 COPY contracts/ ./contracts/
 
 EXPOSE 8000

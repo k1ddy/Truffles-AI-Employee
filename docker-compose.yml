@@ -1,5 +1,5 @@
 # DO NOT USE.
 # Infra stack moved to /home/zhan/infrastructure/docker-compose.yml
-# API deploy: /home/zhan/restart_api.sh
+# API deploy: /home/zhan/truffles-main/scripts/restart_api.sh
 
 services: {}

@@ -853,23 +853,34 @@ jobs:
                 echo "ENV_FILE missing: ${ENV_FILE}"
               fi
             done
-            if [ -f "/home/zhan/restart_api.sh" ]; then
-              grep -n 'OUTBOUND_ALLOWLIST_JIDS' /home/zhan/restart_api.sh || true
-              grep -n 'CHATFLOW_JID' /home/zhan/restart_api.sh || true
-              grep -n 'env-file' /home/zhan/restart_api.sh || true
-              grep -n 'docker compose' /home/zhan/restart_api.sh || true
-              grep -n '^cd ' /home/zhan/restart_api.sh || true
+            RESTART_SCRIPT="/home/zhan/truffles-main/scripts/restart_api.sh"
+            if [ ! -f "${RESTART_SCRIPT}" ]; then
+              RESTART_SCRIPT="/home/zhan/restart_api.sh"
             fi
-            docker rm -f truffles-api >/dev/null 2>&1 || true
+            if [ -f "${RESTART_SCRIPT}" ]; then
+              grep -n 'OUTBOUND_ALLOWLIST_JIDS' "${RESTART_SCRIPT}" || true
+              grep -n 'CHATFLOW_JID' "${RESTART_SCRIPT}" || true
+              grep -n 'env-file' "${RESTART_SCRIPT}" || true
+              grep -n 'docker compose' "${RESTART_SCRIPT}" || true
+              grep -n '^cd ' "${RESTART_SCRIPT}" || true
+            fi
             IMAGE_TAG=main
             if [ "${{ github.ref }}" != "refs/heads/main" ]; then
               IMAGE_TAG=sha-${{ github.sha }}
             fi
-            IMAGE_NAME=${{ env.IMAGE_NAME }}:${IMAGE_TAG} PULL_IMAGE=1 \
+            IMAGE_WITH_TAG=${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+            docker pull "${IMAGE_WITH_TAG}"
+            docker run --rm \
+              --env-file /home/zhan/truffles-main/truffles-api/.env \
+              --network truffles_internal-net \
+              "${IMAGE_WITH_TAG}" \
+              python /app/scripts/apply_sql_migrations.py --migrations-dir /app/migrations
+            IMAGE_NAME=${{ env.IMAGE_NAME }}:${IMAGE_TAG} PULL_IMAGE=0 \
+            RUN_MIGRATIONS=1 \
             OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net,77785890765@s.whatsapp.net,77000000001@s.whatsapp.net,77000000002@s.whatsapp.net \
             REQUIRE_GHCR=1 VERIFY_VERSION=1 \
             EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
-            bash ~/restart_api.sh
+            bash "${RESTART_SCRIPT}"
             for ENV_FILE in "${ENV_FILES[@]}"; do
               if [ -f "${ENV_FILE}" ]; then
                 echo "ALLOWLIST after restart in ${ENV_FILE}:"

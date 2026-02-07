@@ -81,9 +81,9 @@ ssh -i C:\Users\user\.ssh\id_rsa -p 222 zhan@5.188.241.234 "docker exec -i truff
 ### 0. Деплой с проверкой версии (обязателен в проде)
 ```bash
 IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main \
-PULL_IMAGE=1 REQUIRE_GHCR=1 VERIFY_VERSION=1 \
+PULL_IMAGE=1 RUN_MIGRATIONS=1 REQUIRE_GHCR=1 VERIFY_VERSION=1 \
 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main \
-bash /home/zhan/restart_api.sh
+bash /home/zhan/truffles-main/scripts/restart_api.sh
 ```
 
 Проверка вручную:

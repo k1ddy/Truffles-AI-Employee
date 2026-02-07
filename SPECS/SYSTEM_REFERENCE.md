@@ -37,7 +37,7 @@
 - `ops/diagnose.py dialog-report` — one‑command отчёт по диалогу (таймлайн + решения + outbox + media/ASR).
 - `ops/diagnose.py deploy-verify` — проверка версии деплоя (`/admin/version`) и совпадения commit.
 - `ops/sync_client.py` — validate/sync client packs (truth → Qdrant).
-- `/home/zhan/restart_api.sh` — restart API контейнера.
+- `/home/zhan/truffles-main/scripts/restart_api.sh` — restart API контейнера (включая migration gate).
 - SQL evidence: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "<SQL>"`.
 - `docs/runbooks/TRACE_BUNDLE.md` — как читать trace‑bundle (timing + correlation).
 
@@ -140,7 +140,7 @@ python3 ops/diagnose.py dialog-report \
 | Embeddings | BGE-M3 (self-hosted, default `http://bge-m3:80/embed`, override `BGE_M3_URL`) |
 | LLM | OpenAI-compatible API (default `FAST_MODEL=gpt-5-mini`; router uses `ROUTER_MODEL` or `gpt-4o-mini` when FAST_MODEL starts with gpt-5) |
 | Кэш/очереди | Redis |
-| Оркестрация | Docker (API через `restart_api.sh`), compose — для инфры/локально |
+| Оркестрация | Docker (API через `scripts/restart_api.sh`), compose — для инфры/локально |
 | Reverse proxy | Traefik |
 | WhatsApp | ChatFlow API (`app.chatflow.kz`) |
 | Telegram | Bot API (webhook) |
@@ -173,17 +173,17 @@ python3 ops/diagnose.py dialog-report \
 
 ## 4. Деплой
 
-**docker-compose в проде:** инфра‑стек разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`. API деплой — через `/home/zhan/restart_api.sh`. `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
+**docker-compose в проде:** инфра‑стек разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`. API деплой — через `/home/zhan/truffles-main/scripts/restart_api.sh`. `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
 
 **Стандарт (CI/GHCR):**
 ```bash
-ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 bash ~/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 RUN_MIGRATIONS=1 bash /home/zhan/truffles-main/scripts/restart_api.sh"
 ```
 
 **Fallback (локальная сборка):**
 ```bash
 ssh -p 222 zhan@5.188.241.234 "docker build -t truffles-api_truffles-api /home/zhan/truffles-main/truffles-api"
-ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "RUN_MIGRATIONS=1 bash /home/zhan/truffles-main/scripts/restart_api.sh"
 ```
 
 **Логи:**
@@ -191,35 +191,12 @@ ssh -p 222 zhan@5.188.241.234 "bash ~/restart_api.sh"
 ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 ```
 
-`restart_api.sh` поддерживает `IMAGE_NAME` и `PULL_IMAGE=1`.
+`restart_api.sh` поддерживает `IMAGE_NAME`, `PULL_IMAGE=1`, `RUN_MIGRATIONS=1`, `REQUIRE_GHCR=1`, `VERIFY_VERSION=1`.
 
 **restart_api.sh:**
-```bash
-#!/bin/bash
-IMAGE_NAME="${1:-${IMAGE_NAME:-truffles-api_truffles-api}}"
-PULL_IMAGE="${PULL_IMAGE:-0}"
-
-if [ "$PULL_IMAGE" = "1" ]; then
-  docker pull "$IMAGE_NAME"
-fi
-
-docker stop truffles-api 2>/dev/null
-docker rm truffles-api 2>/dev/null
-cd /home/zhan/truffles-main/truffles-api
-docker run -d --name truffles-api \
-  --env-file .env \
-  --network truffles_internal-net \
-  --network proxy-net \
-  -p 8000:8000 \
-  --restart unless-stopped \
-  -l traefik.enable=true \
-  -l 'traefik.http.routers.truffles-api.rule=Host(`api.truffles.kz`)' \
-  -l traefik.http.routers.truffles-api.entrypoints=websecure \
-  -l traefik.http.routers.truffles-api.tls.certresolver=myresolver \
-  -l traefik.http.services.truffles-api.loadbalancer.server.port=8000 \
-  -l traefik.docker.network=proxy-net \
-  "$IMAGE_NAME"
-```
+- canonical path: `/home/zhan/truffles-main/scripts/restart_api.sh`
+- порядок: `docker pull` (optional) → `apply_sql_migrations.py` (по умолчанию `RUN_MIGRATIONS=1`) → переключение `truffles-api` контейнера → version verify
+- миграции исполняются из image (`/app/migrations`) с трекингом в `schema_migrations`; при ошибке скрипт падает до `docker rm -f truffles-api`.
 
 **Проверка нового кода:**
 ```bash
@@ -280,9 +257,9 @@ ssh -p 222 zhan@5.188.241.234 "curl -s http://localhost:8000/admin/health"
 **Как обеспечиваем:**
 ```bash
 IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main \
-PULL_IMAGE=1 REQUIRE_GHCR=1 VERIFY_VERSION=1 \
+PULL_IMAGE=1 RUN_MIGRATIONS=1 REQUIRE_GHCR=1 VERIFY_VERSION=1 \
 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main \
-bash /home/zhan/restart_api.sh
+bash /home/zhan/truffles-main/scripts/restart_api.sh
 ```
 
 **Ручная проверка:**
