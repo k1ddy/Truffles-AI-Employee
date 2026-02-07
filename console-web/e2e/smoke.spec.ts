@@ -143,6 +143,33 @@ async function expectRowsOrEmpty(
     await expect(row.or(empty)).toBeVisible({ timeout });
 }
 
+async function waitForCasesState(
+    page: import('@playwright/test').Page,
+    timeout = 15000,
+) {
+    const row = page.getByTestId('cases-row').first();
+    const empty = page.getByTestId('cases-empty');
+    const error = page.getByTestId('cases-error');
+    await expect
+        .poll(
+            async () => {
+                if (await row.isVisible().catch(() => false)) return 'row';
+                if (await empty.isVisible().catch(() => false)) return 'empty';
+                if (await error.isVisible().catch(() => false)) return 'error';
+                return 'pending';
+            },
+            { timeout }
+        )
+        .not.toBe('pending');
+    if (await row.isVisible().catch(() => false)) {
+        return 'row';
+    }
+    if (await empty.isVisible().catch(() => false)) {
+        return 'empty';
+    }
+    return 'error';
+}
+
 async function selectOptionIfNeeded(
     selector: import('@playwright/test').Locator
 ) {
@@ -513,19 +540,32 @@ async function openInbox(page: import('@playwright/test').Page) {
     if (await selectionGate.isVisible().catch(() => false)) {
         await resolveSelectionGateWithRetry(page, selectionGate);
     }
-    const errorPanel = page.getByTestId('cases-error');
-    if (await errorPanel.isVisible().catch(() => false)) {
+    await expect(page.getByTestId('cases-title')).toBeVisible({ timeout: 20000 });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        const state = await waitForCasesState(page);
+        if (state !== 'error') {
+            return;
+        }
+
+        const retry = page.getByTestId('cases-retry');
+        if (await retry.isVisible().catch(() => false)) {
+            await retry.click();
+        }
+        await clearStoredContext(page);
+        await page.reload({ waitUntil: 'domcontentloaded' });
         const resolved = await ensureTenantSelection(page);
         if (resolved) {
             await page.reload({ waitUntil: 'domcontentloaded' });
         }
         await resolveSelectionGateWithRetry(page, selectionGate);
-        const retry = page.getByTestId('cases-retry');
-        if (await retry.isVisible().catch(() => false)) {
-            await retry.click();
-        }
+        await expect(page.getByTestId('cases-title')).toBeVisible({ timeout: 20000 });
     }
-    await expect(page.getByTestId('cases-title')).toBeVisible({ timeout: 20000 });
+
+    const errorPanel = page.getByTestId('cases-error');
+    if (await errorPanel.isVisible().catch(() => false)) {
+        const details = (await errorPanel.textContent().catch(() => null))?.trim() || 'unknown';
+        throw new Error(`Inbox remained in error state after retries: ${details}`);
+    }
     await expectRowsOrEmpty(page, 'cases-row', 'cases-empty');
 }
 

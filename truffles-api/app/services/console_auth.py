@@ -293,8 +293,11 @@ def _resolve_branch_selection(
     effective_branch_id = None
     if selected_branch_id:
         if selected_branch_id not in allowed_branch_ids:
-            raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Access to this branch denied")
-        effective_branch_id = selected_branch_id
+            if require_selection:
+                raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Access to this branch denied")
+            selected_branch_id = None
+        else:
+            effective_branch_id = selected_branch_id
     elif branch_restricted and len(allowed_branch_ids) == 1:
         effective_branch_id = next(iter(allowed_branch_ids))
     elif branch_restricted and len(allowed_branch_ids) > 1:
@@ -402,7 +405,29 @@ def _build_platform_admin_access_map(
     return access_map
 
 
-def get_console_context(request: Request, db: Session, *, require_selection: bool = True) -> ConsoleAuthContext:
+def _is_active_client(client: Client) -> bool:
+    return (client.status or "").strip().lower() == "active"
+
+
+def _filter_platform_admin_clients(
+    clients: list[Client],
+    *,
+    include_inactive_tenants: bool,
+) -> list[Client]:
+    if include_inactive_tenants:
+        return clients
+    active_clients = [client for client in clients if _is_active_client(client)]
+    # Keep full list as fallback to avoid locking out platform_admin in all-archived datasets.
+    return active_clients or clients
+
+
+def get_console_context(
+    request: Request,
+    db: Session,
+    *,
+    require_selection: bool = True,
+    include_inactive_tenants: bool = False,
+) -> ConsoleAuthContext:
     token = _get_bearer_token(request)
     payload = _decode_token(token)
     subject = payload.get("sub")
@@ -442,7 +467,11 @@ def get_console_context(request: Request, db: Session, *, require_selection: boo
     accessible_clients: list[Client] = []
 
     if platform_admin_agents:
-        clients = db.query(Client).order_by(Client.name.asc()).all()
+        clients_all = db.query(Client).order_by(Client.name.asc()).all()
+        clients = _filter_platform_admin_clients(
+            clients_all,
+            include_inactive_tenants=include_inactive_tenants,
+        )
         clients_by_id = {client.id: client for client in clients}
         access_map = _build_platform_admin_access_map(clients, platform_admin_agents)
         accessible_clients = clients
@@ -561,6 +590,10 @@ def get_console_context(request: Request, db: Session, *, require_selection: boo
         .order_by(Branch.name.asc())
         .all()
     )
+    if effective_role == "platform_admin" and not include_inactive_tenants:
+        active_branches = [branch for branch in branches_for_client if branch.is_active]
+        if active_branches:
+            branches_for_client = active_branches
 
     branch_restricted = "client" not in access_entry.scopes and "company" not in access_entry.scopes
     if branch_restricted:
