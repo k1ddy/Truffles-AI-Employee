@@ -1,0 +1,22 @@
+# SESSION 2026-02-07-pack-runtime-core-imports-a13 — Session 2026-02-07-pack-runtime-core-imports-a13
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-07-pack-runtime-core-imports-a13.md
+- branch: feat/2026-02-07-pack-runtime-core-imports-a13
+- worktree: /home/zhan/worktrees/2026-02-07-pack-runtime-core-imports-a13
+- base_ref: origin/main
+- scope: De-demoization step 2 for core webhook modules: replace demo-specific decision symbols with neutral pack runtime symbols + add import hygiene test.
+- done:
+  - Session created.
+  - Replaced `DemoSalonDecision` usage with `PackDecision` in `policy/booking/info/response`.
+  - Switched response/info flows from `get_demo_salon_*` decision entrypoints to `get_pack_*`.
+  - Added guard test `truffles-api/tests/test_pack_runtime_import_hygiene.py` to block regressions in core webhook modules.
+  - Updated `STATE.md` NOW evidence for de-demoization step 2.
+  - Ran checks and tests; all target suites passed.
+- next:
+  - `scripts/session_check.sh`, commit, push, open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-07-pack-runtime-core-imports-a13.md
+  - /tmp/pytest_pack_runtime_core_imports_20260207.txt
+- last_updated: 2026-02-07

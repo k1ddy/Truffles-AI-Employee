@@ -164,3 +164,4 @@
 | 2026-02-07-tenant-context-schema-gate-a13 | active | feat/2026-02-07-tenant-context-schema-gate-a13 | /home/zhan/worktrees/2026-02-07-tenant-context-schema-gate-a13 | docs/TASK_PACKAGES/TP-2026-02-07-tenant-context-schema-gate.md | 2026-02-07 |
 | 2026-02-07-provider-channel-model-v1-a13 | active | feat/2026-02-07-provider-channel-model-v1-a13 | /home/zhan/worktrees/2026-02-07-provider-channel-model-v1-a13 | docs/TASK_PACKAGES/TP-2026-02-07-provider-channel-model-v1.md | 2026-02-07 |
 | 2026-02-07-pack-runtime-de-demo-a13 | active | feat/2026-02-07-pack-runtime-de-demo-a13 | /home/zhan/worktrees/2026-02-07-pack-runtime-de-demo-a13 | docs/TASK_PACKAGES/TP-2026-02-07-pack-runtime-de-demo-a13.md | 2026-02-07 |
+| 2026-02-07-pack-runtime-core-imports-a13 | active | feat/2026-02-07-pack-runtime-core-imports-a13 | /home/zhan/worktrees/2026-02-07-pack-runtime-core-imports-a13 | docs/TASK_PACKAGES/TP-2026-02-07-pack-runtime-core-imports-a13.md | 2026-02-07 |

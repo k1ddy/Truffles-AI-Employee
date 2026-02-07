@@ -205,10 +205,9 @@ def _build_info_intent_reply(
         _build_fact_meta,
         build_info_combined_reply,
         format_reply_from_truth,
-        get_demo_salon_decision,
-        get_demo_salon_service_hint,
         load_yaml_truth,
     )
+    from app.services.pack_runtime_service import get_pack_decision, get_pack_service_hint
 
     from . import _legacy as legacy
 
@@ -283,9 +282,9 @@ def _build_info_intent_reply(
         )
         return fallback, meta
     if intent in {"pricing", "duration"} and not service_query and message_text:
-        service_query = get_demo_salon_service_hint(message_text, client_slug=client_slug)
+        service_query = get_pack_service_hint(message_text, client_slug=client_slug)
         if not service_query:
-            decision = get_demo_salon_decision(message_text, client_slug=client_slug)
+            decision = get_pack_decision(message_text, client_slug=client_slug)
             if (
                 decision
                 and decision.action == "reply"
@@ -308,7 +307,7 @@ def _build_info_intent_reply(
             include_guest=guest_signal,
             client_slug=client_slug,
         )
-    decision = get_demo_salon_decision(question, client_slug=client_slug)
+    decision = get_pack_decision(question, client_slug=client_slug)
     if decision and decision.action == "reply" and decision.response:
         meta = decision.meta if isinstance(decision.meta, dict) else {}
         if info_meta:
@@ -1254,7 +1253,7 @@ def _handle_truth_gate_fallback(
     log_timing: Callable[[str, float, dict | None], None],
     record_escalation_metric: Callable[[str], None],
 ) -> WebhookResponse | None:
-    from app.services.demo_salon_knowledge import DemoSalonDecision
+    from app.services.pack_runtime_service import PackDecision
 
     from . import _legacy as legacy
 
@@ -1318,7 +1317,7 @@ def _handle_truth_gate_fallback(
                 isinstance(getattr(decision, "meta", None), dict)
                 and decision.meta.get("service_query")
             ):
-                decision = DemoSalonDecision(
+                decision = PackDecision(
                     action="escalate",
                     response=legacy.MSG_ESCALATED,
                     intent="price_query",
@@ -1339,7 +1338,7 @@ def _handle_truth_gate_fallback(
                         "clarify_limit": True,
                     },
                 )
-                decision = DemoSalonDecision(
+                decision = PackDecision(
                     action="escalate",
                     response=legacy.MSG_ESCALATED,
                     intent="clarify_limit",
