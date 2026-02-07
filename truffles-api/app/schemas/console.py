@@ -154,6 +154,10 @@ class ConsoleClientUpdateRequest(BaseModel):
     status: Optional[str] = None
 
 
+class ConsoleClientLifecycleActionRequest(BaseModel):
+    reason: str
+
+
 class ConsoleBranchCreateRequest(BaseModel):
     client_id: UUID
     slug: str

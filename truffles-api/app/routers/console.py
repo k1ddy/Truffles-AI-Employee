@@ -64,6 +64,7 @@ from app.schemas.console import (
     ConsoleClient,
     ConsoleClientCreateRequest,
     ConsoleClientCreateResponse,
+    ConsoleClientLifecycleActionRequest,
     ConsoleClientListResponse,
     ConsoleClientUpdateRequest,
     ConsoleCompany,
@@ -878,6 +879,10 @@ def _parse_bool_param(name: str, value: Optional[str], default: bool = False) ->
 
 
 _TENANT_LIFECYCLE_MODES = {"active", "archived", "all"}
+_CLIENT_STATUS_ACTIVE = "active"
+_CLIENT_STATUS_ARCHIVED = "deleted"
+_CLIENT_LIFECYCLE_REASON_MAX_LEN = 500
+_CLIENT_ARCHIVE_SAMPLE_LIMIT = 20
 
 
 def _parse_tenant_lifecycle_param(value: Optional[str]) -> str:
@@ -887,6 +892,45 @@ def _parse_tenant_lifecycle_param(value: Optional[str]) -> str:
     if normalized not in _TENANT_LIFECYCLE_MODES:
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid lifecycle")
     return normalized
+
+
+def _normalize_client_lifecycle_reason(reason: str) -> str:
+    value = (reason or "").strip()
+    if not value:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "reason required")
+    if len(value) > _CLIENT_LIFECYCLE_REASON_MAX_LEN:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "reason too long")
+    return value
+
+
+def _is_client_active_status(status: Optional[str]) -> bool:
+    return (status or "").strip().lower() == _CLIENT_STATUS_ACTIVE
+
+
+def _collect_client_archive_blockers(db: Session, client_id: UUID) -> dict[str, list[str]]:
+    active_agents = (
+        db.query(Agent)
+        .filter(Agent.client_id == client_id, Agent.is_active.is_(True))
+        .limit(_CLIENT_ARCHIVE_SAMPLE_LIMIT)
+        .all()
+    )
+    active_memberships = (
+        db.query(AgentMembership)
+        .filter(AgentMembership.client_id == client_id, AgentMembership.is_active.is_(True))
+        .limit(_CLIENT_ARCHIVE_SAMPLE_LIMIT)
+        .all()
+    )
+    active_branches = (
+        db.query(Branch)
+        .filter(Branch.client_id == client_id, Branch.is_active.is_(True))
+        .limit(_CLIENT_ARCHIVE_SAMPLE_LIMIT)
+        .all()
+    )
+    return {
+        "active_agent_ids": [str(agent.id) for agent in active_agents],
+        "active_membership_ids": [str(membership.id) for membership in active_memberships],
+        "active_branch_ids": [str(branch.id) for branch in active_branches],
+    }
 
 
 def _parse_date_param(name: str, value: Optional[str]) -> Optional[dt_date]:
@@ -4726,6 +4770,13 @@ async def update_client(
     fields_set = body.model_fields_set
     company = None
 
+    if "status" in fields_set:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            "Use /admin/clients/{client_id}/archive or /restore for lifecycle changes",
+        )
+
     if "slug" in fields_set:
         slug = _normalize_slug(body.slug, "client_slug")
         existing = (
@@ -4738,12 +4789,6 @@ async def update_client(
         if slug != client.name:
             client.name = slug
         updated_fields.append("slug")
-
-    if "status" in fields_set:
-        status_value = _normalize_required_text(body.status, "status")
-        if status_value != client.status:
-            client.status = status_value
-        updated_fields.append("status")
 
     if "company_id" in fields_set:
         if body.company_id:
@@ -4786,6 +4831,149 @@ async def update_client(
         company_id=client.company_id,
         company_name=company_name,
     )
+
+
+@router.post(
+    "/admin/clients/{client_id}/archive",
+    response_model=ConsoleClient,
+    responses={
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+        409: {"model": ConsoleErrorResponse},
+    },
+)
+async def archive_client(
+    client_id: UUID,
+    request: Request,
+    body: ConsoleClientLifecycleActionRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleClient:
+    context = get_console_context(request, db, require_selection=False, include_inactive_tenants=True)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage provisioning",
+    )
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+    if not _is_client_active_status(client.status):
+        raise ConsoleAPIError(409, "INVALID_STATE", "Client is already archived")
+
+    reason = _normalize_client_lifecycle_reason(body.reason)
+    blockers = _collect_client_archive_blockers(db, client.id)
+    blocker_counts = {
+        "active_agents": len(blockers["active_agent_ids"]),
+        "active_memberships": len(blockers["active_membership_ids"]),
+        "active_branches": len(blockers["active_branch_ids"]),
+    }
+    if any(count > 0 for count in blocker_counts.values()):
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="client_archive_blocked",
+            entity_type="client",
+            entity_id=client.id,
+            payload={
+                "reason": reason,
+                "blocker_counts": blocker_counts,
+                "blockers": blockers,
+            },
+            client_id=client.id,
+            actor_id=context.agent.id,
+            actor_name=context.agent.name,
+        )
+        db.commit()
+        raise ConsoleAPIError(
+            409,
+            "CLIENT_ARCHIVE_BLOCKED",
+            "Client archive blocked by active dependencies",
+            details={
+                "blocker_counts": blocker_counts,
+                "blockers": blockers,
+            },
+        )
+
+    previous_status = client.status
+    now = datetime.now(timezone.utc)
+    client.status = _CLIENT_STATUS_ARCHIVED
+    client.deleted_at = now
+    client.updated_at = now
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="client_archived",
+        entity_type="client",
+        entity_id=client.id,
+        payload={
+            "reason": reason,
+            "previous_status": previous_status,
+            "next_status": client.status,
+        },
+        client_id=client.id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+    )
+    db.commit()
+
+    company = db.query(Company).filter(Company.id == client.company_id).first() if client.company_id else None
+    return _build_client_schema(client, company)
+
+
+@router.post(
+    "/admin/clients/{client_id}/restore",
+    response_model=ConsoleClient,
+    responses={
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+        409: {"model": ConsoleErrorResponse},
+    },
+)
+async def restore_client(
+    client_id: UUID,
+    request: Request,
+    body: ConsoleClientLifecycleActionRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleClient:
+    context = get_console_context(request, db, require_selection=False, include_inactive_tenants=True)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage provisioning",
+    )
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+    if _is_client_active_status(client.status):
+        raise ConsoleAPIError(409, "INVALID_STATE", "Client is already active")
+
+    reason = _normalize_client_lifecycle_reason(body.reason)
+    previous_status = client.status
+    now = datetime.now(timezone.utc)
+    client.status = _CLIENT_STATUS_ACTIVE
+    client.deleted_at = None
+    client.updated_at = now
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="client_restored",
+        entity_type="client",
+        entity_id=client.id,
+        payload={
+            "reason": reason,
+            "previous_status": previous_status,
+            "next_status": client.status,
+        },
+        client_id=client.id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+    )
+    db.commit()
+
+    company = db.query(Company).filter(Company.id == client.company_id).first() if client.company_id else None
+    return _build_client_schema(client, company)
 
 
 @router.post(

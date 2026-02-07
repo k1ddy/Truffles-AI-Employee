@@ -37,7 +37,6 @@ type ClientEditorState = {
     id: string;
     slug: string;
     companyId: string;
-    status: string;
     originalSlug: string;
     originalCompanyId: string;
 };
@@ -104,6 +103,7 @@ export default function TenantsPage() {
     const [savingCompany, setSavingCompany] = useState(false);
     const [savingClient, setSavingClient] = useState(false);
     const [savingBranch, setSavingBranch] = useState(false);
+    const [clientLifecyclePendingId, setClientLifecyclePendingId] = useState<string | null>(null);
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -267,7 +267,6 @@ export default function TenantsPage() {
             id: client.id,
             slug: client.slug ?? client.name ?? "",
             companyId: client.company_id ?? "",
-            status: client.status ?? "",
             originalSlug: client.slug ?? client.name ?? "",
             originalCompanyId: client.company_id ?? "",
         });
@@ -360,10 +359,6 @@ export default function TenantsPage() {
         if (companyId !== clientEditor.originalCompanyId) {
             payload.company_id = companyId || null;
         }
-        const statusValue = clientEditor.status.trim();
-        if (statusValue) {
-            payload.status = statusValue;
-        }
         if (Object.keys(payload).length === 0) {
             toast("Нет изменений");
             return;
@@ -379,6 +374,65 @@ export default function TenantsPage() {
             handleError(error);
         } finally {
             setSavingClient(false);
+        }
+    };
+
+    const isClientArchived = (status?: string | null) => (status ?? "").trim().toLowerCase() !== "active";
+
+    const askClientLifecycleReason = (mode: "archive" | "restore"): string | null => {
+        const promptText = mode === "archive"
+            ? "Укажите причину архивации клиента"
+            : "Укажите причину восстановления клиента";
+        const raw = window.prompt(promptText, "");
+        if (raw === null) {
+            return null;
+        }
+        const reason = raw.trim();
+        if (!reason) {
+            toast.error("Укажите причину");
+            return null;
+        }
+        return reason;
+    };
+
+    const handleClientLifecycleAction = async (
+        client: components["schemas"]["Client"],
+        mode: "archive" | "restore",
+    ) => {
+        if (!client.id) {
+            toast.error("Не удалось выполнить действие без ID клиента");
+            return;
+        }
+        const reason = askClientLifecycleReason(mode);
+        if (!reason) {
+            return;
+        }
+        const confirmed = window.confirm(
+            mode === "archive"
+                ? "Архивировать клиента? Клиент исчезнет из active-списка."
+                : "Восстановить клиента в active-список?",
+        );
+        if (!confirmed) {
+            return;
+        }
+        setClientLifecyclePendingId(client.id);
+        try {
+            if (mode === "archive") {
+                await adminApi.archiveClient(client.id, { reason });
+                toast.success("Клиент архивирован");
+            } else {
+                await adminApi.restoreClient(client.id, { reason });
+                toast.success("Клиент восстановлен");
+            }
+            if (clientEditor?.id === client.id) {
+                setClientEditor(null);
+            }
+            refreshTenants();
+            refreshContext();
+        } catch (error) {
+            handleError(error);
+        } finally {
+            setClientLifecyclePendingId(null);
         }
     };
 
@@ -665,6 +719,8 @@ export default function TenantsPage() {
                         ) : (
                             clients.map((client) => {
                                 const isEditing = clientEditor?.id === client.id;
+                                const isArchived = isClientArchived(client.status);
+                                const lifecyclePending = clientLifecyclePendingId === client.id;
                                 return (
                                     <div
                                         key={client.id}
@@ -690,10 +746,25 @@ export default function TenantsPage() {
                                                     Редактировать
                                                 </button>
                                             ) : null}
+                                            {canWriteTenants ? (
+                                                <button
+                                                    className="btn-ghost"
+                                                    onClick={() =>
+                                                        handleClientLifecycleAction(client, isArchived ? "restore" : "archive")
+                                                    }
+                                                    disabled={lifecyclePending}
+                                                >
+                                                    {lifecyclePending
+                                                        ? "Выполняется..."
+                                                        : isArchived
+                                                            ? "Restore"
+                                                            : "Archive"}
+                                                </button>
+                                            ) : null}
                                             <button
                                                 className="btn-ghost"
                                                 onClick={() => setClientContext(client.id, client.company_id)}
-                                                disabled={client.id === selectedClientId}
+                                                disabled={client.id === selectedClientId || lifecyclePending}
                                             >
                                                 В контекст
                                             </button>
@@ -731,33 +802,18 @@ export default function TenantsPage() {
                                                             disabled={!canWriteTenants || savingClient}
                                                         />
                                                     </label>
-                                                    <label className="text-xs text-muted-foreground">
-                                                        Status (optional)
-                                                        <input
-                                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                            value={clientEditor.status}
-                                                            onChange={(event) =>
-                                                                setClientEditor((prev) =>
-                                                                    prev
-                                                                        ? { ...prev, status: event.target.value }
-                                                                        : prev
-                                                                )
-                                                            }
-                                                            disabled={!canWriteTenants || savingClient}
-                                                        />
-                                                    </label>
                                                     <div className="flex items-center gap-2">
                                                         <button
                                                             className="btn-primary"
                                                             onClick={handleSaveClient}
-                                                            disabled={!canWriteTenants || savingClient}
+                                                            disabled={!canWriteTenants || savingClient || lifecyclePending}
                                                         >
                                                             {savingClient ? "Сохранение..." : "Сохранить"}
                                                         </button>
                                                         <button
                                                             className="btn-ghost"
                                                             onClick={() => setClientEditor(null)}
-                                                            disabled={savingClient}
+                                                            disabled={savingClient || lifecyclePending}
                                                         >
                                                             Отмена
                                                         </button>
