@@ -1251,6 +1251,13 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: lifecycle
+          in: query
+          schema:
+            type: string
+            enum: [active, archived, all]
+            default: active
+          description: Tenant lifecycle filter (`active` by default).
       responses:
         "200":
           description: Client list
@@ -1349,6 +1356,13 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: lifecycle
+          in: query
+          schema:
+            type: string
+            enum: [active, archived, all]
+            default: active
+          description: Tenant lifecycle filter (`active` by default).
       responses:
         "200":
           description: Branch list
