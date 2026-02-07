@@ -467,6 +467,12 @@ export type AuditListResponse = components["schemas"]["AuditListResponse"];
 export type AgentListResponse = components["schemas"]["AgentListResponse"];
 export type BranchIntegrationStatus = components["schemas"]["BranchIntegrationStatus"];
 export type IntegrationsListResponse = components["schemas"]["IntegrationsListResponse"];
+export type OpsJobDefinition = components["schemas"]["OpsJobDefinition"];
+export type OpsJobCatalogResponse = components["schemas"]["OpsJobCatalogResponse"];
+export type OpsJobRunRequest = components["schemas"]["OpsJobRunRequest"];
+export type OpsJobRecord = components["schemas"]["OpsJobRecord"];
+export type OpsJobRunResponse = components["schemas"]["OpsJobRunResponse"];
+export type OpsJobListResponse = components["schemas"]["OpsJobListResponse"];
 export type TelegramVerifyRequest = components["schemas"]["TelegramVerifyRequest"];
 export type TelegramVerifyResponse = components["schemas"]["TelegramVerifyResponse"];
 export type TelegramTestRequest = components["schemas"]["TelegramTestRequest"];
@@ -517,6 +523,7 @@ export type ListClientsParams = operations["listAdminClients"]["parameters"]["qu
 export type ListBranchesParams = operations["listAdminBranches"]["parameters"]["query"];
 export type ListIntegrationsParams = operations["listAdminIntegrations"]["parameters"]["query"];
 export type ListReferencePacksParams = operations["listAdminReferencePacks"]["parameters"]["query"];
+export type ListOpsJobsParams = operations["listOpsJobs"]["parameters"]["query"];
 
 // ═══════════════════════════════════════════════════════════════════
 // API METHODS (typed)
@@ -580,6 +587,13 @@ export const opsApi = {
     getHealth: () => apiClient.get<HealthResponse>("/health"),
     getMetricsDaily: (date?: string) =>
         apiClient.get<MetricsDailyResponse>("/metrics/daily", { params: { date } }),
+    getJobsCatalog: () => apiClient.get<OpsJobCatalogResponse>("/ops/jobs/catalog"),
+    listJobs: (params?: ListOpsJobsParams) =>
+        apiClient.get<OpsJobListResponse>("/ops/jobs", { params }),
+    getJob: (jobId: string) =>
+        apiClient.get<OpsJobRunResponse>(`/ops/jobs/${jobId}`),
+    runJob: (data: OpsJobRunRequest) =>
+        apiClient.post<OpsJobRunResponse>("/ops/jobs/run", data),
 };
 
 /** Telegram connector endpoints */

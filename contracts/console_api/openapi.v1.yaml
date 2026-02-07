@@ -734,6 +734,118 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /ops/jobs/catalog:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    get:
+      operationId: getOpsJobsCatalog
+      tags: [ops]
+      summary: Get ops jobs catalog
+      responses:
+        "200":
+          description: Available ops jobs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpsJobCatalogResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /ops/jobs:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    get:
+      operationId: listOpsJobs
+      tags: [ops]
+      summary: List ops job history
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: ISO timestamp cursor for pagination
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        "200":
+          description: Ops jobs history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpsJobListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /ops/jobs/{job_id}:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    get:
+      operationId: getOpsJob
+      tags: [ops]
+      summary: Get ops job details
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ops job record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpsJobRunResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /ops/jobs/run:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    post:
+      operationId: runOpsJob
+      tags: [ops]
+      summary: Run ops job (dry-run or execute)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpsJobRunRequest"
+      responses:
+        "200":
+          description: Ops job execution result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpsJobRunResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
   # ──────────────────────────────────────────────────────────────────
   # SETTINGS
   # ──────────────────────────────────────────────────────────────────
@@ -3181,6 +3293,101 @@ components:
           type: integer
         skipped:
           type: integer
+
+    OpsJobDefinition:
+      type: object
+      required: [job_type, label, description, supports_dry_run]
+      properties:
+        job_type:
+          type: string
+          enum: [outbox_process, heal, metrics_snapshot]
+        label:
+          type: string
+        description:
+          type: string
+        supports_dry_run:
+          type: boolean
+
+    OpsJobCatalogResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpsJobDefinition"
+
+    OpsJobRunRequest:
+      type: object
+      required: [job_type]
+      properties:
+        job_type:
+          type: string
+          enum: [outbox_process, heal, metrics_snapshot]
+        mode:
+          type: string
+          enum: [dry_run, execute]
+          default: dry_run
+        params:
+          type: object
+          additionalProperties: true
+          nullable: true
+
+    OpsJobRecord:
+      type: object
+      required: [id, job_type, mode, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        job_type:
+          type: string
+          enum: [outbox_process, heal, metrics_snapshot]
+        mode:
+          type: string
+          enum: [dry_run, execute]
+        status:
+          type: string
+          enum: [success, failed]
+        created_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        request_payload:
+          type: object
+          additionalProperties: true
+          nullable: true
+        result_payload:
+          type: object
+          additionalProperties: true
+          nullable: true
+
+    OpsJobRunResponse:
+      type: object
+      required: [job]
+      properties:
+        job:
+          $ref: "#/components/schemas/OpsJobRecord"
+
+    OpsJobListResponse:
+      type: object
+      required: [items, has_more]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpsJobRecord"
+        cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
 
     # ── Settings ──
     BotConfig:

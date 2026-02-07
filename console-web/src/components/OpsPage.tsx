@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
-import { authApi, canAccessConsole, telegramApi } from "@/lib/api-client";
+import {
+    authApi,
+    canAccessConsole,
+    opsApi,
+    telegramApi,
+    type OpsJobRunRequest,
+} from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
@@ -78,6 +84,42 @@ interface OutboxRetryResponse {
     skipped: number;
 }
 
+type OpsJobType = OpsJobRunRequest["job_type"];
+type OpsJobMode = OpsJobRunRequest["mode"];
+
+interface OpsJobDefinition {
+    job_type: OpsJobType;
+    label: string;
+    description: string;
+    supports_dry_run: boolean;
+}
+
+interface OpsJobCatalogResponse {
+    items: OpsJobDefinition[];
+}
+
+interface OpsJobRecord {
+    id: string;
+    job_type: OpsJobType;
+    mode: OpsJobMode;
+    status: "success" | "failed";
+    created_at: string;
+    finished_at: string | null;
+    error_message: string | null;
+    request_payload: Record<string, unknown> | null;
+    result_payload: Record<string, unknown> | null;
+}
+
+interface OpsJobListResponse {
+    items: OpsJobRecord[];
+    cursor: string | null;
+    has_more: boolean;
+}
+
+interface OpsJobRunResponse {
+    job: OpsJobRecord;
+}
+
 async function fetchHealth(): Promise<HealthData> {
     const response = await api.get("/health");
     return response.data;
@@ -129,11 +171,29 @@ function MetricCard({ label, value, subtext }: { label: string; value: string | 
     );
 }
 
+function formatJsonPreview(payload: Record<string, unknown> | null, limit = 160): string {
+    if (!payload) {
+        return "—";
+    }
+    const raw = JSON.stringify(payload);
+    if (!raw) {
+        return "—";
+    }
+    if (raw.length <= limit) {
+        return raw;
+    }
+    return `${raw.slice(0, limit - 3)}...`;
+}
+
 export default function OpsPage() {
     const { data: session } = useSession();
     const { handleError } = useErrorHandler();
     const [telegramAction, setTelegramAction] = useState<"verify" | "test" | null>(null);
     const [outboxStatus, setOutboxStatus] = useState<OutboxStatusFilter>("failed");
+    const [jobType, setJobType] = useState<OpsJobType>("outbox_process");
+    const [outboxProcessLimit, setOutboxProcessLimit] = useState<number>(10);
+    const [metricsSnapshotDays, setMetricsSnapshotDays] = useState<number>(1);
+    const [metricsSnapshotDate, setMetricsSnapshotDate] = useState<string>("");
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -179,11 +239,36 @@ export default function OpsPage() {
         refetchInterval: 30000,
     });
 
+    const { data: opsJobsCatalog } = useQuery({
+        queryKey: ["ops-jobs-catalog"],
+        queryFn: async () => {
+            const response = await opsApi.getJobsCatalog();
+            return response.data as OpsJobCatalogResponse;
+        },
+        enabled: !!session && canReadOps && isFullOps,
+    });
+
+    const { data: opsJobs, isLoading: opsJobsLoading, error: opsJobsError, refetch: refetchOpsJobs } = useQuery({
+        queryKey: ["ops-jobs"],
+        queryFn: async () => {
+            const response = await opsApi.listJobs({ limit: 20 });
+            return response.data as OpsJobListResponse;
+        },
+        enabled: !!session && canReadOps && isFullOps,
+        refetchInterval: 30000,
+    });
+
     useEffect(() => {
         if (outboxError) {
             handleError(outboxError);
         }
     }, [outboxError, handleError]);
+
+    useEffect(() => {
+        if (opsJobsError) {
+            handleError(opsJobsError);
+        }
+    }, [opsJobsError, handleError]);
 
     const telegramVerify = useMutation({
         mutationFn: async () => {
@@ -252,6 +337,24 @@ export default function OpsPage() {
         },
     });
 
+    const runOpsJob = useMutation({
+        mutationFn: async (payload: OpsJobRunRequest) => {
+            const response = await opsApi.runJob(payload);
+            return response.data as OpsJobRunResponse;
+        },
+        onSuccess: (data) => {
+            if (data.job.status === "success") {
+                toast.success(`Job ${data.job.job_type} выполнен`);
+            } else {
+                toast.error(data.job.error_message || `Job ${data.job.job_type} завершился с ошибкой`);
+            }
+            refetchOpsJobs();
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+    });
+
     const outboxCounts = useMemo(() => {
         const pending = outboxData?.counts?.pending ?? 0;
         const processing = outboxData?.counts?.processing ?? 0;
@@ -263,6 +366,29 @@ export default function OpsPage() {
             total: pending + processing + failed,
         };
     }, [outboxData]);
+
+    const selectedJob = useMemo(
+        () => opsJobsCatalog?.items?.find((item) => item.job_type === jobType) ?? null,
+        [opsJobsCatalog, jobType],
+    );
+
+    const buildRunJobPayload = (mode: OpsJobMode): OpsJobRunRequest => {
+        const params: Record<string, unknown> = {};
+        if (jobType === "outbox_process") {
+            params.limit = Math.max(1, outboxProcessLimit);
+        }
+        if (jobType === "metrics_snapshot") {
+            params.days = Math.max(1, metricsSnapshotDays);
+            if (metricsSnapshotDate) {
+                params.metric_date = metricsSnapshotDate;
+            }
+        }
+        return {
+            job_type: jobType,
+            mode,
+            params,
+        };
+    };
 
     const isLoading = healthLoading || (isFullOps && metricsLoading) || (!isFullOps && telegramLoading);
 
@@ -558,6 +684,152 @@ export default function OpsPage() {
                         </div>
                     ) : (
                         <div className="text-sm text-muted-foreground">Очередь пуста</div>
+                    )}
+                </div>
+            )}
+
+            {isFullOps && (
+                <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-jobs-card">
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-semibold">Console Jobs</h2>
+                        <button
+                            type="button"
+                            className="text-xs text-primary hover:text-primary/80"
+                            onClick={() => refetchOpsJobs()}
+                        >
+                            Обновить историю
+                        </button>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2 mb-4">
+                        <div>
+                            <label className="block text-xs text-muted-foreground mb-1">Job type</label>
+                            <select
+                                className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm"
+                                value={jobType}
+                                onChange={(event) => setJobType(event.target.value as OpsJobType)}
+                            >
+                                {(opsJobsCatalog?.items || []).map((item) => (
+                                    <option key={item.job_type} value={item.job_type}>
+                                        {item.label}
+                                    </option>
+                                ))}
+                            </select>
+                            <p className="text-xs text-muted-foreground mt-1">
+                                {selectedJob?.description || "Каталог jobs загружается..."}
+                            </p>
+                        </div>
+
+                        <div>
+                            {jobType === "outbox_process" && (
+                                <>
+                                    <label className="block text-xs text-muted-foreground mb-1">Limit</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={200}
+                                        className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm"
+                                        value={outboxProcessLimit}
+                                        onChange={(event) => setOutboxProcessLimit(Number(event.target.value))}
+                                    />
+                                </>
+                            )}
+                            {jobType === "metrics_snapshot" && (
+                                <div className="grid gap-2">
+                                    <div>
+                                        <label className="block text-xs text-muted-foreground mb-1">Days</label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={60}
+                                            className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm"
+                                            value={metricsSnapshotDays}
+                                            onChange={(event) => setMetricsSnapshotDays(Number(event.target.value))}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-muted-foreground mb-1">Metric date (optional)</label>
+                                        <input
+                                            type="date"
+                                            className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm"
+                                            value={metricsSnapshotDate}
+                                            onChange={(event) => setMetricsSnapshotDate(event.target.value)}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+                            {jobType === "heal" && (
+                                <p className="text-xs text-muted-foreground mt-6">
+                                    Для `heal` в этом срезе доступен только dry-run.
+                                </p>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 mb-4">
+                        <button
+                            type="button"
+                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => runOpsJob.mutate(buildRunJobPayload("dry_run"))}
+                            disabled={runOpsJob.isPending || !canWriteOps}
+                        >
+                            {runOpsJob.isPending ? "Запуск..." : "Dry-run"}
+                        </button>
+                        <button
+                            type="button"
+                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => runOpsJob.mutate(buildRunJobPayload("execute"))}
+                            disabled={runOpsJob.isPending || !canWriteOps || jobType === "heal"}
+                        >
+                            Execute
+                        </button>
+                    </div>
+
+                    {opsJobsLoading ? (
+                        <div className="text-sm text-muted-foreground">Загрузка истории jobs...</div>
+                    ) : !opsJobs?.items?.length ? (
+                        <div className="text-sm text-muted-foreground">История jobs пока пуста</div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead className="text-xs text-muted-foreground">
+                                    <tr className="text-left border-b border-border/60">
+                                        <th className="py-2 pr-3">Тип</th>
+                                        <th className="py-2 pr-3">Режим</th>
+                                        <th className="py-2 pr-3">Статус</th>
+                                        <th className="py-2 pr-3">Запуск</th>
+                                        <th className="py-2 pr-3">Результат</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {opsJobs.items.map((job) => (
+                                        <tr key={job.id} className="border-b border-border/40">
+                                            <td className="py-2 pr-3">{job.job_type}</td>
+                                            <td className="py-2 pr-3">{job.mode}</td>
+                                            <td className="py-2 pr-3">
+                                                <span
+                                                    className={`px-2 py-1 rounded text-xs font-medium ${
+                                                        job.status === "success"
+                                                            ? "bg-green-100 text-green-800"
+                                                            : "bg-red-100 text-red-800"
+                                                    }`}
+                                                >
+                                                    {job.status}
+                                                </span>
+                                            </td>
+                                            <td className="py-2 pr-3">
+                                                {job.created_at ? new Date(job.created_at).toLocaleString("ru-RU") : "—"}
+                                            </td>
+                                            <td className="py-2 pr-3">
+                                                <span className="text-xs text-muted-foreground">
+                                                    {job.error_message || formatJsonPreview(job.result_payload)}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     )}
                 </div>
             )}

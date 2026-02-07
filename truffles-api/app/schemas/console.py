@@ -408,6 +408,50 @@ class ConsoleOutboxRetryResponse(BaseModel):
     skipped: int
 
 
+ConsoleOpsJobType = Literal["outbox_process", "heal", "metrics_snapshot"]
+ConsoleOpsJobMode = Literal["dry_run", "execute"]
+ConsoleOpsJobStatus = Literal["success", "failed"]
+
+
+class ConsoleOpsJobDefinition(BaseModel):
+    job_type: ConsoleOpsJobType
+    label: str
+    description: str
+    supports_dry_run: bool
+
+
+class ConsoleOpsJobCatalogResponse(BaseModel):
+    items: list[ConsoleOpsJobDefinition]
+
+
+class ConsoleOpsJobRunRequest(BaseModel):
+    job_type: ConsoleOpsJobType
+    mode: ConsoleOpsJobMode = "dry_run"
+    params: Optional[dict] = None
+
+
+class ConsoleOpsJobRecord(BaseModel):
+    id: UUID
+    job_type: ConsoleOpsJobType
+    mode: ConsoleOpsJobMode
+    status: ConsoleOpsJobStatus
+    created_at: str
+    finished_at: Optional[str] = None
+    error_message: Optional[str] = None
+    request_payload: Optional[dict] = None
+    result_payload: Optional[dict] = None
+
+
+class ConsoleOpsJobRunResponse(BaseModel):
+    job: ConsoleOpsJobRecord
+
+
+class ConsoleOpsJobListResponse(BaseModel):
+    items: list[ConsoleOpsJobRecord]
+    cursor: Optional[str] = None
+    has_more: bool
+
+
 class ConsoleAuditEvent(BaseModel):
     id: UUID
     created_at: str
