@@ -163,7 +163,8 @@ async def test_outbox_gateway_uses_provider_from_payload(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_outbox_rows_reject_tenant_context_client_mismatch(monkeypatch):
+@pytest.mark.parametrize("client_slug", ["demo_salon", "generic"])
+async def test_outbox_rows_reject_tenant_context_client_mismatch(monkeypatch, client_slug: str):
     client_id = uuid4()
     outbox_id = uuid4()
     outbox_row = OutboxMessage(
@@ -180,17 +181,17 @@ async def test_outbox_rows_reject_tenant_context_client_mismatch(monkeypatch):
     payload_json = {
         "schema_version": "outbox.v1",
         "event_type": "whatsapp.send_text",
-        "client_slug": "demo_salon",
+        "client_slug": client_slug,
         "provider": "mockflow",
         "channel": "whatsapp",
         "tenant_context": {
             "client_id": str(uuid4()),
-            "client_slug": "demo_salon",
-            "instance_id": "demo-instance",
+            "client_slug": client_slug,
+            "instance_id": f"{client_slug}-instance",
         },
         "payload": {
             "remote_jid": "77770000000@s.whatsapp.net",
-            "instance_id": "demo-instance",
+            "instance_id": f"{client_slug}-instance",
             "text": "Hello",
             "idempotency_key": "idem-tenant-client",
         },
@@ -223,7 +224,8 @@ async def test_outbox_rows_reject_tenant_context_client_mismatch(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_outbox_rows_reject_tenant_context_branch_mismatch(monkeypatch):
+@pytest.mark.parametrize("client_slug", ["demo_salon", "generic"])
+async def test_outbox_rows_reject_tenant_context_branch_mismatch(monkeypatch, client_slug: str):
     client_id = uuid4()
     branch_id = uuid4()
     outbox_id = uuid4()
@@ -241,18 +243,18 @@ async def test_outbox_rows_reject_tenant_context_branch_mismatch(monkeypatch):
     payload_json = {
         "schema_version": "outbox.v1",
         "event_type": "whatsapp.send_text",
-        "client_slug": "demo_salon",
+        "client_slug": client_slug,
         "provider": "mockflow",
         "channel": "whatsapp",
         "tenant_context": {
             "client_id": str(client_id),
             "branch_id": str(uuid4()),
-            "client_slug": "demo_salon",
-            "instance_id": "demo-instance",
+            "client_slug": client_slug,
+            "instance_id": f"{client_slug}-instance",
         },
         "payload": {
             "remote_jid": "77770000000@s.whatsapp.net",
-            "instance_id": "demo-instance",
+            "instance_id": f"{client_slug}-instance",
             "text": "Hello",
             "idempotency_key": "idem-tenant-branch",
         },
