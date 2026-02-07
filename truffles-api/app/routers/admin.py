@@ -186,8 +186,13 @@ def _cleanup_media_storage(storage_dir: Path, ttl_days: int, dry_run: bool) -> d
 
 
 @router.get("/prompt/{client_slug}")
-async def get_prompt(client_slug: str, db: Session = Depends(get_db)) -> PromptResponse:
+async def get_prompt(
+    client_slug: str,
+    db: Session = Depends(get_db),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+) -> PromptResponse:
     """Get current system prompt for client."""
+    _require_admin_token(x_admin_token)
     client = db.query(Client).filter(Client.name == client_slug).first()
     if not client:
         raise HTTPException(status_code=404, detail=f"Client '{client_slug}' not found")
@@ -205,7 +210,12 @@ async def get_prompt(client_slug: str, db: Session = Depends(get_db)) -> PromptR
 
 
 @router.put("/prompt/{client_slug}")
-async def update_prompt(client_slug: str, data: PromptUpdate, db: Session = Depends(get_db)) -> PromptResponse:
+async def update_prompt(
+    client_slug: str,
+    data: PromptUpdate,
+    db: Session = Depends(get_db),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+) -> PromptResponse:
     """Update system prompt for client.
 
     Validation:
@@ -213,6 +223,7 @@ async def update_prompt(client_slug: str, data: PromptUpdate, db: Session = Depe
     - Prompt text must not be empty
     - Prompt text must be < 10000 chars
     """
+    _require_admin_token(x_admin_token)
     # Validation
     if not data.text or not data.text.strip():
         raise HTTPException(status_code=400, detail="Prompt text cannot be empty")
@@ -244,8 +255,13 @@ async def update_prompt(client_slug: str, data: PromptUpdate, db: Session = Depe
 
 
 @router.get("/settings/{client_slug}")
-async def get_settings(client_slug: str, db: Session = Depends(get_db)):
+async def get_settings(
+    client_slug: str,
+    db: Session = Depends(get_db),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
     """Get client settings."""
+    _require_admin_token(x_admin_token)
     client = db.query(Client).filter(Client.name == client_slug).first()
     if not client:
         raise HTTPException(status_code=404, detail=f"Client '{client_slug}' not found")
@@ -322,7 +338,12 @@ async def get_settings(client_slug: str, db: Session = Depends(get_db)):
 
 
 @router.put("/settings/{client_slug}")
-async def update_settings(client_slug: str, data: SettingsUpdate, db: Session = Depends(get_db)):
+async def update_settings(
+    client_slug: str,
+    data: SettingsUpdate,
+    db: Session = Depends(get_db),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
     """Update client settings.
 
     Validation:
@@ -334,6 +355,7 @@ async def update_settings(client_slug: str, data: SettingsUpdate, db: Session = 
     - manager_scope: branch/global
     - auto_approve_roles: owner/admin/manager/support
     """
+    _require_admin_token(x_admin_token)
     # Find client
     client = db.query(Client).filter(Client.name == client_slug).first()
     if not client:
@@ -694,8 +716,12 @@ async def system_health(db: Session = Depends(get_db)):
 
 
 @router.post("/heal")
-async def heal_system(db: Session = Depends(get_db)):
+async def heal_system(
+    db: Session = Depends(get_db),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
     """Check and heal invariant violations."""
+    _require_admin_token(x_admin_token)
     return check_and_heal_conversations(db)
 
 

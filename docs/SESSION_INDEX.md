@@ -168,3 +168,4 @@
 | 2026-02-07-outbox-false-sent-a15 | done | feat/2026-02-07-outbox-false-sent-a15 | /home/zhan/worktrees/2026-02-07-outbox-false-sent-a15 | docs/TASK_PACKAGES/TP-2026-02-07-outbox-false-sent-guard.md | 2026-02-07 |
 | 2026-02-07-tenant-lifecycle-read-a15 | done | feat/2026-02-07-tenant-lifecycle-read-a15 | /home/zhan/worktrees/2026-02-07-tenant-lifecycle-read-a15 | docs/TASK_PACKAGES/TP-2026-02-07-tenant-lifecycle-read-a15.md | 2026-02-07 |
 | 2026-02-07-client-lifecycle-write-a15 | done | feat/2026-02-07-client-lifecycle-write-a15 | /home/zhan/worktrees/2026-02-07-client-lifecycle-write-a15 | docs/TASK_PACKAGES/TP-2026-02-07-client-lifecycle-write-a15.md | 2026-02-07 |
+| 2026-02-07-legacy-admin-security-hardening-a15 | done | feat/2026-02-07-legacy-admin-security-hardening-a15 | /home/zhan/worktrees/2026-02-07-legacy-admin-security-hardening-a15 | docs/TASK_PACKAGES/TP-2026-02-07-legacy-admin-security-hardening-a15.md | 2026-02-07 |
