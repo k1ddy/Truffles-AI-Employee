@@ -23,9 +23,15 @@ compose() {
   docker compose -p "$PROJECT_NAME" -f "$COMPOSE_BASE" -f "$COMPOSE_TEST" "$@"
 }
 
-compose up -d --build truffles-api truffles-outbox truffles-sentinel
+cleanup() {
+  compose down --remove-orphans >/dev/null 2>&1 || true
+}
 
-compose exec -T truffles-api env -i \
+trap cleanup EXIT
+
+compose build truffles-api
+
+compose run --rm -T truffles-api env -i \
   PATH=/usr/local/bin:/usr/bin:/bin \
   PYTHONPATH=/app \
   pytest -q $PYTEST_ARGS
