@@ -1,0 +1,23 @@
+# SESSION 2026-02-07-cross-tenant-pack-backfill-a15 — Session 2026-02-07-cross-tenant-pack-backfill-a15
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-07-cross-tenant-pack-backfill-a15.md
+- branch: feat/2026-02-07-cross-tenant-pack-backfill-a15
+- worktree: /home/zhan/worktrees/2026-02-07-cross-tenant-pack-backfill-a15
+- base_ref: origin/main
+- scope: P0/P1 multi-tenant hardening — cross-tenant negative matrix, pack runtime de-demoization, publish-time branch RAG sync/backfill automation.
+- done:
+  - Implemented cross-tenant negative matrix, pack runtime adapter de-demoization, and publish-time branch RAG sync/backfill automation with green targeted tests.
+  - Session created.
+  - Added cross-tenant negative tests for webhook tenant_context instance mismatch, provider status branch mismatch, and audit route client isolation.
+  - Refactored `pack_runtime_default` to explicit adapter registry; added neutral default adapter + explicit demo adapter; added tests guarding no direct demo import in default facade.
+  - Added knowledge registry helpers for publish-time branch sync + client branch backfill and wired console publish/rollback/autopilot to unified helper.
+  - Ran targeted lint and pytest checks (47 passed).
+- next:
+  - Open PR and merge after review.
+  - Open PR with this session bundle.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-07-cross-tenant-pack-backfill-a15.md
+  - /tmp/pytest_cross_tenant_pack_backfill_a15_20260207.txt
+- last_updated: 2026-02-07

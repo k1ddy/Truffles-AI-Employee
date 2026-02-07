@@ -390,6 +390,79 @@ def sync_qdrant_from_pack(
     return len(points), services_count
 
 
+def _list_client_backfill_branches(
+    db,
+    *,
+    client_id: UUID,
+    exclude_branch_id: UUID | None,
+) -> list[Branch]:
+    query = db.query(Branch).filter(Branch.client_id == client_id)
+    if exclude_branch_id:
+        query = query.filter(Branch.id != exclude_branch_id)
+    return query.order_by(Branch.created_at.asc()).all()
+
+
+def backfill_client_published_branches(
+    db,
+    *,
+    client_slug: str,
+    client_id: UUID,
+    exclude_branch_id: UUID | None,
+) -> tuple[int, int]:
+    synced = 0
+    skipped = 0
+    for branch in _list_client_backfill_branches(
+        db,
+        client_id=client_id,
+        exclude_branch_id=exclude_branch_id,
+    ):
+        published = get_current_published(db, branch_id=branch.id)
+        if not published:
+            skipped += 1
+            continue
+        sync_qdrant_from_pack(
+            published.payload_json,
+            client_slug=client_slug,
+            branch_id=branch.id,
+            knowledge_tag=branch.knowledge_tag,
+            version_id=published.id,
+        )
+        synced += 1
+    return synced, skipped
+
+
+def sync_published_branch_docs(
+    db,
+    *,
+    client_slug: str,
+    branch: Branch,
+    version: KnowledgeVersion,
+    backfill_other_branches: bool = True,
+) -> dict[str, int]:
+    docs_synced, services_synced = sync_qdrant_from_pack(
+        version.payload_json,
+        client_slug=client_slug,
+        branch_id=branch.id,
+        knowledge_tag=branch.knowledge_tag,
+        version_id=version.id,
+    )
+    backfill_synced = 0
+    backfill_skipped = 0
+    if backfill_other_branches:
+        backfill_synced, backfill_skipped = backfill_client_published_branches(
+            db,
+            client_slug=client_slug,
+            client_id=branch.client_id,
+            exclude_branch_id=branch.id,
+        )
+    return {
+        "docs_synced": docs_synced,
+        "services_synced": services_synced,
+        "backfill_synced": backfill_synced,
+        "backfill_skipped": backfill_skipped,
+    }
+
+
 def sync_services_index(payload_json: dict, *, client_slug: str) -> int:
     entries = _collect_service_entries(payload_json)
     if not entries:
