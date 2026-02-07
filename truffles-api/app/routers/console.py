@@ -51,10 +51,10 @@ from app.schemas.console import (
     ConsoleAgentWithIdentities,
     ConsoleAuditEvent,
     ConsoleAuditListResponse,
-    ConsoleBranchIntegrationStatus,
     ConsoleBranch,
     ConsoleBranchCreateRequest,
     ConsoleBranchCreateResponse,
+    ConsoleBranchIntegrationStatus,
     ConsoleBranchListResponse,
     ConsoleBranchUpdateRequest,
     ConsoleCapabilitiesPatchRequest,
@@ -138,8 +138,8 @@ from app.schemas.console import (
 from app.schemas.onboarding_contract import ONBOARDING_CONTRACT_SCHEMA_VERSION, OnboardingContractPayload
 from app.schemas.outbox_payload import validate_outbox_payload
 from app.services.agent_link_service import build_telegram_deep_link, create_agent_link_token
-from app.services.audit_service import record_audit_event
 from app.services.alert_service import alert_warning
+from app.services.audit_service import record_audit_event
 from app.services.capabilities_service import merge_capabilities, payload_to_dict
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_confirmations import create_confirmation, mark_confirmation_used, require_confirmation
