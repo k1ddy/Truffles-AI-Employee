@@ -1,0 +1,24 @@
+# SESSION 2026-02-07-tenant-lifecycle-read-a15 — Session 2026-02-07-tenant-lifecycle-read-a15
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-07-tenant-lifecycle-read-a15.md
+- branch: feat/2026-02-07-tenant-lifecycle-read-a15
+- worktree: /home/zhan/worktrees/2026-02-07-tenant-lifecycle-read-a15
+- base_ref: origin/main
+- scope: Lifecycle read-semantics for Console Tenants (`active/archived/all`) in API/auth context/UI.
+- done:
+  - Added lifecycle query param parsing and filters for `/console/v1/admin/clients|branches`.
+  - Updated `console_auth` platform-admin context to be active-by-default with explicit inactive override.
+  - Added backend tests for lifecycle parsing/filtering and non-required stale branch selection behavior.
+  - Updated OpenAPI contract and regenerated console web API types.
+  - Added Tenants UI toggle `Active / Archived / All` and wired query params.
+- next:
+  - Await review/merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-07-tenant-lifecycle-read-a15.md
+  - `pytest tests/test_console_tenants_list.py tests/test_console_auth_access.py tests/test_console_admin_provisioning.py -q` (32 passed)
+  - `python3 scripts/generate_openapi.py --check`
+  - `npm run generate:api`
+  - `npm run lint`
+- last_updated: 2026-02-07

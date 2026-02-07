@@ -3470,6 +3470,8 @@ export interface operations {
                 limit?: components["parameters"]["limit"];
                 q?: string;
                 company_id?: string;
+                /** @description Tenant lifecycle filter (`active` by default). */
+                lifecycle?: "active" | "archived" | "all";
             };
             header?: never;
             path?: never;
@@ -3561,6 +3563,8 @@ export interface operations {
                 limit?: components["parameters"]["limit"];
                 q?: string;
                 client_id?: string;
+                /** @description Tenant lifecycle filter (`active` by default). */
+                lifecycle?: "active" | "archived" | "all";
             };
             header?: never;
             path?: never;

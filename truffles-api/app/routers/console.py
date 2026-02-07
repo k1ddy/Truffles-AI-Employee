@@ -877,6 +877,18 @@ def _parse_bool_param(name: str, value: Optional[str], default: bool = False) ->
     raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
 
 
+_TENANT_LIFECYCLE_MODES = {"active", "archived", "all"}
+
+
+def _parse_tenant_lifecycle_param(value: Optional[str]) -> str:
+    if value is None:
+        return "active"
+    normalized = value.strip().lower()
+    if normalized not in _TENANT_LIFECYCLE_MODES:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid lifecycle")
+    return normalized
+
+
 def _parse_date_param(name: str, value: Optional[str]) -> Optional[dt_date]:
     if value is None:
         return None
@@ -4372,15 +4384,26 @@ async def list_clients(
     limit: int = 50,
     q: Optional[str] = None,
     company_id: Optional[str] = None,
+    lifecycle: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> ConsoleClientListResponse:
-    context = get_console_context(request, db, require_selection=False)
+    lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=lifecycle_mode != "active",
+    )
     _require_platform_admin(context)
-    _reject_unknown_query_params(request, {"cursor", "limit", "q", "company_id"})
+    _reject_unknown_query_params(request, {"cursor", "limit", "q", "company_id", "lifecycle"})
     _validate_limit(limit)
 
     company_uuid = _parse_uuid_param("company_id", company_id)
     query = db.query(Client)
+    if lifecycle_mode == "active":
+        query = query.filter(Client.status == "active")
+    elif lifecycle_mode == "archived":
+        query = query.filter(Client.status != "active")
     if company_uuid:
         query = query.filter(Client.company_id == company_uuid)
 
@@ -4443,15 +4466,26 @@ async def list_branches(
     limit: int = 50,
     q: Optional[str] = None,
     client_id: Optional[str] = None,
+    lifecycle: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> ConsoleBranchListResponse:
-    context = get_console_context(request, db, require_selection=False)
+    lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=lifecycle_mode != "active",
+    )
     _require_platform_admin(context)
-    _reject_unknown_query_params(request, {"cursor", "limit", "q", "client_id"})
+    _reject_unknown_query_params(request, {"cursor", "limit", "q", "client_id", "lifecycle"})
     _validate_limit(limit)
 
     client_uuid = _parse_uuid_param("client_id", client_id)
     query = db.query(Branch)
+    if lifecycle_mode == "active":
+        query = query.filter(Branch.is_active.is_(True))
+    elif lifecycle_mode == "archived":
+        query = query.filter(Branch.is_active.is_(False))
     if client_uuid:
         query = query.filter(Branch.client_id == client_uuid)
 

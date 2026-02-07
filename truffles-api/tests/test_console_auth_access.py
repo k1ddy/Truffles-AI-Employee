@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 from app.services.console_auth import (
+    _filter_platform_admin_clients,
     _build_access_map,
     _build_platform_admin_access_map,
     _resolve_branch_selection,
@@ -270,3 +271,42 @@ def test_resolve_branch_selection_rejects_out_of_scope():
 
     assert exc_info.value.code == "BRANCH_ACCESS_DENIED"
     assert exc_info.value.status_code == 403
+
+
+def test_resolve_branch_selection_ignores_out_of_scope_without_required_selection():
+    allowed_branch_id = uuid4()
+    denied_branch_id = uuid4()
+
+    effective_branch_id, selection_required = _resolve_branch_selection(
+        {allowed_branch_id},
+        branch_restricted=False,
+        selected_branch_id=denied_branch_id,
+        require_selection=False,
+    )
+
+    assert effective_branch_id is None
+    assert selection_required is False
+
+
+def test_filter_platform_admin_clients_returns_active_only_by_default():
+    active = SimpleNamespace(id=uuid4(), name="A", status="active")
+    deleted = SimpleNamespace(id=uuid4(), name="B", status="deleted")
+
+    filtered = _filter_platform_admin_clients(
+        [active, deleted],
+        include_inactive_tenants=False,
+    )
+
+    assert filtered == [active]
+
+
+def test_filter_platform_admin_clients_fallbacks_to_full_list_when_no_active():
+    archived = SimpleNamespace(id=uuid4(), name="A", status="deleted")
+    suspended = SimpleNamespace(id=uuid4(), name="B", status="suspended")
+
+    filtered = _filter_platform_admin_clients(
+        [archived, suspended],
+        include_inactive_tenants=False,
+    )
+
+    assert filtered == [archived, suspended]
