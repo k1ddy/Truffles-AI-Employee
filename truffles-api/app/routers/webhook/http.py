@@ -111,6 +111,25 @@ def _run_preflight(
 
     remote_jid = metadata.remoteJid
 
+    tenant_client_slug = (incoming_tenant_context.client_slug or "").strip() if incoming_tenant_context else ""
+    if not incoming_tenant_context or (
+        incoming_tenant_context.client_id is None and not tenant_client_slug
+    ):
+        trace_conversation = resolve_trace_conversation(
+            trace_client=client,
+            trace_conversation_id=conversation_id,
+            trace_message_id=message_id,
+            trace_remote_jid=remote_jid,
+        )
+        if record_early_trace(
+            trace_conversation,
+            stage="preflight",
+            decision="reject",
+            reason="missing_tenant_context",
+        ):
+            db.commit()
+        return WebhookResponse(success=False, message="Missing tenant_context"), {}
+
     def _reject_tenant_context(reason: str, *, message: str = "Tenant mismatch", meta: dict | None = None):
         trace_conversation = resolve_trace_conversation(
             trace_client=client,

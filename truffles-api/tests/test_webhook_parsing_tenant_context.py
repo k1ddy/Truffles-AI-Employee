@@ -78,3 +78,22 @@ async def test_parse_webhook_request_sets_tenant_context_instance_from_query():
     assert parsed.body.metadata.instanceId == "inst-query"
     assert parsed.tenant_context is not None
     assert parsed.tenant_context.instance_id == "inst-query"
+
+
+@pytest.mark.asyncio
+async def test_parse_webhook_request_backfills_tenant_context_when_missing():
+    payload = {
+        "body": {
+            "message": "hello",
+            "metadata": {"remoteJid": "77000000000@s.whatsapp.net", "instanceId": "inst-body"},
+        }
+    }
+    request = _build_json_request(payload)
+
+    parsed = await _parse_webhook_request(request, client_slug="generic")
+
+    assert isinstance(parsed, WebhookRequest)
+    assert parsed.tenant_context is not None
+    assert parsed.tenant_context.client_slug == "generic"
+    assert parsed.tenant_context.instance_id == "inst-body"
+    assert parsed.tenant_context.source == "webhook"

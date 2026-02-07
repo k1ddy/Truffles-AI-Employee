@@ -32,6 +32,11 @@ async def handle_message(request: MessageRequest, db: Session = Depends(get_db))
             messageType="text",
             metadata=metadata,
         ),
+        tenant_context={
+            "client_id": str(request.client_id),
+            "client_slug": client_slug,
+            "source": "message_api",
+        },
     )
 
     response = await reasoning_core.handle_webhook_payload(
