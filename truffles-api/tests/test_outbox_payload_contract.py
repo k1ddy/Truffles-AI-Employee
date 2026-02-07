@@ -23,6 +23,11 @@ def test_outbox_payload_contract_valid_minimal():
 
     payload = {
         "client_slug": "demo_salon",
+        "tenant_context": {
+            "client_id": "11111111-1111-4111-8111-111111111111",
+            "client_slug": "demo_salon",
+            "source": "webhook",
+        },
         "body": {
             "messageType": "text",
             "message": "hello",
@@ -46,6 +51,11 @@ def test_outbox_payload_contract_requires_remote_jid():
 
     payload = {
         "client_slug": "demo_salon",
+        "tenant_context": {
+            "client_id": "11111111-1111-4111-8111-111111111111",
+            "client_slug": "demo_salon",
+            "source": "webhook",
+        },
         "body": {
             "messageType": "text",
             "message": "hello",
@@ -66,6 +76,11 @@ def test_outbox_payload_contract_requires_message_or_media():
 
     payload = {
         "client_slug": "demo_salon",
+        "tenant_context": {
+            "client_id": "11111111-1111-4111-8111-111111111111",
+            "client_slug": "demo_salon",
+            "source": "webhook",
+        },
         "body": {
             "messageType": "text",
             "message": " ",
@@ -86,6 +101,11 @@ def test_outbox_payload_contract_client_slug_mismatch():
 
     payload = {
         "client_slug": "demo_salon",
+        "tenant_context": {
+            "client_id": "11111111-1111-4111-8111-111111111111",
+            "client_slug": "demo_salon",
+            "source": "webhook",
+        },
         "body": {
             "messageType": "text",
             "message": "hello",
@@ -96,6 +116,27 @@ def test_outbox_payload_contract_client_slug_mismatch():
     contract, error = validate_outbox_payload(payload, expected_client_slug="other")
     assert contract is None
     assert error == "client_slug_mismatch"
+
+
+def test_outbox_payload_contract_requires_tenant_context():
+    from app.schemas.outbox_payload import validate_outbox_payload
+
+    payload = {
+        "client_slug": "demo_salon",
+        "body": {
+            "messageType": "text",
+            "message": "hello",
+            "metadata": {
+                "remoteJid": "77015705555@s.whatsapp.net",
+                "messageId": "MSG-4",
+            },
+        },
+    }
+
+    contract, error = validate_outbox_payload(payload)
+    assert contract is None
+    assert error is not None
+    assert "tenant_context" in error
 
 
 def test_semantic_service_match_passes_client_slug(monkeypatch):

@@ -1,9 +1,7 @@
 from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import AliasChoices, BaseModel, Field
-
-from app.schemas.outbox_payload import TenantContext
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 
 class WebhookMetadata(BaseModel):
@@ -44,10 +42,34 @@ class WebhookBody(BaseModel):
     mediaData: Optional[Any] = None
 
 
+class WebhookTenantContext(BaseModel):
+    company_id: UUID | None = None
+    client_id: UUID | None = None
+    branch_id: UUID | None = None
+    client_slug: str | None = None
+    branch_slug: str | None = None
+    instance_id: str | None = None
+    source: str | None = None
+
+
 class WebhookRequest(BaseModel):
     body: WebhookBody
     client_slug: Optional[str] = "truffles"
-    tenant_context: TenantContext | None = None
+    tenant_context: WebhookTenantContext = Field(default_factory=WebhookTenantContext)
+
+    @model_validator(mode="after")
+    def _normalize_tenant_context(self) -> "WebhookRequest":
+        if not self.tenant_context:
+            self.tenant_context = WebhookTenantContext()
+
+        client_slug = (self.client_slug or "").strip()
+        if client_slug and not (self.tenant_context.client_slug or "").strip():
+            self.tenant_context.client_slug = client_slug
+
+        if not (self.tenant_context.source or "").strip():
+            self.tenant_context.source = "webhook"
+
+        return self
 
 
 class WebhookResponse(BaseModel):

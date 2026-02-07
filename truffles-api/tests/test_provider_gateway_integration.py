@@ -284,3 +284,58 @@ async def test_outbox_rows_reject_tenant_context_branch_mismatch(monkeypatch, cl
     assert results["failed"] == 1
     assert statuses == ["FAILED"]
     assert outbox_row.meta["contract_error"] == "event:tenant_context_branch_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_outbox_rows_reject_missing_tenant_context(monkeypatch):
+    client_id = uuid4()
+    outbox_id = uuid4()
+    outbox_row = OutboxMessage(
+        id=outbox_id,
+        client_id=client_id,
+        branch_id=None,
+        inbound_message_id="msg-missing-tenant-context",
+        payload_json={},
+        status="PENDING",
+        meta={},
+    )
+    db = _make_db(outbox=outbox_row)
+
+    payload_json = {
+        "schema_version": "outbox.v1",
+        "event_type": "whatsapp.send_text",
+        "client_slug": "generic",
+        "provider": "mockflow",
+        "channel": "whatsapp",
+        "payload": {
+            "remote_jid": "77770000000@s.whatsapp.net",
+            "instance_id": "generic-instance",
+            "text": "Hello",
+            "idempotency_key": "idem-missing-tenant-context",
+        },
+    }
+    row = {
+        "id": outbox_id,
+        "payload_json": payload_json,
+        "conversation_id": None,
+        "client_id": client_id,
+        "branch_id": None,
+        "inbound_message_id": "msg-missing-tenant-context",
+        "created_at": datetime.now(timezone.utc),
+        "attempts": 1,
+    }
+
+    statuses = []
+
+    monkeypatch.setattr(outbox_router, "mark_outbox_status", lambda *_args, **kwargs: statuses.append(kwargs["status"]))
+    monkeypatch.setattr(outbox_router, "record_delivery_failure", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(outbox_router, "alert_error", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(legacy, "_find_message_by_message_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr(legacy, "_find_message_by_conversation_created_at", lambda *args, **kwargs: None)
+
+    results = await outbox_router._process_outbox_rows(db, [row], max_attempts=3, retry_backoff_seconds=1.0)
+
+    assert results["sent"] == 0
+    assert results["failed"] == 1
+    assert statuses == ["FAILED"]
+    assert outbox_row.meta["contract_error"] == "event:missing_tenant_context"

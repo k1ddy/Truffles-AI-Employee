@@ -620,7 +620,7 @@ async def _process_outbox_rows(
 
         tenant_context = payload_json.get("tenant_context")
         if tenant_context is None:
-            return None
+            return "event:missing_tenant_context"
         if not isinstance(tenant_context, dict):
             return "event:invalid_tenant_context"
 

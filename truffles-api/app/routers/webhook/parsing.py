@@ -166,12 +166,21 @@ async def _parse_webhook_request(
         or request.query_params.get("instance_id")
         or request.query_params.get("instance")
     )
+    tenant_context_payload = dict(tenant_context) if isinstance(tenant_context, dict) else {}
     if query_instance_id:
         metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
         metadata["instanceId"] = query_instance_id
         body["metadata"] = metadata
-        if isinstance(tenant_context, dict):
-            tenant_context.setdefault("instance_id", query_instance_id)
+        tenant_context_payload.setdefault("instance_id", query_instance_id)
+    else:
+        metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+        instance_id = metadata.get("instanceId") or metadata.get("instance_id")
+        if instance_id:
+            tenant_context_payload.setdefault("instance_id", instance_id)
+
+    if slug:
+        tenant_context_payload.setdefault("client_slug", slug)
+    tenant_context_payload.setdefault("source", "webhook")
 
     metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
     if not metadata.get("remoteJid") or not body.get("message"):
@@ -189,7 +198,7 @@ async def _parse_webhook_request(
         )
 
     try:
-        return WebhookRequest(body=body, client_slug=slug, tenant_context=tenant_context)
+        return WebhookRequest(body=body, client_slug=slug, tenant_context=tenant_context_payload)
     except Exception as exc:
         logger.warning("Webhook payload validation failed", extra={"context": {"error": str(exc)}})
         return WebhookResponse(success=False, message="Invalid webhook payload")
