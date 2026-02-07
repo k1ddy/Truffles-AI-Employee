@@ -165,4 +165,5 @@
 | 2026-02-07-provider-channel-model-v1-a13 | active | feat/2026-02-07-provider-channel-model-v1-a13 | /home/zhan/worktrees/2026-02-07-provider-channel-model-v1-a13 | docs/TASK_PACKAGES/TP-2026-02-07-provider-channel-model-v1.md | 2026-02-07 |
 | 2026-02-07-pack-runtime-de-demo-a13 | active | feat/2026-02-07-pack-runtime-de-demo-a13 | /home/zhan/worktrees/2026-02-07-pack-runtime-de-demo-a13 | docs/TASK_PACKAGES/TP-2026-02-07-pack-runtime-de-demo-a13.md | 2026-02-07 |
 | 2026-02-07-pack-runtime-core-imports-a13 | active | feat/2026-02-07-pack-runtime-core-imports-a13 | /home/zhan/worktrees/2026-02-07-pack-runtime-core-imports-a13 | docs/TASK_PACKAGES/TP-2026-02-07-pack-runtime-core-imports-a13.md | 2026-02-07 |
+| 2026-02-07-outbox-false-sent-a15 | done | feat/2026-02-07-outbox-false-sent-a15 | /home/zhan/worktrees/2026-02-07-outbox-false-sent-a15 | docs/TASK_PACKAGES/TP-2026-02-07-outbox-false-sent-guard.md | 2026-02-07 |
 | 2026-02-07-tenant-lifecycle-read-a15 | done | feat/2026-02-07-tenant-lifecycle-read-a15 | /home/zhan/worktrees/2026-02-07-tenant-lifecycle-read-a15 | docs/TASK_PACKAGES/TP-2026-02-07-tenant-lifecycle-read-a15.md | 2026-02-07 |
