@@ -6,11 +6,16 @@
 - branch: feat/2026-02-07-decision-safe-degrade-a13
 - worktree: /home/zhan/worktrees/2026-02-07-decision-safe-degrade-a13
 - base_ref: origin/main
-- scope: <fill scope>
+- scope: Tenant runtime hardening: fail-closed truth fallback outside dev/test contexts.
 - done:
   - Session created.
+  - Updated `should_allow_truth_fallback()` to fail-closed behavior outside dev/test.
+  - Added fallback behavior tests for pytest/prod/debug contexts.
+  - Opened PR #560 with checks.
 - next:
-  - Fill Task Package and execute plan.
+  - Wait for merge, then continue next remaining plan gap.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-06-tenant-context-runtime-a13.md
+  - /tmp/pytest_knowledge_runtime_fail_closed_20260207.txt
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/560
 - last_updated: 2026-02-07
