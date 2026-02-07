@@ -1,0 +1,21 @@
+# SESSION 2026-02-07-full-dedemo-core-imports-a15 — Full de-demoization core imports
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-07-pack-runtime-core-imports-a13.md
+- branch: feat/2026-02-07-full-dedemo-core-imports-a15
+- worktree: /home/zhan/worktrees/2026-02-07-full-dedemo-core-imports-a15
+- base_ref: origin/main
+- scope: Full de-demoization core imports: убрать прямые импорты `demo_salon_knowledge` из `booking/info/response/pending/tool_registry/ai_service` через `pack_runtime_service`.
+- done:
+  - Session created.
+  - Added neutral runtime wrappers in `pack_runtime_default/service` for info/signals/meta helpers (`phrase_match_intent`, `build_info_combined_reply`, `_build_fact_meta`, `_format_service_not_found_reply`, parking/guest signals).
+  - Switched core modules (`booking/info/response/pending/tool_registry/ai_service`) from direct `demo_salon_knowledge` imports to `pack_runtime_service`.
+  - Extended import-hygiene test to enforce no direct `demo_salon_knowledge` import in core runtime modules.
+  - Ran targeted lint/tests successfully (ruff + pytest suites).
+- next:
+  - Open PR and merge after review.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-07-pack-runtime-core-imports-a13.md
+  - /tmp/pytest_full_dedemo_core_imports_20260207_a15.txt
+- last_updated: 2026-02-07
