@@ -948,6 +948,16 @@ class TestServiceHints:
 
         assert hint is None
 
+    def test_extract_service_hint_returns_none_without_client_slug(self):
+        with patch("app.routers.webhook.decision.semantic_service_match") as semantic_match, patch(
+            "app.routers.webhook.decision.get_pack_service_hint"
+        ) as pack_hint:
+            hint = webhook_router._extract_service_hint("хочу маникюр", None)
+
+        assert hint is None
+        semantic_match.assert_not_called()
+        pack_hint.assert_not_called()
+
 
 class TestReengageConfirmation:
     def test_reengage_confirmation_active(self):

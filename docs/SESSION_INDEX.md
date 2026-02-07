@@ -159,3 +159,4 @@
 | 2026-02-06-onboarding-flow-canon-a12 | active | feat/2026-02-06-onboarding-flow-canon-a12 | /home/zhan/worktrees/2026-02-06-onboarding-flow-canon-a12 | docs/TASK_PACKAGES/TP-2026-02-05-onboarding-billing-support-audit.md | 2026-02-06 |
 | 2026-02-06-booking-quality-matrix-a10 | active | feat/2026-02-06-booking-quality-matrix-a10 | /home/zhan/worktrees/2026-02-06-booking-quality-matrix-a10 | docs/TASK_PACKAGES/TP-2026-02-06-booking-quality-matrix.md | 2026-02-06 |
 | 2026-02-06-runtime-capabilities-a10 | done | feat/2026-02-06-runtime-capabilities-a10 | /home/zhan/worktrees/2026-02-06-runtime-capabilities-a10 | docs/TASK_PACKAGES/TP-2026-02-06-runtime-capabilities.md | 2026-02-06 |
+| 2026-02-07-decision-safe-degrade-a13 | active | feat/2026-02-07-decision-safe-degrade-a13 | /home/zhan/worktrees/2026-02-07-decision-safe-degrade-a13 | docs/TASK_PACKAGES/TP-2026-02-06-tenant-context-runtime-a13.md | 2026-02-07 |

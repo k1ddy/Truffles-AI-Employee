@@ -2918,9 +2918,13 @@ def _is_booking_cancel(text: str, *, policy_pack: dict | None) -> bool:
 def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
     if not text:
         return None
-    slug = client_slug or "demo_salon"
+    if not isinstance(client_slug, str):
+        return None
+    slug = client_slug.strip()
+    if not slug:
+        return None
     normalized_text = _normalize_text(text)
-    booking_like = _is_booking_request(text, client_slug=client_slug)
+    booking_like = _is_booking_request(text, client_slug=slug)
     if not booking_like:
         booking_like = bool(
             TIME_PATTERN.search(text)
