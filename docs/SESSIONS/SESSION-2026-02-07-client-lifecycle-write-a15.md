@@ -1,0 +1,27 @@
+# SESSION 2026-02-07-client-lifecycle-write-a15 — Session 2026-02-07-client-lifecycle-write-a15
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-07-client-lifecycle-write-a15.md
+- branch: feat/2026-02-07-client-lifecycle-write-a15
+- worktree: /home/zhan/worktrees/2026-02-07-client-lifecycle-write-a15
+- base_ref: origin/main
+- scope: Client lifecycle write semantics (`archive/restore`) for Console Admin with prechecks/audit and Tenants UI action flow.
+- done:
+  - Added explicit client lifecycle actions: `POST /admin/clients/{client_id}/archive` and `/restore`.
+  - Added archive prechecks for active agents/memberships/branches with blocking `409 CLIENT_ARCHIVE_BLOCKED`.
+  - Added lifecycle reason validation and audit events (`client_archived`, `client_restored`, `client_archive_blocked`).
+  - Guarded `PATCH /admin/clients/{client_id}` from lifecycle changes via free-text `status`.
+  - Added `clients.deleted_at` model field and migration `025_add_clients_deleted_at.sql`.
+  - Updated Tenants UI: removed status input and added `Archive/Restore` actions with reason + confirm.
+  - Updated Console API contract and regenerated frontend API types.
+  - Added backend tests for status guard + archive/restore behavior.
+- next:
+  - Await review/merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-07-client-lifecycle-write-a15.md
+  - `PYTEST_ARGS='/app/tests/test_console_admin_provisioning.py /app/tests/test_console_tenants_list.py' scripts/test_api_container.sh` (18 passed)
+  - `python3 truffles-api/scripts/generate_openapi.py --check`
+  - `cd console-web && npm run generate:api`
+  - `cd console-web && npm run lint`
+- last_updated: 2026-02-07
