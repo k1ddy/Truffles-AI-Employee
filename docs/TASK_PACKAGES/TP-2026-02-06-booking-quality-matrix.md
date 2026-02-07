@@ -23,6 +23,7 @@
 - Обновить `scripts/booking_dialog_scenarios.py`: реальные услуги из demo_salon pack + явные «не по слоту» ответы (service/date/time/name/phone) + постоянные перебивки/шум.
 - Обновить `ops/diagnose.py`: поддержать `allow_booking_stall` в ожиданиях, чтобы валидно проверять «не по слоту» ответы без ложных фейлов.
 - Обновить `scripts/booking_confirm_verify.sh`/`ops/diagnose.py livecheck-auto`: выбор branch_slug для корректного instance_id.
+- Добавить `scripts/booking_quality_matrix_resumable.sh` для устойчивого прогона матрицы (resume/skip completed/retry/backoff/stop-the-line report).
 - Добавить поддержку выбора мастера в booking‑tool: `specialist_name` в LLM‑plan prompt + маппинг name → specialist_id в tool registry (fallback: если по услуге ровно один мастер, использовать его).
 - Провести 3 LLM‑quality прогона (seed 42/1337/2026, count=10, include_media, coverage booking/info/interrupt/handoff, tool‑hooks auto), после каждого зафиксировать top‑3 failures и конкретное следующее действие.
 - Подтвердить реальную запись через runbook (`scripts/booking_confirm_verify.sh --apply --cancel-appointments`) и снять SQL evidence.
@@ -36,6 +37,7 @@
 - `scripts/booking_dialog_scenarios.py`
 - `ops/diagnose.py`
 - `scripts/booking_confirm_verify.sh`
+- `scripts/booking_quality_matrix_resumable.sh`
 - `prompts/llm_plan.md`
 - `truffles-api/app/services/tool_registry_service.py`
 - `truffles-api/app/routers/webhook/booking.py`
@@ -70,6 +72,7 @@
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json --count 10 --tool-hooks auto --reset-before-dialog --max-failures 20`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --seed 1337`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --seed 2026`
+- `scripts/booking_quality_matrix_resumable.sh --run-stamp 20260207-stress --base-url http://localhost:8000 --client-slug demo_salon --branches main,branch_b --seeds 42,1337,2026,9001`
 - `scripts/booking_confirm_verify.sh --client-slug demo_salon --branch-slug branch_b --apply --cancel-appointments`
 - SQL: `SELECT id, specialist_id, start_at, status FROM appointments WHERE branch_id = '2e9f5a9d-50a2-4b07-8e54-da2cac2ac751' ORDER BY created_at DESC LIMIT 5;`
 
