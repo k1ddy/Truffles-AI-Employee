@@ -432,6 +432,9 @@ jobs:
             --url https://api.truffles.kz/console/v1 \
             --include-method=GET \
             --exclude-path /ops/outbox \
+            --exclude-path /ops/jobs \
+            --exclude-path /ops/jobs/catalog \
+            --exclude-path /ops/jobs/{job_id} \
             --exclude-path /admin/companies \
             --exclude-path /admin/clients \
             --exclude-path /admin/branches \
