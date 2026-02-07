@@ -4,9 +4,9 @@ from uuid import uuid4
 import pytest
 
 from app.services.console_auth import (
-    _filter_platform_admin_clients,
     _build_access_map,
     _build_platform_admin_access_map,
+    _filter_platform_admin_clients,
     _resolve_branch_selection,
     _resolve_client_selection,
     _resolve_company_selection,

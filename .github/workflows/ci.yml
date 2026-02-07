@@ -436,6 +436,11 @@ jobs:
             --exclude-path /admin/clients \
             --exclude-path /admin/branches \
             --exclude-path /admin/capabilities \
+            --exclude-path /admin/reference-packs \
+            --exclude-path /admin/onboarding-contract \
+            --exclude-path /admin/webhook-secret \
+            --exclude-path /knowledge/current \
+            --exclude-path /knowledge/history \
             --exclude-path /inbox/macros \
             --exclude-path /onboarding/status \
             --exclude-path /onboarding/advance \
