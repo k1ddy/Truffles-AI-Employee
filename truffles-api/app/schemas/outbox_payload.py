@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from app.services.tenant_context_contract import validate_tenant_context_contract
+
 
 def _summarize_validation_error(exc: ValidationError, *, limit: int = 3) -> str:
     parts: list[str] = []
@@ -107,5 +109,11 @@ def validate_outbox_payload(
 
     if expected_client_slug and contract.client_slug != expected_client_slug:
         return None, "client_slug_mismatch"
+
+    _, tenant_error = validate_tenant_context_contract(
+        contract.tenant_context.model_dump(exclude_none=True, mode="json")
+    )
+    if tenant_error:
+        return None, f"contract_error:tenant_context:{tenant_error}"
 
     return contract, None

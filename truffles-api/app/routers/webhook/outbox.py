@@ -50,6 +50,7 @@ from app.services.outbox_service import (
 from app.services.state_machine import ConversationState
 from app.services.state_service import is_simulation_context
 from app.services.telegram_service import TelegramService
+from app.services.tenant_context_contract import validate_tenant_context_contract
 
 logger = get_logger("webhook")
 
@@ -621,8 +622,9 @@ async def _process_outbox_rows(
         tenant_context = payload_json.get("tenant_context")
         if tenant_context is None:
             return "event:missing_tenant_context"
-        if not isinstance(tenant_context, dict):
-            return "event:invalid_tenant_context"
+        tenant_context, tenant_contract_error = validate_tenant_context_contract(tenant_context)
+        if tenant_contract_error:
+            return "event:invalid_tenant_context_contract"
 
         tenant_client_id_raw = tenant_context.get("client_id")
         if tenant_client_id_raw:

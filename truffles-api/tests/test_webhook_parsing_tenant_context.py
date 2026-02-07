@@ -37,7 +37,7 @@ def test_normalize_chatflow_payload_extracts_tenant_context():
     tenant_context = {
         "client_id": str(uuid4()),
         "client_slug": "demo_salon",
-        "source": "provider_gateway",
+        "source": "system",
     }
     payload = {
         "body": {
@@ -59,7 +59,7 @@ async def test_parse_webhook_request_sets_tenant_context_instance_from_query():
     tenant_context = {
         "client_id": str(uuid4()),
         "client_slug": "demo_salon",
-        "source": "provider_gateway",
+        "source": "system",
     }
     payload = {
         "body": {

@@ -17,6 +17,7 @@ from app.schemas.provider_gateway import (
     ProviderStatus,
 )
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
+from app.services.tenant_context_contract import validate_tenant_context_contract
 
 
 def _coerce_remote_jid(value: str | None) -> str | None:
@@ -106,7 +107,7 @@ def translate_provider_inbound(payload: ProviderInbound) -> tuple[WebhookRequest
         metadata=metadata,
     )
     webhook_tenant_context = tenant_context.model_dump(exclude_none=True, mode="json")
-    webhook_tenant_context.setdefault("source", "provider_gateway")
+    webhook_tenant_context.setdefault("source", "system")
     return WebhookRequest(
         body=body,
         client_slug=client_slug,
@@ -143,6 +144,11 @@ def build_provider_outbound_payload(
             tenant_context = TenantContext.model_validate(tenant_context)
         except Exception:
             return None, "invalid_tenant_context"
+    _, tenant_error = validate_tenant_context_contract(
+        tenant_context.model_dump(exclude_none=True, mode="json")
+    )
+    if tenant_error:
+        return None, "invalid_tenant_context_contract"
 
     media_payload = None
     if media:
