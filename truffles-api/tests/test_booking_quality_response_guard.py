@@ -117,6 +117,28 @@ def _load_chaos_action_fallback_helper():
     return namespace["_chaos_action_fallback_ok"]
 
 
+def _load_duplicate_ack_helpers():
+    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
+    source = script_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(script_path))
+    wanted_functions = {
+        "_llm_quality_payload_is_duplicate_ack",
+        "_llm_quality_should_infer_bot_response_from_duplicate_ack",
+    }
+    selected_nodes = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            names = {target.id for target in node.targets if isinstance(target, ast.Name)}
+            if "CHAOS_PENDING_ACTIONS" in names:
+                selected_nodes.append(node)
+        if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
+            selected_nodes.append(node)
+    module = ast.Module(body=selected_nodes, type_ignores=[])
+    namespace = {}
+    exec(compile(module, str(script_path), "exec"), namespace, namespace)
+    return namespace
+
+
 def test_retry_helper_marks_bot_response_when_outbox_appears():
     namespace = _load_retry_helper()
     helper = namespace["_llm_quality_retry_outbox_for_expected_reply"]
@@ -278,4 +300,39 @@ def test_expected_reply_fallback_allows_pending_without_expected_state():
         meta={"action": "escalate"},
         conv_meta={},
         handover_meta={},
+    )
+
+
+def test_duplicate_ack_helper_detects_payload_message():
+    helpers = _load_duplicate_ack_helpers()
+    fn = helpers["_llm_quality_payload_is_duplicate_ack"]
+    assert fn({"success": True, "message": "Duplicate message_id"})
+    assert not fn({"success": True, "message": "ok"})
+
+
+def test_duplicate_ack_helper_inferrs_bot_response_for_reply_action():
+    helpers = _load_duplicate_ack_helpers()
+    fn = helpers["_llm_quality_should_infer_bot_response_from_duplicate_ack"]
+    assert fn(
+        bot_response=False,
+        expected_response=True,
+        response_payload={"success": True, "message": "Duplicate message_id"},
+        attempts=2,
+        meta={"action": "booking_prompt"},
+        meta_error=None,
+        state="bot_active",
+    )
+
+
+def test_duplicate_ack_helper_does_not_infer_for_pending_state():
+    helpers = _load_duplicate_ack_helpers()
+    fn = helpers["_llm_quality_should_infer_bot_response_from_duplicate_ack"]
+    assert not fn(
+        bot_response=False,
+        expected_response=True,
+        response_payload={"success": True, "message": "Duplicate message_id"},
+        attempts=2,
+        meta={"action": "pending_wait"},
+        meta_error=None,
+        state="pending",
     )

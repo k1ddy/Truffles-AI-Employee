@@ -4493,6 +4493,53 @@ def _llm_quality_retry_outbox_for_expected_reply(
             return retry_summary, retry_payload, retry_status, retry_text, True
     return outbox_summary, outbox_payload, outbox_payload_status, outbox_text, bot_response
 
+
+def _llm_quality_payload_is_duplicate_ack(response_payload):
+    if not isinstance(response_payload, dict):
+        return False
+    message = response_payload.get("message")
+    if not isinstance(message, str):
+        return False
+    return "duplicate message_id" in message.casefold()
+
+
+def _llm_quality_should_infer_bot_response_from_duplicate_ack(
+    *,
+    bot_response,
+    expected_response,
+    response_payload,
+    attempts,
+    meta,
+    meta_error,
+    state,
+):
+    if bot_response or not expected_response:
+        return False
+    if attempts <= 1:
+        return False
+    if meta_error or not isinstance(meta, dict):
+        return False
+    if not _llm_quality_payload_is_duplicate_ack(response_payload):
+        return False
+    if state in {"pending", "manager_active"}:
+        return False
+    action = meta.get("action") or meta.get("pending_action")
+    if not isinstance(action, str):
+        return False
+    if action in CHAOS_PENDING_ACTIONS:
+        return False
+    if action in {
+        "escalate",
+        "booking_escalated",
+        "booking_captured_pending",
+        "booking_reuse_handover",
+        "booking_paused",
+    }:
+        return False
+    # Duplicate-ack after infra retry usually means the first attempt was processed;
+    # for reply-like actions we avoid counting a false missing_bot_reply.
+    return action in {"reply", "match", "booking_prompt", "smalltalk", "booking_confirm"}
+
 def _fetch_outbox_rows(db_user, client_id, inbound_message_id, limit=5):
     safe_client = _escape_sql_literal(client_id)
     safe_id = _escape_sql_literal(inbound_message_id)
@@ -6369,6 +6416,18 @@ def _run_llm_quality(args):
                         outbox_wait_seconds=outbox_wait_seconds,
                         poll_interval=args.poll_interval,
                     )
+                bot_response_inferred_duplicate_ack = False
+                if _llm_quality_should_infer_bot_response_from_duplicate_ack(
+                    bot_response=bot_response,
+                    expected_response=expected_response,
+                    response_payload=response_payload,
+                    attempts=attempts,
+                    meta=meta,
+                    meta_error=meta_error,
+                    state=state,
+                ):
+                    bot_response = True
+                    bot_response_inferred_duplicate_ack = True
                 if bot_response:
                     stats["turns_with_response"] += 1
                 else:
@@ -6716,6 +6775,7 @@ def _run_llm_quality(args):
                     "outbox_payload_status": outbox_payload_status,
                     "outbox_text": outbox_text,
                     "bot_response": bot_response,
+                    "bot_response_inferred_duplicate_ack": bot_response_inferred_duplicate_ack,
                     "expected_response": expected_response,
                     "expected_response_reason": expected_reason,
                     "turn_expectations": expectations,
