@@ -68,6 +68,57 @@ class TestSendMessageSafeContract:
         assert result.error.code == ErrorCodes.CHATFLOW_ERROR
 
     @respx.mock
+    def test_chatflow_payload_failure_returns_integration_error(self):
+        """When ChatFlow returns 200 with success=false, should return Result.fail."""
+        import os
+
+        os.environ["CHATFLOW_TOKEN"] = "test-token"
+        os.environ["TEST_MODE"] = "0"
+
+        from app.services.chatflow_service import send_message_safe
+
+        respx.get("https://app.chatflow.kz/api/v1/send-text").mock(
+            return_value=Response(
+                200,
+                json={"success": False, "message": "Either your instance_id is invalid"},
+            )
+        )
+
+        result = send_message_safe(
+            instance_id="test-instance",
+            remote_jid="77001234567@s.whatsapp.net",
+            message="Test message",
+        )
+
+        assert result.is_err()
+        assert isinstance(result.error, IntegrationError)
+        assert result.error.code == ErrorCodes.CHATFLOW_ERROR
+        assert result.error.context.get("reason") == "payload_failure"
+
+    def test_test_mode_skip_returns_error(self, monkeypatch):
+        """When TEST_MODE guard blocks outbound, send_message_safe must return error."""
+        import importlib
+
+        monkeypatch.setenv("CHATFLOW_TOKEN", "test-token")
+        monkeypatch.setenv("TEST_MODE", "1")
+        monkeypatch.setenv("OUTBOUND_ALLOWLIST_JIDS", "77000000001@s.whatsapp.net")
+
+        import app.services.chatflow_service as chatflow_module
+
+        importlib.reload(chatflow_module)
+
+        result = chatflow_module.send_message_safe(
+            instance_id="test-instance",
+            remote_jid="77001234567@s.whatsapp.net",
+            message="Test message",
+        )
+
+        assert result.is_err()
+        assert isinstance(result.error, IntegrationError)
+        assert result.error.code == ErrorCodes.CHATFLOW_ERROR
+        assert result.error.context.get("reason") == "test_mode_guard"
+
+    @respx.mock
     def test_timeout_returns_timeout_error(self):
         """When ChatFlow times out, should return CHATFLOW_TIMEOUT error."""
         import os

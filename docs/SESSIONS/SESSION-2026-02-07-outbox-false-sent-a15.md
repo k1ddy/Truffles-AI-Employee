@@ -1,0 +1,28 @@
+# SESSION 2026-02-07-outbox-false-sent-a15 — Session 2026-02-07-outbox-false-sent-a15
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-07-outbox-false-sent-guard.md
+- branch: feat/2026-02-07-outbox-false-sent-a15
+- worktree: /home/zhan/worktrees/2026-02-07-outbox-false-sent-a15
+- base_ref: origin/main
+- scope: Убрать ложные маркеры `outbox=SENT` без реальной доставки и исключить повторный drift от test-worker в prod окружении.
+- done:
+  - Implemented false-SENT guards and test-stack cleanup protections
+  - Session created.
+  - Added Task Package and started dedicated worktree session (`a15`).
+  - Patched ChatFlow text-send contract: success requires payload `success=true`.
+  - Patched `TEST_MODE` outbound skip behavior to return delivery error instead of success.
+  - Added/updated contract tests for payload failure and test-mode skip.
+  - Disabled test outbox/sentinel workers by default in test compose.
+  - Switched container test script to `docker compose run --rm` + cleanup trap (no lingering test containers).
+  - Captured container test evidence and post-run docker process snapshot.
+- next:
+  - Final diff review and handoff summary.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-07-outbox-false-sent-guard.md
+  - /tmp/pytest_chatflow_contract_false_sent_20260207.txt
+  - /tmp/pytest_ports_false_sent_20260207.txt
+  - /tmp/compose_test_config_false_sent_20260207.txt
+  - /tmp/docker_ps_after_test_compose_cleanup_20260207.txt
+- last_updated: 2026-02-07

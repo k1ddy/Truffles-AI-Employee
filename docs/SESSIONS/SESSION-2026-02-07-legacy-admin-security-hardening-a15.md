@@ -1,0 +1,22 @@
+# SESSION 2026-02-07-legacy-admin-security-hardening-a15 — Session 2026-02-07-legacy-admin-security-hardening-a15
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-07-legacy-admin-security-hardening-a15.md
+- branch: feat/2026-02-07-legacy-admin-security-hardening-a15
+- worktree: /home/zhan/worktrees/2026-02-07-legacy-admin-security-hardening-a15
+- base_ref: origin/main
+- scope: Legacy `/admin/*` security hardening for `prompt/settings/heal` token guard without breaking health/version diagnostics.
+- done:
+  - Implemented legacy admin token guard for prompt/settings/heal and added regression tests.
+  - Added `X-Admin-Token` guard to `GET/PUT /admin/prompt/{client_slug}`.
+  - Added `X-Admin-Token` guard to `GET/PUT /admin/settings/{client_slug}`.
+  - Added `X-Admin-Token` guard to `POST /admin/heal`.
+  - Kept `/admin/health` and `/admin/version` public for CI/runbook compatibility.
+  - Added legacy auth regression tests in `truffles-api/tests/test_admin_legacy_auth.py`.
+- next:
+  - Await review/merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-07-legacy-admin-security-hardening-a15.md
+  - `PYTEST_ARGS='/app/tests/test_admin_health.py /app/tests/test_admin_legacy_auth.py' scripts/test_api_container.sh` (12 passed)
+- last_updated: 2026-02-07

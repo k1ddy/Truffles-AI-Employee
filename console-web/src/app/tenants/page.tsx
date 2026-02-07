@@ -65,6 +65,8 @@ type BranchEditorState = {
     };
 };
 
+type TenantLifecycleMode = "active" | "archived" | "all";
+
 function stringifyOptionalJson(value: unknown): string {
     if (!value || typeof value !== "object") {
         return "";
@@ -95,6 +97,7 @@ export default function TenantsPage() {
     const [clientQuery, setClientQuery] = useState("");
     const [branchQuery, setBranchQuery] = useState("");
     const [companyQuery, setCompanyQuery] = useState("");
+    const [tenantLifecycle, setTenantLifecycle] = useState<TenantLifecycleMode>("active");
     const [companyEditor, setCompanyEditor] = useState<CompanyEditorState | null>(null);
     const [clientEditor, setClientEditor] = useState<ClientEditorState | null>(null);
     const [branchEditor, setBranchEditor] = useState<BranchEditorState | null>(null);
@@ -150,16 +153,17 @@ export default function TenantsPage() {
         components["schemas"]["ClientListResponse"],
         Error,
         InfiniteData<components["schemas"]["ClientListResponse"], string | undefined>,
-        ["tenants-clients", string | undefined],
+        ["tenants-clients", string | undefined, TenantLifecycleMode],
         string | undefined
     >({
-        queryKey: ["tenants-clients", clientQueryValue],
+        queryKey: ["tenants-clients", clientQueryValue, tenantLifecycle],
         queryFn: async ({ pageParam }) => {
             const cursor = typeof pageParam === "string" ? pageParam : undefined;
             const response = await adminApi.listClients({
                 cursor,
                 limit: 20,
                 q: clientQueryValue,
+                lifecycle: tenantLifecycle,
             });
             return response.data;
         },
@@ -173,16 +177,17 @@ export default function TenantsPage() {
         components["schemas"]["BranchListResponse"],
         Error,
         InfiniteData<components["schemas"]["BranchListResponse"], string | undefined>,
-        ["tenants-branches", string | undefined],
+        ["tenants-branches", string | undefined, TenantLifecycleMode],
         string | undefined
     >({
-        queryKey: ["tenants-branches", branchQueryValue],
+        queryKey: ["tenants-branches", branchQueryValue, tenantLifecycle],
         queryFn: async ({ pageParam }) => {
             const cursor = typeof pageParam === "string" ? pageParam : undefined;
             const response = await adminApi.listBranches({
                 cursor,
                 limit: 20,
                 q: branchQueryValue,
+                lifecycle: tenantLifecycle,
             });
             return response.data;
         },
@@ -487,6 +492,27 @@ export default function TenantsPage() {
                 <h1 className="text-2xl font-bold" data-testid="tenants-title">Тенанты</h1>
                 <div className="text-xs text-muted-foreground">
                     Контекст: {selectedCompanyId ?? "—"} / {meData?.client?.name ?? selectedClientId ?? "—"} / {selectedBranchId ?? "—"}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <span className="text-xs text-muted-foreground">Режим списка:</span>
+                    <button
+                        className={tenantLifecycle === "active" ? "btn-primary" : "btn-ghost"}
+                        onClick={() => setTenantLifecycle("active")}
+                    >
+                        Active
+                    </button>
+                    <button
+                        className={tenantLifecycle === "archived" ? "btn-primary" : "btn-ghost"}
+                        onClick={() => setTenantLifecycle("archived")}
+                    >
+                        Archived
+                    </button>
+                    <button
+                        className={tenantLifecycle === "all" ? "btn-primary" : "btn-ghost"}
+                        onClick={() => setTenantLifecycle("all")}
+                    >
+                        All
+                    </button>
                 </div>
             </div>
 

@@ -20,7 +20,7 @@ services:
     env_file: []
     environment:
       - TEST_MODE=1
-      - OUTBOX_WORKER_ENABLED=1
+      - OUTBOX_WORKER_ENABLED=0
     labels: []
 
   truffles-sentinel:
@@ -28,5 +28,5 @@ services:
     env_file: []
     environment:
       - TEST_MODE=1
-      - SENTINEL_ENABLED=1
+      - SENTINEL_ENABLED=0
     labels: []

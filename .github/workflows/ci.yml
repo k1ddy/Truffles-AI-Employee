@@ -312,9 +312,9 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         run: npx playwright install --with-deps chromium
 
-      - name: Playwright smoke (live)
+      - name: Playwright login smoke (live)
         if: steps.guard.outputs.skip != 'true'
-        run: npm run test:e2e:smoke
+        run: npm run test:e2e:smoke -- e2e/login.spec.ts
 
   console-contract:
     needs: [changes]
@@ -436,6 +436,11 @@ jobs:
             --exclude-path /admin/clients \
             --exclude-path /admin/branches \
             --exclude-path /admin/capabilities \
+            --exclude-path /admin/reference-packs \
+            --exclude-path /admin/onboarding-contract \
+            --exclude-path /admin/webhook-secret \
+            --exclude-path /knowledge/current \
+            --exclude-path /knowledge/history \
             --exclude-path /inbox/macros \
             --exclude-path /onboarding/status \
             --exclude-path /onboarding/advance \

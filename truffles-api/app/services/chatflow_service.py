@@ -57,6 +57,21 @@ def _get_chatflow_media_base_url() -> str:
     return os.environ.get("CHATFLOW_MEDIA_BASE_URL") or CHATFLOW_MEDIA_BASE_URL
 
 
+def _parse_chatflow_success(response: httpx.Response) -> tuple[bool, str]:
+    try:
+        payload = response.json()
+    except Exception:
+        return False, "invalid_response"
+    if not isinstance(payload, dict):
+        return False, "invalid_response"
+    success = payload.get("success")
+    if success is True:
+        return True, "ok"
+    if success is False:
+        return False, "payload_failure"
+    return False, "invalid_response"
+
+
 def _should_skip_outbound(remote_jid: str, *, action: str) -> bool:
     if not _get_test_mode():
         return False
@@ -125,7 +140,8 @@ def send_whatsapp_message(
 ) -> bool:
     """Send message via ChatFlow API."""
     if _should_skip_outbound(remote_jid, action="message"):
-        return True
+        record_delivery_failure(None, source="chatflow", provider="chatflow", reason="test_mode_guard")
+        return False
 
     token = _get_chatflow_token()
     if not token:
@@ -166,7 +182,19 @@ def send_whatsapp_message(
                     {"jid": remote_jid, "status": response.status_code, "body": response.text[:200]},
                 )
                 return False
-            return True
+            success, reason = _parse_chatflow_success(response)
+            if not success:
+                record_delivery_failure(None, source="chatflow", provider="chatflow", reason=reason)
+                alert_error(
+                    "WhatsApp send failed",
+                    {
+                        "jid": remote_jid,
+                        "status": response.status_code,
+                        "reason": reason,
+                        "body": response.text[:200],
+                    },
+                )
+            return success
     except Exception as e:
         logger.error(f"Error sending WhatsApp message: {e}")
         alert_critical("WhatsApp send failed", {"jid": remote_jid, "error": str(e)})
@@ -387,7 +415,14 @@ def send_message_safe(
     Возвращает Result.ok(MessageSent) или Result.fail(IntegrationError).
     """
     if _should_skip_outbound(remote_jid, action="message"):
-        return Ok(MessageSent(remote_jid=remote_jid, instance_id=instance_id))
+        if record_metrics:
+            record_delivery_failure(None, source="chatflow", provider="chatflow", reason="test_mode_guard")
+        return Err(IntegrationError(
+            code=ErrorCodes.CHATFLOW_ERROR,
+            message="Outbound blocked by TEST_MODE guard",
+            service="chatflow",
+            context={"remote_jid": remote_jid, "reason": "test_mode_guard"},
+        ))
 
     token = _get_chatflow_token()
     if not token:
@@ -428,25 +463,54 @@ def send_message_safe(
             logger.info(
                 f"ChatFlow response: status={response.status_code}, jid={remote_jid}, body={response.text[:200]}"
             )
-            if response.status_code == 200:
+            if response.status_code != 200:
+                if record_metrics:
+                    record_delivery_failure(
+                        None,
+                        source="chatflow",
+                        provider="chatflow",
+                        reason=f"status_{response.status_code}",
+                    )
+                if notify_on_failure:
+                    alert_error(
+                        "WhatsApp send failed",
+                        {"jid": remote_jid, "status": response.status_code, "body": response.text[:200]},
+                    )
+                return Err(IntegrationError(
+                    code=ErrorCodes.CHATFLOW_ERROR,
+                    message=f"ChatFlow returned {response.status_code}",
+                    service="chatflow",
+                    context={"status_code": response.status_code, "body": response.text[:200]},
+                ))
+            success, reason = _parse_chatflow_success(response)
+            if success:
                 return Ok(MessageSent(remote_jid=remote_jid, instance_id=instance_id))
             if record_metrics:
                 record_delivery_failure(
                     None,
                     source="chatflow",
                     provider="chatflow",
-                    reason=f"status_{response.status_code}",
+                    reason=reason,
                 )
             if notify_on_failure:
                 alert_error(
                     "WhatsApp send failed",
-                    {"jid": remote_jid, "status": response.status_code, "body": response.text[:200]},
+                    {
+                        "jid": remote_jid,
+                        "status": response.status_code,
+                        "reason": reason,
+                        "body": response.text[:200],
+                    },
                 )
             return Err(IntegrationError(
                 code=ErrorCodes.CHATFLOW_ERROR,
-                message=f"ChatFlow returned {response.status_code}",
+                message=f"ChatFlow payload failure: {reason}",
                 service="chatflow",
-                context={"status_code": response.status_code, "body": response.text[:200]},
+                context={
+                    "status_code": response.status_code,
+                    "body": response.text[:200],
+                    "reason": reason,
+                },
             ))
     except httpx.TimeoutException as e:
         logger.error(f"ChatFlow timeout: {e}")
