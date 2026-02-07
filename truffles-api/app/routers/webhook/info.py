@@ -125,6 +125,8 @@ def _detect_info_class_intents(
     if "hours" in anchor_intents and (question_like or short_query or intent_decomp_set):
         hours_signal = True
 
+    if parking_signal:
+        intents.add("parking")
     if location_signal:
         intents.add("location")
     if hours_signal:

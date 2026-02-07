@@ -54,9 +54,15 @@
     - `/tmp/booking_quality/20260207-fix2-main-seed-1337-replay/summary.json` (`pass_rate=0.8623`, `expected_state_mismatch 9 -> 1`, `expected_reply_mismatch 8 -> 2` vs stress baseline).
   - Confirmed residual dominant failures after `fix2`: `expected_info_section_miss` / `info_section_miss` (all seeds), plus `booking_slot_stall` tail on seeds 2026/1337.
   - Expanded runbook with a dedicated operator workflow section for future agents/humans (pre-run checklist, interruption recovery, analysis order, fix loop contract, handoff package).
+  - Added parking intent propagation in info classifier (`_detect_info_class_intents`) so parking questions keep explicit `parking` intent in booking-interrupt meta/trace.
+  - Added regression test `test_detect_info_class_intents_parking_signal` (`truffles-api/tests/test_master_info_flow.py`).
+  - Re-ran deterministic replay after parking fix (`fix3`, same frozen scenarios):
+    - `/tmp/booking_quality/20260207-fix3-main-seed-1337-replay/summary.json`: `pass_rate 0.8623 -> 0.8986`, `expected_info_section_miss 9 -> 4`, `info_section_miss 7 -> 4`, `booking_slot_stall 3 -> 0`.
+    - `/tmp/booking_quality/20260207-fix3-main-seed-9001-replay/summary.json`: `pass_rate 0.8261 -> 0.8939`, `expected_info_section_miss 9 -> 2`, `info_section_miss 8 -> 1`.
+    - `/tmp/booking_quality/20260207-fix3-main-seed-2026-replay/summary.json`: `pass_rate 0.8039 -> 0.8347`, `expected_info_section_miss 7 -> 1`, `info_section_miss 6 -> 1` (residual dominant: `expected_action_mismatch`, `expected_reply_mismatch`, `booking_slot_stall`).
 - next:
-  - Resolve info-tag gap (primary): cut `expected_info_section_miss` / `info_section_miss` in booking-active interrupts while preserving improved expectation-state/reply metrics.
-  - Resolve `booking_slot_stall` tail for seeds 2026/1337 without regressing pending/manager handling.
+  - Resolve expectation tail (primary): `expected_action_mismatch` / `expected_reply_mismatch` on 2026 and 9001 after parking normalization.
+  - Resolve `booking_slot_stall` tail (seed 2026) without regressing pending/manager handling.
   - Resume `branch_b` matrix from checkpoint with `scripts/booking_quality_matrix_resumable.sh --run-stamp 20260207-stress` after info-gap fix + one regression test.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-06-booking-quality-matrix.md
@@ -88,4 +94,7 @@
   - /tmp/booking_quality/20260207-fix2-main-seed-2026-replay/summary.json
   - /tmp/booking_quality/20260207-fix2-main-seed-9001-replay/summary.json
   - /tmp/booking_quality/20260207-fix2-main-seed-1337-replay/summary.json
+  - /tmp/booking_quality/20260207-fix3-main-seed-2026-replay/summary.json
+  - /tmp/booking_quality/20260207-fix3-main-seed-9001-replay/summary.json
+  - /tmp/booking_quality/20260207-fix3-main-seed-1337-replay/summary.json
 - last_updated: 2026-02-07
