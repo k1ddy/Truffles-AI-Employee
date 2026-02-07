@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Conversation, Message, User
 from app.schemas.webhook import WebhookResponse
-from app.services.demo_salon_knowledge import get_system_lexicon_list
+from app.services.pack_runtime_service import get_system_lexicon_list
 from app.services.state_machine import ConversationState
 
 

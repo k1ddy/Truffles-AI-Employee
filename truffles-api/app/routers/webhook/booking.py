@@ -268,7 +268,7 @@ def _clean_name_candidate(value: str) -> str:
 
 @lru_cache(maxsize=16)
 def _load_datetime_lexicon(client_slug: str | None) -> dict:
-    from app.services.demo_salon_knowledge import load_yaml_truth
+    from app.services.pack_runtime_service import load_yaml_truth
 
     truth = load_yaml_truth(client_slug)
     domain_pack = truth.get("domain_pack") if isinstance(truth, dict) else None
@@ -457,9 +457,9 @@ def _validate_service_slot(
     if extracted:
         return extracted
     if client_slug:
-        from app.services.demo_salon_knowledge import get_demo_salon_service_hint
+        from app.services.pack_runtime_service import get_pack_service_hint
 
-        fallback = get_demo_salon_service_hint(message_text, client_slug=client_slug)
+        fallback = get_pack_service_hint(message_text, client_slug=client_slug)
         if fallback:
             return fallback
     return None
@@ -1382,8 +1382,13 @@ def _handle_booking_interrupt(
     send_response: Callable[..., Any],
     finalize_response: Callable[..., Any],
 ) -> WebhookResponse | None:
-    from app.services.demo_salon_knowledge import compose_multi_truth_reply, format_reply_from_truth
-    from app.services.pack_runtime_service import PackDecision
+    from app.services.pack_runtime_service import (
+        PackDecision,
+        build_info_combined_reply,
+        compose_multi_truth_reply,
+        format_reply_from_truth,
+        phrase_match_intent,
+    )
 
     from . import _legacy as legacy
 
@@ -1458,8 +1463,6 @@ def _handle_booking_interrupt(
         master_signal = False
         if booking_interrupt_text and client_slug:
             try:
-                from app.services.demo_salon_knowledge import phrase_match_intent
-
                 master_signal = "master" in phrase_match_intent(
                     booking_interrupt_text, client_slug=client_slug
                 )
@@ -1484,8 +1487,6 @@ def _handle_booking_interrupt(
             info_decision = None
             info_source = None
             if guest_policy_hit:
-                from app.services.demo_salon_knowledge import build_info_combined_reply
-
                 guest_reply, guest_meta = build_info_combined_reply(
                     include_parking=False,
                     include_guest=True,

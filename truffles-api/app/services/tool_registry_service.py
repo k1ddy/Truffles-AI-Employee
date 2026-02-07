@@ -23,6 +23,7 @@ from app.services.appointment_reminder_service import (
 from app.services.appointment_service import AppointmentConflictError, SchedulingService
 from app.services.calendar_sync_service import enqueue_appointment_sync, get_provider_health
 from app.services.capabilities_runtime import get_runtime_capabilities
+from app.services.pack_runtime_service import format_reply_from_truth, load_yaml_truth
 
 CALENDAR_TOOL_ACTIONS = {
     "calendar.list_slots",
@@ -567,8 +568,6 @@ def _catalog_service_query(
 
 
 def _catalog_location(client_slug: str | None) -> tuple[str | None, str | None]:
-    from app.services.demo_salon_knowledge import format_reply_from_truth
-
     reply = format_reply_from_truth("location", client_slug=client_slug)
     if reply:
         return reply, None
@@ -576,8 +575,6 @@ def _catalog_location(client_slug: str | None) -> tuple[str | None, str | None]:
 
 
 def _catalog_portfolio(client_slug: str | None) -> tuple[str | None, str | None]:
-    from app.services.demo_salon_knowledge import load_yaml_truth
-
     truth = load_yaml_truth(client_slug)
     instagram = (
         truth.get("salon", {}).get("instagram") if isinstance(truth, dict) else None

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 from functools import lru_cache
 from types import ModuleType
+from typing import Any
 
 _DEFAULT_ADAPTER_MODULE = "app.services.pack_runtime_generic_adapter"
 _PACK_ADAPTER_BY_SLUG = {
@@ -115,6 +116,20 @@ def _has_duration_signal(
     )
 
 
+def _has_parking_signal(normalized: str, *, client_slug: str | None = None) -> bool:
+    return _resolve_adapter(client_slug)._has_parking_signal(
+        normalized,
+        client_slug=client_slug,
+    )
+
+
+def _has_guest_waiting_signal(normalized: str, *, client_slug: str | None = None) -> bool:
+    return _resolve_adapter(client_slug)._has_guest_waiting_signal(
+        normalized,
+        client_slug=client_slug,
+    )
+
+
 def semantic_question_type(
     text: str,
     *,
@@ -149,6 +164,19 @@ def compose_multi_truth_reply(
     )
 
 
+def build_info_combined_reply(
+    *,
+    include_parking: bool = False,
+    include_guest: bool = False,
+    client_slug: str | None = "generic",
+) -> tuple[str | None, dict[str, Any]]:
+    return _resolve_adapter(client_slug).build_info_combined_reply(
+        include_parking=include_parking,
+        include_guest=include_guest,
+        client_slug=client_slug,
+    )
+
+
 def format_reply_from_truth(
     intent: str,
     slots: dict | None = None,
@@ -161,6 +189,36 @@ def format_reply_from_truth(
         slots=slots,
         client_slug=client_slug,
         truth=truth,
+    )
+
+
+def _format_service_not_found_reply(
+    truth: dict,
+    *,
+    client_slug: str | None = None,
+) -> str | None:
+    return _resolve_adapter(client_slug)._format_service_not_found_reply(truth)
+
+
+def _build_fact_meta(
+    *,
+    fact_source: str,
+    fact_intents: list[str] | None = None,
+    meta: dict[str, Any] | None = None,
+    service_query_meta: dict[str, Any] | None = None,
+    info_sections: list[str] | None = None,
+    price_item: dict[str, Any] | None = None,
+    duration_item: str | None = None,
+    client_slug: str | None = None,
+) -> dict[str, Any]:
+    return _resolve_adapter(client_slug)._build_fact_meta(
+        fact_source=fact_source,
+        fact_intents=fact_intents,
+        meta=meta,
+        service_query_meta=service_query_meta,
+        info_sections=info_sections,
+        price_item=price_item,
+        duration_item=duration_item,
     )
 
 
@@ -209,14 +267,26 @@ def get_pack_service_hint(message: str, *, client_slug: str | None = None) -> st
     return _resolve_adapter(client_slug).get_pack_service_hint(message, client_slug=client_slug)
 
 
+def phrase_match_intent(text: str, client_slug: str | None = "generic") -> set[str]:
+    return _resolve_adapter(client_slug).phrase_match_intent(
+        text,
+        client_slug=client_slug,
+    )
+
+
 __all__ = [
+    "_build_fact_meta",
     "_detect_promotion_intent",
+    "_format_service_not_found_reply",
+    "_has_guest_waiting_signal",
     "_has_duration_signal",
+    "_has_parking_signal",
     "_has_price_signal",
     "_match_service",
     "_matches_service_request_lexicon",
     "_normalize_text",
     "build_evening_greeting",
+    "build_info_combined_reply",
     "build_quiet_hours_notice",
     "compose_multi_truth_reply",
     "format_reply_from_truth",
@@ -231,6 +301,7 @@ __all__ = [
     "load_policy_pack",
     "load_system_lexicons",
     "load_yaml_truth",
+    "phrase_match_intent",
     "semantic_question_type",
     "semantic_service_match",
 ]

@@ -14,9 +14,9 @@ from app.logging_config import get_logger, record_llm_time, record_rag_time, sta
 from app.models import Client, Message, Prompt
 from app.schemas.consult import ConsultControllerOutput, ConsultTopic, validate_consult_controller_output
 from app.services.alert_service import alert_error
-from app.services.demo_salon_knowledge import get_system_lexicon_list
 from app.services.knowledge_service import format_knowledge_context, search_knowledge
 from app.services.llm import OpenAIProvider
+from app.services.pack_runtime_service import get_system_lexicon_list
 from app.services.result import Result
 
 logger = get_logger("ai_service")
