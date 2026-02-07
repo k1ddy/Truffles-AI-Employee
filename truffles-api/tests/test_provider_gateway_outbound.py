@@ -208,6 +208,25 @@ def test_build_provider_outbound_payload_missing_tenant():
     assert error == "missing_tenant_context"
 
 
+def test_build_provider_outbound_payload_rejects_invalid_tenant_context_contract():
+    payload, error = build_provider_outbound_payload(
+        outbox_id=str(uuid4()),
+        provider="chatflow",
+        channel="whatsapp",
+        tenant_context={
+            **_tenant_context(),
+            "source": "provider_gateway",
+        },
+        remote_jid="77770000000@s.whatsapp.net",
+        text="Hello",
+        idempotency_key="idem-1",
+        callback_url=None,
+    )
+
+    assert payload is None
+    assert error == "invalid_tenant_context_contract"
+
+
 def test_provider_status_disabled_returns_404(client, monkeypatch):
     monkeypatch.delenv("PROVIDER_GATEWAY_STATUS_ENABLED", raising=False)
     response = client.post("/provider/status", json={})
@@ -244,6 +263,32 @@ def test_provider_status_calls_update(client, monkeypatch):
             mock_update.assert_called_once()
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+def test_provider_status_rejects_invalid_tenant_context_source(client, monkeypatch):
+    monkeypatch.setenv("PROVIDER_GATEWAY_STATUS_ENABLED", "1")
+    monkeypatch.delenv("PROVIDER_GATEWAY_TOKEN", raising=False)
+
+    payload = {
+        "provider": "chatflow",
+        "channel": "whatsapp",
+        "provider_message_id": "msg-1",
+        "tenant_context": {
+            **_tenant_context(),
+            "source": "provider_gateway",
+        },
+        "status": "sent",
+        "status_at": datetime.now(timezone.utc).isoformat(),
+        "outbox_id": str(uuid4()),
+    }
+    with patch("app.routers.provider_gateway.update_outbox_status_from_provider") as mock_update:
+        response = client.post("/provider/status", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is False
+    assert body["message"] == "Invalid tenant_context contract"
+    mock_update.assert_not_called()
 
 
 def test_provider_outbound_contract_text():

@@ -1,0 +1,21 @@
+# SESSION 2026-02-07-tenant-context-schema-gate-a13 — Session 2026-02-07-tenant-context-schema-gate-a13
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-07-tenant-context-schema-gate.md
+- branch: feat/2026-02-07-tenant-context-schema-gate-a13
+- worktree: /home/zhan/worktrees/2026-02-07-tenant-context-schema-gate-a13
+- base_ref: origin/main
+- scope: Вшить единый runtime-validator tenant_context по каноническому jsonschema в webhook/provider/outbox.
+- done:
+  - Session created.
+  - Added `tenant_context_contract` service validating against `contracts/tenancy/tenant_context.v1.jsonschema`.
+  - Wired validator to webhook preflight, provider-gateway inbound/status, outbox payload/tenant guard.
+  - Normalized provider-gateway `tenant_context.source` to `system` (schema-compliant).
+  - Added targeted tests for invalid source/contract rejection and runtime coverage.
+- next:
+  - Open PR and merge after checks.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-07-tenant-context-schema-gate.md
+  - /tmp/pytest_tenant_context_schema_gate_20260207.txt
+- last_updated: 2026-02-07

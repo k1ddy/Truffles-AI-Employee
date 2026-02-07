@@ -26,7 +26,6 @@ def test_summarize_outbox_payload_contract():
         "tenant_context": {
             "client_id": str(uuid4()),
             "branch_id": str(uuid4()),
-            "source": "whatsapp",
         },
         "body": {
             "messageType": "text",

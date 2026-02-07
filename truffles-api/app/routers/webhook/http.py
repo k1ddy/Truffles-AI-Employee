@@ -22,6 +22,7 @@ from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services import reasoning_core
 from app.services.alert_service import alert_warning
 from app.services.chatflow_service import verify_signed_media_path
+from app.services.tenant_context_contract import validate_tenant_context_contract
 
 from . import _legacy as legacy
 
@@ -146,6 +147,18 @@ def _run_preflight(
         ):
             db.commit()
         return WebhookResponse(success=False, message=message), {}
+
+    incoming_tenant_payload = incoming_tenant_context.model_dump(exclude_none=True, mode="json")
+    _, incoming_tenant_error = validate_tenant_context_contract(
+        incoming_tenant_payload,
+        require_client_id=False,
+    )
+    if incoming_tenant_error:
+        return _reject_tenant_context(
+            "tenant_context_contract_invalid",
+            message="Invalid tenant_context",
+            meta={"error": incoming_tenant_error},
+        )
 
     sender_branch = _lookup_sender_branch(db, remote_jid)
     if sender_branch:
@@ -355,6 +368,13 @@ def _run_preflight(
     effective_tenant_context = {
         key: value for key, value in effective_tenant_context.items() if value is not None
     }
+    _, effective_tenant_error = validate_tenant_context_contract(effective_tenant_context)
+    if effective_tenant_error:
+        return _reject_tenant_context(
+            "tenant_context_contract_invalid",
+            message="Invalid tenant_context",
+            meta={"error": effective_tenant_error},
+        )
 
     if enforce_secret:
         expected_secret = _resolve_expected_webhook_secret(

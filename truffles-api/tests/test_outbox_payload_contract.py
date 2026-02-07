@@ -139,6 +139,32 @@ def test_outbox_payload_contract_requires_tenant_context():
     assert "tenant_context" in error
 
 
+def test_outbox_payload_contract_rejects_invalid_tenant_context_source():
+    from app.schemas.outbox_payload import validate_outbox_payload
+
+    payload = {
+        "client_slug": "demo_salon",
+        "tenant_context": {
+            "client_id": "11111111-1111-4111-8111-111111111111",
+            "client_slug": "demo_salon",
+            "source": "provider_gateway",
+        },
+        "body": {
+            "messageType": "text",
+            "message": "hello",
+            "metadata": {
+                "remoteJid": "77015705555@s.whatsapp.net",
+                "messageId": "MSG-4",
+            },
+        },
+    }
+
+    contract, error = validate_outbox_payload(payload)
+    assert contract is None
+    assert error is not None
+    assert "tenant_context" in error
+
+
 def test_semantic_service_match_passes_client_slug(monkeypatch):
     from app.services import demo_salon_knowledge as knowledge
 

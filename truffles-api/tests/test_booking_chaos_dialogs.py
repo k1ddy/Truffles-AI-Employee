@@ -65,7 +65,7 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
     for saved_message in saved_messages:
         saved_message.message_metadata = {}
 
-    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    client = SimpleNamespace(id=uuid4(), name="demo_salon", config={})
     settings = SimpleNamespace(
         webhook_secret=None,
         branch_resolution_mode="disabled",

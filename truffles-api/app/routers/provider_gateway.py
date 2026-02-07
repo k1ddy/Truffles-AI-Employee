@@ -13,6 +13,7 @@ from app.schemas.webhook import WebhookResponse
 from app.services import reasoning_core
 from app.services.inbox_event_service import record_inbox_event
 from app.services.provider_gateway_service import translate_provider_inbound, update_outbox_status_from_provider
+from app.services.tenant_context_contract import validate_tenant_context_contract
 
 logger = get_logger("provider_gateway")
 router = APIRouter()
@@ -77,6 +78,16 @@ async def handle_provider_inbound(request: Request, db: Session = Depends(get_db
         )
         return WebhookResponse(success=False, message="Invalid provider inbound payload")
 
+    _, tenant_error = validate_tenant_context_contract(
+        payload.tenant_context.model_dump(exclude_none=True, mode="json")
+    )
+    if tenant_error:
+        logger.warning(
+            "Provider inbound tenant_context contract validation failed",
+            extra={"context": {"error": tenant_error}},
+        )
+        return WebhookResponse(success=False, message="Invalid tenant_context contract")
+
     if _is_provider_inbox_enabled():
         ok, result = record_inbox_event(db, payload=payload, raw_payload=payload_json)
         if not ok and result != "duplicate":
@@ -126,6 +137,16 @@ async def handle_provider_status(request: Request, db: Session = Depends(get_db)
             extra={"context": {"error": str(exc)}},
         )
         return {"success": False, "message": "Invalid provider status payload"}
+
+    _, tenant_error = validate_tenant_context_contract(
+        payload.tenant_context.model_dump(exclude_none=True, mode="json")
+    )
+    if tenant_error:
+        logger.warning(
+            "Provider status tenant_context contract validation failed",
+            extra={"context": {"error": tenant_error}},
+        )
+        return {"success": False, "message": "Invalid tenant_context contract"}
 
     ok, message = update_outbox_status_from_provider(db, status=payload)
     if not ok:
