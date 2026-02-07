@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "apply_sql_migrations.py"
 SPEC = importlib.util.spec_from_file_location("apply_sql_migrations", SCRIPT_PATH)
 assert SPEC is not None
