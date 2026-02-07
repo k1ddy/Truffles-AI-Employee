@@ -37,10 +37,24 @@ def _is_env_enabled(value: str | None, default: bool = False) -> bool:
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
-def should_allow_truth_fallback() -> bool:
-    if _is_env_enabled(os.environ.get("KNOWLEDGE_RUNTIME_ALLOW_FALLBACK"), default=False):
+def _is_dev_or_test_runtime() -> bool:
+    if os.environ.get("PYTEST_CURRENT_TEST"):
         return True
-    return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    if _is_env_enabled(os.environ.get("TEST_MODE"), default=False):
+        return True
+    if _is_env_enabled(os.environ.get("DEBUG"), default=False):
+        return True
+    return False
+
+
+def should_allow_truth_fallback() -> bool:
+    # Pytest keeps fallback enabled to avoid forcing DB setup in unit tests.
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return True
+    # Outside dev/test contexts we stay fail-closed: published pack only.
+    if not _is_dev_or_test_runtime():
+        return False
+    return _is_env_enabled(os.environ.get("KNOWLEDGE_RUNTIME_ALLOW_FALLBACK"), default=False)
 
 
 def set_runtime_truth(runtime_truth: RuntimeTruth | None) -> None:

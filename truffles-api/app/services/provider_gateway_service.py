@@ -105,7 +105,13 @@ def translate_provider_inbound(payload: ProviderInbound) -> tuple[WebhookRequest
         message=message_text,
         metadata=metadata,
     )
-    return WebhookRequest(body=body, client_slug=client_slug), None
+    webhook_tenant_context = tenant_context.model_dump(exclude_none=True, mode="json")
+    webhook_tenant_context.setdefault("source", "provider_gateway")
+    return WebhookRequest(
+        body=body,
+        client_slug=client_slug,
+        tenant_context=webhook_tenant_context,
+    ), None
 
 
 def build_provider_outbound_payload(

@@ -305,6 +305,7 @@ POST /console/v1/cases/{case_id}/return
 **Policy**
 - If a company has multiple branches but only one phone, strict isolation is not supported.
 - Launch in safe mode is forbidden. Safe mode may exist only as runtime protection, not as onboarding completion.
+- Runtime safe mode semantics are `FACT/COLLECT/HANDOFF` only; `FACT` must be pack-only, with no inference and no booking-commit.
 
 ### 2.5 Control Plane Go/No-Go (Ready for Live Customers)
 
@@ -348,6 +349,7 @@ POST /console/v1/cases/{case_id}/return
 **Decision**
 - Любой пропуск в A-E -> **No-Go**.
 - Запуск в safe mode как замена Go-Live не допускается.
+- Runtime safe mode в Go-Live контуре остаётся fallback-only: только `FACT/COLLECT/HANDOFF`, где `FACT` ограничен pack-фактами без booking-commit.
 
 #### 2.5.3 Где описаны процессы (и чего нет)
 

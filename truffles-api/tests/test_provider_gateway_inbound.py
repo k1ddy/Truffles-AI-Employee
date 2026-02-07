@@ -126,6 +126,9 @@ def test_provider_inbound_routes_to_webhook(client, monkeypatch):
             assert webhook_request.body.metadata.messageId == "msg-123"
             assert webhook_request.body.metadata.instanceId == "demo-instance"
             assert isinstance(webhook_request.body.metadata.timestamp, int)
+            assert webhook_request.tenant_context.client_slug == "demo_salon"
+            assert str(webhook_request.tenant_context.client_id) == payload["tenant_context"]["client_id"]
+            assert webhook_request.tenant_context.source == "provider_gateway"
     finally:
         app.dependency_overrides.pop(get_db, None)
 

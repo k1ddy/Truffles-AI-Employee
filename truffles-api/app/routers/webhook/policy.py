@@ -9,8 +9,14 @@ from sqlalchemy.orm import Session
 
 from app.models import Client, Conversation, Message, User
 from app.schemas.webhook import WebhookResponse
-from app.services.demo_salon_knowledge import DemoSalonDecision
 from app.services.intent_service import Intent
+from app.services.pack_runtime_service import (
+    DemoSalonDecision,
+    get_pack_decision,
+    get_pack_price_item,
+    get_pack_price_reply,
+    load_policy_pack,
+)
 
 _POLICY_SECTIONS = (
     "payment_info",
@@ -117,8 +123,6 @@ def _should_escalate_to_pending(policy: dict[str, bool], intent: Intent) -> bool
 
 
 def _load_policy_pack(*, policy_type: str | None, client_slug: str | None) -> dict | None:
-    from app.services.demo_salon_knowledge import load_policy_pack
-
     slug = policy_type or client_slug
     if not slug:
         return None
@@ -514,13 +518,11 @@ def _format_discounts_policy_reply(
     return None
 
 
-def _demo_salon_escalation_gate(messages: list[str], *, client_slug: str | None):
-    from app.services.demo_salon_knowledge import get_demo_salon_decision
-
+def _pack_escalation_gate(messages: list[str], *, client_slug: str | None):
     from . import _legacy as legacy
 
     for message in messages:
-        decision = get_demo_salon_decision(message, client_slug=client_slug)
+        decision = get_pack_decision(message, client_slug=client_slug)
         if not decision or decision.action != "escalate":
             continue
         if decision.intent in {"medical"} and legacy._is_hygiene_context_text(message):
@@ -529,18 +531,29 @@ def _demo_salon_escalation_gate(messages: list[str], *, client_slug: str | None)
     return None
 
 
+def _pack_price_sidecar(
+    messages: list[str],
+    *,
+    client_slug: str | None,
+) -> tuple[str | None, str | None]:
+    for message in messages:
+        price_reply = get_pack_price_reply(message, client_slug=client_slug)
+        if price_reply:
+            return price_reply, get_pack_price_item(message, client_slug=client_slug)
+    return None, None
+
+
+# Backward-compatible aliases while call sites migrate from demo-specific names.
+def _demo_salon_escalation_gate(messages: list[str], *, client_slug: str | None):
+    return _pack_escalation_gate(messages, client_slug=client_slug)
+
+
 def _demo_salon_price_sidecar(
     messages: list[str],
     *,
     client_slug: str | None,
 ) -> tuple[str | None, str | None]:
-    from app.services.demo_salon_knowledge import get_demo_salon_price_item, get_demo_salon_price_reply
-
-    for message in messages:
-        price_reply = get_demo_salon_price_reply(message, client_slug=client_slug)
-        if price_reply:
-            return price_reply, get_demo_salon_price_item(message, client_slug=client_slug)
-    return None, None
+    return _pack_price_sidecar(messages, client_slug=client_slug)
 
 
 def _get_policy_type(client: Client | None, *, client_slug: str | None) -> str | None:
@@ -565,9 +578,7 @@ def _get_policy_handler(client: Client | None, *, client_slug: str | None) -> di
     policy_type = _get_policy_type(client, client_slug=client_slug)
     if not policy_type:
         return None
-    handler = legacy._POLICY_HANDLERS.get(policy_type)
-    if not handler and policy_type:
-        handler = legacy._POLICY_HANDLERS.get("demo_salon")
+    handler = legacy._POLICY_HANDLERS.get(policy_type) or legacy._POLICY_HANDLERS.get("default")
     if not handler:
         return None
     policy_pack = _get_policy_pack(client, client_slug=client_slug)

@@ -85,7 +85,7 @@ class OutboxPayloadContract(BaseModel):
 
     body: OutboxPayloadBody
     client_slug: str = Field(..., min_length=1)
-    tenant_context: TenantContext | None = None
+    tenant_context: TenantContext
 
     @model_validator(mode="after")
     def _normalize_client_slug(self) -> "OutboxPayloadContract":

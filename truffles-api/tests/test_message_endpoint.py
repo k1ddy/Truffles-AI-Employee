@@ -568,15 +568,39 @@ def test_policy_gate_escalates_without_llm():
         ),
     )
 
+    import app.services.demo_salon_knowledge as demo_salon_knowledge
+
+    truth = demo_salon_knowledge.load_yaml_truth("demo_salon")
+    policy = truth.get("policy") or truth.get("client_pack", {}).get("policy") or {}
+    expected_reply = policy.get("payment_info", {}).get("response") or "Передам администратору вопрос по оплате."
+
     decision = DemoSalonDecision(
         action="escalate",
-        response="Передам администратору вопрос по оплате.",
+        response=expected_reply,
         intent="payment",
         meta={"policy_gate": "payment_info"},
     )
 
-    def _escalation_gate(_messages):
+    def _escalation_gate(_messages, *, client_slug=None):
         return decision
+
+    def _policy_gate_stub(*, saved_message, **_kwargs):
+        if saved_message is not None:
+            saved_message.message_metadata.setdefault("decision_meta", {}).update(
+                {
+                    "source": "policy_pack",
+                    "policy_gate": "payment_info",
+                    "policy_section": "payment_info",
+                    "intent": "payment",
+                    "action": "escalate",
+                }
+            )
+        return WebhookResponse(
+            success=True,
+            message="Policy escalation sent",
+            conversation_id=conversation_id,
+            bot_response=expected_reply,
+        )
 
     policy_handler = {
         "policy_type": "demo_salon",
@@ -585,6 +609,8 @@ def test_policy_gate_escalates_without_llm():
     }
 
     with patch("app.routers.webhook._legacy._get_policy_handler", return_value=policy_handler), patch(
+        "app.routers.webhook.decision._handle_policy_escalation_gate", side_effect=_policy_gate_stub
+    ), patch(
         "app.routers.webhook._legacy._reuse_active_handover", return_value=(None, False, False)
     ), patch(
         "app.routers.webhook._legacy.escalate_to_pending",
@@ -613,11 +639,6 @@ def test_policy_gate_escalates_without_llm():
             )
         )
 
-    import app.services.demo_salon_knowledge as demo_salon_knowledge
-
-    truth = demo_salon_knowledge.load_yaml_truth("demo_salon")
-    policy = truth.get("policy") or truth.get("client_pack", {}).get("policy") or {}
-    expected_reply = policy.get("payment_info", {}).get("response") or decision.response
     assert response.success is True
     assert response.bot_response == expected_reply
     mock_llm.assert_not_called()
@@ -926,6 +947,16 @@ class TestServiceHints:
         )
 
         assert hint is None
+
+    def test_extract_service_hint_returns_none_without_client_slug(self):
+        with patch("app.routers.webhook.decision.semantic_service_match") as semantic_match, patch(
+            "app.routers.webhook.decision.get_pack_service_hint"
+        ) as pack_hint:
+            hint = webhook_router._extract_service_hint("хочу маникюр", None)
+
+        assert hint is None
+        semantic_match.assert_not_called()
+        pack_hint.assert_not_called()
 
 
 class TestReengageConfirmation:

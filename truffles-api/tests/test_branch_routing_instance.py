@@ -3,6 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
+import pytest
+
 from app.models import Branch, Client, ClientSettings
 from app.routers.webhook.branch_selection import _handle_branch_selection_gate
 from app.routers.webhook.http import _run_preflight
@@ -384,8 +386,9 @@ def test_preflight_accepts_media_only_payload():
     assert preflight_payload["message_text"] == "[audio]"
 
 
-def test_preflight_rejects_tenant_context_client_mismatch():
-    client = SimpleNamespace(id=uuid4(), name="demo_salon", company_id=None)
+@pytest.mark.parametrize("client_slug", ["demo_salon", "generic"])
+def test_preflight_rejects_tenant_context_client_mismatch(client_slug: str):
+    client = SimpleNamespace(id=uuid4(), name=client_slug, company_id=None)
     settings = SimpleNamespace(branch_resolution_mode="hybrid", webhook_secret=None)
 
     client_query = Mock()
@@ -409,13 +412,13 @@ def test_preflight_rejects_tenant_context_client_mismatch():
     db.commit = Mock()
 
     payload = WebhookRequest(
-        client_slug="demo_salon",
+        client_slug=client_slug,
         body=WebhookBody(
             message="hello",
             messageType="text",
             metadata=WebhookMetadata(remoteJid="77000000000@s.whatsapp.net"),
         ),
-        tenant_context={"client_id": str(uuid4()), "client_slug": "demo_salon"},
+        tenant_context={"client_id": str(uuid4()), "client_slug": client_slug},
     )
 
     with patch("app.routers.webhook.http._lookup_sender_branch", return_value=None):
@@ -435,8 +438,9 @@ def test_preflight_rejects_tenant_context_client_mismatch():
     assert preflight_payload == {}
 
 
-def test_preflight_rejects_tenant_context_branch_mismatch():
-    client = SimpleNamespace(id=uuid4(), name="demo_salon", company_id=None)
+@pytest.mark.parametrize("client_slug", ["demo_salon", "generic"])
+def test_preflight_rejects_tenant_context_branch_mismatch(client_slug: str):
+    client = SimpleNamespace(id=uuid4(), name=client_slug, company_id=None)
     settings = SimpleNamespace(branch_resolution_mode="hybrid", webhook_secret=None)
     resolved_branch = SimpleNamespace(
         id=uuid4(),
@@ -477,7 +481,7 @@ def test_preflight_rejects_tenant_context_branch_mismatch():
     db.commit = Mock()
 
     payload = WebhookRequest(
-        client_slug="demo_salon",
+        client_slug=client_slug,
         body=WebhookBody(
             message="hello",
             messageType="text",
@@ -488,7 +492,7 @@ def test_preflight_rejects_tenant_context_branch_mismatch():
         ),
         tenant_context={
             "client_id": str(client.id),
-            "client_slug": "demo_salon",
+            "client_slug": client_slug,
             "branch_id": str(tenant_branch.id),
         },
     )

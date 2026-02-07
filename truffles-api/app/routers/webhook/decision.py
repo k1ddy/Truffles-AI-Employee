@@ -209,8 +209,6 @@ from app.routers.webhook.pending import (
     _handle_pending_gate,
 )
 from app.routers.webhook.policy import (
-    _demo_salon_escalation_gate,
-    _demo_salon_price_sidecar,
     _detect_booking_cancel,
     _detect_llm_guard_topics,
     _format_discounts_policy_reply,
@@ -223,10 +221,11 @@ from app.routers.webhook.policy import (
     _has_discount_policy_rules,
     _looks_like_policy_topic,
     _looks_like_promotions_request,
+    _pack_escalation_gate,
+    _pack_price_sidecar,
     _resolve_hard_law_sections,
     _should_escalate_to_pending,
     _should_run_booking_flow,
-    _should_run_demo_truth_gate,
     _should_run_truth_gate,
 )
 from app.routers.webhook.response import (
@@ -299,33 +298,6 @@ from app.services.ai_service import (
 from app.services.capabilities_runtime import build_runtime_capabilities, set_runtime_capabilities
 from app.services.chatflow_service import get_instance_id
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
-from app.services.demo_salon_knowledge import (
-    DemoSalonDecision,
-    _detect_promotion_intent,
-    _has_duration_signal,
-    _has_price_signal,
-    _match_service,
-    _matches_service_request_lexicon,
-    build_evening_greeting,
-    build_quiet_hours_notice,
-    compose_multi_truth_reply,
-    format_reply_from_truth,
-    get_demo_salon_decision,
-    get_demo_salon_price_item,
-    get_demo_salon_price_reply,
-    get_demo_salon_service_decision,
-    get_demo_salon_service_hint,
-    get_signal_lexicon_list,
-    get_system_anchor_groups,
-    get_system_lexicon_list,
-    load_system_lexicons,
-    load_yaml_truth,
-    semantic_question_type,
-    semantic_service_match,
-)
-from app.services.demo_salon_knowledge import (
-    _normalize_text as _normalize_service_text,
-)
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
     CONTROLLER_TIMEOUT_SECONDS,
@@ -357,6 +329,32 @@ from app.services.knowledge_validation import (
 )
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
 from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
+from app.services.pack_runtime_service import (
+    PackDecision,
+    _detect_promotion_intent,
+    _has_duration_signal,
+    _has_price_signal,
+    _match_service,
+    _matches_service_request_lexicon,
+    build_evening_greeting,
+    build_quiet_hours_notice,
+    compose_multi_truth_reply,
+    format_reply_from_truth,
+    get_pack_decision,
+    get_pack_price_item,
+    get_pack_service_decision,
+    get_pack_service_hint,
+    get_signal_lexicon_list,
+    get_system_anchor_groups,
+    get_system_lexicon_list,
+    load_system_lexicons,
+    load_yaml_truth,
+    semantic_question_type,
+    semantic_service_match,
+)
+from app.services.pack_runtime_service import (
+    _normalize_text as _normalize_service_text,
+)
 from app.services.state_machine import ConversationState
 from app.services.state_service import (
     apply_simulation_context,
@@ -368,6 +366,13 @@ from app.services.state_service import (
     transition_state,
 )
 from app.services.telegram_service import TelegramService
+
+# Backward-compatible exports for tests and legacy imports.
+get_demo_salon_decision = get_pack_decision
+get_demo_salon_service_decision = get_pack_service_decision
+get_demo_salon_price_item = get_pack_price_item
+get_demo_salon_service_hint = get_pack_service_hint
+_should_run_demo_truth_gate = _should_run_truth_gate
 
 
 def _normalize_message_text(message_text: str | None) -> str:
@@ -420,18 +425,18 @@ def _detect_fast_intent(
     policy_type: str | None,
     booking_wants_flow: bool,
     bypass_domain_flows: bool,
-) -> DemoSalonDecision | None:
+) -> PackDecision | None:
     if not message_text or booking_wants_flow or bypass_domain_flows:
         return None
 
     from . import _legacy as legacy
 
     if legacy.is_greeting_message(message_text):
-        return DemoSalonDecision(action="smalltalk", response=legacy.GREETING_RESPONSE, intent="greeting")
+        return PackDecision(action="smalltalk", response=legacy.GREETING_RESPONSE, intent="greeting")
     if legacy.is_thanks_message(message_text):
-        return DemoSalonDecision(action="smalltalk", response=legacy.THANKS_RESPONSE, intent="thanks")
+        return PackDecision(action="smalltalk", response=legacy.THANKS_RESPONSE, intent="thanks")
     if legacy.is_acknowledgement_message(message_text):
-        return DemoSalonDecision(action="smalltalk", response=legacy.ACKNOWLEDGEMENT_RESPONSE, intent="ack")
+        return PackDecision(action="smalltalk", response=legacy.ACKNOWLEDGEMENT_RESPONSE, intent="ack")
     return None
 
 
@@ -1309,7 +1314,7 @@ def _run_intent_decomposition(
         if tokens and len(tokens) <= SESSION_MEMORY_SHORT_TOKENS:
             has_digits = any(ch.isdigit() for ch in message_text)
             has_service_hint = bool(
-                get_demo_salon_service_hint(message_text, client_slug=client_slug)
+                get_pack_service_hint(message_text, client_slug=client_slug)
             )
             short_noisy_followup = not has_digits and "?" not in message_text and not has_service_hint
     preserve_info_carryover = bool(
@@ -2928,9 +2933,13 @@ def _is_booking_cancel(text: str, *, policy_pack: dict | None) -> bool:
 def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
     if not text:
         return None
-    slug = client_slug or "demo_salon"
+    if not isinstance(client_slug, str):
+        return None
+    slug = client_slug.strip()
+    if not slug:
+        return None
     normalized_text = _normalize_text(text)
-    booking_like = _is_booking_request(text, client_slug=client_slug)
+    booking_like = _is_booking_request(text, client_slug=slug)
     if not booking_like:
         booking_like = bool(
             TIME_PATTERN.search(text)
@@ -2941,7 +2950,7 @@ def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
         )
     match = semantic_service_match(text, slug)
     if not match or match.action != "match":
-        fallback = get_demo_salon_service_hint(text, client_slug=slug)
+        fallback = get_pack_service_hint(text, client_slug=slug)
         if fallback:
             return fallback
         return None
@@ -3801,15 +3810,19 @@ MULTI_INTENT_LABELS = {
 }
 
 
+_DEFAULT_POLICY_HANDLER = {
+    "escalation_gate": _pack_escalation_gate,
+    "service_matcher": get_pack_service_decision,
+    "truth_gate": get_pack_decision,
+    "price_item": get_pack_price_item,
+    "price_sidecar": _pack_price_sidecar,
+}
+
+
 _POLICY_HANDLERS = {
-    "demo_salon": {
-        "policy_type": "demo_salon",
-        "escalation_gate": _demo_salon_escalation_gate,
-        "service_matcher": get_demo_salon_service_decision,
-        "truth_gate": get_demo_salon_decision,
-        "price_item": get_demo_salon_price_item,
-        "price_sidecar": _demo_salon_price_sidecar,
-    }
+    "default": _DEFAULT_POLICY_HANDLER,
+    # Keep explicit demo alias for backward compatibility in tests/config.
+    "demo_salon": _DEFAULT_POLICY_HANDLER,
 }
 
 
@@ -7165,7 +7178,7 @@ async def _handle_webhook_payload(
                 client_slug=payload.client_slug,
             )
         if promo_reply:
-            decision = DemoSalonDecision(
+            decision = PackDecision(
                 action="reply",
                 response=promo_reply,
                 intent="promotions",
@@ -7184,13 +7197,13 @@ async def _handle_webhook_payload(
                 else None
             )
             if discounts_reply:
-                decision = DemoSalonDecision(
+                decision = PackDecision(
                     action="reply",
                     response=discounts_reply,
                     intent="discounts",
                 )
             else:
-                decision = DemoSalonDecision(
+                decision = PackDecision(
                     action="escalate",
                     response=MSG_ESCALATED,
                     intent="discounts",

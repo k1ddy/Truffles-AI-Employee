@@ -65,3 +65,62 @@ def test_load_yaml_truth_uses_runtime_truth():
         assert truth.get("salon", {}).get("name") == "FromDB"
     finally:
         set_runtime_truth(None)
+
+
+def test_load_yaml_truth_uses_runtime_truth_for_generic_slug():
+    runtime_truth = RuntimeTruth(
+        truth={"salon": {"name": "GenericFromDB"}},
+        client_slug="generic",
+        branch_id=uuid4(),
+        source="knowledge_versions",
+        allow_fallback=False,
+    )
+    set_runtime_truth(runtime_truth)
+    try:
+        truth = load_yaml_truth("generic")
+        assert truth.get("salon", {}).get("name") == "GenericFromDB"
+    finally:
+        set_runtime_truth(None)
+
+
+def test_load_yaml_truth_blocks_slug_mismatch_without_fallback():
+    runtime_truth = RuntimeTruth(
+        truth={"salon": {"name": "TenantScoped"}},
+        client_slug="generic",
+        branch_id=uuid4(),
+        source="knowledge_versions",
+        allow_fallback=False,
+    )
+    set_runtime_truth(runtime_truth)
+    try:
+        truth = load_yaml_truth("demo_salon")
+        assert truth == {}
+    finally:
+        set_runtime_truth(None)
+
+
+def test_should_allow_truth_fallback_in_pytest(monkeypatch):
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test-case")
+    monkeypatch.delenv("KNOWLEDGE_RUNTIME_ALLOW_FALLBACK", raising=False)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("DEBUG", raising=False)
+
+    assert knowledge_runtime.should_allow_truth_fallback() is True
+
+
+def test_should_allow_truth_fallback_rejects_prod_even_with_flag(monkeypatch):
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("DEBUG", raising=False)
+    monkeypatch.setenv("KNOWLEDGE_RUNTIME_ALLOW_FALLBACK", "1")
+
+    assert knowledge_runtime.should_allow_truth_fallback() is False
+
+
+def test_should_allow_truth_fallback_allows_debug_with_explicit_flag(monkeypatch):
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.setenv("DEBUG", "1")
+    monkeypatch.setenv("KNOWLEDGE_RUNTIME_ALLOW_FALLBACK", "1")
+
+    assert knowledge_runtime.should_allow_truth_fallback() is True

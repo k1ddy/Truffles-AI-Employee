@@ -1,12 +1,12 @@
 # SESSION 2026-02-06-tenant-context-runtime-a13 — Runtime tenant_context enforcement + cross-tenant coverage
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-06-tenant-context-runtime-a13.md
 - branch: feat/2026-02-06-tenant-context-runtime-a13
 - worktree: /home/zhan/worktrees/2026-02-06-tenant-context-runtime-a13
 - base_ref: origin/main
-- scope: Вшить tenant_context в runtime webhook/outbox/metrics и закрыть тестовые GAP для cross-tenant вне Console.
+- scope: Вшить tenant_context в runtime webhook/outbox/metrics, закрыть тестовые GAP для cross-tenant вне Console, убрать SAFE_MODE канон-двусмысленность, затем убрать hardcoded demo fallback в policy handler runtime.
 - done:
   - Добавлен `tenant_context` в `WebhookRequest` + parsing extraction.
   - Preflight webhook валидирует tenant_context mismatch (client/slug/instance/branch).
@@ -14,9 +14,16 @@
   - Добавлен outbox row tenant guard (`client_id`/`branch_id`/`tenant_context`).
   - Metrics daily/analytics SQL фильтрует user_messages по `metadata.tenant_context.client_id`.
   - Добавлены тесты для webhook/outbox/audit tenant isolation.
+  - SAFE_MODE канон выровнен: runtime fallback (`FACT/COLLECT/HANDOFF`, FACT pack-only, без booking-commit) + запрет safe-mode как Go-Live статуса синхронизирован в owner-docs.
+  - Runtime policy handler переведён на fallback `default` (вместо hardcoded `demo_salon`) и добавлены generic pack entrypoints (`get_pack_*`) с обратной совместимостью.
 - next:
-  - Прогнать финальный `session_check` и оформить merge/close.
+  - Прогнать `session_check`, оформить commit и PR по runtime policy-handler default fallback.
 - evidence:
   - /tmp/pytest_tenant_context_runtime_20260206_a13.txt
+  - /tmp/pytest_policy_handler_default_20260206.txt
+  - STRATEGY/REQUIREMENTS.md
+  - docs/PROCESSES.md
+  - SPECS/VERTICAL_PACK_KIT.md
+  - truffles-api/tests/test_policy_handler_runtime.py
   - STATE.md (NOW)
-- last_updated: 2026-02-06
+- last_updated: 2026-02-07
