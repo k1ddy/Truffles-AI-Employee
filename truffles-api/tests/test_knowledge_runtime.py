@@ -97,3 +97,30 @@ def test_load_yaml_truth_blocks_slug_mismatch_without_fallback():
         assert truth == {}
     finally:
         set_runtime_truth(None)
+
+
+def test_should_allow_truth_fallback_in_pytest(monkeypatch):
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test-case")
+    monkeypatch.delenv("KNOWLEDGE_RUNTIME_ALLOW_FALLBACK", raising=False)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("DEBUG", raising=False)
+
+    assert knowledge_runtime.should_allow_truth_fallback() is True
+
+
+def test_should_allow_truth_fallback_rejects_prod_even_with_flag(monkeypatch):
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("DEBUG", raising=False)
+    monkeypatch.setenv("KNOWLEDGE_RUNTIME_ALLOW_FALLBACK", "1")
+
+    assert knowledge_runtime.should_allow_truth_fallback() is False
+
+
+def test_should_allow_truth_fallback_allows_debug_with_explicit_flag(monkeypatch):
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.setenv("DEBUG", "1")
+    monkeypatch.setenv("KNOWLEDGE_RUNTIME_ALLOW_FALLBACK", "1")
+
+    assert knowledge_runtime.should_allow_truth_fallback() is True
