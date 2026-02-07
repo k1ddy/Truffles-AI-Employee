@@ -1230,6 +1230,65 @@ def test_booking_flow_expected_reply_and_interrupt():
     assert isinstance(trace_intents, list) and trace_intents, f"{case_id}: trace info_intents empty"
 
 
+def test_booking_flow_info_interrupt_sections_location_hours_parking_promo():
+    cases = [
+        ("CA05_BOOKING_INTERRUPT_LOCATION", "где находится ваш салон?", "location"),
+        ("CA05_BOOKING_INTERRUPT_HOURS", "как вы работаете?", "hours"),
+        ("CA05_BOOKING_INTERRUPT_PARKING", "есть ли у вас парковка?", "parking"),
+        ("CA05_BOOKING_INTERRUPT_PROMO", "у вас есть акции или скидки?", "promotions"),
+    ]
+
+    for case_id, question, expected_section in cases:
+        _response, conversation, saved_message = _run_webhook_conversation(
+            ["хочу записаться", "маникюр", question],
+            case_id,
+            None,
+        )
+        meta = saved_message.message_metadata.get("decision_meta", {})
+        assert meta.get("booking_info_interrupt") is True, (
+            f"{case_id}: booking_info_interrupt mismatch; meta={meta}"
+        )
+        sections = meta.get("info_sections")
+        assert isinstance(sections, list) and sections, f"{case_id}: info_sections empty"
+        assert expected_section in sections, f"{case_id}: missing info section {expected_section}"
+        assert meta.get("action") == "reply", f"{case_id}: action mismatch"
+
+        trace = _get_decision_trace(conversation)
+        interrupt_trace = next(
+            (entry for entry in reversed(trace) if entry.get("stage") == "booking_interrupt"),
+            None,
+        )
+        assert interrupt_trace is not None, f"{case_id}: missing booking_interrupt trace"
+        trace_sections = interrupt_trace.get("info_sections")
+        assert isinstance(trace_sections, list) and expected_section in trace_sections, (
+            f"{case_id}: trace missing section {expected_section}"
+        )
+
+
+def test_booking_flow_interrupt_after_price_duration_sequence():
+    prefix = [
+        "Здравствуйте! Я хочу записаться на стрижку.",
+        "Какой у вас прайс на стрижку?",
+        "Сколько времени займет стрижка?",
+    ]
+    cases = [
+        ("CA05_AFTER_PRICE_LOCATION", "Где находится ваш салон?", "location"),
+        ("CA05_AFTER_PRICE_HOURS", "Каковы ваши часы работы?", "hours"),
+        ("CA05_AFTER_PRICE_PARKING", "Есть ли у вас парковка?", "parking"),
+        ("CA05_AFTER_PRICE_PROMO", "У вас есть какие-то акции или скидки?", "promotions"),
+    ]
+    for case_id, question, expected_section in cases:
+        _response, _conversation, saved_message = _run_webhook_conversation(
+            [*prefix, question],
+            case_id,
+            None,
+        )
+        meta = saved_message.message_metadata.get("decision_meta", {})
+        sections = meta.get("info_sections")
+        assert isinstance(sections, list) and sections, f"{case_id}: info_sections empty; meta={meta}"
+        assert expected_section in sections, f"{case_id}: missing info section {expected_section}; meta={meta}"
+
+
 def test_consult_pack_only_and_short_circuit():
     def _consult_intent_decomp(text: str, **_kwargs) -> dict:
         payload = _fake_intent_decomp(text, **_kwargs)

@@ -1382,7 +1382,11 @@ def _handle_booking_interrupt(
     send_response: Callable[..., Any],
     finalize_response: Callable[..., Any],
 ) -> WebhookResponse | None:
-    from app.services.demo_salon_knowledge import DemoSalonDecision, compose_multi_truth_reply
+    from app.services.demo_salon_knowledge import (
+        DemoSalonDecision,
+        compose_multi_truth_reply,
+        format_reply_from_truth,
+    )
 
     from . import _legacy as legacy
 
@@ -1548,6 +1552,22 @@ def _handle_booking_interrupt(
                         )
                         if info_decision:
                             info_source = "truth_gate"
+                if not info_decision and "promotions" in booking_info_intents:
+                    # In active booking flow generic promo/discount questions must stay in
+                    # booking_interrupt path with deterministic info metadata.
+                    promo_reply = format_reply_from_truth("promotions", client_slug=client_slug)
+                    if promo_reply:
+                        info_decision = DemoSalonDecision(
+                            action="reply",
+                            response=promo_reply,
+                            intent="promotions",
+                            meta={
+                                "fact_source": "truth",
+                                "fact_intents": ["promotions"],
+                                "info_sections": ["promotions"],
+                            },
+                        )
+                        info_source = "truth_gate"
             if not info_decision and batch_non_booking_message and not booking_info_intents:
                 service_matcher = policy_handler.get("service_matcher")
                 if service_matcher:

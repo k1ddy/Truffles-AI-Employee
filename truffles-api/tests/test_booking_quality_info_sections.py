@@ -1,0 +1,68 @@
+import ast
+from pathlib import Path
+
+
+def _load_expected_section_matcher():
+    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
+    source = script_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(script_path))
+    wanted_assignments = {
+        "LLM_QUALITY_INFO_TAGS",
+        "LLM_QUALITY_INFO_SECTION_MAP",
+        "LLM_QUALITY_SECTION_TAG_MAP",
+        "LLM_QUALITY_INTENT_TAG_MAP",
+    }
+    wanted_functions = {
+        "_llm_quality_collect_info_signals",
+        "_llm_quality_token_to_info_tags",
+        "_llm_quality_expected_section_answered",
+    }
+    selected_nodes = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            names = {target.id for target in node.targets if isinstance(target, ast.Name)}
+            if names & wanted_assignments:
+                selected_nodes.append(node)
+        elif isinstance(node, ast.For):
+            source_segment = ast.get_source_segment(source, node) or ""
+            if "LLM_QUALITY_SECTION_TAG_MAP" in source_segment:
+                selected_nodes.append(node)
+        elif isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
+            selected_nodes.append(node)
+    module = ast.Module(body=selected_nodes, type_ignores=[])
+    namespace = {}
+    exec(compile(module, str(script_path), "exec"), namespace, namespace)
+    return namespace["_llm_quality_expected_section_answered"]
+
+
+_expected_section_answered = _load_expected_section_matcher()
+
+
+def test_expected_sections_match_promotions_synonyms():
+    matched, info_sections, intents = _expected_section_answered(
+        ["discounts", "discount", "promo", "promotion"],
+        {"info_sections": ["promotions"], "intent": "promotions"},
+        [],
+    )
+    assert matched is True
+    assert "promotions" in info_sections
+    assert "promotions" in intents
+
+
+def test_expected_sections_match_location_aliases_from_trace():
+    matched, info_sections, _intents = _expected_section_answered(
+        ["location"],
+        {},
+        [{"info_sections": ["address"]}],
+    )
+    assert matched is True
+    assert "address" in info_sections
+
+
+def test_expected_sections_keep_mismatch_when_unrelated():
+    matched, _info_sections, _intents = _expected_section_answered(
+        ["hours"],
+        {"info_sections": ["promotions"], "intent": "promotions"},
+        [],
+    )
+    assert matched is False

@@ -2611,12 +2611,49 @@ def _llm_quality_extract_expectations(turn):
         "allow_booking_stall": allow_booking_stall,
     }
 
+def _llm_quality_token_to_info_tags(token):
+    tags = set()
+    if not isinstance(token, str):
+        return tags
+    normalized = token.strip().lower()
+    if not normalized:
+        return tags
+    if normalized in LLM_QUALITY_INFO_TAGS:
+        tags.add(normalized)
+    section_tag = LLM_QUALITY_SECTION_TAG_MAP.get(normalized)
+    if section_tag:
+        tags.add(section_tag)
+    intent_tags = LLM_QUALITY_INTENT_TAG_MAP.get(normalized)
+    if intent_tags:
+        tags.update(intent_tags)
+    return tags
+
+
 def _llm_quality_expected_section_answered(expected_sections, meta, trace_entries):
     if not expected_sections:
         return False, [], []
     info_sections, intents = _llm_quality_collect_info_signals(meta, trace_entries)
     actual = set(info_sections) | set(intents)
-    return bool(set(expected_sections) & actual), info_sections, intents
+    expected_normalized = {
+        section.strip().lower()
+        for section in expected_sections
+        if isinstance(section, str) and section.strip()
+    }
+    if expected_normalized & actual:
+        return True, info_sections, intents
+
+    expected_tags = set()
+    for section in expected_normalized:
+        expected_tags.update(_llm_quality_token_to_info_tags(section))
+    if not expected_tags:
+        return False, info_sections, intents
+
+    actual_tags = set()
+    for section in info_sections:
+        actual_tags.update(_llm_quality_token_to_info_tags(section))
+    for intent in intents:
+        actual_tags.update(_llm_quality_token_to_info_tags(intent))
+    return bool(expected_tags & actual_tags), info_sections, intents
 
 def _llm_quality_value_matches(expected, actual):
     if expected is None:
@@ -6207,11 +6244,19 @@ def _run_llm_quality(args):
                         expected_info_sections, meta, trace_entries
                     )
                     actual_section_set = set(info_sections) | set(info_intents)
+                    actual_tag_set = set()
+                    for token in actual_section_set:
+                        actual_tag_set.update(_llm_quality_token_to_info_tags(token))
                     tag_hits = {}
                     for section in expected_info_sections:
-                        section_hit = section in actual_section_set
-                        info_answered[section] = section_hit
-                        tag = LLM_QUALITY_SECTION_TAG_MAP.get(section)
+                        normalized_section = section.strip().lower() if isinstance(section, str) else ""
+                        section_hit = bool(normalized_section and normalized_section in actual_section_set)
+                        if not section_hit:
+                            expected_tags = _llm_quality_token_to_info_tags(normalized_section)
+                            section_hit = bool(expected_tags & actual_tag_set)
+                        key = normalized_section or section
+                        info_answered[key] = section_hit
+                        tag = LLM_QUALITY_SECTION_TAG_MAP.get(normalized_section)
                         if tag:
                             tag_hits[tag] = bool(tag_hits.get(tag)) or section_hit
                     for tag, tag_hit in tag_hits.items():

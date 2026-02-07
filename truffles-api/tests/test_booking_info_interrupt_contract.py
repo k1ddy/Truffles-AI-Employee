@@ -121,3 +121,31 @@ def test_decision_recomputes_batch_non_booking_message_after_debounce():
 
     assert len(calls) >= 2
     assert any(getattr(call, "lineno", 0) >= 6338 for call in calls)
+
+
+def test_expected_reply_info_block_detects_booking_interrupt_info_turns():
+    assert decision_router._should_block_expected_reply_by_info(
+        expected_reply_type=legacy.EXPECTED_REPLY_TIME,
+        message_text="Есть ли у вас парковка?",
+        client_slug="demo_salon",
+    )
+    assert decision_router._should_block_expected_reply_by_info(
+        expected_reply_type=legacy.EXPECTED_REPLY_TIME,
+        message_text="У вас есть какие-то акции или скидки?",
+        client_slug="demo_salon",
+    )
+    assert not decision_router._should_block_expected_reply_by_info(
+        expected_reply_type=legacy.EXPECTED_REPLY_TIME,
+        message_text="Можно на 18:30?",
+        client_slug="demo_salon",
+    )
+
+
+def test_decision_recomputes_expected_reply_block_after_debounce():
+    source_path = (
+        Path(__file__).resolve().parents[1] / "app" / "routers" / "webhook" / "decision.py"
+    )
+    calls = _named_calls(source_path, "_should_block_expected_reply_by_info")
+
+    assert calls
+    assert any(getattr(call, "lineno", 0) >= 6338 for call in calls)

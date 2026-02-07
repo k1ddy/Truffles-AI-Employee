@@ -535,6 +535,37 @@ def is_handover_status_question(text: str) -> bool:
     return bool(keywords) and any(k in normalized for k in keywords)
 
 
+def _should_block_expected_reply_by_info(
+    *,
+    expected_reply_type: str | None,
+    message_text: str | None,
+    client_slug: str | None,
+) -> bool:
+    from . import _legacy as legacy
+
+    if expected_reply_type not in {
+        legacy.EXPECTED_REPLY_SERVICE,
+        legacy.EXPECTED_REPLY_TIME,
+        legacy.EXPECTED_REPLY_NAME,
+    }:
+        return False
+    if not message_text:
+        return False
+    normalized_message = legacy._normalize_service_text(message_text)
+    blocked = bool(
+        legacy._looks_like_info_query(message_text, client_slug=client_slug)
+        or legacy._has_price_signal(normalized_message, message_text)
+        or legacy._has_duration_signal(normalized_message, message_text)
+    )
+    if (
+        blocked
+        and expected_reply_type == legacy.EXPECTED_REPLY_TIME
+        and legacy._extract_datetime(message_text)
+    ):
+        return False
+    return blocked
+
+
 def _apply_expected_reply_contract(
     *,
     conversation: Conversation,
@@ -628,18 +659,11 @@ def _apply_expected_reply_contract(
         deterministic_value = None
         normalization_flags: list[str] = []
         if message_text:
-            normalized_message = legacy._normalize_service_text(message_text)
-            expected_reply_blocked_by_info = (
-                legacy._looks_like_info_query(message_text, client_slug=client_slug)
-                or legacy._has_price_signal(normalized_message, message_text)
-                or legacy._has_duration_signal(normalized_message, message_text)
+            expected_reply_blocked_by_info = _should_block_expected_reply_by_info(
+                expected_reply_type=expected_reply_type,
+                message_text=message_text,
+                client_slug=client_slug,
             )
-            if (
-                expected_reply_blocked_by_info
-                and expected_reply_type == legacy.EXPECTED_REPLY_TIME
-                and legacy._extract_datetime(message_text)
-            ):
-                expected_reply_blocked_by_info = False
         expected_reply_text = expected_reply_text or ""
         if expected_reply_text:
             (
@@ -6336,6 +6360,16 @@ async def _handle_webhook_payload(
         return handover_response
 
     batch_messages = _coerce_batch_messages(message_text, batch_messages)
+    expected_reply_blocked_by_info = _should_block_expected_reply_by_info(
+        expected_reply_type=expected_reply_type,
+        message_text=message_text,
+        client_slug=payload.client_slug,
+    )
+    if saved_message and expected_reply_blocked_by_info:
+        _update_message_decision_metadata(
+            saved_message,
+            {"expected_reply_blocked_by_info": True},
+        )
     # Recompute after debounce/normalization so booking interrupts use current turn anchors.
     batch_non_booking_message = _select_last_non_booking_message(
         batch_messages,
@@ -7093,8 +7127,10 @@ async def _handle_webhook_payload(
                 meta_updates["policy_pack_missing"] = True
             _update_message_decision_metadata(saved_message, meta_updates)
 
+    booking_promotions_interrupt = bool(booking_wants_flow and routing["allow_booking_flow"])
     if (
         promotions_trigger
+        and not booking_promotions_interrupt
         and routing["allow_bot_reply"]
         and not bypass_domain_flows
         and message_text

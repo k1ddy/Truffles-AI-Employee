@@ -29,6 +29,13 @@
     - `truffles-api/tests/test_booking_appointments.py` new tests for interrupt text selection + info-intent precedence.
   - Captured replay hygiene root cause: without `--reset-before-dialog`, runs leak prior conversation trace/state and can produce false drift; updated `AGENTS.md`, runbook, and task-package commands to require reset on replay.
   - Replayed with reset (`booking-replay-42-default7-count1-reset`) and confirmed remaining deterministic GAP: booking-active info interrupts (`location/hours/parking/promo`) still resolve to `booking_prompt` with missing `info_sections`.
+  - Added deterministic expected-reply info-block helper in decision pipeline and applied it after debounce normalization (`decision.py`) to keep booking interrupt gate stable for info turns.
+  - Updated promo routing in decision gate: skip early policy-discounts shortcut when booking flow is active, so turn reaches booking interrupt handler.
+  - Added booking interrupt promo fallback (`booking.py`) so generic discount/promo question in active booking path yields deterministic `intent=promotions` + `info_sections=["promotions"]`.
+  - Added deterministic regressions for booking interrupt info sections (location/hours/parking/promo) in `test_demo_salon_eval.py` and expected-reply info-block contract tests in `test_booking_info_interrupt_contract.py`.
+  - Fixed llm-quality evaluator drift in `ops/diagnose.py`: expected info section matching now normalizes section synonyms via canonical info tags (e.g. `discount/promo/promotion` -> `promotions`), and `info_answered` uses the same normalized matching to avoid contradictory `expected_info_section_miss` vs `info_section_miss`.
+  - Added evaluator regression tests in `truffles-api/tests/test_booking_quality_info_sections.py`.
+  - Ran replay against isolated worktree runtime (`truffles-api-a14` on `:8004`) and validated that promo false-negative in evaluator is removed on published branch run (`booking-replay-42-default17-count1-reset-a14-branchb-evalfix2`).
 - next:
   - Resolve core GAP: for booking-active turns with `expected_reply_type=time`, ensure `location/hours/parking/promo` go through info interrupt path (meta `info_sections` present, not `booking_prompt` fallback).
   - Add deterministic regression for per-turn info interrupt in booking-active flow (turn-level `decision_meta.info_sections` assertion).
@@ -50,4 +57,10 @@
   - /tmp/booking_quality/booking-replay-42-default6-count1/summary.json
   - /tmp/booking_quality/booking-replay-42-default7-count1-reset/summary.json
   - /tmp/booking_quality/booking-replay-42-default7-count1-reset/brief.md
+  - /tmp/booking_quality/booking-replay-42-default10-count1-reset-a14/summary.json
+  - /tmp/booking_quality/booking-replay-42-default12-count1-reset-a14-clean/summary.json
+  - /tmp/booking_quality/booking-replay-42-default14-count1-reset-a14-newjid/summary.json
+  - /tmp/booking_quality/booking-replay-42-default15-count1-reset-a14-branchb/summary.json
+  - /tmp/booking_quality/booking-replay-42-default16-count1-reset-a14-branchb-evalfix/summary.json
+  - /tmp/booking_quality/booking-replay-42-default17-count1-reset-a14-branchb-evalfix2/summary.json
 - last_updated: 2026-02-07
