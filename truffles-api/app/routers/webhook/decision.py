@@ -298,32 +298,6 @@ from app.services.ai_service import (
 from app.services.capabilities_runtime import build_runtime_capabilities, set_runtime_capabilities
 from app.services.chatflow_service import get_instance_id
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
-from app.services.demo_salon_knowledge import (
-    DemoSalonDecision,
-    _detect_promotion_intent,
-    _has_duration_signal,
-    _has_price_signal,
-    _match_service,
-    _matches_service_request_lexicon,
-    build_evening_greeting,
-    build_quiet_hours_notice,
-    compose_multi_truth_reply,
-    format_reply_from_truth,
-    get_pack_decision,
-    get_pack_price_item,
-    get_pack_service_decision,
-    get_pack_service_hint,
-    get_signal_lexicon_list,
-    get_system_anchor_groups,
-    get_system_lexicon_list,
-    load_system_lexicons,
-    load_yaml_truth,
-    semantic_question_type,
-    semantic_service_match,
-)
-from app.services.demo_salon_knowledge import (
-    _normalize_text as _normalize_service_text,
-)
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
 from app.services.intent_service import (
     CONTROLLER_TIMEOUT_SECONDS,
@@ -355,6 +329,32 @@ from app.services.knowledge_validation import (
 )
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
 from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
+from app.services.pack_runtime_service import (
+    DemoSalonDecision,
+    _detect_promotion_intent,
+    _has_duration_signal,
+    _has_price_signal,
+    _match_service,
+    _matches_service_request_lexicon,
+    build_evening_greeting,
+    build_quiet_hours_notice,
+    compose_multi_truth_reply,
+    format_reply_from_truth,
+    get_pack_decision,
+    get_pack_price_item,
+    get_pack_service_decision,
+    get_pack_service_hint,
+    get_signal_lexicon_list,
+    get_system_anchor_groups,
+    get_system_lexicon_list,
+    load_system_lexicons,
+    load_yaml_truth,
+    semantic_question_type,
+    semantic_service_match,
+)
+from app.services.pack_runtime_service import (
+    _normalize_text as _normalize_service_text,
+)
 from app.services.state_machine import ConversationState
 from app.services.state_service import (
     apply_simulation_context,
