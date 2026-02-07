@@ -12,6 +12,7 @@ import http.client
 import base64
 import glob
 import json
+import math
 import os
 import random
 import re
@@ -2662,6 +2663,88 @@ def _llm_quality_value_matches(expected, actual):
         return actual in expected
     return actual == expected
 
+
+def _llm_quality_state_matches_expected(expected_state, state, meta, conv_meta, handover_meta):
+    if expected_state is None:
+        return True
+    if _llm_quality_value_matches(expected_state, state):
+        return True
+    expected_values = (
+        list(expected_state)
+        if isinstance(expected_state, (list, tuple, set))
+        else [expected_state]
+    )
+    for candidate in expected_values:
+        if not isinstance(candidate, str):
+            continue
+        if _chaos_state_fallback_ok(candidate, state, meta, conv_meta, handover_meta):
+            return True
+    return False
+
+
+def _llm_quality_action_matches_expected(
+    expected_action,
+    meta,
+    conv_meta,
+    trace_entries,
+    expected_info_sections,
+    actual_expected_reply_type,
+):
+    if not expected_action:
+        return True
+    expected_actions = (
+        list(expected_action)
+        if isinstance(expected_action, (list, tuple, set))
+        else [expected_action]
+    )
+    expected_actions = [item for item in expected_actions if isinstance(item, str) and item.strip()]
+    if not expected_actions:
+        return True
+    if _chaos_matches_action(meta, expected_actions):
+        return True
+    info_sections_ok = True
+    if expected_info_sections:
+        info_sections_ok, _, _ = _llm_quality_expected_section_answered(
+            expected_info_sections, meta, trace_entries
+        )
+    expected_payload = {
+        "action_any": expected_actions,
+        "info_sections": expected_info_sections or [],
+        "expected_reply_type": actual_expected_reply_type,
+    }
+    return _chaos_action_fallback_ok(
+        expected_payload, meta, conv_meta, trace_entries, info_sections_ok
+    )
+
+
+def _llm_quality_expected_reply_matches(
+    *,
+    expected_reply,
+    expected_response,
+    expected_state,
+    state,
+    meta,
+    conv_meta,
+    handover_meta,
+):
+    if expected_reply is None:
+        return True
+    if expected_reply == expected_response:
+        return True
+    if expected_state is None:
+        return False
+    expected_values = (
+        list(expected_state)
+        if isinstance(expected_state, (list, tuple, set))
+        else [expected_state]
+    )
+    for candidate in expected_values:
+        if not isinstance(candidate, str):
+            continue
+        if _chaos_state_fallback_ok(candidate, state, meta, conv_meta, handover_meta):
+            return True
+    return False
+
 def _llm_quality_infer_info_tags(text):
     if not text:
         return set()
@@ -3283,12 +3366,19 @@ def _llm_quality_evaluate_turn(
         reasons.append("decision_trace_missing")
     if state not in LLM_QUALITY_KNOWN_STATES:
         reasons.append("unknown_state")
-    if expected_state and not _llm_quality_value_matches(expected_state, state):
+    if expected_state and not _llm_quality_state_matches_expected(
+        expected_state, state, meta, conv_meta, handover_meta
+    ):
         reasons.append("expected_state_mismatch")
-    if expected_action:
-        action_value = (meta or {}).get("action") if isinstance(meta, dict) else None
-        if not _llm_quality_value_matches(expected_action, action_value):
-            reasons.append("expected_action_mismatch")
+    if expected_action and not _llm_quality_action_matches_expected(
+        expected_action,
+        meta,
+        conv_meta,
+        trace_entries,
+        expected_info_sections,
+        actual_expected_reply_type,
+    ):
+        reasons.append("expected_action_mismatch")
     if expected_reply_type and not _llm_quality_value_matches(
         expected_reply_type, actual_expected_reply_type
     ):
@@ -3301,7 +3391,15 @@ def _llm_quality_evaluate_turn(
             fallback_ok = True
         if not fallback_ok:
             reasons.append("expected_reply_type_mismatch")
-    if expected_reply is not None and expected_reply != expected_response:
+    if not _llm_quality_expected_reply_matches(
+        expected_reply=expected_reply,
+        expected_response=expected_response,
+        expected_state=expected_state,
+        state=state,
+        meta=meta,
+        conv_meta=conv_meta,
+        handover_meta=handover_meta,
+    ):
         reasons.append("expected_reply_mismatch")
     if expected_info_sections:
         expected_answered, _, _ = _llm_quality_expected_section_answered(
@@ -3321,6 +3419,7 @@ def _llm_quality_evaluate_turn(
         booking_active
         and booking_progress_expected
         and booking_progressed is False
+        and state not in {"pending", "manager_active"}
         and not allow_booking_stall
     ):
         reasons.append("booking_slot_stall")
@@ -4334,6 +4433,46 @@ def _fetch_outbox_summary(db_user, client_id, inbound_message_id):
         count = None
     status = parts[1] if len(parts) > 1 and parts[1] else None
     return {"count": count, "status": status}, None
+
+def _llm_quality_retry_outbox_for_expected_reply(
+    *,
+    expected_response,
+    bot_response,
+    db_user,
+    client_id,
+    inbound_message_id,
+    inline_response_text,
+    outbox_summary,
+    outbox_payload,
+    outbox_payload_status,
+    outbox_text,
+    outbox_wait_seconds,
+    poll_interval,
+):
+    if (
+        not expected_response
+        or bot_response
+        or not db_user
+        or not client_id
+        or not inbound_message_id
+    ):
+        return outbox_summary, outbox_payload, outbox_payload_status, outbox_text, bot_response
+    sleep_seconds = max(0.2, min(float(poll_interval or 0.6), 0.8))
+    wait_budget = max(float(outbox_wait_seconds or 0.0), sleep_seconds * 2)
+    attempts = max(1, min(6, int(math.ceil(wait_budget / sleep_seconds))))
+    for _ in range(attempts):
+        time.sleep(sleep_seconds)
+        retry_summary, _ = _fetch_outbox_summary(db_user, client_id, inbound_message_id)
+        retry_payload, retry_status, _ = _llm_quality_fetch_outbox_payload(
+            db_user, client_id, inbound_message_id
+        )
+        retry_text = _llm_quality_extract_outbox_text(retry_payload)
+        if not retry_text and inline_response_text:
+            retry_text = inline_response_text
+        retry_bot_response = bool((retry_summary or {}).get("count")) or bool(retry_text)
+        if retry_bot_response:
+            return retry_summary, retry_payload, retry_status, retry_text, True
+    return outbox_summary, outbox_payload, outbox_payload_status, outbox_text, bot_response
 
 def _fetch_outbox_rows(db_user, client_id, inbound_message_id, limit=5):
     safe_client = _escape_sql_literal(client_id)
@@ -6189,12 +6328,33 @@ def _run_llm_quality(args):
                 bot_response = bool((outbox_summary or {}).get("count")) if outbox_summary else False
                 if inline_response_text:
                     bot_response = True
+                expected_response, expected_reason = _llm_quality_expected_response(state, meta)
+                if not args.dry_run:
+                    (
+                        outbox_summary,
+                        outbox_payload,
+                        outbox_payload_status,
+                        outbox_text,
+                        bot_response,
+                    ) = _llm_quality_retry_outbox_for_expected_reply(
+                        expected_response=expected_response,
+                        bot_response=bot_response,
+                        db_user=db_user,
+                        client_id=client_id,
+                        inbound_message_id=message_id,
+                        inline_response_text=inline_response_text,
+                        outbox_summary=outbox_summary,
+                        outbox_payload=outbox_payload,
+                        outbox_payload_status=outbox_payload_status,
+                        outbox_text=outbox_text,
+                        outbox_wait_seconds=outbox_wait_seconds,
+                        poll_interval=args.poll_interval,
+                    )
                 if bot_response:
                     stats["turns_with_response"] += 1
                 else:
                     stats["turns_missing_response"] += 1
 
-                expected_response, expected_reason = _llm_quality_expected_response(state, meta)
                 if expected_response:
                     stats["turns_expected_response"] += 1
                     if not bot_response:

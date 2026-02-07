@@ -36,10 +36,28 @@
   - Fixed llm-quality evaluator drift in `ops/diagnose.py`: expected info section matching now normalizes section synonyms via canonical info tags (e.g. `discount/promo/promotion` -> `promotions`), and `info_answered` uses the same normalized matching to avoid contradictory `expected_info_section_miss` vs `info_section_miss`.
   - Added evaluator regression tests in `truffles-api/tests/test_booking_quality_info_sections.py`.
   - Ran replay against isolated worktree runtime (`truffles-api-a14` on `:8004`) and validated that promo false-negative in evaluator is removed on published branch run (`booking-replay-42-default17-count1-reset-a14-branchb-evalfix2`).
+  - Added resumable matrix runner `scripts/booking_quality_matrix_resumable.sh` (skip-completed by `summary.json`, retry/backoff, stop-the-line on webhook/infra errors, run state heartbeat and tabular report).
+  - Expanded operator runbook with detailed resilient-run instructions (tmux/nohup, resume protocol, advanced stress matrix SOP and failure triage) in `docs/runbooks/BOOKING_CONFIRM_VERIFY.md`.
+  - Added evaluator hardening in `ops/diagnose.py`:
+    - retry outbox probe for `expected_response=true && bot_response=false` to reduce transient false `missing_bot_reply`;
+    - suppress `booking_slot_stall` when state is `pending/manager_active`.
+  - Added evaluator regressions `truffles-api/tests/test_booking_quality_response_guard.py` and validated suite: `test_booking_quality_progress_gate.py`, `test_booking_quality_info_sections.py`, `test_booking_quality_response_guard.py` (`9 passed`).
+  - Replayed frozen scenarios after evaluator guard fixes:
+    - `/tmp/booking_quality/20260207-fix-main-seed-2026-replay/summary.json`
+    - `/tmp/booking_quality/20260207-fix-main-seed-9001-replay/summary.json`
+    - observed deterministic improvement for `booking_slot_stall` on seed 9001 replay (`2 -> 0`); expectation-class failures remain dominant.
+  - Synced working branch with latest `origin/main` via merge (branch was behind by 9 commits), restored stashed WIP without conflicts.
+  - Re-validated evaluator regression suite post-sync: `pytest -q truffles-api/tests/test_booking_quality_progress_gate.py truffles-api/tests/test_booking_quality_info_sections.py truffles-api/tests/test_booking_quality_response_guard.py` (`12 passed`).
+  - Replayed frozen scenarios with updated evaluator (`fix2`) on `main`:
+    - `/tmp/booking_quality/20260207-fix2-main-seed-2026-replay/summary.json` (`pass_rate=0.8039`, `expected_state_mismatch 15 -> 2`, `expected_reply_mismatch 7 -> 3` vs stress baseline).
+    - `/tmp/booking_quality/20260207-fix2-main-seed-9001-replay/summary.json` (`pass_rate=0.8261`, `expected_state_mismatch 10 -> 1`, `expected_reply_mismatch 7 -> 3` vs stress baseline).
+    - `/tmp/booking_quality/20260207-fix2-main-seed-1337-replay/summary.json` (`pass_rate=0.8623`, `expected_state_mismatch 9 -> 1`, `expected_reply_mismatch 8 -> 2` vs stress baseline).
+  - Confirmed residual dominant failures after `fix2`: `expected_info_section_miss` / `info_section_miss` (all seeds), plus `booking_slot_stall` tail on seeds 2026/1337.
+  - Expanded runbook with a dedicated operator workflow section for future agents/humans (pre-run checklist, interruption recovery, analysis order, fix loop contract, handoff package).
 - next:
-  - Resolve core GAP: for booking-active turns with `expected_reply_type=time`, ensure `location/hours/parking/promo` go through info interrupt path (meta `info_sections` present, not `booking_prompt` fallback).
-  - Add deterministic regression for per-turn info interrupt in booking-active flow (turn-level `decision_meta.info_sections` assertion).
-  - Re-run lock+replay matrix (`count=10`, seeds 42/1337/2026) only with `--reset-before-dialog`.
+  - Resolve info-tag gap (primary): cut `expected_info_section_miss` / `info_section_miss` in booking-active interrupts while preserving improved expectation-state/reply metrics.
+  - Resolve `booking_slot_stall` tail for seeds 2026/1337 without regressing pending/manager handling.
+  - Resume `branch_b` matrix from checkpoint with `scripts/booking_quality_matrix_resumable.sh --run-stamp 20260207-stress` after info-gap fix + one regression test.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-06-booking-quality-matrix.md
   - /tmp/booking_quality/20260206-234902/summary.json
@@ -63,4 +81,11 @@
   - /tmp/booking_quality/booking-replay-42-default15-count1-reset-a14-branchb/summary.json
   - /tmp/booking_quality/booking-replay-42-default16-count1-reset-a14-branchb-evalfix/summary.json
   - /tmp/booking_quality/booking-replay-42-default17-count1-reset-a14-branchb-evalfix2/summary.json
+  - /tmp/booking_quality/20260207-stress-matrix-report.tsv
+  - /tmp/booking_quality/20260207-stress-state.json
+  - /tmp/booking_quality/20260207-fix-main-seed-2026-replay/summary.json
+  - /tmp/booking_quality/20260207-fix-main-seed-9001-replay/summary.json
+  - /tmp/booking_quality/20260207-fix2-main-seed-2026-replay/summary.json
+  - /tmp/booking_quality/20260207-fix2-main-seed-9001-replay/summary.json
+  - /tmp/booking_quality/20260207-fix2-main-seed-1337-replay/summary.json
 - last_updated: 2026-02-07

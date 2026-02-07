@@ -55,6 +55,7 @@
 | `scripts/test_api_container.sh` | Контейнерный pytest (drift‑safe, sanitized env) | Backend/QA |
 | `scripts/booking_confirm_verify.sh` | Runbook скрипт: booking confirm verification + evidence | QA/OPS/Brain |
 | `scripts/booking_dialog_scenarios.py` | Генератор booking‑диалогов (10–15 ходов, перебивки, медиа‑шаблоны) | QA/OPS |
+| `scripts/booking_quality_matrix_resumable.sh` | Resumable LLM-quality matrix runner (skip completed, retry/backoff, stop-the-line, report/state) | QA/OPS/Brain |
 | `scripts/restart_knowledge_gateway.sh` | Перезапуск Knowledge Gateway (shadow) | OPS |
 | `scripts/restart_provider_gateway.sh` | Перезапуск Provider Gateway (shadow) | OPS |
 | `scripts/restart_inbox_service.sh` | Перезапуск Inbox Service (shadow) | OPS |

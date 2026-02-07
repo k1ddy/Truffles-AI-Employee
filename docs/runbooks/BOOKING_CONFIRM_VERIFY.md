@@ -194,6 +194,111 @@ TEST_MODE=1 python3 ops/diagnose.py llm-quality \
   --max-failures 20
 ```
 
+Resumable matrix runner (recommended for unstable network/session)
+```bash
+# Resume in-place without touching completed artifacts
+scripts/booking_quality_matrix_resumable.sh \
+  --run-stamp 20260207-stress \
+  --base-url http://localhost:8000 \
+  --client-slug demo_salon \
+  --branches main,branch_b \
+  --seeds 42,1337,2026,9001
+```
+
+What the runner guarantees
+- Step identity is deterministic: `{run_stamp}-{branch}-baseline|seed-{seed}-gen|seed-{seed}-replay`.
+- If `summary.json` exists for a step, the step is skipped (no overwrite).
+- Incomplete step (missing `summary.json`) is re-run with retry/backoff.
+- Stop-the-line is automatic on `webhook_errors > 0` or `infra_errors > 0`.
+- Writes heartbeat/state into `/tmp/booking_quality/<run_stamp>-state.json`.
+- Rebuilds `/tmp/booking_quality/<run_stamp>-matrix-report.tsv` on each run.
+
+Long-run execution (tmux/nohup)
+```bash
+# tmux (preferred for remote sessions)
+tmux new -s booking-matrix
+scripts/booking_quality_matrix_resumable.sh --run-stamp 20260207-stress | tee /tmp/booking_quality/20260207-stress-run.log
+# detach: Ctrl+b then d
+# reattach:
+tmux attach -t booking-matrix
+
+# or nohup
+nohup scripts/booking_quality_matrix_resumable.sh --run-stamp 20260207-stress \
+  > /tmp/booking_quality/20260207-stress-run.log 2>&1 &
+```
+
+Resume protocol after interruption
+1. Check current state:
+   `cat /tmp/booking_quality/20260207-stress-state.json`
+2. Check completed steps:
+   `cat /tmp/booking_quality/20260207-stress-matrix-report.tsv`
+3. Re-run the same command with the same `--run-stamp`.
+4. Confirm that already completed outputs were skipped (look for `skip completed step` in log).
+
+Advanced stress matrix (human + agent guide)
+1. Fix constants before run:
+   - One runtime (`--base-url`) for all compared runs.
+   - Stable knobs: `--count`, `--min-turns`, `--max-turns`, `--scenario-coverage`, `--include-media`.
+   - Always `--reset-before-dialog`.
+2. Collect baseline per branch:
+   - At least `count >= 5` before using comparisons for decisions.
+3. Generate stress per seed:
+   - Use at least 4 seeds (`42,1337,2026,9001`) to reduce accidental overfit.
+   - Keep generation and replay count equal (`count=10` recommended).
+4. Replay only from frozen scenarios:
+   - `--scenarios-file <gen>/scenarios.json`
+   - `--baseline-summary <baseline>/summary.json`
+5. Enforce gates:
+   - Hard stop: `webhook_errors`, `infra_errors`.
+   - Quality targets: `decision_meta_coverage=1.0`, `unknown_state_rate<=0.02`, track pass-rate and info mismatch trend.
+6. Triage failures into 3 bins:
+   - `code`: pipeline/routing/trace/meta bugs.
+   - `data`: pack/content gaps (`info_section_miss` with correct routing).
+   - `expectation`: stale or wrong evaluator expectations.
+7. Fix discipline:
+   - One repeatable failure -> one fix -> one regression test.
+   - Re-run only affected seed replay first, then full branch matrix.
+8. Evidence bundle for handoff:
+   - `summary.json`, `responses.jsonl`, `trace_bundle.jsonl`, `brief.md`, `matrix-report.tsv`, and exact replay command.
+
+Detailed operator workflow (future agents + humans)
+1. Pre-run checklist (must pass before first command)
+   - Confirm branch/worktree/session ownership (`scripts/session_check.sh`).
+   - Confirm API health (`curl -s <base-url>/admin/health`).
+   - Confirm allowlist JIDs are present and not equal to branch sender JID.
+   - Confirm baseline path exists and is readable.
+   - Confirm output stamp is new (do not reuse someone else's stamp).
+2. Generation strategy
+   - Preferred: generate once per seed, replay many times from frozen `scenarios.json`.
+   - If `OPENAI_API_KEY` is unavailable, do not block: reuse previously generated `scenarios.json`.
+   - Keep `count/min-turns/max-turns` identical between generation and replay.
+3. Replay strategy
+   - Always pass `--scenarios-file` and `--baseline-summary` for comparisons.
+   - Keep one runtime and one branch per run command.
+   - Use `--max-failures` to cap runtime during regression loops.
+   - For long runs, always tee logs to file and run in tmux/nohup.
+4. Interruption recovery (network/shell/session reset)
+   - Do not delete partial artifacts in `/tmp/booking_quality`.
+   - Check whether run already finished: `test -f <output>/summary.json`.
+   - If finished: collect metrics only, do not rerun.
+   - If not finished: rerun the exact replay command with the same output dir and same run stamp.
+   - For matrix script: rerun the same `scripts/booking_quality_matrix_resumable.sh --run-stamp ...`; completed steps are skipped automatically.
+5. Analysis order (to avoid false conclusions)
+   - First: `stop_reason`, `webhook_errors`, `infra_errors` (hard blockers).
+   - Second: `pass_rate`, `unknown_state_rate`, `decision_meta_coverage`.
+   - Third: reason deltas (`expected_*`, `info_section_miss`, `missing_bot_reply`, `booking_slot_stall`).
+   - Fourth: inspect top 3 reasons in `summary.top_failures` and confirm on `responses.jsonl`.
+6. Fix loop contract
+   - One dominant repeatable reason -> one code/data/evaluator fix.
+   - Add one regression test for that reason.
+   - Replay only affected seed first.
+   - If improved, run broader seed set and update handoff evidence.
+7. Handoff package (minimum)
+   - Paths to `summary.json`, `responses.jsonl`, `trace_bundle.jsonl`, `brief.md`.
+   - Table of deltas versus baseline (seed-by-seed).
+   - Explicit callout: which failures improved and which worsened.
+   - Exact next command for continuation.
+
 Artifacts
 - `/tmp/booking_quality/<stamp>/scenarios.json`
 - `/tmp/booking_quality/<stamp>/responses.jsonl`
