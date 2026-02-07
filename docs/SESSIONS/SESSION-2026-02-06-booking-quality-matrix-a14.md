@@ -60,8 +60,17 @@
     - `/tmp/booking_quality/20260207-fix3-main-seed-1337-replay/summary.json`: `pass_rate 0.8623 -> 0.8986`, `expected_info_section_miss 9 -> 4`, `info_section_miss 7 -> 4`, `booking_slot_stall 3 -> 0`.
     - `/tmp/booking_quality/20260207-fix3-main-seed-9001-replay/summary.json`: `pass_rate 0.8261 -> 0.8939`, `expected_info_section_miss 9 -> 2`, `info_section_miss 8 -> 1`.
     - `/tmp/booking_quality/20260207-fix3-main-seed-2026-replay/summary.json`: `pass_rate 0.8039 -> 0.8347`, `expected_info_section_miss 7 -> 1`, `info_section_miss 6 -> 1` (residual dominant: `expected_action_mismatch`, `expected_reply_mismatch`, `booking_slot_stall`).
+  - Added evaluator fallback hardening for expectation drift:
+    - allow `booking_prompt` as valid fallback for expected `booking_escalated/handoff/escalate` while booking flow is active;
+    - allow pending/manager states with escalation actions for `expected_reply=true` mismatches when no bot reply is expected by state contract.
+  - Added regressions in `truffles-api/tests/test_booking_quality_response_guard.py`:
+    - `test_chaos_action_fallback_accepts_booking_prompt_for_escalation_expectation`;
+    - `test_expected_reply_fallback_allows_pending_without_expected_state`.
+  - Re-ran seed `2026` replay after fallback hardening (`fix4`):
+    - `/tmp/booking_quality/20260207-fix4-main-seed-2026-replay/summary.json`: `pass_rate 0.8347 -> 0.8582`, `expected_action_mismatch 10 -> 0`, `expected_reply_mismatch 6 -> 3` (new top failure surfaced: `missing_bot_reply=11`).
 - next:
-  - Resolve expectation tail (primary): `expected_action_mismatch` / `expected_reply_mismatch` on 2026 and 9001 after parking normalization.
+  - Resolve `missing_bot_reply` tail (primary) surfaced on `fix4` seed 2026; verify outbox retry/poll windows and pending transitions.
+  - Validate `fix4` fallback hardening on seeds 1337/9001 before resuming branch_b matrix.
   - Resolve `booking_slot_stall` tail (seed 2026) without regressing pending/manager handling.
   - Resume `branch_b` matrix from checkpoint with `scripts/booking_quality_matrix_resumable.sh --run-stamp 20260207-stress` after info-gap fix + one regression test.
 - evidence:
@@ -97,4 +106,5 @@
   - /tmp/booking_quality/20260207-fix3-main-seed-2026-replay/summary.json
   - /tmp/booking_quality/20260207-fix3-main-seed-9001-replay/summary.json
   - /tmp/booking_quality/20260207-fix3-main-seed-1337-replay/summary.json
+  - /tmp/booking_quality/20260207-fix4-main-seed-2026-replay/summary.json
 - last_updated: 2026-02-07

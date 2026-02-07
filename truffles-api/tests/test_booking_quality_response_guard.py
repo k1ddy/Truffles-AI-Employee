@@ -62,6 +62,7 @@ def _load_expectation_helpers():
             selected_nodes.append(node)
     module = ast.Module(body=selected_nodes, type_ignores=[])
     namespace = {
+        "CHAOS_PENDING_ACTIONS": {"pending_status", "pending_wait", "pending_ack"},
         "_chaos_state_fallback_ok": (
             lambda expected, actual, meta, _conv_meta, _handover: (
                 expected == "bot_active"
@@ -82,6 +83,38 @@ def _load_expectation_helpers():
     }
     exec(compile(module, str(script_path), "exec"), namespace, namespace)
     return namespace
+
+
+def _load_chaos_action_fallback_helper():
+    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
+    source = script_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(script_path))
+    wanted_functions = {
+        "_chaos_action_fallback_ok",
+        "_chaos_booking_reply_active",
+        "_chaos_extract_expected_reply",
+    }
+    selected_nodes = []
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
+            selected_nodes.append(node)
+    module = ast.Module(body=selected_nodes, type_ignores=[])
+    namespace = {
+        "CHAOS_PENDING_ACTIONS": {"pending_status", "pending_wait", "pending_ack"},
+        "CHAOS_BOOKING_REPLY_TYPES": {"service_choice", "time", "name"},
+        "_chaos_trace_has_pending": lambda *_args, **_kwargs: False,
+        "_chaos_booking_completion_actions": lambda: [
+            "booking_escalated",
+            "booking_captured_pending",
+            "booking_reuse_handover",
+            "booking_paused",
+        ],
+        "_chaos_trace_has_stage_with_reason": lambda *_args, **_kwargs: False,
+        "_chaos_trace_has_stage": lambda *_args, **_kwargs: False,
+        "_chaos_trace_has_truth_hours": lambda *_args, **_kwargs: False,
+    }
+    exec(compile(module, str(script_path), "exec"), namespace, namespace)
+    return namespace["_chaos_action_fallback_ok"]
 
 
 def test_retry_helper_marks_bot_response_when_outbox_appears():
@@ -205,6 +238,21 @@ def test_action_fallback_allows_booking_escalated_vs_booking_prompt():
     )
 
 
+def test_chaos_action_fallback_accepts_booking_prompt_for_escalation_expectation():
+    fn = _load_chaos_action_fallback_helper()
+    assert fn(
+        {
+            "action_any": ["booking_escalated"],
+            "info_sections": [],
+            "expected_reply_type": "time",
+        },
+        {"action": "booking_prompt", "intent": "booking"},
+        {"state": "bot_active", "context": {"expected_reply_type": "time"}},
+        [],
+        True,
+    )
+
+
 def test_expected_reply_fallback_allows_pending_transition():
     helpers = _load_expectation_helpers()
     fn = helpers["_llm_quality_expected_reply_matches"]
@@ -212,6 +260,20 @@ def test_expected_reply_fallback_allows_pending_transition():
         expected_reply=True,
         expected_response=False,
         expected_state="bot_active",
+        state="pending",
+        meta={"action": "escalate"},
+        conv_meta={},
+        handover_meta={},
+    )
+
+
+def test_expected_reply_fallback_allows_pending_without_expected_state():
+    helpers = _load_expectation_helpers()
+    fn = helpers["_llm_quality_expected_reply_matches"]
+    assert fn(
+        expected_reply=True,
+        expected_response=False,
+        expected_state=None,
         state="pending",
         meta={"action": "escalate"},
         conv_meta={},

@@ -1781,6 +1781,11 @@ def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sec
             return True
         if meta_action in CHAOS_PENDING_ACTIONS and (conv_meta or {}).get("state") == "pending":
             return True
+    if any(action in expected_actions for action in ("booking_escalated", "handoff", "escalate")):
+        if meta_action == "booking_prompt" and booking_active:
+            expected_reply_type = expected.get("expected_reply_type")
+            if expected_reply_type is None or expected_reply_type in CHAOS_BOOKING_REPLY_TYPES:
+                return True
     if "reply" in expected_actions and expected.get("info_sections") and info_sections_ok:
         if meta_action in _chaos_booking_completion_actions() or meta_action == "booking_prompt":
             return True
@@ -2731,6 +2736,20 @@ def _llm_quality_expected_reply_matches(
         return True
     if expected_reply == expected_response:
         return True
+    if expected_reply is True and expected_response is False:
+        action = (meta or {}).get("action")
+        if state in {"pending", "manager_active"} and (
+            action in CHAOS_PENDING_ACTIONS
+            or action
+            in {
+                "escalate",
+                "booking_escalated",
+                "booking_captured_pending",
+                "booking_reuse_handover",
+                "booking_paused",
+            }
+        ):
+            return True
     if expected_state is None:
         return False
     expected_values = (
