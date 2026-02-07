@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
@@ -28,6 +29,7 @@ from app.models import (
     ClientOnboardingContract,
     ClientSettings,
     Company,
+    ConsoleOpsJob,
     Conversation,
     Handover,
     KnowledgeVersion,
@@ -111,6 +113,12 @@ from app.schemas.console import (
     ConsoleOnboardingContractResponse,
     ConsoleOnboardingStatusResponse,
     ConsoleOnboardingStepStatus,
+    ConsoleOpsJobCatalogResponse,
+    ConsoleOpsJobDefinition,
+    ConsoleOpsJobListResponse,
+    ConsoleOpsJobRecord,
+    ConsoleOpsJobRunRequest,
+    ConsoleOpsJobRunResponse,
     ConsoleOutboxCounts,
     ConsoleOutboxItem,
     ConsoleOutboxListResponse,
@@ -170,6 +178,11 @@ from app.services.learning_service import evaluate_candidate_eligibility, get_le
 from app.services.manager_message_service import (
     notify_client_manager_status,
     process_console_media_upload,
+)
+from app.services.metrics_daily_service import (
+    get_metrics_daily_backfill_max_days,
+    get_metrics_daily_default_date,
+    run_metrics_daily_snapshot,
 )
 from app.services.onboarding_contract_service import (
     find_capability_mismatches,
@@ -1251,6 +1264,24 @@ _OUTBOX_STATUS_MAP = {
     "failed": "FAILED",
 }
 
+_OPS_JOB_DEFINITIONS = {
+    "outbox_process": {
+        "label": "Outbox Process",
+        "description": "Process pending outbox messages for the selected tenant scope.",
+        "supports_dry_run": True,
+    },
+    "heal": {
+        "label": "Heal",
+        "description": "Run invariant healing checks in dry-run mode (execute disabled in slice 1).",
+        "supports_dry_run": True,
+    },
+    "metrics_snapshot": {
+        "label": "Metrics Snapshot",
+        "description": "Compute daily metrics snapshot for the selected client.",
+        "supports_dry_run": True,
+    },
+}
+
 
 def _require_ops_access(context: ConsoleAuthContext, *, action: str = "read") -> None:
     message = "Only owner/admin/support can access ops"
@@ -1368,6 +1399,368 @@ def _build_outbox_item(row: OutboxMessage) -> ConsoleOutboxItem:
         instance_id=summary.get("instance_id"),
         forwarded_to_telegram=summary.get("forwarded_to_telegram"),
     )
+
+
+def _jsonable_payload(value: object) -> dict:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        raw = value
+    else:
+        raw = {"value": value}
+    return json.loads(json.dumps(raw, default=str))
+
+
+def _build_ops_job_record(job: ConsoleOpsJob) -> ConsoleOpsJobRecord:
+    return ConsoleOpsJobRecord(
+        id=job.id,
+        job_type=job.job_type,
+        mode=job.mode,
+        status=job.status,
+        created_at=job.created_at.isoformat() if job.created_at else "",
+        finished_at=job.finished_at.isoformat() if job.finished_at else None,
+        error_message=job.error_message,
+        request_payload=job.request_payload if isinstance(job.request_payload, dict) else None,
+        result_payload=job.result_payload if isinstance(job.result_payload, dict) else None,
+    )
+
+
+def _parse_ops_job_params(params: Optional[dict]) -> dict:
+    if params is None:
+        return {}
+    if not isinstance(params, dict):
+        raise ConsoleAPIError(400, "INVALID_PARAM", "params must be an object")
+    return params
+
+
+def _parse_ops_job_int_param(
+    params: dict,
+    *,
+    name: str,
+    default: int,
+    min_value: int = 1,
+    max_value: Optional[int] = None,
+) -> int:
+    raw = params.get(name, default)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{name} must be an integer") from exc
+    if value < min_value:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{name} must be >= {min_value}")
+    if max_value is not None and value > max_value:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{name} must be <= {max_value}")
+    return value
+
+
+def _resolve_branch_scope(context: ConsoleAuthContext) -> Optional[list[UUID]]:
+    if not context.branch_restricted:
+        return None
+    branch_ids = [branch.id for branch in context.branches]
+    return branch_ids
+
+
+def _query_scoped_outbox_message_rows(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    status: str,
+) -> list[OutboxMessage]:
+    query = db.query(OutboxMessage).filter(
+        OutboxMessage.client_id == context.client.id,
+        OutboxMessage.status == status,
+    )
+    allowed_branch_ids = _resolve_branch_scope(context)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            return []
+        query = query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
+    return query.all()
+
+
+def _build_outbox_dry_run_summary(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    limit: int,
+    idle_seconds: int,
+    max_wait_seconds: int,
+) -> dict:
+    pending = len(_query_scoped_outbox_message_rows(db, context=context, status="PENDING"))
+    processing = len(_query_scoped_outbox_message_rows(db, context=context, status="PROCESSING"))
+    failed = len(_query_scoped_outbox_message_rows(db, context=context, status="FAILED"))
+    return {
+        "mode": "dry_run",
+        "scope": {
+            "client_id": str(context.client.id),
+            "branch_ids": [str(branch_id) for branch_id in (_resolve_branch_scope(context) or [])],
+        },
+        "config": {
+            "limit": limit,
+            "idle_seconds": idle_seconds,
+            "max_wait_seconds": max_wait_seconds,
+        },
+        "counts": {
+            "pending": pending,
+            "processing": processing,
+            "failed": failed,
+        },
+    }
+
+
+def _claim_scoped_outbox_rows(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    limit: int,
+    idle_seconds: int,
+    max_wait_seconds: int,
+) -> list[dict]:
+    now = datetime.now(timezone.utc)
+    idle_cutoff = now - timedelta(seconds=idle_seconds)
+    max_wait_cutoff = now - timedelta(seconds=max_wait_seconds)
+
+    query = (
+        db.query(
+            OutboxMessage.conversation_id.label("conversation_id"),
+            func.max(OutboxMessage.created_at).label("last_created_at"),
+            func.min(OutboxMessage.created_at).label("first_created_at"),
+        )
+        .filter(
+            OutboxMessage.client_id == context.client.id,
+            OutboxMessage.status == "PENDING",
+            OutboxMessage.conversation_id.isnot(None),
+            or_(OutboxMessage.next_attempt_at.is_(None), OutboxMessage.next_attempt_at <= now),
+        )
+        .group_by(OutboxMessage.conversation_id)
+        .order_by(func.max(OutboxMessage.created_at).asc())
+        .limit(limit)
+    )
+    allowed_branch_ids = _resolve_branch_scope(context)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            return []
+        query = query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
+
+    batches = query.all()
+    conversation_ids: list[UUID] = []
+    for batch in batches:
+        if not batch.conversation_id:
+            continue
+        is_idle = bool(batch.last_created_at and batch.last_created_at <= idle_cutoff)
+        is_max_wait = bool(max_wait_seconds > 0 and batch.first_created_at and batch.first_created_at <= max_wait_cutoff)
+        if is_idle or is_max_wait:
+            conversation_ids.append(batch.conversation_id)
+
+    if not conversation_ids:
+        return []
+
+    rows_query = (
+        db.query(OutboxMessage)
+        .filter(
+            OutboxMessage.client_id == context.client.id,
+            OutboxMessage.status == "PENDING",
+            OutboxMessage.conversation_id.in_(conversation_ids),
+        )
+        .order_by(OutboxMessage.created_at.asc(), OutboxMessage.id.asc())
+    )
+    if allowed_branch_ids is not None:
+        rows_query = rows_query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
+    rows = rows_query.all()
+
+    for row in rows:
+        row.status = "PROCESSING"
+        row.attempts = int(row.attempts or 0) + 1
+        row.updated_at = now
+    db.commit()
+
+    return [
+        {
+            "id": row.id,
+            "client_id": row.client_id,
+            "branch_id": row.branch_id,
+            "conversation_id": row.conversation_id,
+            "inbound_message_id": row.inbound_message_id,
+            "payload_json": row.payload_json,
+            "attempts": row.attempts,
+            "created_at": row.created_at,
+        }
+        for row in rows
+    ]
+
+
+def _build_metrics_snapshot_dry_run(
+    *,
+    context: ConsoleAuthContext,
+    metric_date: dt_date,
+    days: int,
+) -> dict:
+    return {
+        "mode": "dry_run",
+        "scope": {
+            "client_id": str(context.client.id),
+        },
+        "metric_date": metric_date.isoformat(),
+        "days": days,
+    }
+
+
+async def _run_outbox_process_job(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    mode: str,
+    params: dict,
+) -> dict:
+    limit = _parse_ops_job_int_param(
+        params,
+        name="limit",
+        default=int(os.environ.get("OUTBOX_PROCESS_LIMIT", "10")),
+        min_value=1,
+        max_value=200,
+    )
+    idle_seconds = _parse_ops_job_int_param(
+        params,
+        name="idle_seconds",
+        default=int(float(os.environ.get("OUTBOX_COALESCE_SECONDS", "8"))),
+        min_value=0,
+        max_value=3600,
+    )
+    max_wait_seconds = _parse_ops_job_int_param(
+        params,
+        name="max_wait_seconds",
+        default=int(float(os.environ.get("OUTBOX_MAX_WAIT_SECONDS", "10"))),
+        min_value=0,
+        max_value=3600,
+    )
+    max_attempts = int(os.environ.get("OUTBOX_MAX_ATTEMPTS", "5"))
+    retry_backoff_seconds = float(os.environ.get("OUTBOX_RETRY_BACKOFF_SECONDS", "2"))
+
+    if mode == "dry_run":
+        return _build_outbox_dry_run_summary(
+            db,
+            context=context,
+            limit=limit,
+            idle_seconds=idle_seconds,
+            max_wait_seconds=max_wait_seconds,
+        )
+
+    claimed_rows = _claim_scoped_outbox_rows(
+        db,
+        context=context,
+        limit=limit,
+        idle_seconds=idle_seconds,
+        max_wait_seconds=max_wait_seconds,
+    )
+    if not claimed_rows:
+        return {
+            "mode": "execute",
+            "scope": {"client_id": str(context.client.id)},
+            "processed": 0,
+            "results": {"processed": 0, "failed": 0},
+        }
+
+    from app.routers.webhook import _process_outbox_rows
+
+    results = await _process_outbox_rows(
+        db,
+        claimed_rows,
+        max_attempts=max_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+    )
+    return {
+        "mode": "execute",
+        "scope": {"client_id": str(context.client.id)},
+        "processed": len(claimed_rows),
+        "results": results,
+    }
+
+
+async def _run_heal_job(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    mode: str,
+    params: dict,
+) -> dict:
+    _ = params
+    if mode == "dry_run":
+        broken_no_topic = (
+            db.query(Conversation)
+            .filter(
+                Conversation.client_id == context.client.id,
+                Conversation.state.in_(["manager_active", "pending"]),
+                Conversation.telegram_topic_id.is_(None),
+            )
+            .count()
+        )
+        broken_no_handover = (
+            db.query(Conversation)
+            .filter(
+                Conversation.client_id == context.client.id,
+                Conversation.state.in_(["manager_active", "pending"]),
+            )
+            .count()
+        )
+        return {
+            "mode": "dry_run",
+            "scope": {"client_id": str(context.client.id)},
+            "checks": {
+                "manager_or_pending_without_topic": broken_no_topic,
+                "manager_or_pending_total": broken_no_handover,
+            },
+            "note": "execute mode for heal is disabled in slice 1",
+        }
+    raise ConsoleAPIError(400, "INVALID_PARAM", "heal execute is not available in this slice")
+
+
+async def _run_metrics_snapshot_job(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    mode: str,
+    params: dict,
+) -> dict:
+    metric_date_raw = params.get("metric_date")
+    metric_date = (
+        _parse_date_param("metric_date", str(metric_date_raw))
+        if metric_date_raw is not None
+        else get_metrics_daily_default_date()
+    )
+    max_days = get_metrics_daily_backfill_max_days()
+    days = _parse_ops_job_int_param(
+        params,
+        name="days",
+        default=1,
+        min_value=1,
+        max_value=max_days,
+    )
+
+    if mode == "dry_run":
+        return _build_metrics_snapshot_dry_run(
+            context=context,
+            metric_date=metric_date,
+            days=days,
+        )
+
+    results = []
+    for offset in range(days - 1, -1, -1):
+        day = metric_date - timedelta(days=offset)
+        results.append(
+            run_metrics_daily_snapshot(
+                db,
+                metric_date=day,
+                client_ids=[context.client.id],
+                status_allowlist=None,
+            )
+        )
+    return {
+        "mode": "execute",
+        "scope": {"client_id": str(context.client.id)},
+        "metric_date": metric_date.isoformat(),
+        "days": days,
+        "results": results,
+    }
 
 
 @router.get(
@@ -3096,6 +3489,212 @@ async def retry_outbox(
     db.commit()
 
     return ConsoleOutboxRetryResponse(success=True, retried=retried, skipped=skipped)
+
+
+@router.get(
+    "/ops/jobs/catalog",
+    response_model=ConsoleOpsJobCatalogResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_ops_jobs_catalog(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleOpsJobCatalogResponse:
+    context = get_console_context(request, db)
+    _require_ops_access(context, action="read")
+
+    items = [
+        ConsoleOpsJobDefinition(
+            job_type=job_type,
+            label=meta["label"],
+            description=meta["description"],
+            supports_dry_run=bool(meta["supports_dry_run"]),
+        )
+        for job_type, meta in _OPS_JOB_DEFINITIONS.items()
+    ]
+    return ConsoleOpsJobCatalogResponse(items=items)
+
+
+@router.get(
+    "/ops/jobs",
+    response_model=ConsoleOpsJobListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_ops_jobs(
+    request: Request,
+    cursor: Optional[str] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+) -> ConsoleOpsJobListResponse:
+    context = get_console_context(request, db)
+    _require_ops_access(context, action="read")
+
+    _reject_unknown_query_params(request, {"cursor", "limit"})
+    _validate_limit(limit)
+
+    query = db.query(ConsoleOpsJob).filter(ConsoleOpsJob.client_id == context.client.id)
+    allowed_branch_ids = _resolve_branch_scope(context)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            return ConsoleOpsJobListResponse(items=[], cursor=None, has_more=False)
+        query = query.filter(ConsoleOpsJob.branch_id.in_(allowed_branch_ids))
+
+    cursor_date = _parse_cursor_param(cursor)
+    if cursor_date is not None:
+        query = query.filter(ConsoleOpsJob.created_at < cursor_date)
+
+    rows = (
+        query.order_by(ConsoleOpsJob.created_at.desc(), ConsoleOpsJob.id.desc())
+        .limit(limit + 1)
+        .all()
+    )
+    has_more = len(rows) > limit
+    items_rows = rows[:limit]
+    next_cursor = items_rows[-1].created_at.isoformat() if has_more and items_rows else None
+
+    return ConsoleOpsJobListResponse(
+        items=[_build_ops_job_record(row) for row in items_rows],
+        cursor=next_cursor,
+        has_more=has_more,
+    )
+
+
+@router.get(
+    "/ops/jobs/{job_id}",
+    response_model=ConsoleOpsJobRunResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def get_ops_job(
+    job_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleOpsJobRunResponse:
+    context = get_console_context(request, db)
+    _require_ops_access(context, action="read")
+
+    query = db.query(ConsoleOpsJob).filter(
+        ConsoleOpsJob.id == job_id,
+        ConsoleOpsJob.client_id == context.client.id,
+    )
+    allowed_branch_ids = _resolve_branch_scope(context)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Job not found")
+        query = query.filter(ConsoleOpsJob.branch_id.in_(allowed_branch_ids))
+
+    job = query.first()
+    if not job:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Job not found")
+    return ConsoleOpsJobRunResponse(job=_build_ops_job_record(job))
+
+
+@router.post(
+    "/ops/jobs/run",
+    response_model=ConsoleOpsJobRunResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def run_ops_job(
+    body: ConsoleOpsJobRunRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleOpsJobRunResponse:
+    context = get_console_context(request, db)
+    _require_ops_access(context, action="write")
+
+    params = _parse_ops_job_params(body.params)
+    if body.job_type not in _OPS_JOB_DEFINITIONS:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unknown job_type")
+
+    job = ConsoleOpsJob(
+        client_id=context.client.id,
+        branch_id=context.effective_branch_id,
+        actor_agent_id=context.agent.id,
+        job_type=body.job_type,
+        mode=body.mode,
+        status="success",
+        request_payload=_jsonable_payload(
+            {
+                "job_type": body.job_type,
+                "mode": body.mode,
+                "params": params,
+            }
+        ),
+    )
+    db.add(job)
+    db.flush()
+
+    error_code: Optional[str] = None
+    try:
+        if body.job_type == "outbox_process":
+            result_payload = await _run_outbox_process_job(
+                db,
+                context=context,
+                mode=body.mode,
+                params=params,
+            )
+        elif body.job_type == "heal":
+            result_payload = await _run_heal_job(
+                db,
+                context=context,
+                mode=body.mode,
+                params=params,
+            )
+        elif body.job_type == "metrics_snapshot":
+            result_payload = await _run_metrics_snapshot_job(
+                db,
+                context=context,
+                mode=body.mode,
+                params=params,
+            )
+        else:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Unknown job_type")
+        job.status = "success"
+        job.error_message = None
+        job.result_payload = _jsonable_payload(result_payload)
+    except ConsoleAPIError as exc:
+        error_code = exc.code
+        job.status = "failed"
+        job.error_message = exc.message
+        job.result_payload = _jsonable_payload(
+            {
+                "error": {
+                    "code": exc.code,
+                    "message": exc.message,
+                }
+            }
+        )
+    except Exception as exc:
+        job.status = "failed"
+        job.error_message = str(exc)[:500]
+        job.result_payload = _jsonable_payload(
+            {
+                "error": {
+                    "code": "RUNTIME_ERROR",
+                    "message": str(exc),
+                }
+            }
+        )
+    job.finished_at = datetime.now(timezone.utc)
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="ops_job_run",
+        entity_type="ops_job",
+        entity_id=job.id,
+        payload={
+            "job_type": body.job_type,
+            "mode": body.mode,
+            "status": job.status,
+            "error_code": error_code,
+            "error_message": job.error_message,
+        },
+        client_id=context.client.id,
+        branch_id=context.effective_branch_id,
+    )
+    db.commit()
+    db.refresh(job)
+    return ConsoleOpsJobRunResponse(job=_build_ops_job_record(job))
 
 
 @router.get(

@@ -13,6 +13,7 @@ from app.models.company import Company
 from app.models.console_confirmation import ConsoleConfirmation
 from app.models.console_idempotency import ConsoleIdempotencyKey
 from app.models.console_macro import ConsoleMacro
+from app.models.console_ops_job import ConsoleOpsJob
 from app.models.conversation import Conversation
 from app.models.handover import Handover
 from app.models.inbox_event import InboxEvent
@@ -47,6 +48,7 @@ __all__ = [
     "ConsoleConfirmation",
     "ConsoleIdempotencyKey",
     "ConsoleMacro",
+    "ConsoleOpsJob",
     "Prompt",
     "ReferencePack",
     "OutboxMessage",
