@@ -1,0 +1,66 @@
+# SESSION 2026-02-06-booking-quality-matrix-a14 — Session 2026-02-06-booking-quality-matrix-a14
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-06-booking-quality-matrix.md
+- branch: feat/2026-02-06-booking-quality-matrix-a14
+- worktree: /home/zhan/worktrees/2026-02-06-booking-quality-matrix-a14
+- base_ref: origin/main
+- scope: Stabilize llm-quality loop with deterministic replay, explicit baseline compare, fail-fast stop rule, and auto-handoff brief.
+- done:
+  - Added llm-quality replay controls in `ops/diagnose.py`: `--scenarios-file`, `--baseline-summary`, `--max-failures`, `--brief-file`.
+  - Added llm-quality artifacts: `summary.scenario_source`, `summary.baseline_source`, `summary.top_failures`, `summary.replay_command`, `summary.stop_reason`; auto-generated `brief.md`.
+  - Updated runbook/task package with deterministic lock+replay protocol and handoff artifact requirements.
+  - Verified smoke run with replay mode and fail-fast (`/tmp/booking_quality/20260206-234902/*`).
+  - Executed lock+replay cycle (timeboxed): `booking-lock-42-fast1` and `booking-replay-42-fast1` with fixed scenarios + explicit baseline_summary.
+  - Captured repeatable top failure: `missing_bot_reply` (5/5 turns in replay), with replay command in generated brief.
+  - Re-ran replay with default timeouts and confirmed `missing_bot_reply` was timeout artifact, not runtime regression (`booking-replay-42-default1`).
+  - Tightened booking progress gate in llm-quality evaluator and added regression test (`test_booking_quality_progress_gate.py`).
+  - Verified after fix: `booking_slot_stall` removed from top failures; replay pass_rate improved to `0.8333` (`booking-replay-42-default2`).
+  - Added booking interrupt guard fixes in webhook core:
+    - propagated `client_slug` into `_detect_info_class_intents` call-sites (`decision.py`, `booking.py`);
+    - removed promo override that unblocked expected-reply defer in `_apply_expected_reply_contract`;
+    - recomputed `batch_non_booking_message` after debounce-normalized `batch_messages` in `decision.py`.
+  - Added helper-level hardening in booking router:
+    - `_select_booking_interrupt_text` to prioritize current non-booking turn over stale batch anchor;
+    - `_resolve_booking_info_intents` to prefer deterministic `info_class_intents` over raw intent-decomp fallback.
+  - Added regressions:
+    - `truffles-api/tests/test_booking_info_interrupt_contract.py` (promo block contract + AST guards for `client_slug` propagation and post-debounce recompute);
+    - `truffles-api/tests/test_booking_appointments.py` new tests for interrupt text selection + info-intent precedence.
+  - Captured replay hygiene root cause: without `--reset-before-dialog`, runs leak prior conversation trace/state and can produce false drift; updated `AGENTS.md`, runbook, and task-package commands to require reset on replay.
+  - Replayed with reset (`booking-replay-42-default7-count1-reset`) and confirmed remaining deterministic GAP: booking-active info interrupts (`location/hours/parking/promo`) still resolve to `booking_prompt` with missing `info_sections`.
+  - Added deterministic expected-reply info-block helper in decision pipeline and applied it after debounce normalization (`decision.py`) to keep booking interrupt gate stable for info turns.
+  - Updated promo routing in decision gate: skip early policy-discounts shortcut when booking flow is active, so turn reaches booking interrupt handler.
+  - Added booking interrupt promo fallback (`booking.py`) so generic discount/promo question in active booking path yields deterministic `intent=promotions` + `info_sections=["promotions"]`.
+  - Added deterministic regressions for booking interrupt info sections (location/hours/parking/promo) in `test_demo_salon_eval.py` and expected-reply info-block contract tests in `test_booking_info_interrupt_contract.py`.
+  - Fixed llm-quality evaluator drift in `ops/diagnose.py`: expected info section matching now normalizes section synonyms via canonical info tags (e.g. `discount/promo/promotion` -> `promotions`), and `info_answered` uses the same normalized matching to avoid contradictory `expected_info_section_miss` vs `info_section_miss`.
+  - Added evaluator regression tests in `truffles-api/tests/test_booking_quality_info_sections.py`.
+  - Ran replay against isolated worktree runtime (`truffles-api-a14` on `:8004`) and validated that promo false-negative in evaluator is removed on published branch run (`booking-replay-42-default17-count1-reset-a14-branchb-evalfix2`).
+- next:
+  - Resolve core GAP: for booking-active turns with `expected_reply_type=time`, ensure `location/hours/parking/promo` go through info interrupt path (meta `info_sections` present, not `booking_prompt` fallback).
+  - Add deterministic regression for per-turn info interrupt in booking-active flow (turn-level `decision_meta.info_sections` assertion).
+  - Re-run lock+replay matrix (`count=10`, seeds 42/1337/2026) only with `--reset-before-dialog`.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-06-booking-quality-matrix.md
+  - /tmp/booking_quality/20260206-234902/summary.json
+  - /tmp/booking_quality/20260206-234902/brief.md
+  - /tmp/booking_quality/booking-lock-42-fast1/summary.json
+  - /tmp/booking_quality/booking-lock-42-fast1/brief.md
+  - /tmp/booking_quality/booking-replay-42-fast1/summary.json
+  - /tmp/booking_quality/booking-replay-42-fast1/brief.md
+  - /tmp/booking_quality/booking-replay-42-default1/summary.json
+  - /tmp/booking_quality/booking-replay-42-default2/summary.json
+  - /tmp/booking_quality/booking-replay-42-default3-timeboxed/summary.json
+  - /tmp/booking_quality/booking-replay-42-default3-count1/summary.json
+  - /tmp/booking_quality/booking-replay-42-default4-count1/summary.json
+  - /tmp/booking_quality/booking-replay-42-default5-count1/summary.json
+  - /tmp/booking_quality/booking-replay-42-default6-count1/summary.json
+  - /tmp/booking_quality/booking-replay-42-default7-count1-reset/summary.json
+  - /tmp/booking_quality/booking-replay-42-default7-count1-reset/brief.md
+  - /tmp/booking_quality/booking-replay-42-default10-count1-reset-a14/summary.json
+  - /tmp/booking_quality/booking-replay-42-default12-count1-reset-a14-clean/summary.json
+  - /tmp/booking_quality/booking-replay-42-default14-count1-reset-a14-newjid/summary.json
+  - /tmp/booking_quality/booking-replay-42-default15-count1-reset-a14-branchb/summary.json
+  - /tmp/booking_quality/booking-replay-42-default16-count1-reset-a14-branchb-evalfix/summary.json
+  - /tmp/booking_quality/booking-replay-42-default17-count1-reset-a14-branchb-evalfix2/summary.json
+- last_updated: 2026-02-07

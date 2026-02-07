@@ -757,8 +757,8 @@ LLM_QUALITY_BUNDLE_INTENTS = {"info_bundle", "multi_intent_info"}
 LLM_QUALITY_KNOWN_STATES = {"bot_active", "pending", "manager_active"}
 LLM_QUALITY_BOOKING_SLOTS = ("service", "datetime", "name", "phone")
 LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE = {
-    "service_choice": {"booking", "service", "multi_service"},
-    "time": {"booking", "time", "time_alt"},
+    "service_choice": {"service", "multi_service"},
+    "time": {"time", "time_alt", "date"},
     "name": {"name"},
 }
 LLM_QUALITY_PROGRESS_SKIP_TAGS = {
@@ -2517,8 +2517,13 @@ def _llm_quality_should_expect_booking_progress(expected_reply_type, turn_tags):
     if not normalized_tags:
         return True
     required_tags = LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE.get(expected_reply_type, set())
-    if required_tags and normalized_tags.intersection(required_tags):
-        return True
+    if required_tags:
+        if normalized_tags.intersection(required_tags):
+            return True
+        if normalized_tags.intersection(LLM_QUALITY_PROGRESS_SKIP_TAGS):
+            return False
+        # Unknown tags should not force slot-stall checks for this turn.
+        return False
     if normalized_tags.intersection(LLM_QUALITY_PROGRESS_SKIP_TAGS):
         return False
     if expected_reply_type == "name":
@@ -2606,12 +2611,49 @@ def _llm_quality_extract_expectations(turn):
         "allow_booking_stall": allow_booking_stall,
     }
 
+def _llm_quality_token_to_info_tags(token):
+    tags = set()
+    if not isinstance(token, str):
+        return tags
+    normalized = token.strip().lower()
+    if not normalized:
+        return tags
+    if normalized in LLM_QUALITY_INFO_TAGS:
+        tags.add(normalized)
+    section_tag = LLM_QUALITY_SECTION_TAG_MAP.get(normalized)
+    if section_tag:
+        tags.add(section_tag)
+    intent_tags = LLM_QUALITY_INTENT_TAG_MAP.get(normalized)
+    if intent_tags:
+        tags.update(intent_tags)
+    return tags
+
+
 def _llm_quality_expected_section_answered(expected_sections, meta, trace_entries):
     if not expected_sections:
         return False, [], []
     info_sections, intents = _llm_quality_collect_info_signals(meta, trace_entries)
     actual = set(info_sections) | set(intents)
-    return bool(set(expected_sections) & actual), info_sections, intents
+    expected_normalized = {
+        section.strip().lower()
+        for section in expected_sections
+        if isinstance(section, str) and section.strip()
+    }
+    if expected_normalized & actual:
+        return True, info_sections, intents
+
+    expected_tags = set()
+    for section in expected_normalized:
+        expected_tags.update(_llm_quality_token_to_info_tags(section))
+    if not expected_tags:
+        return False, info_sections, intents
+
+    actual_tags = set()
+    for section in info_sections:
+        actual_tags.update(_llm_quality_token_to_info_tags(section))
+    for intent in intents:
+        actual_tags.update(_llm_quality_token_to_info_tags(intent))
+    return bool(expected_tags & actual_tags), info_sections, intents
 
 def _llm_quality_value_matches(expected, actual):
     if expected is None:
@@ -2875,6 +2917,169 @@ def _llm_quality_generate_batch(args, *, count, seed):
     if not isinstance(dialogs, list):
         return None, None, "scenario output missing dialogs"
     return dialogs, warnings, None
+
+
+def _llm_quality_load_dialogs_from_file(path):
+    file_path = os.path.abspath(os.path.expanduser(path or ""))
+    if not file_path:
+        return None, None, "scenario file path is empty"
+    if not os.path.exists(file_path):
+        return None, None, f"scenario file not found: {file_path}"
+    try:
+        with open(file_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception as exc:
+        return None, None, f"scenario file parse failed: {exc}"
+
+    warnings = {}
+    dialogs = None
+    if isinstance(payload, dict):
+        dialogs = payload.get("dialogs")
+        raw_warnings = payload.get("warnings")
+        if isinstance(raw_warnings, dict):
+            warnings = dict(raw_warnings)
+    elif isinstance(payload, list):
+        dialogs = payload
+    else:
+        return None, None, "scenario file must contain object with dialogs or dialogs list"
+
+    if not isinstance(dialogs, list) or not dialogs:
+        return None, None, "scenario file has no dialogs"
+
+    normalized = []
+    dropped = 0
+    for dialog in dialogs:
+        if not isinstance(dialog, dict):
+            dropped += 1
+            continue
+        turns = dialog.get("turns")
+        if not isinstance(turns, list) or not turns:
+            dropped += 1
+            continue
+        normalized.append(dialog)
+    if not normalized:
+        return None, None, "scenario file has no valid dialogs with turns"
+    if dropped:
+        warnings["scenario_file"] = [f"dropped_invalid_dialogs={dropped}"]
+    return normalized, warnings, None
+
+
+def _llm_quality_top_failure_reasons(failure_counts, limit=3):
+    if not isinstance(failure_counts, dict) or limit <= 0:
+        return []
+    rows = []
+    for reason, count in failure_counts.items():
+        try:
+            count_value = int(count)
+        except Exception:
+            continue
+        rows.append((str(reason), count_value))
+    rows.sort(key=lambda item: (-item[1], item[0]))
+    top = []
+    for reason, count in rows[:limit]:
+        top.append(
+            {
+                "reason": reason,
+                "count": count,
+                "label": LLM_QUALITY_REASON_LABELS.get(reason, reason),
+                "category": LLM_QUALITY_REASON_TAXONOMY.get(reason, "unknown"),
+            }
+        )
+    return top
+
+
+def _llm_quality_next_step_for_reason(reason):
+    mapping = {
+        "booking_slot_stall": "trace booking stages and verify slot extraction for this turn",
+        "missing_bot_reply": "inspect outbox_summary/outbox_payload_status for blocked send",
+        "decision_meta_missing": "check early-return traces and meta write on this path",
+        "decision_trace_missing": "verify trace retention for early returns and pending paths",
+        "expected_reply_type_mismatch": "compare expected_reply_type in context vs turn.expect.reply_type",
+        "unknown_state": "inspect conversation.state transitions before/after handoff",
+        "handover_missing": "check handoff row creation when state is manager_active",
+        "info_section_miss": "verify info_sections and intents emitted in meta/trace",
+    }
+    return mapping.get(reason, "inspect top failing turns in responses.jsonl and trace_bundle.jsonl")
+
+
+def _llm_quality_build_replay_command(args, scenarios_path, count):
+    cmd = [
+        "python3",
+        "ops/diagnose.py",
+        "llm-quality",
+        "--base-url",
+        args.base_url,
+        "--client-slug",
+        args.client_slug,
+        "--scenarios-file",
+        scenarios_path,
+        "--count",
+        str(count),
+        "--manager-mode",
+        args.manager_mode,
+        "--pending-mode",
+        args.pending_mode,
+        "--tool-hooks",
+        args.tool_hooks,
+    ]
+    if args.branch_slug:
+        cmd.extend(["--branch-slug", args.branch_slug])
+    if args.remote_jid:
+        cmd.extend(["--remote-jid", args.remote_jid])
+    else:
+        cmd.extend(["--allowlist-jids", "$OUTBOUND_ALLOWLIST_JIDS"])
+    if args.allow_non_allowlist:
+        cmd.append("--allow-non-allowlist")
+    if args.skip_outbox:
+        cmd.append("--skip-outbox")
+    if args.reset_before_dialog:
+        cmd.append("--reset-before-dialog")
+    if args.max_failures > 0:
+        cmd.extend(["--max-failures", str(args.max_failures)])
+    return "TEST_MODE=1 " + " ".join(shlex.quote(part) for part in cmd)
+
+
+def _llm_quality_write_brief(path, summary):
+    metrics = (summary or {}).get("metrics") or {}
+    rates = metrics.get("rates") or {}
+    top_failures = (summary or {}).get("top_failures") or []
+    stop_reason = (summary or {}).get("stop_reason")
+    scenario_source = (summary or {}).get("scenario_source") or {}
+    replay_command = (summary or {}).get("replay_command")
+    lines = [
+        "# LLM Quality Brief",
+        "",
+        f"- run_id: `{summary.get('run_id')}`",
+        f"- finished_at: `{summary.get('finished_at')}`",
+        f"- duration_s: `{summary.get('duration_s')}`",
+        f"- pass_rate: `{rates.get('pass_rate')}`",
+        f"- expected_reply_rate: `{rates.get('expected_reply_rate')}`",
+        f"- booking_slot_progress_rate: `{rates.get('booking_slot_progress_rate')}`",
+        f"- scenario_source: `{scenario_source.get('type')}`",
+        f"- scenarios_path: `{summary.get('scenarios_path')}`",
+        f"- responses_path: `{summary.get('responses_path')}`",
+        f"- trace_bundle_path: `{summary.get('trace_bundle_path')}`",
+    ]
+    if scenario_source.get("path"):
+        lines.append(f"- scenario_source_path: `{scenario_source.get('path')}`")
+    if stop_reason:
+        lines.append(f"- stop_reason: `{stop_reason}`")
+    lines.extend(["", "## Top Failures"])
+    if top_failures:
+        for row in top_failures:
+            next_step = _llm_quality_next_step_for_reason(row.get("reason"))
+            lines.append(
+                f"- `{row.get('reason')}` x{row.get('count')} ({row.get('category')}): {row.get('label')}; next: {next_step}."
+            )
+    else:
+        lines.append("- none")
+    lines.extend(["", "## Replay"])
+    if replay_command:
+        lines.append(f"- command: `{replay_command}`")
+    else:
+        lines.append("- command: n/a")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
 
 def _llm_quality_redact_text(text: str | None) -> str | None:
     if not text:
@@ -3431,6 +3636,11 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--branch-slug", default=os.environ.get("TRUFFLES_BRANCH_SLUG"))
     parser.add_argument("--count", type=int, default=5)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument(
+        "--scenarios-file",
+        default=None,
+        help="Reuse dialogs from an existing scenarios.json (deterministic replay).",
+    )
     parser.add_argument("--mode", choices=["template", "llm"], default="llm")
     parser.add_argument("--min-turns", type=int, default=10)
     parser.add_argument("--max-turns", type=int, default=15)
@@ -3483,11 +3693,27 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--console-mode", choices=["real", "skip"], default="real")
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--run-id", default=None)
+    parser.add_argument(
+        "--brief-file",
+        default=None,
+        help="Write a compact markdown handoff summary (default: <output_dir>/brief.md).",
+    )
+    parser.add_argument(
+        "--baseline-summary",
+        default=None,
+        help="Use explicit summary.json as comparison baseline (instead of ops/results/booking_quality.json).",
+    )
     parser.add_argument("--update-baseline", action="store_true")
     parser.add_argument("--append-history", action="store_true")
     parser.add_argument("--history-max", type=int, default=20)
     parser.add_argument("--fail-on-thresholds", action="store_true")
     parser.add_argument("--fail-on-regression", action="store_true")
+    parser.add_argument(
+        "--max-failures",
+        type=int,
+        default=0,
+        help="Stop early after this many failed turns (0 disables).",
+    )
     parser.add_argument("--regression-tolerance", type=float, default=0.02)
     parser.add_argument("--judge-mode", choices=["off", "sample", "all"], default="off")
     parser.add_argument("--judge-sample", type=float, default=0.1)
@@ -5250,40 +5476,67 @@ def _run_llm_quality(args):
 
     dialogs = []
     warnings = {}
-    batch_size = max(1, args.batch_size)
-    seed_base = args.seed if args.seed is not None else int(time.time())
-    batch_idx = 0
-    while len(dialogs) < args.count:
-        batch_count = min(batch_size, args.count - len(dialogs))
-        batch_seed = seed_base + batch_idx if args.seed is not None else None
-        retries = 0
-        while True:
-            batch_dialogs, batch_warnings, error = _llm_quality_generate_batch(
-                args, count=batch_count, seed=batch_seed
+    scenario_source = {"type": "generated", "path": None}
+    if args.scenarios_file:
+        dialogs, source_warnings, error = _llm_quality_load_dialogs_from_file(args.scenarios_file)
+        if error:
+            raise SystemExit(f"llm-quality: scenarios-file load failed ({error})")
+        if isinstance(source_warnings, dict):
+            warnings.update(source_warnings)
+        scenario_source = {
+            "type": "file",
+            "path": os.path.abspath(os.path.expanduser(args.scenarios_file)),
+        }
+        if len(dialogs) < args.count:
+            warnings.setdefault("scenario_source", []).append(
+                f"requested_count={args.count},available={len(dialogs)}"
             )
-            if not error and batch_dialogs:
-                break
-            if retries >= args.retry_count:
-                raise SystemExit(f"llm-quality: scenario generation failed ({error})")
-            time.sleep(args.retry_backoff * (2 ** retries))
-            retries += 1
-        dialogs.extend(batch_dialogs)
-        if isinstance(batch_warnings, dict):
-            warnings.update(batch_warnings)
-        batch_idx += 1
-    dialogs = dialogs[: args.count]
+        dialogs = dialogs[: args.count]
+    else:
+        batch_size = max(1, args.batch_size)
+        seed_base = args.seed if args.seed is not None else int(time.time())
+        batch_idx = 0
+        while len(dialogs) < args.count:
+            batch_count = min(batch_size, args.count - len(dialogs))
+            batch_seed = seed_base + batch_idx if args.seed is not None else None
+            retries = 0
+            while True:
+                batch_dialogs, batch_warnings, error = _llm_quality_generate_batch(
+                    args, count=batch_count, seed=batch_seed
+                )
+                if not error and batch_dialogs:
+                    break
+                if retries >= args.retry_count:
+                    raise SystemExit(f"llm-quality: scenario generation failed ({error})")
+                time.sleep(args.retry_backoff * (2 ** retries))
+                retries += 1
+            dialogs.extend(batch_dialogs)
+            if isinstance(batch_warnings, dict):
+                warnings.update(batch_warnings)
+            batch_idx += 1
+        dialogs = dialogs[: args.count]
+
+    if not dialogs:
+        raise SystemExit("llm-quality: no dialogs to execute")
 
     scenarios_payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "mode": args.mode,
         "count": len(dialogs),
         "turn_range": [args.min_turns, args.max_turns],
+        "source": scenario_source,
         "warnings": warnings,
         "dialogs": dialogs,
     }
     scenarios_path = os.path.join(output_dir, "scenarios.json")
     with open(scenarios_path, "w", encoding="utf-8") as handle:
         json.dump(scenarios_payload, handle, ensure_ascii=False, indent=2)
+    replay_command = _llm_quality_build_replay_command(args, scenarios_path, len(dialogs))
+    brief_path = (
+        os.path.abspath(os.path.expanduser(args.brief_file))
+        if args.brief_file
+        else os.path.join(output_dir, "brief.md")
+    )
 
     responses_path = os.path.join(output_dir, "responses.jsonl")
     trace_bundle_path = os.path.join(output_dir, "trace_bundle.jsonl")
@@ -5747,6 +6000,7 @@ def _run_llm_quality(args):
     min_wait = min(args.min_wait, args.max_wait)
     max_wait = max(args.min_wait, args.max_wait)
     started_at = datetime.now(timezone.utc)
+    stop_reason = None
 
     with open(responses_path, "w", encoding="utf-8") as responses_handle, open(
         trace_bundle_path, "w", encoding="utf-8"
@@ -5990,11 +6244,19 @@ def _run_llm_quality(args):
                         expected_info_sections, meta, trace_entries
                     )
                     actual_section_set = set(info_sections) | set(info_intents)
+                    actual_tag_set = set()
+                    for token in actual_section_set:
+                        actual_tag_set.update(_llm_quality_token_to_info_tags(token))
                     tag_hits = {}
                     for section in expected_info_sections:
-                        section_hit = section in actual_section_set
-                        info_answered[section] = section_hit
-                        tag = LLM_QUALITY_SECTION_TAG_MAP.get(section)
+                        normalized_section = section.strip().lower() if isinstance(section, str) else ""
+                        section_hit = bool(normalized_section and normalized_section in actual_section_set)
+                        if not section_hit:
+                            expected_tags = _llm_quality_token_to_info_tags(normalized_section)
+                            section_hit = bool(expected_tags & actual_tag_set)
+                        key = normalized_section or section
+                        info_answered[key] = section_hit
+                        tag = LLM_QUALITY_SECTION_TAG_MAP.get(normalized_section)
                         if tag:
                             tag_hits[tag] = bool(tag_hits.get(tag)) or section_hit
                     for tag, tag_hit in tag_hits.items():
@@ -6331,6 +6593,24 @@ def _run_llm_quality(args):
                     )
                     + "\n"
                 )
+                if args.max_failures > 0 and stats["turns_failed"] >= args.max_failures:
+                    stop_reason = f"max_failures_reached:{args.max_failures}"
+                    break
+            if stop_reason:
+                break
+
+    if stop_reason:
+        print(
+            json.dumps(
+                {
+                    "stage": "llm_quality_stop",
+                    "reason": stop_reason,
+                    "turns_failed": stats["turns_failed"],
+                    "turns": stats["turns"],
+                },
+                ensure_ascii=False,
+            )
+        )
 
     finished_at = datetime.now(timezone.utc)
     duration_s = round((finished_at - started_at).total_seconds(), 2)
@@ -6417,11 +6697,31 @@ def _run_llm_quality(args):
         )
 
     baseline_path = os.path.join(_llm_quality_repo_root(), "ops", "results", "booking_quality.json")
+    baseline_source = baseline_path
     baseline_payload = None
     baseline_metrics = None
     baseline_updated_at = None
     baseline_history = []
-    if os.path.exists(baseline_path):
+    if args.baseline_summary:
+        baseline_source = os.path.abspath(os.path.expanduser(args.baseline_summary))
+        if not os.path.exists(baseline_source):
+            raise SystemExit(f"llm-quality: baseline-summary not found ({baseline_source})")
+        try:
+            with open(baseline_source, "r", encoding="utf-8") as handle:
+                baseline_payload = json.load(handle)
+            baseline_metrics = (baseline_payload or {}).get("metrics")
+            baseline_updated_at = (baseline_payload or {}).get("finished_at") or (
+                baseline_payload or {}
+            ).get("updated_at")
+            if baseline_metrics is None:
+                raise SystemExit(
+                    f"llm-quality: baseline-summary has no metrics ({baseline_source})"
+                )
+        except SystemExit:
+            raise
+        except Exception as exc:
+            raise SystemExit(f"llm-quality: baseline-summary parse failed ({exc})")
+    elif os.path.exists(baseline_path):
         try:
             with open(baseline_path, "r", encoding="utf-8") as handle:
                 baseline_payload = json.load(handle)
@@ -6436,15 +6736,18 @@ def _run_llm_quality(args):
     regression_results, regression_breaches = _llm_quality_check_regression(
         metrics, baseline_metrics, args.regression_tolerance
     )
+    top_failures = _llm_quality_top_failure_reasons(failure_counts, limit=3)
     safe_config = {
         "mode": args.mode,
-        "count": args.count,
+        "count": len(dialogs),
+        "requested_count": args.count,
         "min_turns": args.min_turns,
         "max_turns": args.max_turns,
         "include_media": args.include_media,
         "media_mode": args.media_mode,
         "media_kind": args.media_kind,
         "scenario_coverage": args.scenario_coverage,
+        "scenarios_file": args.scenarios_file,
         "seed": args.seed,
         "manager_mode": args.manager_mode,
         "pending_mode": args.pending_mode,
@@ -6455,6 +6758,8 @@ def _run_llm_quality(args):
         "tool_calendar_text": args.tool_calendar_text,
         "tool_hook_wait": args.tool_hook_wait,
         "jid_mode": args.jid_mode,
+        "max_failures": args.max_failures,
+        "baseline_summary": args.baseline_summary,
         "regression_tolerance": args.regression_tolerance,
         "judge_mode": judge_mode,
         "judge_sample": args.judge_sample,
@@ -6476,11 +6781,17 @@ def _run_llm_quality(args):
         "trace_bundle_path": trace_bundle_path,
         "metrics": metrics,
         "baseline_metrics": baseline_metrics,
+        "baseline_source": baseline_source,
         "delta": delta,
         "failure_counts": failure_counts,
+        "top_failures": top_failures,
         "failures": failures,
         "coverage": coverage_stats,
         "judge": judge_stats,
+        "scenario_source": scenario_source,
+        "replay_command": replay_command,
+        "stop_reason": stop_reason,
+        "brief_path": brief_path,
         "taxonomy": {
             "counts": taxonomy_counts,
             "by_reason": {
@@ -6498,6 +6809,7 @@ def _run_llm_quality(args):
         },
         "regression": {
             "tolerance": args.regression_tolerance,
+            "baseline_source": baseline_source,
             "baseline_updated_at": baseline_updated_at,
             "results": regression_results,
             "breaches": regression_breaches,
@@ -6507,6 +6819,7 @@ def _run_llm_quality(args):
     summary_path = os.path.join(output_dir, "summary.json")
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
+    _llm_quality_write_brief(brief_path, summary)
 
     history_entry = {
         "run_id": run_id,
@@ -6535,7 +6848,17 @@ def _run_llm_quality(args):
         with open(baseline_path, "w", encoding="utf-8") as handle:
             json.dump(baseline_payload, handle, ensure_ascii=False, indent=2)
 
-    print(json.dumps({"output_dir": output_dir, "summary": summary_path}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                "output_dir": output_dir,
+                "summary": summary_path,
+                "brief": brief_path,
+                "replay_command": replay_command,
+            },
+            ensure_ascii=False,
+        )
+    )
     if args.fail_on_thresholds and threshold_breaches:
         raise SystemExit(
             f"llm-quality: threshold breaches ({', '.join(threshold_breaches)})"

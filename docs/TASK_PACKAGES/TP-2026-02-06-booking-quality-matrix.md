@@ -67,6 +67,7 @@
 - SQL preflight (specialists/services/working_hours).
 - `python3 scripts/booking_dialog_scenarios.py --count 1 --min-turns 10 --max-turns 16 --coverage booking,info,interrupt --include-media --output /tmp/booking_dialog_scenarios_smoke_20260206.json`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --seed 42`
+- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json --count 10 --tool-hooks auto --reset-before-dialog --max-failures 20`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --seed 1337`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --seed 2026`
 - `scripts/booking_confirm_verify.sh --client-slug demo_salon --branch-slug branch_b --apply --cancel-appointments`
@@ -74,6 +75,7 @@
 
 ## Evidence
 - `/tmp/booking_quality/20260206-064148/summary.json`, `responses.jsonl`, `scenarios.json`, `trace_bundle.jsonl` (пример LLM‑quality прогона; для матрицы будут 3 прогона).
+- `/tmp/booking_quality/booking-lock-42/brief.md` (top failures + replay command for next agent).
 - `/tmp/sql_*` дампы для specialists/services/working_hours.
 - `/tmp/livecheck_ca05_booking*`, `/tmp/livecheck_ca12_booking_full*` и SQL evidence из `booking_confirm_verify`.
 - запись в `STATE.md`.
@@ -88,8 +90,8 @@
 - long‑eval или прогоны без плана следующего действия.
 
 ## Branch + Worktree
-- Branch: `feat/2026-02-06-booking-quality-matrix-a10`
-- Worktree: `/home/zhan/worktrees/2026-02-06-booking-quality-matrix-a10`
+- Branch: `feat/2026-02-06-booking-quality-matrix-a14`
+- Worktree: `/home/zhan/worktrees/2026-02-06-booking-quality-matrix-a14`
 - Base ref: `origin/main`
 - Merge policy: PR -> `main`
 - Cleanup: `scripts/session_end.sh --status done` + remove worktree/branch
