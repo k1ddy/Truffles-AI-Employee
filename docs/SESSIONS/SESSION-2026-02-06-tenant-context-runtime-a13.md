@@ -1,6 +1,6 @@
 # SESSION 2026-02-06-tenant-context-runtime-a13 — Runtime tenant_context enforcement + cross-tenant coverage
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-06-tenant-context-runtime-a13.md
 - branch: feat/2026-02-06-tenant-context-runtime-a13
@@ -26,4 +26,4 @@
   - SPECS/VERTICAL_PACK_KIT.md
   - truffles-api/tests/test_policy_handler_runtime.py
   - STATE.md (NOW)
-- last_updated: 2026-02-06
+- last_updated: 2026-02-07
