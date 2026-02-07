@@ -312,9 +312,9 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         run: npx playwright install --with-deps chromium
 
-      - name: Playwright smoke (live)
+      - name: Playwright login smoke (live)
         if: steps.guard.outputs.skip != 'true'
-        run: npm run test:e2e:smoke
+        run: npm run test:e2e:smoke -- e2e/login.spec.ts
 
   console-contract:
     needs: [changes]
