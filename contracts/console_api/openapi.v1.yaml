@@ -1339,6 +1339,82 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /admin/clients/{client_id}/archive:
+    post:
+      operationId: archiveAdminClient
+      tags: [admin]
+      summary: Archive client
+      parameters:
+        - name: client_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientLifecycleActionRequest"
+      responses:
+        "200":
+          description: Client archived
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/clients/{client_id}/restore:
+    post:
+      operationId: restoreAdminClient
+      tags: [admin]
+      summary: Restore client
+      parameters:
+        - name: client_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientLifecycleActionRequest"
+      responses:
+        "200":
+          description: Client restored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /admin/branches:
     get:
       operationId: listAdminBranches
@@ -1860,6 +1936,17 @@ components:
               details:
                 required_step: integrations
               trace_id: abc123
+    Conflict:
+      description: Request conflicts with current resource state
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INVALID_STATE
+              message: Action conflicts with current state
+              trace_id: abc123
     ConfirmationRequired:
       description: Confirmation required for destructive action
       content:
@@ -2099,6 +2186,14 @@ components:
         status:
           type: string
           nullable: true
+
+    ClientLifecycleActionRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+
     ClientListResponse:
       type: object
       required: [items, has_more]

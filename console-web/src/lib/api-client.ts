@@ -624,6 +624,10 @@ export const adminApi = {
         apiClient.post<components["schemas"]["ClientCreateResponse"]>("/admin/clients", data),
     patchClient: (clientId: string, data: components["schemas"]["ClientUpdateRequest"]) =>
         apiClient.patch<components["schemas"]["Client"]>(`/admin/clients/${clientId}`, data),
+    archiveClient: (clientId: string, data: components["schemas"]["ClientLifecycleActionRequest"]) =>
+        apiClient.post<components["schemas"]["Client"]>(`/admin/clients/${clientId}/archive`, data),
+    restoreClient: (clientId: string, data: components["schemas"]["ClientLifecycleActionRequest"]) =>
+        apiClient.post<components["schemas"]["Client"]>(`/admin/clients/${clientId}/restore`, data),
     createBranch: (data: components["schemas"]["BranchCreateRequest"]) =>
         apiClient.post<components["schemas"]["BranchCreateResponse"]>("/admin/branches", data),
     patchBranch: (branchId: string, data: components["schemas"]["BranchUpdateRequest"]) =>

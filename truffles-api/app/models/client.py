@@ -14,6 +14,7 @@ class Client(Base):
     config = Column(JSONB, nullable=False, default={})
     created_at = Column(TIMESTAMP(timezone=True), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False)
+    deleted_at = Column(TIMESTAMP(timezone=True), nullable=True)
     company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=True)
 
     company = relationship("Company", back_populates="clients")
