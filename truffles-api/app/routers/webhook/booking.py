@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from app.models import Conversation, Message, User
-    from app.services.demo_salon_knowledge import DemoSalonDecision
+    from app.services.pack_runtime_service import PackDecision
 
 BOOKING_SLOT_ORDER = ("service", "datetime", "name")
 PHONE_PATTERN = re.compile(r"\+?\d[\d\s\-\(\)]{8,}\d")
@@ -858,7 +858,7 @@ def _apply_collect_all_prompt(
     return booking_state, legacy.MSG_BOOKING_ASK_ALL
 
 
-def _is_booking_time_service_decision(decision: DemoSalonDecision | None) -> bool:
+def _is_booking_time_service_decision(decision: PackDecision | None) -> bool:
     if not decision or getattr(decision, "action", None) != "reply":
         return False
     intent = getattr(decision, "intent", None)
@@ -1382,11 +1382,8 @@ def _handle_booking_interrupt(
     send_response: Callable[..., Any],
     finalize_response: Callable[..., Any],
 ) -> WebhookResponse | None:
-    from app.services.demo_salon_knowledge import (
-        DemoSalonDecision,
-        compose_multi_truth_reply,
-        format_reply_from_truth,
-    )
+    from app.services.demo_salon_knowledge import compose_multi_truth_reply, format_reply_from_truth
+    from app.services.pack_runtime_service import PackDecision
 
     from . import _legacy as legacy
 
@@ -1495,7 +1492,7 @@ def _handle_booking_interrupt(
                     client_slug=client_slug,
                 )
                 if guest_reply:
-                    info_decision = DemoSalonDecision(
+                    info_decision = PackDecision(
                         action="reply",
                         response=guest_reply,
                         intent="guest_policy",
@@ -1512,7 +1509,7 @@ def _handle_booking_interrupt(
                     )
                     if multi_result:
                         multi_reply, multi_meta = multi_result
-                        info_decision = DemoSalonDecision(
+                        info_decision = PackDecision(
                             action="reply",
                             response=multi_reply,
                             intent="multi_truth",
@@ -1557,7 +1554,7 @@ def _handle_booking_interrupt(
                     # booking_interrupt path with deterministic info metadata.
                     promo_reply = format_reply_from_truth("promotions", client_slug=client_slug)
                     if promo_reply:
-                        info_decision = DemoSalonDecision(
+                        info_decision = PackDecision(
                             action="reply",
                             response=promo_reply,
                             intent="promotions",

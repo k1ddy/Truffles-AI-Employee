@@ -703,11 +703,6 @@ def _handle_consult_flow(
         load_consult_playbook,
         select_consult_question,
     )
-    from app.services.demo_salon_knowledge import (
-        DemoSalonDecision,
-        get_demo_salon_decision,
-        get_demo_salon_service_decision,
-    )
     from app.services.knowledge_service import resolve_consult_topic_candidates
     from app.services.knowledge_snapshot_consumer import (
         build_consult_snapshot,
@@ -715,6 +710,11 @@ def _handle_consult_flow(
         get_consult_snapshot_mode,
         is_consult_snapshot_allowlisted,
         is_snapshot_consumer_enabled,
+    )
+    from app.services.pack_runtime_service import (
+        PackDecision,
+        get_pack_decision,
+        get_pack_service_decision,
     )
 
     from . import _legacy as legacy
@@ -866,9 +866,9 @@ def _handle_consult_flow(
             and any(token in normalized for token in ("ухаж", "продл", "держ", "нос", "срок"))
         )
         if aftercare_trigger or prep_trigger or combo_trigger:
-            from app.services.demo_salon_knowledge import get_demo_salon_decision
+            from app.services.pack_runtime_service import get_pack_decision
 
-            truth_decision = get_demo_salon_decision(
+            truth_decision = get_pack_decision(
                 message_text,
                 client_slug=client_slug,
                 intent_decomp=intent_decomp_payload,
@@ -1132,7 +1132,7 @@ def _handle_consult_flow(
                             now=now,
                         )
                         consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
-                    consult_decision = DemoSalonDecision(
+                    consult_decision = PackDecision(
                         action="reply",
                         response=clarify_prompt,
                         intent="consult_reply",
@@ -1218,7 +1218,7 @@ def _handle_consult_flow(
                         intent_decomp=intent_decomp_payload,
                     )
                 elif policy_type == "demo_salon":
-                    service_availability_decision = get_demo_salon_service_decision(
+                    service_availability_decision = get_pack_service_decision(
                         message_text,
                         client_slug=client_slug,
                         intent_decomp=intent_decomp_payload,
@@ -1396,7 +1396,7 @@ def _handle_consult_flow(
                         "consult_source": "pack",
                         "source": "pack",
                     }
-                    consult_decision = DemoSalonDecision(
+                    consult_decision = PackDecision(
                         action="escalate",
                         response=legacy.MSG_ESCALATED,
                         intent="consult_escalate",
@@ -1453,7 +1453,7 @@ def _handle_consult_flow(
                             now=now,
                         )
                         consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
-                    consult_decision = DemoSalonDecision(
+                    consult_decision = PackDecision(
                         action="reply",
                         response=clarify_prompt,
                         intent="consult_reply",
@@ -1491,7 +1491,7 @@ def _handle_consult_flow(
                                 "consult_source": "pack",
                             }
                         )
-                        consult_decision = DemoSalonDecision(
+                        consult_decision = PackDecision(
                             action="reply",
                             response=pack_decision.response,
                             intent=pack_decision.intent,
@@ -1585,14 +1585,14 @@ def _handle_consult_flow(
                         consult_meta[key] = value
             if consult_decision and consult_decision.action == "reply":
                 combined_response = legacy._append_followup(consult_decision.response, service_reply)
-                consult_decision = DemoSalonDecision(
+                consult_decision = PackDecision(
                     action="reply",
                     response=combined_response,
                     intent=consult_decision.intent or "consult_reply",
                     meta=consult_meta,
                 )
             else:
-                consult_decision = DemoSalonDecision(
+                consult_decision = PackDecision(
                     action="reply",
                     response=service_reply,
                     intent="consult_reply",
@@ -1636,7 +1636,7 @@ def _handle_consult_flow(
             consult_meta["clarify_limit"] = True
             consult_meta["clarify_reason"] = "consult_no_service"
             consult_meta["clarify_attempt"] = {"intent": "consult", "count": clarify_count}
-            consult_decision = DemoSalonDecision(
+            consult_decision = PackDecision(
                 action="escalate",
                 response=legacy.MSG_ESCALATED,
                 intent="consult_no_service",
@@ -1667,7 +1667,7 @@ def _handle_consult_flow(
                     now=now,
                 )
                 consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
-            consult_decision = DemoSalonDecision(
+            consult_decision = PackDecision(
                 action="reply",
                 response=legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC,
                 intent="consult_reply",
