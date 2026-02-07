@@ -9,10 +9,18 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable
 
 from app.schemas.webhook import WebhookResponse
-from app.services.demo_salon_knowledge import (
+from app.services.pack_runtime_service import (
+    _build_fact_meta,
     _has_guest_waiting_signal,
     _has_parking_signal,
+    build_info_combined_reply,
+    compose_multi_truth_reply,
+    format_reply_from_truth,
+    get_pack_decision,
+    get_pack_service_hint,
     get_signal_lexicon_list,
+    load_yaml_truth,
+    phrase_match_intent,
 )
 
 if TYPE_CHECKING:
@@ -112,8 +120,6 @@ def _detect_info_class_intents(
         master_signal = True
     if not master_signal and message_text and client_slug:
         try:
-            from app.services.demo_salon_knowledge import phrase_match_intent
-
             master_signal = "master" in phrase_match_intent(
                 message_text, client_slug=client_slug
             )
@@ -177,8 +183,6 @@ def _looks_like_info_query(message_text: str | None, *, client_slug: str | None 
         if _looks_like_promotions_request(message_text, client_slug=client_slug):
             return True
         if client_slug:
-            from app.services.demo_salon_knowledge import phrase_match_intent
-
             if "order_booking" in phrase_match_intent(message_text, client_slug):
                 return True
         from . import _legacy as legacy
@@ -201,14 +205,6 @@ def _build_info_intent_reply(
     message_text: str | None = None,
     include_info_bundle: bool = True,
 ) -> tuple[str | None, dict | None]:
-    from app.services.demo_salon_knowledge import (
-        _build_fact_meta,
-        build_info_combined_reply,
-        format_reply_from_truth,
-        load_yaml_truth,
-    )
-    from app.services.pack_runtime_service import get_pack_decision, get_pack_service_hint
-
     from . import _legacy as legacy
 
     normalized = legacy.normalize_for_matching(message_text) if message_text else ""
@@ -453,12 +449,6 @@ def _handle_info_flow(
     send_response: Callable[..., Any],
     finalize_response: Callable[..., Any],
 ) -> InfoFlowResult:
-    from app.services.demo_salon_knowledge import (
-        build_info_combined_reply,
-        compose_multi_truth_reply,
-        get_demo_salon_service_hint,
-    )
-
     from . import _legacy as legacy
 
     force_truth_gate = False
@@ -590,7 +580,7 @@ def _handle_info_flow(
         and not info_class_intents
     ):
         normalized = legacy.normalize_for_matching(message_text)
-        service_hint = get_demo_salon_service_hint(message_text, client_slug=client_slug)
+        service_hint = get_pack_service_hint(message_text, client_slug=client_slug)
         if service_hint:
             if _has_parking_signal(normalized, client_slug=client_slug) or _has_guest_waiting_signal(
                 normalized,
@@ -1562,8 +1552,6 @@ def _handle_offline_info_class(
     send_and_save: Callable[..., tuple[str, bool]],
 ) -> WebhookResponse | None:
     import os
-
-    from app.services.demo_salon_knowledge import build_info_combined_reply
 
     from . import _legacy as legacy
 

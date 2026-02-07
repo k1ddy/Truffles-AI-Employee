@@ -63,7 +63,7 @@ def _merge_response_composer_dicts(base: dict | None, override: dict | None) -> 
 
 @lru_cache(maxsize=16)
 def _load_response_composer_config(client_slug: str | None) -> dict[str, Any]:
-    from app.services.demo_salon_knowledge import load_yaml_truth
+    from app.services.pack_runtime_service import load_yaml_truth
 
     truth = load_yaml_truth(client_slug)
     if not isinstance(truth, dict):
@@ -846,7 +846,7 @@ def _handle_consult_flow(
         consult_blocked = True
 
     if message_text and policy_type == "demo_salon" and routing.get("allow_truth_gate_reply"):
-        from app.services.demo_salon_knowledge import _normalize_text
+        from app.services.pack_runtime_service import _normalize_text
 
         normalized = _normalize_text(message_text)
         prep_trigger = bool(
@@ -1188,7 +1188,7 @@ def _handle_consult_flow(
             )
             price_or_duration_signal = False
             if message_text:
-                from app.services.demo_salon_knowledge import (
+                from app.services.pack_runtime_service import (
                     _has_duration_signal,
                     _has_price_signal,
                     _normalize_text,
@@ -2603,7 +2603,7 @@ def _handle_ai_response_action(
             bm25_count = int(rag_scores.get("bm25_count") or 0) if isinstance(rag_scores, dict) else 0
             rag_empty = bool(rag_attempted and vector_count <= 0 and bm25_count <= 0)
             if semantic_attempted and explicit_service_query and rag_empty:
-                from app.services.demo_salon_knowledge import (
+                from app.services.pack_runtime_service import (
                     _format_service_not_found_reply,
                     load_yaml_truth,
                 )
