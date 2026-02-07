@@ -128,7 +128,7 @@ def test_provider_inbound_routes_to_webhook(client, monkeypatch):
             assert isinstance(webhook_request.body.metadata.timestamp, int)
             assert webhook_request.tenant_context.client_slug == "demo_salon"
             assert str(webhook_request.tenant_context.client_id) == payload["tenant_context"]["client_id"]
-            assert webhook_request.tenant_context.source == "provider_gateway"
+            assert webhook_request.tenant_context.source == "system"
     finally:
         app.dependency_overrides.pop(get_db, None)
 
@@ -141,6 +141,39 @@ def test_translate_provider_inbound_requires_client_slug():
     assert error == "client_slug_required"
 
 
+def test_provider_inbound_rejects_invalid_tenant_context_source(client, monkeypatch):
+    monkeypatch.setenv("PROVIDER_GATEWAY_INBOUND_ENABLED", "1")
+    monkeypatch.delenv("PROVIDER_GATEWAY_TOKEN", raising=False)
+
+    payload = _build_payload()
+    payload["tenant_context"]["source"] = "provider_gateway"
+    response = client.post("/provider/inbound", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is False
+    assert data["message"] == "Invalid tenant_context contract"
+
+
 def test_provider_inbound_contract_valid():
     payload = _build_payload()
     _validate_schema("contracts/integrations/provider_inbound.v1.jsonschema", payload)
+
+
+def test_provider_inbound_contract_rejects_invalid_channel():
+    payload = _build_payload({"channel": "sms"})
+    with pytest.raises(Exception):
+        _validate_schema("contracts/integrations/provider_inbound.v1.jsonschema", payload)
+
+
+def test_provider_inbound_rejects_invalid_channel(client, monkeypatch):
+    monkeypatch.setenv("PROVIDER_GATEWAY_INBOUND_ENABLED", "1")
+    monkeypatch.delenv("PROVIDER_GATEWAY_TOKEN", raising=False)
+
+    payload = _build_payload({"channel": "sms"})
+    response = client.post("/provider/inbound", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is False
+    assert data["message"] == "Invalid provider inbound payload"

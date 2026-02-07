@@ -11,7 +11,7 @@ from app.models import Client, Conversation, Message, User
 from app.schemas.webhook import WebhookResponse
 from app.services.intent_service import Intent
 from app.services.pack_runtime_service import (
-    DemoSalonDecision,
+    PackDecision,
     get_pack_decision,
     get_pack_price_item,
     get_pack_price_reply,
@@ -589,7 +589,7 @@ def _get_policy_handler(client: Client | None, *, client_slug: str | None) -> di
 
 
 def _apply_policy_decision(
-    decision: DemoSalonDecision,
+    decision: PackDecision,
     *,
     db: Session,
     conversation: Conversation,
@@ -760,7 +760,7 @@ def _handle_hard_law_gate(
     risk_level = _resolve_policy_risk_level(section) or "high"
     intent = _resolve_policy_intent(section_key, section)
     response = section.get("response") if isinstance(section, dict) else None
-    decision = DemoSalonDecision(
+    decision = PackDecision(
         action="escalate",
         response=response or _get_escalation_fallback(),
         intent=intent,
@@ -834,7 +834,7 @@ def _handle_policy_escalation_gate(
         risk_level = _resolve_policy_risk_level(section) or "high"
         intent = _resolve_policy_intent(section_key, section)
         response = section.get("response") if isinstance(section, dict) else None
-        decision = DemoSalonDecision(
+        decision = PackDecision(
             action="escalate",
             response=response or _get_escalation_fallback(),
             intent=intent,
@@ -951,7 +951,7 @@ def _handle_policy_escalation_gate(
             response = section.get("response") if isinstance(section, dict) else None
             intent = _resolve_policy_intent(section_key, section)
             risk_level = _resolve_policy_risk_level(section)
-            decision = DemoSalonDecision(
+            decision = PackDecision(
                 action=action,
                 response=response or _get_escalation_fallback(),
                 intent=intent,

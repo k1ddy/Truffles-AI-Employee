@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlparse
 from uuid import UUID
 
 from app.models import OutboxMessage
+from app.schemas.channel import parse_channel
 from app.schemas.outbox_payload import TenantContext
 from app.schemas.provider_gateway import (
     ProviderInbound,
@@ -17,6 +18,7 @@ from app.schemas.provider_gateway import (
     ProviderStatus,
 )
 from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
+from app.services.tenant_context_contract import validate_tenant_context_contract
 
 
 def _coerce_remote_jid(value: str | None) -> str | None:
@@ -106,7 +108,7 @@ def translate_provider_inbound(payload: ProviderInbound) -> tuple[WebhookRequest
         metadata=metadata,
     )
     webhook_tenant_context = tenant_context.model_dump(exclude_none=True, mode="json")
-    webhook_tenant_context.setdefault("source", "provider_gateway")
+    webhook_tenant_context.setdefault("source", "system")
     return WebhookRequest(
         body=body,
         client_slug=client_slug,
@@ -137,12 +139,20 @@ def build_provider_outbound_payload(
         return None, "missing_outbox_id"
     if not idempotency_key:
         return None, "missing_idempotency_key"
+    channel_value = parse_channel(channel)
+    if not channel_value:
+        return None, "invalid_channel"
 
     if not isinstance(tenant_context, TenantContext):
         try:
             tenant_context = TenantContext.model_validate(tenant_context)
         except Exception:
             return None, "invalid_tenant_context"
+    _, tenant_error = validate_tenant_context_contract(
+        tenant_context.model_dump(exclude_none=True, mode="json")
+    )
+    if tenant_error:
+        return None, "invalid_tenant_context_contract"
 
     media_payload = None
     if media:
@@ -167,7 +177,7 @@ def build_provider_outbound_payload(
     outbound = ProviderOutbound(
         outbox_id=outbox_id,
         provider=provider,
-        channel=channel,
+        channel=channel_value,
         tenant_context=tenant_context,
         to=ProviderOutboundRecipient(jid=remote_jid),
         content=content,

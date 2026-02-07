@@ -100,3 +100,7 @@ decisions:
     area: "decision_model"
     choice: "LLM_POLICY_CORE"
     statement: "LLM is the policy core and sole decision-maker for dialog actions (FACT/COLLECT/HANDOFF). Safety code validates LLM output schema, enforces hard policy/safety, and executes tools; expected-reply/pending/router gates do not override LLM decisions. Escalation only on explicit user request or policy risk; OOD responses must soft-return to domain. Facts only via packs/tools."
+  - id: "DEC-024"
+    area: "channel_contract"
+    choice: "CANONICAL_ENUM_RUNTIME_ENFORCED"
+    statement: "Provider gateway contracts and runtime schemas enforce canonical channel enum (`whatsapp|telegram|instagram|web`); invalid channel values are rejected fail-closed at ingress/status/outbound payload build."

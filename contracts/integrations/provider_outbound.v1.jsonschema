@@ -23,7 +23,7 @@
     },
     "channel": {
       "type": "string",
-      "minLength": 1
+      "enum": ["whatsapp", "telegram", "instagram", "web"]
     },
     "tenant_context": {
       "$ref": "../tenancy/tenant_context.v1.jsonschema"

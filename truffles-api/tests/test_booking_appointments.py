@@ -10,8 +10,8 @@ from app.models.branch import Branch
 from app.models.service import Service
 
 pytest.importorskip("dateparser")
-from app.routers.webhook import booking as booking_router
 from app.routers.webhook import _legacy as legacy
+from app.routers.webhook import booking as booking_router
 
 
 def _make_query(result):
