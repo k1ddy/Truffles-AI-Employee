@@ -330,7 +330,7 @@ from app.services.knowledge_validation import (
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
 from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
 from app.services.pack_runtime_service import (
-    DemoSalonDecision,
+    PackDecision,
     _detect_promotion_intent,
     _has_duration_signal,
     _has_price_signal,
@@ -425,18 +425,18 @@ def _detect_fast_intent(
     policy_type: str | None,
     booking_wants_flow: bool,
     bypass_domain_flows: bool,
-) -> DemoSalonDecision | None:
+) -> PackDecision | None:
     if not message_text or booking_wants_flow or bypass_domain_flows:
         return None
 
     from . import _legacy as legacy
 
     if legacy.is_greeting_message(message_text):
-        return DemoSalonDecision(action="smalltalk", response=legacy.GREETING_RESPONSE, intent="greeting")
+        return PackDecision(action="smalltalk", response=legacy.GREETING_RESPONSE, intent="greeting")
     if legacy.is_thanks_message(message_text):
-        return DemoSalonDecision(action="smalltalk", response=legacy.THANKS_RESPONSE, intent="thanks")
+        return PackDecision(action="smalltalk", response=legacy.THANKS_RESPONSE, intent="thanks")
     if legacy.is_acknowledgement_message(message_text):
-        return DemoSalonDecision(action="smalltalk", response=legacy.ACKNOWLEDGEMENT_RESPONSE, intent="ack")
+        return PackDecision(action="smalltalk", response=legacy.ACKNOWLEDGEMENT_RESPONSE, intent="ack")
     return None
 
 
@@ -7145,7 +7145,7 @@ async def _handle_webhook_payload(
                 client_slug=payload.client_slug,
             )
         if promo_reply:
-            decision = DemoSalonDecision(
+            decision = PackDecision(
                 action="reply",
                 response=promo_reply,
                 intent="promotions",
@@ -7164,13 +7164,13 @@ async def _handle_webhook_payload(
                 else None
             )
             if discounts_reply:
-                decision = DemoSalonDecision(
+                decision = PackDecision(
                     action="reply",
                     response=discounts_reply,
                     intent="discounts",
                 )
             else:
-                decision = DemoSalonDecision(
+                decision = PackDecision(
                     action="escalate",
                     response=MSG_ESCALATED,
                     intent="discounts",

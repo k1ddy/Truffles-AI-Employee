@@ -33,7 +33,11 @@ from app.services.demo_salon_knowledge import (
     semantic_service_match,
 )
 
+# Neutral runtime type alias used by webhook decision flow.
+PackDecision = DemoSalonDecision
+
 __all__ = [
+    "PackDecision",
     "DemoSalonDecision",
     "_detect_promotion_intent",
     "_has_duration_signal",
