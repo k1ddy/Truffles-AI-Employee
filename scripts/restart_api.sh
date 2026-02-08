@@ -4,6 +4,7 @@ set -euo pipefail
 IMAGE_NAME="${1:-${IMAGE_NAME:-ghcr.io/k1ddy/truffles-ai-employee:main}}"
 PULL_IMAGE="${PULL_IMAGE:-0}"
 REQUIRE_GHCR="${REQUIRE_GHCR:-1}"
+EXPECTED_IMAGE="${EXPECTED_IMAGE:-}"
 VERIFY_VERSION="${VERIFY_VERSION:-0}"
 VERIFY_URL="${VERIFY_URL:-http://localhost:8000/admin/version}"
 VERIFY_RETRIES="${VERIFY_RETRIES:-30}"
@@ -15,18 +16,24 @@ RUN_MIGRATIONS="${RUN_MIGRATIONS:-1}"
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-/app/migrations}"
 MIGRATION_RUNNER="${MIGRATION_RUNNER:-/app/scripts/apply_sql_migrations.py}"
 MIGRATION_NETWORK="${MIGRATION_NETWORK:-truffles_internal-net}"
+MIGRATION_BOOTSTRAP_MODE="${MIGRATION_BOOTSTRAP_MODE:-auto}"
 
 API_WORKDIR="${API_WORKDIR:-/home/zhan/truffles-main/truffles-api}"
 API_ENV_FILE="${API_ENV_FILE:-${API_WORKDIR}/.env}"
 
-if [ "$REQUIRE_GHCR" = "1" ]; then
-  case "$IMAGE_NAME" in
-    ghcr.io/k1ddy/truffles-ai-employee:*) ;;
-    *)
-      echo "ERROR: REQUIRE_GHCR=1 but IMAGE_NAME='$IMAGE_NAME' is not a GHCR image." >&2
-      exit 1
-      ;;
+is_ghcr_image_ref() {
+  local image_ref="$1"
+  case "$image_ref" in
+    ghcr.io/k1ddy/truffles-ai-employee:*|ghcr.io/k1ddy/truffles-ai-employee@sha256:*) return 0 ;;
+    *) return 1 ;;
   esac
+}
+
+if [ "$REQUIRE_GHCR" = "1" ]; then
+  if ! is_ghcr_image_ref "$IMAGE_NAME"; then
+    echo "ERROR: REQUIRE_GHCR=1 but IMAGE_NAME='$IMAGE_NAME' is not a GHCR image ref." >&2
+    exit 1
+  fi
 fi
 
 if [ "$PULL_IMAGE" = "1" ]; then
@@ -44,7 +51,7 @@ if [ "$RUN_MIGRATIONS" = "1" ]; then
     --env-file "$API_ENV_FILE" \
     --network "$MIGRATION_NETWORK" \
     "$IMAGE_NAME" \
-    python "$MIGRATION_RUNNER" --migrations-dir "$MIGRATIONS_DIR"
+    python "$MIGRATION_RUNNER" --migrations-dir "$MIGRATIONS_DIR" --bootstrap "$MIGRATION_BOOTSTRAP_MODE"
 fi
 
 docker rm -f truffles-api >/dev/null 2>&1 || true
@@ -65,6 +72,25 @@ docker run -d --name truffles-api \
   -e CONSOLE_OIDC_JWKS_URL=https://auth.truffles.kz/realms/truffles/protocol/openid-connect/certs \
   -e CONSOLE_OIDC_ISSUER=https://auth.truffles.kz/realms/truffles \
   "$IMAGE_NAME"
+
+expected_ref="${EXPECTED_IMAGE:-$IMAGE_NAME}"
+expected_image_id="$(docker image inspect --format '{{.Id}}' "$expected_ref" 2>/dev/null || true)"
+if [ -z "$expected_image_id" ]; then
+  echo "ERROR: deploy verify failed (cannot inspect expected image: $expected_ref)." >&2
+  exit 1
+fi
+actual_image_id="$(docker inspect --format '{{.Image}}' truffles-api 2>/dev/null || true)"
+if [ -z "$actual_image_id" ]; then
+  echo "ERROR: deploy verify failed (cannot inspect truffles-api image)." >&2
+  exit 1
+fi
+if [ "$actual_image_id" != "$expected_image_id" ]; then
+  echo "ERROR: deploy verify failed (API image mismatch)." >&2
+  echo "expected=$expected_image_id" >&2
+  echo "actual=$actual_image_id" >&2
+  exit 1
+fi
+echo "Deploy image verify OK: truffles-api image id $actual_image_id"
 
 if [ "$VERIFY_VERSION" = "1" ]; then
   resp=""

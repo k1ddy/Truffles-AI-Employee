@@ -1,0 +1,26 @@
+# SESSION 2026-02-08-release-governance-hardening-a16 — Session 2026-02-08-release-governance-hardening-a16
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-08-release-governance-hardening-a16.md
+- branch: feat/2026-02-08-release-governance-hardening-a16
+- worktree: /home/zhan/worktrees/2026-02-08-release-governance-hardening-a16
+- base_ref: origin/main
+- scope: CI/deploy/migration governance hardening for deterministic release + parity + bootstrap guard
+- done:
+  - Release governance hardening implemented: CI gates + release parity + migration bootstrap/governance
+  - Session created.
+  - Added migration governance checker (`scripts/check_migration_governance.py`) and wired strict CI lint gate.
+  - Added unified release script (`scripts/restart_release.sh`) and hardened `restart_api.sh`/`restart_workers.sh` for digest/image parity checks.
+  - Hardened CI deploy/livecheck gates (`deploy_required` path coverage, main deploy enforcement, livecheck on deployed=true, digest rollout path).
+  - Extended migration runner bootstrap modes (`off|auto|legacy`) + tests.
+  - Updated canon docs (`TECH.md`, `SPECS/SYSTEM_REFERENCE.md`, `STRUCTURE.md`, `STATE.md`).
+- next:
+  - Session closed for implementation; await PR CI and merge decision.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-08-release-governance-hardening-a16.md
+  - /tmp/migration_governance_check_20260208_a16.txt
+  - /tmp/py_compile_release_governance_20260208_a16.txt
+  - /tmp/shell_syntax_release_scripts_20260208_a16.txt
+  - /tmp/pytest_apply_sql_migrations_release_governance_20260208_a16.txt
+- last_updated: 2026-02-08

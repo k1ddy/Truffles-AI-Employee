@@ -45,6 +45,8 @@
 | `SUMMARY.md` | Сводка текущей инвентаризации и GAP | Архитектор |
 | `scripts/restart_workers.sh` | Перезапуск контейнеров воркеров (outbox/sentinel) | OPS |
 | `scripts/restart_api.sh` | Канонический деплой API (migration gate + version verify) | OPS |
+| `scripts/restart_release.sh` | Канонический release API+workers (digest + parity + migration gate) | OPS |
+| `scripts/check_migration_governance.py` | Governance check для SQL миграций (naming/frozen ops migrations) | Backend/OPS |
 | `scripts/session_start.sh` | Создать worktree/branch и session log (agent suffix обязателен) | Все роли |
 | `scripts/session_check.sh` | Проверка сессии перед commit/push | Все роли |
 | `scripts/session_end.sh` | Закрытие сессии + index обновление | Все роли |
@@ -358,7 +360,7 @@
 | `dev` | webhook + services | `truffles-api/app/routers/webhook/`, `truffles-api/app/services/*` |
 | `data` | eval + facts | `truffles-api/app/knowledge/demo_salon/EVAL.yaml`, `truffles-api/app/knowledge/demo_salon/EVAL_GOLDEN.yaml`, `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml` |
 | `docs` | specs + состояния | `SPECS/*`, `STATE.md`, `STRUCTURE.md`, `AGENTS.md` |
-| `ops` | CI + deploy | `.github/workflows/*`, `TECH.md`, `/home/zhan/truffles-main/scripts/restart_api.sh`, infra compose (не в этом репо) |
+| `ops` | CI + deploy | `.github/workflows/*`, `TECH.md`, `/home/zhan/truffles-main/scripts/restart_release.sh`, infra compose (не в этом репо) |
 
 ---
 

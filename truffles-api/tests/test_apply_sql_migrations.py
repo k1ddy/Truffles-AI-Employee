@@ -14,7 +14,9 @@ SPEC.loader.exec_module(MODULE)
 
 MigrationSpec = MODULE.MigrationSpec
 build_migration_plan = MODULE.build_migration_plan
+decide_bootstrap_action = MODULE.decide_bootstrap_action
 discover_migration_files = MODULE.discover_migration_files
+TRACKING_TABLE = MODULE.TRACKING_TABLE
 
 
 def test_discover_migration_files_returns_sorted_sql_only(tmp_path):
@@ -71,3 +73,64 @@ def test_build_migration_plan_raises_on_checksum_mismatch():
 
     with pytest.raises(RuntimeError, match="checksum mismatch"):
         build_migration_plan([migration], applied={"001_init.sql": "applied"})
+
+
+def test_decide_bootstrap_action_skip_when_schema_migrations_has_data():
+    action = decide_bootstrap_action(
+        applied_count=3,
+        public_tables={TRACKING_TABLE, "clients", "messages"},
+        bootstrap_mode="auto",
+    )
+    assert action == "skip"
+
+
+def test_decide_bootstrap_action_skip_when_database_is_empty():
+    action = decide_bootstrap_action(
+        applied_count=0,
+        public_tables={TRACKING_TABLE},
+        bootstrap_mode="auto",
+    )
+    assert action == "skip"
+
+
+def test_decide_bootstrap_action_raises_in_off_mode_for_legacy_schema():
+    with pytest.raises(RuntimeError, match="schema_migrations is empty"):
+        decide_bootstrap_action(
+            applied_count=0,
+            public_tables={TRACKING_TABLE, "clients", "messages"},
+            bootstrap_mode="off",
+        )
+
+
+def test_decide_bootstrap_action_auto_bootstrap_when_markers_present():
+    action = decide_bootstrap_action(
+        applied_count=0,
+        public_tables={
+            TRACKING_TABLE,
+            "clients",
+            "branches",
+            "users",
+            "conversations",
+            "messages",
+        },
+        bootstrap_mode="auto",
+    )
+    assert action == "bootstrap"
+
+
+def test_decide_bootstrap_action_auto_raises_when_markers_missing():
+    with pytest.raises(RuntimeError, match="marker tables are missing"):
+        decide_bootstrap_action(
+            applied_count=0,
+            public_tables={TRACKING_TABLE, "clients", "messages"},
+            bootstrap_mode="auto",
+        )
+
+
+def test_decide_bootstrap_action_legacy_bootstrap_without_marker_check():
+    action = decide_bootstrap_action(
+        applied_count=0,
+        public_tables={TRACKING_TABLE, "clients", "messages"},
+        bootstrap_mode="legacy",
+    )
+    assert action == "bootstrap"
