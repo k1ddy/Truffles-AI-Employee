@@ -1,0 +1,95 @@
+# SESSION 2026-02-08-booking-strict-judge-a16 — Session 2026-02-08-booking-strict-judge-a16
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-08-booking-strict-judge.md
+- branch: feat/2026-02-08-booking-strict-judge-a16
+- worktree: /home/zhan/worktrees/2026-02-08-booking-strict-judge-a16
+- base_ref: origin/main
+- scope: strict llm-quality evaluator hard-fail gates to prevent false OK, plus frozen replay validation and operator SOP update.
+- done:
+  - Session created.
+  - Added strict evaluator gates in `ops/diagnose.py`:
+    - `strict_pass_rate` + `hard_fail_rate` metrics and per-turn `evaluation.strict_ok`.
+    - New reason codes: `false_booking_confirmation`, `calendar_tool_contract_miss`, `judge_fail`.
+    - Hard-fail taxonomy set (`LLM_QUALITY_HARD_FAIL_REASONS`) and strict failure accounting.
+  - Fixed stale trace leakage in info matching:
+    - current-turn trace filtering by `decision_meta.timing.pipeline_started_at/pipeline_finished_at`;
+    - no fallback to old trace tail when pipeline window is present but empty.
+  - Added regressions:
+    - `truffles-api/tests/test_booking_quality_response_guard.py` (+calendar/false-confirm tests).
+    - `truffles-api/tests/test_booking_quality_info_sections.py` (+pipeline-window stale-trace tests).
+  - Updated operator/human runbook with strict replay SOP, timeout/recovery protocol, strict metrics interpretation, and extended reason taxonomy.
+  - Ran checks:
+    - `python3 -m py_compile ops/diagnose.py`
+    - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py` (9 passed)
+    - `pytest -q truffles-api/tests/test_booking_quality_info_sections.py` (5 passed)
+    - `pytest -q truffles-api/tests/test_booking_quality_progress_gate.py` (3 passed)
+  - Ran frozen replay smoke on main seed=1337 (`count=1`) without modifying source artifacts.
+  - Synced branch with latest `origin/main`, resolved `docs/SESSION_INDEX.md` merge conflict (kept both active sessions), and completed merge commit.
+  - Opened PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/578
+  - Hardened outbox delivery semantics for strict replay in `ops/diagnose.py`:
+    - reply is no longer considered delivered just because `outbox.count>0`;
+    - delivery now depends on status-aware contract (`SENT` vs `FAILED`/`PENDING`/`PROCESSING`) or inline webhook reply;
+    - retry helper now returns the latest observed outbox status/payload even when reply is still missing.
+  - Added strict outbox failure taxonomy:
+    - new reasons: `outbox_delivery_failed`, `outbox_delivery_timeout`;
+    - both added to hard-fail set and runbook reason map.
+  - Extended regressions in `truffles-api/tests/test_booking_quality_response_guard.py`:
+    - `FAILED` outbox does not produce false delivered reply;
+    - evaluator emits `outbox_delivery_failed` / `outbox_delivery_timeout` on missing expected reply path.
+  - Re-ran checks:
+    - `python3 -m py_compile ops/diagnose.py`
+    - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_booking_quality_info_sections.py truffles-api/tests/test_booking_quality_progress_gate.py` (20 passed)
+  - Ran accelerated frozen replay (`seed=1337`, `count=2`) to verify outbox-path instrumentation; run interrupted before `summary.json`, partial artifacts preserved for continuation.
+  - Ran frozen smoke replay on updated outbox contract (`seed=1337`, `count=1`) and produced fresh `summary.json` with strict/hard metrics.
+  - Verified PR ancestry and merge risk:
+    - PR570 commits are not ancestors of PR578 and not in `main`;
+    - simulated merge order `570 -> 578` produces conflicts in `ops/diagnose.py` and `truffles-api/tests/test_booking_quality_response_guard.py`.
+  - Ported PR570 deltas directly into PR578 branch (conflict-free path):
+    - Added duplicate-ack bot-reply inference in `ops/diagnose.py` (`_llm_quality_payload_is_duplicate_ack`, `_llm_quality_should_infer_bot_response_from_duplicate_ack`), with conservative guards for pending/handoff actions.
+    - Added missing-reply infra suppression in evaluator (`meta_error`/`webhook_error` aware) to avoid false negative on transport failures.
+    - Added booking expectation fallbacks from PR570 in `_chaos_action_fallback_ok` and `_llm_quality_expected_reply_matches`.
+    - Restored parking intent propagation in `truffles-api/app/routers/webhook/info.py`.
+  - Added regressions for ported logic:
+    - `truffles-api/tests/test_booking_quality_response_guard.py`:
+      - duplicate-ack detector/inference;
+      - infra suppression for missing_bot_reply;
+      - manager/pending expected_reply fallback.
+    - `truffles-api/tests/test_master_info_flow.py`:
+      - parking signal intent test.
+  - Re-ran checks:
+    - `python3 -m py_compile ops/diagnose.py`
+    - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_booking_quality_info_sections.py truffles-api/tests/test_booking_quality_progress_gate.py` (29 passed)
+  - Ran frozen smoke replay after PR570-port (`seed=1337`, `count=1`) and produced summary/brief artifacts.
+  - Core-eval semantic hardening (without string `must_include*` gates in core tier):
+    - Added `core_eval_mode` path in `truffles-api/tests/test_demo_salon_eval.py`.
+    - Core tier now checks semantic contracts via `decision_meta`/trace and non-empty reply contracts, while keeping strict trace assertions.
+    - Disabled local fake `detect_multi_intent`/`_extract_service_hint` patches for core-tier run path only.
+  - Fixed tenant-context false negatives in eval harness:
+    - switched fake `client_id` to valid UUID contract (`TEST_CLIENT_ID`) for webhook simulation helpers.
+  - Added policy regression guard for cancel-policy questions:
+    - `truffles-api/app/routers/webhook/policy.py`: avoid classifying policy question about cancellation terms as hard-law cancel request.
+    - `truffles-api/tests/test_demo_salon_eval.py`: added `test_cancel_policy_question_not_escalated_as_cancel_request` and `test_cancel_request_still_escalates`.
+  - Re-ran checks for updated core path:
+    - `python3 -m py_compile truffles-api/tests/test_demo_salon_eval.py truffles-api/app/routers/webhook/policy.py`
+    - `OPENAI_API_KEY= CI=1 pytest -q truffles-api/tests/test_demo_salon_eval.py` (15 passed)
+    - `OPENAI_API_KEY= pytest -q truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_booking_quality_info_sections.py truffles-api/tests/test_booking_quality_progress_gate.py` (29 passed)
+- next:
+  - Resume full frozen replay (`seed=1337`, `count=10`) after PR570-port and compare against pre-port strict metrics.
+  - Triage dominant expectation failures (`expected_state_mismatch`, `expected_reply_mismatch`) vs scenario contract.
+  - If full replay confirms reproducibility, close PR570 as superseded by PR578 and keep single merge path.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-08-booking-strict-judge.md
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke1b/summary.json
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke1b/responses.jsonl
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke1b/brief.md
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-replay3/responses.jsonl
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-replay3/trace_bundle.jsonl
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke2/summary.json
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke2/responses.jsonl
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke2/brief.md
+  - /tmp/booking_quality/20260208-pr570-port-smoke1/summary.json
+  - /tmp/booking_quality/20260208-pr570-port-smoke1/responses.jsonl
+  - /tmp/booking_quality/20260208-pr570-port-smoke1/brief.md
+- last_updated: 2026-02-08

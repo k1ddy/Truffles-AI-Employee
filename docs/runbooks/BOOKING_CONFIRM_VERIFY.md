@@ -194,6 +194,29 @@ TEST_MODE=1 python3 ops/diagnose.py llm-quality \
   --max-failures 20
 ```
 
+Strict replay (fast, frozen scenarios, anti-false-OK)
+```bash
+# Use external timeout so network/outbox stalls do not block progress for hours.
+timeout 20m TEST_MODE=1 python3 ops/diagnose.py llm-quality \
+  --base-url http://localhost:8000 \
+  --client-slug demo_salon \
+  --scenarios-file /tmp/booking_quality/20260207-stress-main-seed-1337-gen/scenarios.json \
+  --count 10 \
+  --tool-hooks check \
+  --manager-mode check \
+  --pending-mode skip \
+  --min-wait 0 \
+  --max-wait 0 \
+  --max-failures 20 \
+  --output-dir /tmp/booking_quality/<stamp>-strict-main-seed-1337-replay
+```
+
+If timeout is hit
+1. Do not delete partial artifacts.
+2. Check whether `/summary.json` exists in output dir.
+3. If no summary: rerun exact same command and output dir.
+4. If summary exists: treat run as complete and continue analysis.
+
 Resumable matrix runner (recommended for unstable network/session)
 ```bash
 # Resume in-place without touching completed artifacts
@@ -285,9 +308,10 @@ Detailed operator workflow (future agents + humans)
    - For matrix script: rerun the same `scripts/booking_quality_matrix_resumable.sh --run-stamp ...`; completed steps are skipped automatically.
 5. Analysis order (to avoid false conclusions)
    - First: `stop_reason`, `webhook_errors`, `infra_errors` (hard blockers).
-   - Second: `pass_rate`, `unknown_state_rate`, `decision_meta_coverage`.
-   - Third: reason deltas (`expected_*`, `info_section_miss`, `missing_bot_reply`, `booking_slot_stall`).
-   - Fourth: inspect top 3 reasons in `summary.top_failures` and confirm on `responses.jsonl`.
+   - Second: `strict_pass_rate`, `hard_fail_rate`, `unknown_state_rate`, `decision_meta_coverage`.
+   - Third: `pass_rate` as supporting metric only.
+   - Fourth: reason deltas (`expected_*`, `info_section_miss`, `missing_bot_reply`, `outbox_delivery_failed`, `outbox_delivery_timeout`, `booking_slot_stall`, `false_booking_confirmation`, `calendar_tool_contract_miss`).
+   - Fifth: inspect top 3 reasons in `summary.top_failures` and confirm on `responses.jsonl`.
 6. Fix loop contract
    - One dominant repeatable reason -> one code/data/evaluator fix.
    - Add one regression test for that reason.
@@ -309,14 +333,19 @@ Artifacts
 
 Evaluation contract (state-aware)
 - `decision_meta` and `decision_trace` are required per inbound turn.
+- `evaluation.ok` is legacy compatibility; use `evaluation.strict_ok` + `strict_pass_rate` for real quality gate.
+- Hard-fail reasons (`missing_bot_reply`, `outbox_delivery_failed`, `outbox_delivery_timeout`, `false_booking_confirmation`, `calendar_tool_contract_miss`, meta/trace/state contract breaks) must never be treated as OK.
 - If `turn.expect` is present, it overrides heuristic matching for action/info_sections/reply_type/state.
 - Known states: `bot_active`, `pending`, `manager_active`; anything else is `unknown_state`.
 - `manager_active`/`pending` mean no bot reply expected; replies here are flagged.
 - `manager_active` requires a handover row; missing handover is a failure.
 - Manager callbacks (simulate mode): `take` -> `manager_active` + `handover.status=active`; `resolve` -> `bot_active` + `resolved`; `return` -> `bot_active` + `bot_handling`.
 - Info requests must match `info_sections`/intents (price/location/hours/promo/duration/parking/master).
+- Info matching is current-turn scoped (pipeline window); stale historical trace must not satisfy current info request.
 - Booking-active turns should show slot progress; stalls are flagged.
 - `booking_slot_stall` checks only slot-relevant turns (service/time/date/no-tag), not generic booking noise.
+- If response text claims booking confirmation, evaluator requires appointment/calendar evidence; otherwise `false_booking_confirmation`.
+- If appointment/calendar path is active without successful calendar outcome, evaluator reports `calendar_tool_contract_miss`.
 - Booking `expected_reply_type` is limited to `service_choice`/`time`/`name` (phone/confirm are not expected_reply_type).
 
 Reason codes (summary.failures / failure_counts)
@@ -329,10 +358,15 @@ Reason codes (summary.failures / failure_counts)
 - expected_reply_mismatch
 - expected_info_section_miss
 - missing_bot_reply
+- outbox_delivery_failed
+- outbox_delivery_timeout
 - unexpected_bot_reply_manager
 - handover_missing
 - info_section_miss
 - booking_slot_stall
+- false_booking_confirmation
+- calendar_tool_contract_miss
+- judge_fail
 - manager_action_failed
 - handoff_state_mismatch
 - handoff_status_mismatch
@@ -340,23 +374,26 @@ Reason codes (summary.failures / failure_counts)
 Taxonomy (summary.taxonomy)
 - expectation: expected_* mismatches (scenario/expectations drift).
 - canon: missing decision_meta/trace or unknown_state (invariant breaks).
-- code: missing_bot_reply, booking_slot_stall, handover state/status mismatches, manager_action_failed.
+- code: missing_bot_reply, outbox_delivery_failed, outbox_delivery_timeout, booking_slot_stall, false_booking_confirmation, calendar_tool_contract_miss, handover state/status mismatches, manager_action_failed.
 - data: info_section_miss (packs/content gaps).
 
 Thresholds (summary.thresholds)
 - reply_rate >= 0.90
+- strict_pass_rate >= 0.90
 - expected_reply_rate >= 0.95
 - info_answer_rate >= 0.70
+- hard_fail_rate <= 0.00
 - unknown_state_rate <= 0.02
 - booking_slot_progress_rate >= 0.25
 - handoff_correct_rate >= 0.90
 
-LLM judge (semantic, non-blocking)
+LLM judge (semantic signal, optional strict gate)
 - Enabled via `--judge-sample 0.1` (or `--judge-mode all` to judge every reply).
 - Uses user text + bot reply + decision_meta/trace summary + pack truth (`SALON_TRUTH.yaml`) + consult playbook (`CONSULT_PLAYBOOK.yaml`).
   Judge context is limited to relevant sections (info tags / intents); full packs are not injected.
 - Output stored in `summary.json` under `judge` and per-turn in `responses.jsonl`.
-- Judge results are non-blocking and should be used as a signal, not a gate.
+- If judge is enabled and verdict is `fail`, evaluator adds `judge_fail` to `evaluation.strict_reasons`.
+- Keep judge disabled for pure deterministic runs; enable it when semantic supervision is needed.
 
 Chaos coverage map (summary.coverage)
 - states: bot_active/pending/manager_active/unknown.

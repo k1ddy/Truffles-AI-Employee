@@ -279,6 +279,34 @@ def _detect_hard_law_match(
             )
             if normalized and consult_override and legacy._contains_any(normalized, consult_override):
                 return None
+        if section_key == "cancel":
+            normalized = legacy._normalize_text(message_text)
+            if normalized:
+                policy_question_cues = [
+                    "за сколько",
+                    "какой срок",
+                    "какие условия",
+                    "правил",
+                    "услови",
+                    "что если",
+                    "можно ли",
+                    "нужно отмен",
+                    "когда отмен",
+                ]
+                cancel_request_cues = [
+                    "отмените",
+                    "отмени",
+                    "хочу отмен",
+                    "нужно отменить",
+                    "надо отмен",
+                    "прошу отмен",
+                    "отмена записи",
+                    "отмена запись",
+                ]
+                asks_policy = legacy._contains_any(normalized, policy_question_cues)
+                direct_request = legacy._contains_any(normalized, cancel_request_cues)
+                if asks_policy and not direct_request:
+                    return None
         return match
     if not intent_hints:
         return None
@@ -327,7 +355,34 @@ def _detect_booking_cancel(message_text: str | None, *, policy_pack: dict | None
     keywords = _policy_str_list(section.get("keywords") if isinstance(section, dict) else None)
     if not keywords:
         return False
-    return _matches_policy_keywords(normalized, keywords)
+    if not _matches_policy_keywords(normalized, keywords):
+        return False
+
+    # Do not escalate policy questions ("за сколько отменять запись?") as cancellation requests.
+    policy_question_cues = [
+        "за сколько",
+        "какой срок",
+        "какие условия",
+        "правил",
+        "услови",
+        "что если",
+        "можно ли",
+    ]
+    cancel_request_cues = [
+        "отмените",
+        "отмени",
+        "хочу отмен",
+        "нужно отмен",
+        "надо отмен",
+        "прошу отмен",
+        "отмена записи",
+        "отмена запись",
+    ]
+    asks_policy = legacy._contains_any(normalized, policy_question_cues)
+    direct_request = legacy._contains_any(normalized, cancel_request_cues)
+    if asks_policy and not direct_request:
+        return False
+    return True
 
 
 def _is_hard_law_intent(

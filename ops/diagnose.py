@@ -784,19 +784,24 @@ LLM_QUALITY_PROGRESS_SKIP_TAGS = {
 LLM_QUALITY_FAILURE_LIMIT = 50
 LLM_QUALITY_THRESHOLDS = {
     "reply_rate": 0.9,
+    "strict_pass_rate": 0.9,
     "expected_reply_rate": 0.95,
     "info_answer_rate": 0.7,
+    "hard_fail_rate": 0.0,
     "unknown_state_rate": 0.02,
     "booking_slot_progress_rate": 0.25,
     "handoff_correct_rate": 0.9,
 }
 LLM_QUALITY_THRESHOLD_DIRECTIONS = {
+    "hard_fail_rate": "max",
     "unknown_state_rate": "max",
 }
 LLM_QUALITY_REGRESSION_KEYS = (
     "reply_rate",
+    "strict_pass_rate",
     "expected_reply_rate",
     "info_answer_rate",
+    "hard_fail_rate",
     "unknown_state_rate",
     "booking_slot_progress_rate",
     "handoff_correct_rate",
@@ -811,10 +816,15 @@ LLM_QUALITY_REASON_LABELS = {
     "expected_reply_mismatch": "reply expectation does not match scenario expectation",
     "expected_info_section_miss": "expected info_sections missing in meta/trace",
     "missing_bot_reply": "expected response but no bot reply observed",
+    "outbox_delivery_failed": "expected response but outbox delivery is FAILED",
+    "outbox_delivery_timeout": "expected response but outbox did not deliver within wait window",
     "unexpected_bot_reply_manager": "bot replied while manager_active",
     "handover_missing": "manager_active but handover missing",
     "info_section_miss": "info request not answered per meta/trace",
     "booking_slot_stall": "booking active without slot progress",
+    "false_booking_confirmation": "booking confirmation text without appointment/calendar proof",
+    "calendar_tool_contract_miss": "appointment path without successful calendar tool outcome",
+    "judge_fail": "LLM judge marked turn as fail",
     "manager_action_failed": "manager callback failed",
     "handoff_state_mismatch": "state mismatch after manager action",
     "handoff_status_mismatch": "handover status mismatch after manager action",
@@ -830,15 +840,53 @@ LLM_QUALITY_REASON_TAXONOMY = {
     "expected_reply_mismatch": "expectation",
     "expected_info_section_miss": "expectation",
     "missing_bot_reply": "code",
+    "outbox_delivery_failed": "code",
+    "outbox_delivery_timeout": "code",
     "unexpected_bot_reply_manager": "code",
     "handover_missing": "code",
     "info_section_miss": "data",
     "booking_slot_stall": "code",
+    "false_booking_confirmation": "code",
+    "calendar_tool_contract_miss": "code",
+    "judge_fail": "expectation",
     "manager_action_failed": "code",
     "handoff_state_mismatch": "code",
     "handoff_status_mismatch": "code",
 }
+LLM_QUALITY_HARD_FAIL_REASONS = {
+    "decision_meta_missing",
+    "decision_trace_missing",
+    "unknown_state",
+    "missing_bot_reply",
+    "outbox_delivery_failed",
+    "outbox_delivery_timeout",
+    "false_booking_confirmation",
+    "calendar_tool_contract_miss",
+    "unexpected_bot_reply_manager",
+    "handover_missing",
+}
+LLM_QUALITY_INFO_TRACE_LOOKBACK = 12
+LLM_QUALITY_TRACE_WINDOW_PADDING_SECONDS = 2
+LLM_QUALITY_BOOKING_CONFIRM_PHRASES = (
+    "вы записаны",
+    "запись подтверждена",
+    "запись оформлена",
+    "записал вас",
+    "записала вас",
+    "забронировал для вас",
+    "забронировала для вас",
+)
+LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS = {
+    "pending_confirmation",
+    "confirmed",
+    "booked",
+    "scheduled",
+    "active",
+}
 LLM_QUALITY_TOOL_OUTCOMES = ("success", "failure", "pending")
+LLM_QUALITY_OUTBOX_SUCCESS_STATUSES = {"SENT"}
+LLM_QUALITY_OUTBOX_FAILURE_STATUSES = {"FAILED"}
+LLM_QUALITY_OUTBOX_PENDING_STATUSES = {"PENDING", "PROCESSING"}
 LLM_QUALITY_JUDGE_REASONS = {
     "irrelevant_reply": "reply does not address the user's intent/question",
     "missed_question": "question not answered or slot not collected",
@@ -1781,6 +1829,11 @@ def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sec
             return True
         if meta_action in CHAOS_PENDING_ACTIONS and (conv_meta or {}).get("state") == "pending":
             return True
+    if any(action in expected_actions for action in ("booking_escalated", "handoff", "escalate")):
+        if meta_action == "booking_prompt" and booking_active:
+            expected_reply_type = expected.get("expected_reply_type")
+            if expected_reply_type is None or expected_reply_type in CHAOS_BOOKING_REPLY_TYPES:
+                return True
     if "reply" in expected_actions and expected.get("info_sections") and info_sections_ok:
         if meta_action in _chaos_booking_completion_actions() or meta_action == "booking_prompt":
             return True
@@ -2731,6 +2784,20 @@ def _llm_quality_expected_reply_matches(
         return True
     if expected_reply == expected_response:
         return True
+    if expected_reply is True and expected_response is False:
+        action = (meta or {}).get("action")
+        if state in {"pending", "manager_active"} and (
+            action in CHAOS_PENDING_ACTIONS
+            or action
+            in {
+                "escalate",
+                "booking_escalated",
+                "booking_captured_pending",
+                "booking_reuse_handover",
+                "booking_paused",
+            }
+        ):
+            return True
     if expected_state is None:
         return False
     expected_values = (
@@ -2849,6 +2916,38 @@ def _llm_quality_extract_tool_signals(meta, trace_entries):
         }
     return signals
 
+
+def _llm_quality_current_turn_trace_entries(meta, trace_entries):
+    entries = [entry for entry in (trace_entries or []) if isinstance(entry, dict)]
+    if not entries:
+        return []
+    if not isinstance(meta, dict):
+        return entries[-LLM_QUALITY_INFO_TRACE_LOOKBACK:]
+
+    timing = meta.get("timing")
+    if not isinstance(timing, dict):
+        return entries[-LLM_QUALITY_INFO_TRACE_LOOKBACK:]
+
+    window_start = _parse_iso_datetime(timing.get("pipeline_started_at"))
+    window_end = _parse_iso_datetime(timing.get("pipeline_finished_at"))
+    if not window_start or not window_end:
+        return entries[-LLM_QUALITY_INFO_TRACE_LOOKBACK:]
+
+    if window_end < window_start:
+        return entries[-LLM_QUALITY_INFO_TRACE_LOOKBACK:]
+
+    low = window_start - timedelta(seconds=LLM_QUALITY_TRACE_WINDOW_PADDING_SECONDS)
+    high = window_end + timedelta(seconds=LLM_QUALITY_TRACE_WINDOW_PADDING_SECONDS)
+    bounded = []
+    for entry in entries:
+        recorded_at = _parse_iso_datetime(entry.get("recorded_at"))
+        if recorded_at and low <= recorded_at <= high:
+            bounded.append(entry)
+    if bounded:
+        return bounded
+    return []
+
+
 def _llm_quality_collect_info_signals(meta, trace_entries):
     info_sections = set()
     intents = set()
@@ -2861,7 +2960,7 @@ def _llm_quality_collect_info_signals(meta, trace_entries):
             for section in sections:
                 if isinstance(section, str) and section.strip():
                     info_sections.add(section.strip().lower())
-    for entry in trace_entries or []:
+    for entry in _llm_quality_current_turn_trace_entries(meta, trace_entries):
         if not isinstance(entry, dict):
             continue
         intent = entry.get("intent")
@@ -2878,6 +2977,21 @@ def _llm_quality_collect_info_signals(meta, trace_entries):
                 if isinstance(section, str) and section.strip():
                     info_sections.add(section.strip().lower())
     return info_sections, intents
+
+
+def _llm_quality_is_booking_confirmation_text(text):
+    if not isinstance(text, str):
+        return False
+    normalized = text.strip().lower()
+    if not normalized:
+        return False
+    if "?" in normalized:
+        return False
+    for phrase in LLM_QUALITY_BOOKING_CONFIRM_PHRASES:
+        if phrase in normalized:
+            return True
+    return False
+
 
 def _llm_quality_info_answered(info_tags, meta, trace_entries):
     info_sections, intents = _llm_quality_collect_info_signals(meta, trace_entries)
@@ -2912,6 +3026,48 @@ def _llm_quality_expected_manager_state(action, state_before):
     if action == "skip":
         return state_before, None
     return None, None
+
+def _llm_quality_normalize_outbox_status(status):
+    if not isinstance(status, str):
+        return ""
+    return status.strip().upper()
+
+def _llm_quality_resolve_outbox_status(outbox_payload_status, outbox_summary):
+    status = _llm_quality_normalize_outbox_status(outbox_payload_status)
+    if status:
+        return status
+    if isinstance(outbox_summary, dict):
+        return _llm_quality_normalize_outbox_status(outbox_summary.get("status"))
+    return ""
+
+def _llm_quality_outbox_delivery_state(outbox_payload_status, outbox_summary):
+    status = _llm_quality_resolve_outbox_status(outbox_payload_status, outbox_summary)
+    if status in LLM_QUALITY_OUTBOX_SUCCESS_STATUSES:
+        return "sent"
+    if status in LLM_QUALITY_OUTBOX_FAILURE_STATUSES:
+        return "failed"
+    if status in LLM_QUALITY_OUTBOX_PENDING_STATUSES:
+        return "pending"
+    count = (outbox_summary or {}).get("count") if isinstance(outbox_summary, dict) else 0
+    if isinstance(count, int) and count > 0:
+        return "unknown"
+    return "missing"
+
+def _llm_quality_has_bot_reply(
+    *,
+    outbox_summary,
+    outbox_payload_status,
+    outbox_text,
+    inline_response_text,
+):
+    if isinstance(inline_response_text, str) and inline_response_text.strip():
+        return True
+    delivery_state = _llm_quality_outbox_delivery_state(outbox_payload_status, outbox_summary)
+    if delivery_state == "sent":
+        return True
+    if delivery_state == "unknown":
+        return bool((outbox_text or "").strip())
+    return False
 
 def _llm_quality_extract_outbox_text(payload):
     if not isinstance(payload, dict):
@@ -3075,6 +3231,11 @@ def _llm_quality_next_step_for_reason(reason):
     mapping = {
         "booking_slot_stall": "trace booking stages and verify slot extraction for this turn",
         "missing_bot_reply": "inspect outbox_summary/outbox_payload_status for blocked send",
+        "outbox_delivery_failed": "inspect outbox last_error/provider status and retry/backoff policy",
+        "outbox_delivery_timeout": "increase poll/outbox wait for replay and verify worker/outbox process timing",
+        "false_booking_confirmation": "verify booking confirmation text against appointment_id and calendar outcome",
+        "calendar_tool_contract_miss": "inspect tool_signals.calendar + appointment_status before confirming booking",
+        "judge_fail": "review semantic mismatch in judge summary and convert to deterministic guard/test",
         "decision_meta_missing": "check early-return traces and meta write on this path",
         "decision_trace_missing": "verify trace retention for early returns and pending paths",
         "expected_reply_type_mismatch": "compare expected_reply_type in context vs turn.expect.reply_type",
@@ -3125,6 +3286,7 @@ def _llm_quality_build_replay_command(args, scenarios_path, count):
 def _llm_quality_write_brief(path, summary):
     metrics = (summary or {}).get("metrics") or {}
     rates = metrics.get("rates") or {}
+    counts = metrics.get("counts") or {}
     top_failures = (summary or {}).get("top_failures") or []
     stop_reason = (summary or {}).get("stop_reason")
     scenario_source = (summary or {}).get("scenario_source") or {}
@@ -3136,6 +3298,9 @@ def _llm_quality_write_brief(path, summary):
         f"- finished_at: `{summary.get('finished_at')}`",
         f"- duration_s: `{summary.get('duration_s')}`",
         f"- pass_rate: `{rates.get('pass_rate')}`",
+        f"- strict_pass_rate: `{rates.get('strict_pass_rate')}`",
+        f"- hard_fail_rate: `{rates.get('hard_fail_rate')}`",
+        f"- hard_fail_turns: `{counts.get('turns_hard_failed')}`",
         f"- expected_reply_rate: `{rates.get('expected_reply_rate')}`",
         f"- booking_slot_progress_rate: `{rates.get('booking_slot_progress_rate')}`",
         f"- scenario_source: `{scenario_source.get('type')}`",
@@ -3244,8 +3409,10 @@ def _llm_quality_check_thresholds(metrics):
     rates = (metrics or {}).get("rates") or {}
     values = {
         "reply_rate": rates.get("reply_rate"),
+        "strict_pass_rate": rates.get("strict_pass_rate"),
         "expected_reply_rate": rates.get("expected_reply_rate"),
         "info_answer_rate": rates.get("info_answer_rate"),
+        "hard_fail_rate": rates.get("hard_fail_rate"),
         "unknown_state_rate": rates.get("unknown_state_rate"),
         "booking_slot_progress_rate": rates.get("booking_slot_progress_rate"),
         "handoff_correct_rate": rates.get("handoff_correct_rate"),
@@ -3358,6 +3525,12 @@ def _llm_quality_evaluate_turn(
     booking_progress_expected,
     booking_progressed,
     allow_booking_stall,
+    outbox_text=None,
+    tool_signals=None,
+    outbox_summary=None,
+    outbox_payload_status=None,
+    meta_error=None,
+    webhook_error=None,
 ):
     reasons = []
     if meta is None:
@@ -3408,7 +3581,38 @@ def _llm_quality_evaluate_turn(
         if not expected_answered:
             reasons.append("expected_info_section_miss")
     if expected_response and not bot_response:
-        reasons.append("missing_bot_reply")
+        suppress_missing_reply = False
+        if isinstance(webhook_error, str) and webhook_error.strip():
+            lowered = webhook_error.casefold()
+            infra_markers = (
+                "remote_disconnected",
+                "timeout",
+                "timed out",
+                "connection refused",
+                "connection reset",
+                "network is unreachable",
+                "temporary failure",
+                "name or service not known",
+                "connection aborted",
+                "broken pipe",
+            )
+            if any(marker in lowered for marker in infra_markers):
+                suppress_missing_reply = True
+        if not suppress_missing_reply and not isinstance(meta, dict):
+            if isinstance(meta_error, str) and meta_error.casefold() in {
+                "timeout",
+                "conversation_not_found",
+            } and state not in LLM_QUALITY_KNOWN_STATES:
+                suppress_missing_reply = True
+        if not suppress_missing_reply:
+            reasons.append("missing_bot_reply")
+            delivery_state = _llm_quality_outbox_delivery_state(
+                outbox_payload_status, outbox_summary
+            )
+            if delivery_state == "failed":
+                reasons.append("outbox_delivery_failed")
+            elif delivery_state in {"pending", "unknown"}:
+                reasons.append("outbox_delivery_timeout")
     if state == "manager_active" and bot_response:
         reasons.append("unexpected_bot_reply_manager")
     if state == "manager_active" and not handover_meta:
@@ -3423,6 +3627,27 @@ def _llm_quality_evaluate_turn(
         and not allow_booking_stall
     ):
         reasons.append("booking_slot_stall")
+
+    signal_map = tool_signals if isinstance(tool_signals, dict) else {}
+    calendar_signal = signal_map.get("calendar")
+    calendar_outcome = ""
+    if isinstance(calendar_signal, dict):
+        calendar_outcome = _llm_quality_normalize_tool_token(calendar_signal.get("outcome"))
+    appointment_id = (meta or {}).get("appointment_id") if isinstance(meta, dict) else None
+    appointment_status = _llm_quality_normalize_tool_token(
+        (meta or {}).get("appointment_status") if isinstance(meta, dict) else None
+    )
+    has_calendar_contract = bool(
+        appointment_id
+        or appointment_status in LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS
+        or calendar_signal
+    )
+    if has_calendar_contract and calendar_outcome != "success":
+        reasons.append("calendar_tool_contract_miss")
+
+    if _llm_quality_is_booking_confirmation_text(outbox_text):
+        if not appointment_id and calendar_outcome != "success":
+            reasons.append("false_booking_confirmation")
     return reasons
 
 def _parse_livecheck_args(argv):
@@ -4460,6 +4685,10 @@ def _llm_quality_retry_outbox_for_expected_reply(
     sleep_seconds = max(0.2, min(float(poll_interval or 0.6), 0.8))
     wait_budget = max(float(outbox_wait_seconds or 0.0), sleep_seconds * 2)
     attempts = max(1, min(6, int(math.ceil(wait_budget / sleep_seconds))))
+    last_summary = outbox_summary
+    last_payload = outbox_payload
+    last_status = outbox_payload_status
+    last_text = outbox_text
     for _ in range(attempts):
         time.sleep(sleep_seconds)
         retry_summary, _ = _fetch_outbox_summary(db_user, client_id, inbound_message_id)
@@ -4469,10 +4698,82 @@ def _llm_quality_retry_outbox_for_expected_reply(
         retry_text = _llm_quality_extract_outbox_text(retry_payload)
         if not retry_text and inline_response_text:
             retry_text = inline_response_text
-        retry_bot_response = bool((retry_summary or {}).get("count")) or bool(retry_text)
+        last_summary = retry_summary
+        last_payload = retry_payload
+        last_status = retry_status
+        last_text = retry_text
+        retry_bot_response = _llm_quality_has_bot_reply(
+            outbox_summary=retry_summary,
+            outbox_payload_status=retry_status,
+            outbox_text=retry_text,
+            inline_response_text=inline_response_text,
+        )
         if retry_bot_response:
             return retry_summary, retry_payload, retry_status, retry_text, True
-    return outbox_summary, outbox_payload, outbox_payload_status, outbox_text, bot_response
+    return last_summary, last_payload, last_status, last_text, bot_response
+
+def _llm_quality_payload_is_duplicate_ack(response_payload):
+    marker = "duplicate message_id"
+    if isinstance(response_payload, str):
+        return marker in response_payload.casefold()
+    if not isinstance(response_payload, dict):
+        return False
+    for field in ("message", "error"):
+        value = response_payload.get(field)
+        if isinstance(value, str) and marker in value.casefold():
+            return True
+    nested_response = response_payload.get("response")
+    if isinstance(nested_response, str):
+        if marker in nested_response.casefold():
+            return True
+        try:
+            nested_payload = json.loads(nested_response)
+        except Exception:
+            nested_payload = None
+        if _llm_quality_payload_is_duplicate_ack(nested_payload):
+            return True
+    return False
+
+def _llm_quality_should_infer_bot_response_from_duplicate_ack(
+    *,
+    bot_response,
+    expected_response,
+    response_payload,
+    attempts,
+    meta,
+    meta_error,
+    state,
+):
+    if bot_response or not expected_response:
+        return False
+    if attempts <= 1:
+        return False
+    if meta_error or not isinstance(meta, dict):
+        return False
+    if not _llm_quality_payload_is_duplicate_ack(response_payload):
+        return False
+    if state in {"pending", "manager_active"}:
+        return False
+    action = meta.get("action") or meta.get("pending_action")
+    if not isinstance(action, str):
+        return False
+    if action in CHAOS_PENDING_ACTIONS:
+        return False
+    if action in {
+        "escalate",
+        "booking_captured_pending",
+        "booking_reuse_handover",
+        "booking_paused",
+    }:
+        return False
+    return action in {
+        "reply",
+        "match",
+        "booking_prompt",
+        "smalltalk",
+        "booking_confirm",
+        "booking_escalated",
+    }
 
 def _fetch_outbox_rows(db_user, client_id, inbound_message_id, limit=5):
     safe_client = _escape_sql_literal(client_id)
@@ -5701,6 +6002,9 @@ def _run_llm_quality(args):
         "turns_expected_missing": 0,
         "turns_passed": 0,
         "turns_failed": 0,
+        "turns_strict_passed": 0,
+        "turns_strict_failed": 0,
+        "turns_hard_failed": 0,
         "unknown_state": 0,
         "decision_meta_missing": 0,
         "decision_trace_missing": 0,
@@ -6338,9 +6642,12 @@ def _run_llm_quality(args):
                 if not outbox_text and inline_response_text:
                     outbox_text = inline_response_text
 
-                bot_response = bool((outbox_summary or {}).get("count")) if outbox_summary else False
-                if inline_response_text:
-                    bot_response = True
+                bot_response = _llm_quality_has_bot_reply(
+                    outbox_summary=outbox_summary,
+                    outbox_payload_status=outbox_payload_status,
+                    outbox_text=outbox_text,
+                    inline_response_text=inline_response_text,
+                )
                 expected_response, expected_reason = _llm_quality_expected_response(state, meta)
                 if not args.dry_run:
                     (
@@ -6363,6 +6670,18 @@ def _run_llm_quality(args):
                         outbox_wait_seconds=outbox_wait_seconds,
                         poll_interval=args.poll_interval,
                     )
+                bot_response_inferred_duplicate_ack = False
+                if _llm_quality_should_infer_bot_response_from_duplicate_ack(
+                    bot_response=bot_response,
+                    expected_response=expected_response,
+                    response_payload=response_payload,
+                    attempts=attempts,
+                    meta=meta,
+                    meta_error=meta_error,
+                    state=state,
+                ):
+                    bot_response = True
+                    bot_response_inferred_duplicate_ack = True
                 if bot_response:
                     stats["turns_with_response"] += 1
                 else:
@@ -6512,6 +6831,12 @@ def _run_llm_quality(args):
                     booking_progress_expected=progress_expected,
                     booking_progressed=booking_progressed,
                     allow_booking_stall=allow_booking_stall,
+                    outbox_text=outbox_text,
+                    tool_signals=tool_signals,
+                    outbox_summary=outbox_summary,
+                    outbox_payload_status=outbox_payload_status,
+                    meta_error=meta_error,
+                    webhook_error=response_error,
                 )
                 if evaluation_reasons:
                     stats["turns_failed"] += 1
@@ -6611,8 +6936,28 @@ def _run_llm_quality(args):
                 else:
                     if judge_skip_reason:
                         _record_judge_skip(judge_skip_reason)
+
+                strict_reasons = list(evaluation_reasons or [])
+                if (
+                    isinstance(judge_result, dict)
+                    and judge_result.get("verdict") == "fail"
+                    and "judge_fail" not in strict_reasons
+                ):
+                    strict_reasons.append("judge_fail")
+                strict_reasons = list(dict.fromkeys(strict_reasons))
+                hard_reasons = [
+                    reason for reason in strict_reasons if reason in LLM_QUALITY_HARD_FAIL_REASONS
+                ]
+                strict_ok = not strict_reasons
+                if strict_ok:
+                    stats["turns_strict_passed"] += 1
+                else:
+                    stats["turns_strict_failed"] += 1
+                if hard_reasons:
+                    stats["turns_hard_failed"] += 1
+
                 _record_failure(
-                    evaluation_reasons,
+                    strict_reasons,
                     {
                         "type": "turn",
                         "dialog_id": dialog.get("dialog_id"),
@@ -6627,7 +6972,9 @@ def _run_llm_quality(args):
                         "bot_response": bot_response,
                         "info_tags": info_tags,
                         "booking_slots": booking_slots,
-                        "reasons": evaluation_reasons,
+                        "reasons": strict_reasons,
+                        "hard_reasons": hard_reasons,
+                        "strict_ok": strict_ok,
                     },
                 )
 
@@ -6710,6 +7057,7 @@ def _run_llm_quality(args):
                     "outbox_payload_status": outbox_payload_status,
                     "outbox_text": outbox_text,
                     "bot_response": bot_response,
+                    "bot_response_inferred_duplicate_ack": bot_response_inferred_duplicate_ack,
                     "expected_response": expected_response,
                     "expected_response_reason": expected_reason,
                     "turn_expectations": expectations,
@@ -6727,6 +7075,10 @@ def _run_llm_quality(args):
                     "evaluation": {
                         "ok": not evaluation_reasons,
                         "reasons": evaluation_reasons,
+                        "strict_ok": strict_ok,
+                        "strict_reasons": strict_reasons,
+                        "hard_fail": bool(hard_reasons),
+                        "hard_reasons": hard_reasons,
                     },
                     "judge": judge_result,
                     "manager_actions": manager_actions_run,
@@ -6766,7 +7118,7 @@ def _run_llm_quality(args):
                     )
                     + "\n"
                 )
-                if args.max_failures > 0 and stats["turns_failed"] >= args.max_failures:
+                if args.max_failures > 0 and stats["turns_strict_failed"] >= args.max_failures:
                     stop_reason = f"max_failures_reached:{args.max_failures}"
                     break
             if stop_reason:
@@ -6779,6 +7131,7 @@ def _run_llm_quality(args):
                     "stage": "llm_quality_stop",
                     "reason": stop_reason,
                     "turns_failed": stats["turns_failed"],
+                    "turns_strict_failed": stats["turns_strict_failed"],
                     "turns": stats["turns"],
                 },
                 ensure_ascii=False,
@@ -6810,6 +7163,9 @@ def _run_llm_quality(args):
             "turns_expected_missing": stats["turns_expected_missing"],
             "turns_passed": stats["turns_passed"],
             "turns_failed": stats["turns_failed"],
+            "turns_strict_passed": stats["turns_strict_passed"],
+            "turns_strict_failed": stats["turns_strict_failed"],
+            "turns_hard_failed": stats["turns_hard_failed"],
             "unknown_state": stats["unknown_state"],
             "decision_meta_missing": stats["decision_meta_missing"],
             "decision_trace_missing": stats["decision_trace_missing"],
@@ -6853,6 +7209,12 @@ def _run_llm_quality(args):
         )
         metrics["rates"]["pass_rate"] = round(
             stats["turns_passed"] / max(stats["turns"], 1), 4
+        )
+        metrics["rates"]["strict_pass_rate"] = round(
+            stats["turns_strict_passed"] / max(stats["turns"], 1), 4
+        )
+        metrics["rates"]["hard_fail_rate"] = round(
+            stats["turns_hard_failed"] / max(stats["turns"], 1), 4
         )
     if info_stats["turns_with_info_request"]:
         metrics["rates"]["info_answer_rate"] = round(

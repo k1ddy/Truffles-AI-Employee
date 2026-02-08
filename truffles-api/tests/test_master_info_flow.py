@@ -13,6 +13,17 @@ def test_detect_info_class_intents_master_signal():
     assert meta.get("info_signals", {}).get("master") is True
 
 
+def test_detect_info_class_intents_parking_signal():
+    intents, meta = _detect_info_class_intents(
+        "У вас есть парковка рядом?",
+        intent_decomp_set=set(),
+        client_slug="demo_salon",
+    )
+
+    assert "parking" in intents
+    assert meta.get("info_signals", {}).get("parking") is True
+
+
 def test_build_info_intent_reply_master_uses_truth_team():
     reply, meta = _build_info_intent_reply(
         "master",
