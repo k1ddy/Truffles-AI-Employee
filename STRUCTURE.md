@@ -131,6 +131,7 @@
 | `docs/REPORTS/2026-01-30-inbox-ux-v2.md` | Отчёт: Inbox UX v2 + макросы | Brain/Architect |
 | `docs/REPORTS/2026-01-31-console-media-infra-telegram.md` | Report: Console media infra + Telegram touchpoints | Brain/Architect |
 | `docs/REPORTS/2026-02-01-pack-compiler-implementation.md` | Report: Pack compiler implementation evidence + chaos-sim summary | Brain/Architect |
+| `docs/REPORTS/2026-02-08-enterprise-fleet-program.md` | Report: Enterprise fleet operating model + 5-PR execution plan | Brain/Architect |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
