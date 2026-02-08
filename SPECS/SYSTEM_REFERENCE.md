@@ -37,7 +37,8 @@
 - `ops/diagnose.py dialog-report` — one‑command отчёт по диалогу (таймлайн + решения + outbox + media/ASR).
 - `ops/diagnose.py deploy-verify` — проверка версии деплоя (`/admin/version`) и совпадения commit.
 - `ops/sync_client.py` — validate/sync client packs (truth → Qdrant).
-- `/home/zhan/truffles-main/scripts/restart_api.sh` — restart API контейнера (включая migration gate).
+- `/home/zhan/truffles-main/scripts/restart_release.sh` — единый release API+workers (migration gate + parity check).
+- `/home/zhan/truffles-main/scripts/restart_api.sh` — restart API контейнера (используется release flow).
 - SQL evidence: `docker exec -i truffles_postgres_1 psql -U n8n -d chatbot -c "<SQL>"`.
 - `docs/runbooks/TRACE_BUNDLE.md` — как читать trace‑bundle (timing + correlation).
 
@@ -140,7 +141,7 @@ python3 ops/diagnose.py dialog-report \
 | Embeddings | BGE-M3 (self-hosted, default `http://bge-m3:80/embed`, override `BGE_M3_URL`) |
 | LLM | OpenAI-compatible API (default `FAST_MODEL=gpt-5-mini`; router uses `ROUTER_MODEL` or `gpt-4o-mini` when FAST_MODEL starts with gpt-5) |
 | Кэш/очереди | Redis |
-| Оркестрация | Docker (API через `scripts/restart_api.sh`), compose — для инфры/локально |
+| Оркестрация | Docker (release через `scripts/restart_release.sh`), compose — для инфры/локально |
 | Reverse proxy | Traefik |
 | WhatsApp | ChatFlow API (`app.chatflow.kz`) |
 | Telegram | Bot API (webhook) |
@@ -173,17 +174,17 @@ python3 ops/diagnose.py dialog-report \
 
 ## 4. Деплой
 
-**docker-compose в проде:** инфра‑стек разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`. API деплой — через `/home/zhan/truffles-main/scripts/restart_api.sh`. `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
+**docker-compose в проде:** инфра‑стек разделён: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`); был кейс `KeyError: 'ContainerConfig'` на `up/build`. Прод релиз — через `/home/zhan/truffles-main/scripts/restart_release.sh`. `/home/zhan/truffles-main/docker-compose.yml` — заглушка.
 
 **Стандарт (CI/GHCR):**
 ```bash
-ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 RUN_MIGRATIONS=1 bash /home/zhan/truffles-main/scripts/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 RUN_MIGRATIONS=1 MIGRATION_BOOTSTRAP_MODE=auto REQUIRE_GHCR=1 VERIFY_VERSION=1 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main bash /home/zhan/truffles-main/scripts/restart_release.sh"
 ```
 
 **Fallback (локальная сборка):**
 ```bash
 ssh -p 222 zhan@5.188.241.234 "docker build -t truffles-api_truffles-api /home/zhan/truffles-main/truffles-api"
-ssh -p 222 zhan@5.188.241.234 "RUN_MIGRATIONS=1 bash /home/zhan/truffles-main/scripts/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "RUN_MIGRATIONS=1 MIGRATION_BOOTSTRAP_MODE=auto REQUIRE_GHCR=0 bash /home/zhan/truffles-main/scripts/restart_release.sh"
 ```
 
 **Логи:**
@@ -191,11 +192,17 @@ ssh -p 222 zhan@5.188.241.234 "RUN_MIGRATIONS=1 bash /home/zhan/truffles-main/sc
 ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 50"
 ```
 
-`restart_api.sh` поддерживает `IMAGE_NAME`, `PULL_IMAGE=1`, `RUN_MIGRATIONS=1`, `REQUIRE_GHCR=1`, `VERIFY_VERSION=1`.
+`restart_release.sh` поддерживает `IMAGE_NAME`, `PULL_IMAGE=1`, `RUN_MIGRATIONS=1`, `MIGRATION_BOOTSTRAP_MODE=auto|legacy|off`, `REQUIRE_GHCR=1`, `VERIFY_VERSION=1`, `EXPECTED_GIT_COMMIT`, `EXPECTED_VERSION`.
+`restart_api.sh` поддерживает `EXPECTED_IMAGE` и `MIGRATION_BOOTSTRAP_MODE`.
+
+**restart_release.sh:**
+- canonical path: `/home/zhan/truffles-main/scripts/restart_release.sh`
+- порядок: `docker pull` (optional) → digest resolve → `restart_api.sh` → `restart_workers.sh` → parity check API/workers image id
+- устраняет drift API vs workers и защищает от mutable tag ошибок.
 
 **restart_api.sh:**
 - canonical path: `/home/zhan/truffles-main/scripts/restart_api.sh`
-- порядок: `docker pull` (optional) → `apply_sql_migrations.py` (по умолчанию `RUN_MIGRATIONS=1`) → переключение `truffles-api` контейнера → version verify
+- порядок: `docker pull` (optional) → `apply_sql_migrations.py` (по умолчанию `RUN_MIGRATIONS=1`, bootstrap mode configurable) → переключение `truffles-api` контейнера → image verify → version verify
 - миграции исполняются из image (`/app/migrations`) с трекингом в `schema_migrations`; при ошибке скрипт падает до `docker rm -f truffles-api`.
 
 **Проверка нового кода:**
@@ -236,7 +243,7 @@ ssh -p 222 zhan@5.188.241.234 "curl -s http://localhost:8000/admin/health"
 
 1) **Task Package** содержит DoD/Tests/Live-check/Evidence (иначе STOP).
 2) **CI зелёный** (core/long по задаче) — ссылка на run обязательна.
-3) **Деплой** по разделу 4 (GHCR → `PULL_IMAGE=1`; fallback build допустим).
+3) **Деплой** по разделу 4 (`restart_release.sh`, GHCR + digest parity; fallback build допустим).
 4) **Проверка версии**: `/admin/version` + `/admin/health` (если version unknown → STOP).
 5) **Live-check** (если указан в DoD): реальный inbound → conv_id + decision_trace/meta.
 6) **STATE.md** обновляет Brain или Top Architect с evidence **до merge** для core/поведенческих изменений; финальная запись — в конце сессии.
@@ -250,16 +257,17 @@ ssh -p 222 zhan@5.188.241.234 "curl -s http://localhost:8000/admin/health"
 **Цель:** исключить ситуацию “CI зелёный, а контейнер на старом коде”.
 
 **Инварианты (обязательны в проде):**
-- Контейнер запускается только из GHCR‑образа (`ghcr.io/k1ddy/truffles-ai-employee:*`).
+- Контейнеры запускаются только из GHCR‑образа (`ghcr.io/k1ddy/truffles-ai-employee:*` или digest ref).
+- API и workers (`truffles-outbox`, `truffles-sentinel`) обязаны быть на одном image id.
 - `/admin/version` не должен быть `unknown`.
 - `git_commit` в `/admin/version` обязан совпадать с SHA деплоя.
 
 **Как обеспечиваем:**
 ```bash
 IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main \
-PULL_IMAGE=1 RUN_MIGRATIONS=1 REQUIRE_GHCR=1 VERIFY_VERSION=1 \
+PULL_IMAGE=1 RUN_MIGRATIONS=1 MIGRATION_BOOTSTRAP_MODE=auto REQUIRE_GHCR=1 VERIFY_VERSION=1 \
 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main \
-bash /home/zhan/truffles-main/scripts/restart_api.sh
+bash /home/zhan/truffles-main/scripts/restart_release.sh
 ```
 
 **Ручная проверка:**

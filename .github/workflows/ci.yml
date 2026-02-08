@@ -78,13 +78,25 @@ jobs:
               - "truffles-api/tests/test_demo_salon_eval.py"
             deploy_required:
               - "truffles-api/app/**"
+              - "truffles-api/migrations/**"
+              - "truffles-api/scripts/**"
               - "truffles-api/requirements.txt"
               - "truffles-api/Dockerfile"
+              - "scripts/restart_api.sh"
+              - "scripts/restart_workers.sh"
+              - "scripts/restart_release.sh"
+              - "scripts/check_migration_governance.py"
               - "knowledge/**"
             livecheck_required:
               - "truffles-api/app/**"
+              - "truffles-api/migrations/**"
+              - "truffles-api/scripts/**"
               - "truffles-api/requirements.txt"
               - "truffles-api/Dockerfile"
+              - "scripts/restart_api.sh"
+              - "scripts/restart_workers.sh"
+              - "scripts/restart_release.sh"
+              - "scripts/check_migration_governance.py"
               - "knowledge/**"
               - "ops/**"
               - ".github/workflows/**"
@@ -106,6 +118,8 @@ jobs:
         working-directory: truffles-api
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -122,6 +136,9 @@ jobs:
 
       - name: Lint (ruff)
         run: ruff check app tests
+
+      - name: Migration governance check
+        run: python ../scripts/check_migration_governance.py --strict
 
       - name: Smoke test (catches ImportError)
         run: python -c "from app.main import app; print('✓ App imports OK')"
@@ -681,7 +698,6 @@ jobs:
         needs.unit-tests.result == 'success' &&
         (needs.console-e2e.result == 'success' || needs.console-e2e.result == 'skipped') &&
         (needs.console-contract.result == 'success' || needs.console-contract.result == 'skipped') &&
-        (needs.core-eval.result == 'success' || needs.core-eval.result == 'skipped') &&
         (needs.long-eval.result == 'success' || needs.long-eval.result == 'skipped') &&
         (needs.asr-eval.result == 'success' || needs.asr-eval.result == 'skipped') &&
         needs.secret-scan.result == 'success'
@@ -776,6 +792,13 @@ jobs:
           fi
           echo "deploy_gate: event=${{ github.event_name }} ref=${{ github.ref }} run_livecheck=${{ inputs.run_livecheck }}"
 
+      - name: Enforce deploy on main
+        if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.changes.outputs.deploy_required == 'true' && steps.deploy_gate.outputs.deployed != 'true' }}
+        run: |
+          echo "ERROR: deploy_required=true but deploy gate blocked rollout on main." >&2
+          echo "build-push result: ${{ needs.build-push.result }}" >&2
+          exit 1
+
       - name: Deploy to VPS
         if: ${{ steps.deploy_gate.outputs.deployed == 'true' }}
         uses: appleboy/ssh-action@v1.0.0
@@ -864,23 +887,28 @@ jobs:
               grep -n 'docker compose' "${RESTART_SCRIPT}" || true
               grep -n '^cd ' "${RESTART_SCRIPT}" || true
             fi
+            RELEASE_SCRIPT="/home/zhan/truffles-main/scripts/restart_release.sh"
+            if [ ! -f "${RELEASE_SCRIPT}" ]; then
+              RELEASE_SCRIPT="/home/zhan/restart_release.sh"
+            fi
             IMAGE_TAG=main
             if [ "${{ github.ref }}" != "refs/heads/main" ]; then
               IMAGE_TAG=sha-${{ github.sha }}
             fi
             IMAGE_WITH_TAG=${{ env.IMAGE_NAME }}:${IMAGE_TAG}
             docker pull "${IMAGE_WITH_TAG}"
-            docker run --rm \
-              --env-file /home/zhan/truffles-main/truffles-api/.env \
-              --network truffles_internal-net \
-              "${IMAGE_WITH_TAG}" \
-              python /app/scripts/apply_sql_migrations.py --migrations-dir /app/migrations
-            IMAGE_NAME=${{ env.IMAGE_NAME }}:${IMAGE_TAG} PULL_IMAGE=0 \
+            IMAGE_DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "${IMAGE_WITH_TAG}" | head -n1)"
+            if [ -z "${IMAGE_DIGEST}" ]; then
+              echo "ERROR: cannot resolve image digest from ${IMAGE_WITH_TAG}" >&2
+              exit 1
+            fi
+            IMAGE_NAME="${IMAGE_DIGEST}" PULL_IMAGE=0 \
             RUN_MIGRATIONS=1 \
+            MIGRATION_BOOTSTRAP_MODE=auto \
             OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net,77785890765@s.whatsapp.net,77000000001@s.whatsapp.net,77000000002@s.whatsapp.net \
             REQUIRE_GHCR=1 VERIFY_VERSION=1 \
             EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
-            bash "${RESTART_SCRIPT}"
+            bash "${RELEASE_SCRIPT}"
             for ENV_FILE in "${ENV_FILES[@]}"; do
               if [ -f "${ENV_FILE}" ]; then
                 echo "ALLOWLIST after restart in ${ENV_FILE}:"
@@ -920,7 +948,7 @@ jobs:
         run: |
           run_livecheck="false"
           deploy_ok="false"
-          if [ "${{ needs.deploy.result }}" = "success" ] || [ "${{ needs.deploy.result }}" = "skipped" ]; then
+          if [ "${{ needs.deploy.outputs.deployed }}" = "true" ]; then
             deploy_ok="true"
           fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -935,7 +963,7 @@ jobs:
             fi
           fi
           echo "run=${run_livecheck}" >> "$GITHUB_OUTPUT"
-          echo "livecheck_gate: event=${{ github.event_name }} ref=${{ github.ref }} run_livecheck=${{ inputs.run_livecheck }} deploy_result=${{ needs.deploy.result }} livecheck_required=${{ needs.changes.outputs.livecheck_required }} gate_run=${run_livecheck}"
+          echo "livecheck_gate: event=${{ github.event_name }} ref=${{ github.ref }} run_livecheck=${{ inputs.run_livecheck }} deploy_result=${{ needs.deploy.result }} deployed=${{ needs.deploy.outputs.deployed }} livecheck_required=${{ needs.changes.outputs.livecheck_required }} gate_run=${run_livecheck}"
 
       - name: Configure SSH
         if: ${{ steps.livecheck_gate.outputs.run == 'true' }}

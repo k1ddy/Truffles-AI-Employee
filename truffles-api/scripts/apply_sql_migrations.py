@@ -4,13 +4,27 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence
+from typing import Dict, Iterable, List, Sequence, Set
 
 import psycopg2
 
 
 TRACKING_TABLE = "schema_migrations"
 MIGRATION_LOCK_KEY = 982451653
+BOOTSTRAP_ACTION_SKIP = "skip"
+BOOTSTRAP_ACTION_BOOTSTRAP = "bootstrap"
+BOOTSTRAP_MODE_OFF = "off"
+BOOTSTRAP_MODE_AUTO = "auto"
+BOOTSTRAP_MODE_LEGACY = "legacy"
+LEGACY_MARKER_TABLES = frozenset(
+    {
+        "clients",
+        "branches",
+        "users",
+        "conversations",
+        "messages",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -89,6 +103,67 @@ def _fetch_applied_checksums(conn) -> Dict[str, str]:
     return {name: checksum for name, checksum in rows}
 
 
+def _fetch_public_tables(conn) -> Set[str]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+            """
+        )
+        rows = cur.fetchall()
+    return {str(name) for (name,) in rows}
+
+
+def decide_bootstrap_action(
+    *,
+    applied_count: int,
+    public_tables: Set[str],
+    bootstrap_mode: str,
+) -> str:
+    if bootstrap_mode not in {BOOTSTRAP_MODE_OFF, BOOTSTRAP_MODE_AUTO, BOOTSTRAP_MODE_LEGACY}:
+        raise RuntimeError(f"Unsupported bootstrap mode: {bootstrap_mode}")
+
+    if applied_count > 0:
+        return BOOTSTRAP_ACTION_SKIP
+
+    user_tables = {name for name in public_tables if name != TRACKING_TABLE}
+    if not user_tables:
+        return BOOTSTRAP_ACTION_SKIP
+
+    if bootstrap_mode == BOOTSTRAP_MODE_OFF:
+        raise RuntimeError(
+            "schema_migrations is empty but database already has user tables; "
+            "rerun with --bootstrap auto|legacy"
+        )
+
+    if bootstrap_mode == BOOTSTRAP_MODE_AUTO:
+        missing_markers = sorted(LEGACY_MARKER_TABLES - public_tables)
+        if missing_markers:
+            marker_list = ", ".join(missing_markers)
+            raise RuntimeError(
+                "schema_migrations bootstrap(auto) refused: legacy marker tables are missing: "
+                f"{marker_list}. Rerun with --bootstrap legacy only if this is intentional."
+            )
+
+    return BOOTSTRAP_ACTION_BOOTSTRAP
+
+
+def _bootstrap_legacy(conn, migrations: Sequence[MigrationSpec]) -> None:
+    with conn.cursor() as cur:
+        for migration in migrations:
+            cur.execute(
+                f"""
+                INSERT INTO {TRACKING_TABLE} (name, checksum)
+                VALUES (%s, %s)
+                ON CONFLICT (name) DO NOTHING
+                """,
+                (migration.name, migration.checksum),
+            )
+    conn.commit()
+
+
 def _apply_migration(conn, migration: MigrationSpec) -> None:
     with conn.cursor() as cur:
         cur.execute(migration.sql)
@@ -123,6 +198,7 @@ def apply_migrations(
     migrations_dir: Path,
     *,
     check_only: bool = False,
+    bootstrap_mode: str = BOOTSTRAP_MODE_OFF,
 ) -> int:
     migrations = discover_migration_files(migrations_dir)
     if not migrations:
@@ -133,6 +209,22 @@ def apply_migrations(
         _acquire_lock(conn)
         _ensure_tracking_table(conn)
         applied = _fetch_applied_checksums(conn)
+        public_tables = _fetch_public_tables(conn)
+        bootstrap_action = decide_bootstrap_action(
+            applied_count=len(applied),
+            public_tables=public_tables,
+            bootstrap_mode=bootstrap_mode,
+        )
+        if bootstrap_action == BOOTSTRAP_ACTION_BOOTSTRAP:
+            if check_only:
+                print(
+                    "Migration check failed: schema_migrations bootstrap is required. "
+                    "Run apply with --bootstrap legacy|auto."
+                )
+                return 1
+            print(f"Bootstrapping {TRACKING_TABLE} from legacy schema (mode={bootstrap_mode})")
+            _bootstrap_legacy(conn, migrations)
+            applied = _fetch_applied_checksums(conn)
         pending, skipped = build_migration_plan(migrations, applied)
 
         print(
@@ -178,6 +270,11 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Check mode: fail if pending migrations exist",
     )
+    parser.add_argument(
+        "--bootstrap",
+        default=os.environ.get("MIGRATION_BOOTSTRAP_MODE", BOOTSTRAP_MODE_OFF),
+        help="Bootstrap mode for legacy DB without schema_migrations: off|auto|legacy",
+    )
     return parser.parse_args(argv)
 
 
@@ -188,11 +285,20 @@ def main(argv: Iterable[str] | None = None) -> int:
     if not database_url:
         print("ERROR: --database-url is required (or set DATABASE_URL)", file=sys.stderr)
         return 2
+    bootstrap_mode = (args.bootstrap or "").strip().lower()
+    if bootstrap_mode not in {BOOTSTRAP_MODE_OFF, BOOTSTRAP_MODE_AUTO, BOOTSTRAP_MODE_LEGACY}:
+        print("ERROR: --bootstrap must be one of: off, auto, legacy", file=sys.stderr)
+        return 2
 
     migrations_dir = Path(args.migrations_dir)
 
     try:
-        return apply_migrations(database_url, migrations_dir, check_only=args.check)
+        return apply_migrations(
+            database_url,
+            migrations_dir,
+            check_only=args.check,
+            bootstrap_mode=bootstrap_mode,
+        )
     except Exception as exc:
         print(f"ERROR: migration runner failed: {exc}", file=sys.stderr)
         return 1

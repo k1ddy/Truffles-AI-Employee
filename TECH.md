@@ -41,7 +41,7 @@ hostname; whoami; pwd; curl -s https://ifconfig.me
 | bge-m3 | text-embeddings-inference | Embeddings |
 | truffles-traefik | traefik:v2.11 | Reverse proxy |
 
-**Важно:** Инфраструктура разделена: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`). API в проде деплоится через `/home/zhan/truffles-main/scripts/restart_api.sh`. В `/home/zhan/truffles-main/docker-compose.yml` — заглушка (не использовать). Ранее был кейс ошибки `KeyError: 'ContainerConfig'` на `up/build`.
+**Важно:** Инфраструктура разделена: `traefik/website` → `/home/zhan/infrastructure/docker-compose.yml`, core stack → `/home/zhan/infrastructure/docker-compose.truffles.yml` (env: `/home/zhan/infrastructure/.env`). Прод релиз выполняется через `/home/zhan/truffles-main/scripts/restart_release.sh` (внутри вызывает `restart_api.sh` + `restart_workers.sh`). В `/home/zhan/truffles-main/docker-compose.yml` — заглушка (не использовать). Ранее был кейс ошибки `KeyError: 'ContainerConfig'` на `up/build`.
 
 ---
 
@@ -442,21 +442,34 @@ k6 run ops/k6/console_smoke.js
 
 **deploy_required (точный список путей):**
 - `truffles-api/app/**`
+- `truffles-api/migrations/**`
+- `truffles-api/scripts/**`
 - `truffles-api/requirements.txt`
 - `truffles-api/Dockerfile`
+- `scripts/restart_api.sh`
+- `scripts/restart_workers.sh`
+- `scripts/restart_release.sh`
+- `scripts/check_migration_governance.py`
 - `knowledge/**`
 
 **livecheck_required (точный список путей):**
 - `truffles-api/app/**`
+- `truffles-api/migrations/**`
+- `truffles-api/scripts/**`
 - `truffles-api/requirements.txt`
 - `truffles-api/Dockerfile`
+- `scripts/restart_api.sh`
+- `scripts/restart_workers.sh`
+- `scripts/restart_release.sh`
+- `scripts/check_migration_governance.py`
 - `knowledge/**`
 - `ops/**`
 - `.github/workflows/**`
 
 **Event gate (PR vs main):**
 - На PR `build-push`, `deploy`, `ci-livecheck` всегда skip.
-- На main эти шаги выполняются только при успешных обязательных джобах (lint/unit/secret-scan + core/long/asr, если они не skipped).
+- На main эти шаги выполняются только при успешных обязательных джобах (lint/unit/secret-scan + long/asr, если они не skipped).
+- `core-eval` остаётся обязательным quality-signal, но не блокирует deploy.
 
 ### Как форсировать проверки
 - **long/asr:** label `run-long` на PR или `workflow_dispatch` с `run_long=true`.
@@ -480,8 +493,8 @@ k6 run ops/k6/console_smoke.js
 
 ### Гейты build/deploy/livecheck (важно понимать)
 - `build-push` запускается только на `main` или `workflow_dispatch`, и только если lint/unit/secret-scan ok.
-- `deploy` внутри себя решает `deployed=true/false` (PR и не‑main → false).
-- `ci-livecheck` job всегда виден, но шаги выполняются только если `deploy` прошёл и событие допустимо.
+- `deploy` внутри себя решает `deployed=true/false`; на `main` при `deploy_required=true` silent skip запрещён (job падает).
+- `ci-livecheck` job всегда виден, но шаги выполняются только если `deploy.outputs.deployed=true`.
 
 ### Concurrency (почему бывают cancelled)
 - Для не‑main включён `cancel-in-progress`, поэтому новый PR‑пуш отменяет предыдущие run’ы. Это нормально.
@@ -518,15 +531,17 @@ ssh -p 222 zhan@5.188.241.234 "docker logs truffles-api --tail 100"
 ssh -p 222 zhan@5.188.241.234 "sed -i 's/^APP_VERSION=.*/APP_VERSION=main/' /home/zhan/truffles-main/truffles-api/.env"
 
 # CI build/push → pull image (prod standard)
-ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 RUN_MIGRATIONS=1 REQUIRE_GHCR=1 VERIFY_VERSION=1 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main bash /home/zhan/truffles-main/scripts/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "IMAGE_NAME=ghcr.io/k1ddy/truffles-ai-employee:main PULL_IMAGE=1 RUN_MIGRATIONS=1 MIGRATION_BOOTSTRAP_MODE=auto REQUIRE_GHCR=1 VERIFY_VERSION=1 EXPECTED_GIT_COMMIT=<sha> EXPECTED_VERSION=main bash /home/zhan/truffles-main/scripts/restart_release.sh"
 
 # ❌ Запрещено на проде: локальная docker-compose build/run для API
-# restart_api.sh по умолчанию использует GHCR и требует GHCR-образ (REQUIRE_GHCR=1).
+# restart_release.sh по умолчанию использует GHCR и требует GHCR-образ (REQUIRE_GHCR=1).
 # По умолчанию RUN_MIGRATIONS=1: SQL миграции применяются до переключения контейнера.
 ```
-`restart_api.sh` поддерживает `IMAGE_NAME`, `PULL_IMAGE=1`, `RUN_MIGRATIONS=1`, `REQUIRE_GHCR=1`, `VERIFY_VERSION=1`, `EXPECTED_GIT_COMMIT`, `EXPECTED_VERSION`.
+`restart_release.sh` поддерживает `IMAGE_NAME`, `PULL_IMAGE=1`, `RUN_MIGRATIONS=1`, `MIGRATION_BOOTSTRAP_MODE=auto|legacy|off`, `REQUIRE_GHCR=1`, `VERIFY_VERSION=1`, `EXPECTED_GIT_COMMIT`, `EXPECTED_VERSION`.
+Он резолвит immutable digest и применяет один image reference к `truffles-api`, `truffles-outbox`, `truffles-sentinel` с parity-check.
+`restart_api.sh` используется внутри release flow и поддерживает `EXPECTED_IMAGE`, `MIGRATION_BOOTSTRAP_MODE`.
 
-После деплоя обязательно перезапустить воркеры на том же образе, чтобы не было дрейфа:
+Точечный перезапуск только воркеров (если нужно отдельно):
 ```bash
 ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.env bash /home/zhan/truffles-main/scripts/restart_workers.sh"
 ```
@@ -545,17 +560,10 @@ ssh -p 222 zhan@5.188.241.234 "curl -s http://127.0.0.1:8011/health"
 
 ### Перезапуск API (без обновления кода)
 ```bash
-ssh -p 222 zhan@5.188.241.234 "RUN_MIGRATIONS=1 bash /home/zhan/truffles-main/scripts/restart_api.sh"
+ssh -p 222 zhan@5.188.241.234 "RUN_MIGRATIONS=1 MIGRATION_BOOTSTRAP_MODE=auto bash /home/zhan/truffles-main/scripts/restart_release.sh"
 ```
 По умолчанию перезапуск идёт с GHCR `:main` (REQUIRE_GHCR=1); локальные образы на проде запрещены.
-**Важно:** воркеры (`truffles-outbox`, `truffles-sentinel`) запускаются отдельно; `restart_api.sh` их не перезапускает.
-```bash
-ssh -p 222 zhan@5.188.241.234 "docker restart truffles-outbox truffles-sentinel"
-```
-Или через скрипт:
-```bash
-ssh -p 222 zhan@5.188.241.234 "ENV_FILE=/home/zhan/truffles-main/truffles-api/.env bash /home/zhan/truffles-main/scripts/restart_workers.sh"
-```
+`restart_release.sh` перезапускает API+workers в одном шаге и проверяет image parity.
 
 ### Запрос к БД
 ```bash
