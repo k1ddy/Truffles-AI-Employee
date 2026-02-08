@@ -7,10 +7,10 @@ from app.services.console_auth import (
     _build_access_map,
     _build_platform_admin_access_map,
     _filter_platform_admin_clients,
-    _resolve_legacy_agents,
     _resolve_branch_selection,
     _resolve_client_selection,
     _resolve_company_selection,
+    _resolve_legacy_agents,
     _resolve_role,
 )
 from app.services.console_errors import ConsoleAPIError
