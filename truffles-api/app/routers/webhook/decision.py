@@ -299,6 +299,10 @@ from app.services.capabilities_runtime import build_runtime_capabilities, set_ru
 from app.services.chatflow_service import get_instance_id
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
+from app.services.integration_guardrails_service import (
+    REASON_INBOUND_WITHOUT_OUTBOUND,
+    report_integration_incident,
+)
 from app.services.intent_service import (
     CONTROLLER_TIMEOUT_SECONDS,
     POLICY_CORE_CONFIDENCE_THRESHOLD,
@@ -315,10 +319,6 @@ from app.services.intent_service import (
     route_dialogue_controller,
     route_llm_policy_core,
     should_escalate,
-)
-from app.services.integration_guardrails_service import (
-    REASON_INBOUND_WITHOUT_OUTBOUND,
-    report_integration_incident,
 )
 from app.services.knowledge_registry_service import get_current_published
 from app.services.knowledge_runtime import (
