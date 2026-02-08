@@ -808,6 +808,17 @@ jobs:
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            set -euo pipefail
+            REPO_ROOT="/home/zhan/truffles-main"
+            if [ ! -d "${REPO_ROOT}/.git" ]; then
+              echo "ERROR: repo not found on host: ${REPO_ROOT}" >&2
+              exit 1
+            fi
+            git -C "${REPO_ROOT}" fetch origin
+            git -C "${REPO_ROOT}" checkout main
+            git -C "${REPO_ROOT}" pull --ff-only origin main
+            echo "Host repo HEAD after sync: $(git -C "${REPO_ROOT}" rev-parse HEAD)"
+
             export ALLOWLIST="77015705555@s.whatsapp.net,77785890765@s.whatsapp.net,77000000001@s.whatsapp.net,77000000002@s.whatsapp.net"
             ENV_FILES=(
               "/home/zhan/infrastructure/.env"
@@ -876,21 +887,15 @@ jobs:
                 echo "ENV_FILE missing: ${ENV_FILE}"
               fi
             done
-            RESTART_SCRIPT="/home/zhan/truffles-main/scripts/restart_api.sh"
-            if [ ! -f "${RESTART_SCRIPT}" ]; then
-              RESTART_SCRIPT="/home/zhan/restart_api.sh"
-            fi
-            if [ -f "${RESTART_SCRIPT}" ]; then
-              grep -n 'OUTBOUND_ALLOWLIST_JIDS' "${RESTART_SCRIPT}" || true
-              grep -n 'CHATFLOW_JID' "${RESTART_SCRIPT}" || true
-              grep -n 'env-file' "${RESTART_SCRIPT}" || true
-              grep -n 'docker compose' "${RESTART_SCRIPT}" || true
-              grep -n '^cd ' "${RESTART_SCRIPT}" || true
-            fi
-            RELEASE_SCRIPT="/home/zhan/truffles-main/scripts/restart_release.sh"
-            if [ ! -f "${RELEASE_SCRIPT}" ]; then
-              RELEASE_SCRIPT="/home/zhan/restart_release.sh"
-            fi
+            RESTART_SCRIPT="${REPO_ROOT}/scripts/restart_api.sh"
+            RELEASE_SCRIPT="${REPO_ROOT}/scripts/restart_release.sh"
+            test -f "${RESTART_SCRIPT}"
+            test -f "${RELEASE_SCRIPT}"
+            grep -n 'OUTBOUND_ALLOWLIST_JIDS' "${RESTART_SCRIPT}" || true
+            grep -n 'CHATFLOW_JID' "${RESTART_SCRIPT}" || true
+            grep -n 'env-file' "${RESTART_SCRIPT}" || true
+            grep -n 'docker compose' "${RESTART_SCRIPT}" || true
+            grep -n '^cd ' "${RESTART_SCRIPT}" || true
             IMAGE_TAG=main
             if [ "${{ github.ref }}" != "refs/heads/main" ]; then
               IMAGE_TAG=sha-${{ github.sha }}
