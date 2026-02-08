@@ -722,6 +722,11 @@ class ConsoleBranchIntegrationStatus(BaseModel):
     telegram_status: Literal["ok", "inactive", "missing_bot_token", "missing_chat_id"]
     last_inbound_at: Optional[str] = None
     last_inbound_instance_id: Optional[str] = None
+    integration_state: Literal["ok", "degraded"] = "ok"
+    integration_reason: Optional[str] = None
+    integration_checked_at: Optional[str] = None
+    integration_degraded_at: Optional[str] = None
+    integration_recovered_at: Optional[str] = None
     drift_issues: list[str] = []
     status: Literal["ok", "warn", "error"]
 

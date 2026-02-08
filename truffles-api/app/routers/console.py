@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import json
 import os
 import re
@@ -208,6 +206,7 @@ from app.services.state_service import manager_resolve as state_manager_resolve
 from app.services.state_service import manager_return as state_manager_return
 from app.services.state_service import manager_take as state_manager_take
 from app.services.telegram_service import TelegramService
+from app.services.webhook_secret_service import derive_webhook_secret_from_instance
 
 router = APIRouter(prefix="/console/v1", tags=["console"])
 
@@ -455,7 +454,9 @@ def _ensure_unique_branch_field(
     if not value:
         return
     column = getattr(Branch, field_name)
-    query = db.query(Branch).filter(Branch.client_id == client_id, column == value)
+    query = db.query(Branch).filter(column == value)
+    if field_name != "instance_id":
+        query = query.filter(Branch.client_id == client_id)
     if exclude_branch_id:
         query = query.filter(Branch.id != exclude_branch_id)
     if query.first():
@@ -904,7 +905,13 @@ _CLIENT_ARCHIVE_SAMPLE_LIMIT = 20
 _INTEGRATION_DEFAULT_STALE_MINUTES = 60
 _INTEGRATION_MIN_STALE_MINUTES = 5
 _INTEGRATION_MAX_STALE_MINUTES = 24 * 60
-_INTEGRATION_ALERT_ISSUES = {"instance_id_mismatch", "invalid_webhook_url", "no_recent_inbound"}
+_INTEGRATION_ALERT_ISSUES = {
+    "instance_id_mismatch",
+    "invalid_webhook_url",
+    "invalid_webhook_secret",
+    "inbound_without_outbound",
+    "no_recent_inbound",
+}
 _INTEGRATION_DRIFT_STATE: dict[str, str] = {}
 _INTEGRATION_DRIFT_LOCK = Lock()
 
@@ -1036,6 +1043,13 @@ def _build_branch_integration_status(
 ) -> ConsoleBranchIntegrationStatus:
     branch_instance_id = _normalize_optional_text(branch.instance_id)
     branch_telegram_chat_id = _normalize_optional_text(branch.telegram_chat_id)
+    integration_state = (_normalize_optional_text(getattr(branch, "integration_state", None)) or "ok").lower()
+    if integration_state not in {"ok", "degraded"}:
+        integration_state = "ok"
+    integration_reason = _normalize_optional_text(getattr(branch, "integration_reason", None))
+    integration_checked_at = getattr(branch, "integration_checked_at", None)
+    integration_degraded_at = getattr(branch, "integration_degraded_at", None)
+    integration_recovered_at = getattr(branch, "integration_recovered_at", None)
     webhook_url: Optional[str] = None
     webhook_url_valid = False
     drift_issues: list[str] = []
@@ -1080,6 +1094,10 @@ def _build_branch_integration_status(
         status = "error"
     elif branch.is_active and (whatsapp_status == "no_recent_inbound" or telegram_status in {"missing_bot_token", "missing_chat_id"}):
         status = "warn"
+    if branch.is_active and integration_state == "degraded":
+        status = "error"
+        if integration_reason and integration_reason not in drift_issues:
+            drift_issues.append(integration_reason)
 
     return ConsoleBranchIntegrationStatus(
         branch_id=branch.id,
@@ -1094,6 +1112,11 @@ def _build_branch_integration_status(
         telegram_status=telegram_status,
         last_inbound_at=last_inbound_at.isoformat() if last_inbound_at else None,
         last_inbound_instance_id=last_inbound_instance_id,
+        integration_state=integration_state,
+        integration_reason=integration_reason,
+        integration_checked_at=integration_checked_at.isoformat() if integration_checked_at else None,
+        integration_degraded_at=integration_degraded_at.isoformat() if integration_degraded_at else None,
+        integration_recovered_at=integration_recovered_at.isoformat() if integration_recovered_at else None,
         drift_issues=drift_issues,
         status=status,
     )
@@ -1129,6 +1152,9 @@ def _emit_integration_drift_signals(
                     "status": item.status,
                     "whatsapp_status": item.whatsapp_status,
                     "telegram_status": item.telegram_status,
+                    "integration_state": item.integration_state,
+                    "integration_reason": item.integration_reason,
+                    "integration_checked_at": item.integration_checked_at,
                     "last_inbound_at": item.last_inbound_at,
                     "last_inbound_instance_id": item.last_inbound_instance_id,
                     "configured_instance_id": item.instance_id,
@@ -6497,25 +6523,11 @@ def _serialize_reference_pack(record: ReferencePack) -> ConsoleReferencePack:
 
 
 _AUTOPILOT_DEFAULT_TIMEZONE = "Asia/Almaty"
-_WEBHOOK_SECRET_PREFIX = "whs_v1_"
-
-
-def _get_webhook_secret_salt() -> str:
-    return (
-        os.environ.get("WEBHOOK_SECRET_PEPPER")
-        or os.environ.get("SECRET_KEY")
-        or "truffles-webhook-secret-v1"
-    )
 
 
 def _derive_webhook_secret_from_instance(instance_id: str) -> str:
     normalized_instance = _normalize_required_text(instance_id, "instance_id")
-    digest = hmac.new(
-        _get_webhook_secret_salt().encode("utf-8"),
-        normalized_instance.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-    return f"{_WEBHOOK_SECRET_PREFIX}{digest[:40]}"
+    return derive_webhook_secret_from_instance(normalized_instance)
 
 
 def _build_webhook_url(*, client_slug: str, webhook_secret: str) -> str:

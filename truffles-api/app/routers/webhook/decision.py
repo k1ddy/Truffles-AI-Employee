@@ -299,6 +299,10 @@ from app.services.capabilities_runtime import build_runtime_capabilities, set_ru
 from app.services.chatflow_service import get_instance_id
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
+from app.services.integration_guardrails_service import (
+    REASON_INBOUND_WITHOUT_OUTBOUND,
+    report_integration_incident,
+)
 from app.services.intent_service import (
     CONTROLLER_TIMEOUT_SECONDS,
     POLICY_CORE_CONFIDENCE_THRESHOLD,
@@ -4651,6 +4655,7 @@ async def _handle_webhook_payload(
             _log_timing("send_ms", (time.monotonic() - send_start) * 1000, {"send_ok": True})
             return True
         sent = False
+        instance_id: str | None = None
         with start_span("webhook.send", context=timing_context) as span:
             instance_id = get_instance_id(
                 db,
@@ -4730,6 +4735,26 @@ async def _handle_webhook_payload(
         if span is not None:
             span.set_attribute("send.ok", bool(sent))
         _log_timing("send_ms", (time.monotonic() - send_start) * 1000, {"send_ok": sent})
+        if not sent and conversation and conversation.branch_id:
+            branch = (
+                db.query(Branch)
+                .filter(Branch.id == conversation.branch_id, Branch.client_id == client.id)
+                .first()
+            )
+            if branch:
+                report_integration_incident(
+                    db,
+                    client=client,
+                    branch=branch,
+                    reason=REASON_INBOUND_WITHOUT_OUTBOUND,
+                    source="webhook_send",
+                    context={
+                        "conversation_id": str(conversation.id),
+                        "message_id": message_id,
+                        "remote_jid": remote_jid,
+                        "instance_id": instance_id,
+                    },
+                )
         return sent
 
     if skip_persist:

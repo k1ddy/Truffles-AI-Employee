@@ -322,3 +322,4 @@
 | 2026-02-08-outbox-safety-hardstop-a16 | active | feat/2026-02-08-outbox-safety-hardstop-a16 | /home/zhan/worktrees/2026-02-08-outbox-safety-hardstop-a16 | docs/TASK_PACKAGES/TP-2026-02-07-outbox-false-sent-guard.md | 2026-02-08 |
 | 2026-02-08-instance-routing-alias-a17 | done | feat/2026-02-08-instance-routing-alias-a17 | /home/zhan/worktrees/2026-02-08-instance-routing-alias-a17 | docs/TASK_PACKAGES/TP-2026-02-08-instance-routing-alias-a17.md | 2026-02-08 |
 | 2026-02-08-ci-deploy-host-sync-hardening-a18 | done | feat/2026-02-08-ci-deploy-host-sync-hardening-a18 | /home/zhan/worktrees/2026-02-08-ci-deploy-host-sync-hardening-a18 | docs/TASK_PACKAGES/TP-2026-02-08-ci-deploy-host-sync-hardening-a18.md | 2026-02-08 |
+| 2026-02-08-integration-guardrails-a19 | done | feat/2026-02-08-integration-guardrails-a19 | /home/zhan/worktrees/2026-02-08-integration-guardrails-a19 | docs/TASK_PACKAGES/TP-2026-02-08-integration-guardrails-a19.md | 2026-02-08 |

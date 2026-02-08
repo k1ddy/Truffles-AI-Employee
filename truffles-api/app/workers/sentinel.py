@@ -8,6 +8,7 @@ from app.database import SessionLocal
 from app.logging_config import get_logger, setup_logging, start_span
 from app.models import Handover, OutboxMessage
 from app.services.health_service import check_and_alert_health, check_and_heal_conversations
+from app.services.integration_guardrails_service import run_integration_watchdog
 
 setup_logging()
 logger = get_logger("sentinel_worker")
@@ -61,11 +62,16 @@ def _setup_otel() -> None:
     SQLAlchemyInstrumentor().instrument(engine=engine)
     otel_logger.info("OTel enabled", extra={"context": {"endpoint": endpoint, "service": service_name}})
 
-def _get_sentinel_settings() -> tuple[float, bool]:
-    interval = float(os.environ.get("SENTINEL_INTERVAL_SECONDS", "300"))
+def _get_sentinel_settings() -> tuple[float, bool, bool]:
+    interval = float(os.environ.get("SENTINEL_INTERVAL_SECONDS", "60"))
     interval = max(interval, 60)
     heal_enabled = os.environ.get("SENTINEL_HEAL_ENABLED", "1").lower() not in ("0", "false", "no")
-    return interval, heal_enabled
+    integration_watchdog_enabled = os.environ.get("INTEGRATION_WATCHDOG_ENABLED", "1").lower() not in (
+        "0",
+        "false",
+        "no",
+    )
+    return interval, heal_enabled, integration_watchdog_enabled
 
 async def _run_sentinel_health_checks(db) -> dict:
     checks = {}
@@ -121,7 +127,7 @@ async def run_worker():
     logger.info("Starting Sentinel Worker...")
     while True:
         try:
-            interval, heal_enabled = _get_sentinel_settings()
+            interval, heal_enabled, integration_watchdog_enabled = _get_sentinel_settings()
             
             # Legacy behavior: sleep FIRST (avoid boot storm / wait for DB)
             await asyncio.sleep(interval)
@@ -148,6 +154,14 @@ async def run_worker():
                         logger.info(
                             "Sentinel healed conversations",
                             extra={"context": result},
+                        )
+                if integration_watchdog_enabled:
+                    with start_span("sentinel.integration_watchdog"):
+                        watchdog = run_integration_watchdog(db)
+                    if watchdog["degraded"] or watchdog["recovered"] or watchdog["remediated"]:
+                        logger.warning(
+                            "Sentinel integration watchdog updates",
+                            extra={"context": watchdog},
                         )
             finally:
                 db.close()

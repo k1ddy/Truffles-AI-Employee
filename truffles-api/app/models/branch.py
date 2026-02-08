@@ -28,6 +28,11 @@ class Branch(Base):
     onboarding_state = Column(Text)
     onboarding_updated_at = Column(TIMESTAMP(timezone=True))
     is_active = Column(Boolean, default=True)
+    integration_state = Column(Text, nullable=False, default="ok")
+    integration_reason = Column(Text)
+    integration_checked_at = Column(TIMESTAMP(timezone=True))
+    integration_degraded_at = Column(TIMESTAMP(timezone=True))
+    integration_recovered_at = Column(TIMESTAMP(timezone=True))
     created_at = Column(TIMESTAMP(timezone=True))
     updated_at = Column(TIMESTAMP(timezone=True))
 
