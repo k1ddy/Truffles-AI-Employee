@@ -101,6 +101,11 @@ class TestGetSystemHealth:
             "build_minimum_data_status",
             lambda _db: {"version": "minimum_data_contract.v1"},
         )
+        monkeypatch.setattr(
+            health_service,
+            "build_runtime_safety_snapshot",
+            lambda: Mock(to_dict=lambda: {"status": "ok", "danger_flags": []}),
+        )
 
         result = get_system_health(db)
 
@@ -109,6 +114,7 @@ class TestGetSystemHealth:
         assert result["conversations"]["manager_active"] == 1
         assert result["handovers"]["pending"] == 3
         assert result["handovers"]["active"] == 1
+        assert result["safety"]["status"] == "ok"
         assert result["minimum_data_contract"]["version"] == "minimum_data_contract.v1"
 
     def test_returns_checked_at_timestamp(self, monkeypatch):
@@ -119,7 +125,36 @@ class TestGetSystemHealth:
             "build_minimum_data_status",
             lambda _db: {"version": "minimum_data_contract.v1"},
         )
+        monkeypatch.setattr(
+            health_service,
+            "build_runtime_safety_snapshot",
+            lambda: Mock(to_dict=lambda: {"status": "ok", "danger_flags": []}),
+        )
 
         result = get_system_health(db)
 
         assert "checked_at" in result
+
+    def test_returns_safety_danger_flags(self, monkeypatch):
+        db = MagicMock()
+        db.query.return_value.filter.return_value.count.return_value = 0
+        monkeypatch.setattr(
+            health_service,
+            "build_minimum_data_status",
+            lambda _db: {"version": "minimum_data_contract.v1"},
+        )
+        monkeypatch.setattr(
+            health_service,
+            "build_runtime_safety_snapshot",
+            lambda: Mock(
+                to_dict=lambda: {
+                    "status": "danger",
+                    "danger_flags": ["test_mode_outbox_worker_on_nonlocal_db"],
+                }
+            ),
+        )
+
+        result = get_system_health(db)
+
+        assert result["safety"]["status"] == "danger"
+        assert result["safety"]["danger_flags"] == ["test_mode_outbox_worker_on_nonlocal_db"]

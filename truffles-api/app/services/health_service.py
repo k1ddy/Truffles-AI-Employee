@@ -9,6 +9,7 @@ from app.services.knowledge_validation import (
     MINIMUM_DATA_CONTRACT_VERSION,
     evaluate_minimum_data_contract,
 )
+from app.services.runtime_safety import build_runtime_safety_snapshot
 from app.services.state_machine import ConversationState
 from app.services.state_service import force_state
 
@@ -247,6 +248,7 @@ def get_system_health(db: Session) -> dict:
     pending_handovers = db.query(Handover).filter(Handover.status == "pending").count()
 
     active_handovers = db.query(Handover).filter(Handover.status == "active").count()
+    safety_snapshot = build_runtime_safety_snapshot()
 
     return {
         "conversations": {
@@ -258,6 +260,7 @@ def get_system_health(db: Session) -> dict:
             "pending": pending_handovers,
             "active": active_handovers,
         },
+        "safety": safety_snapshot.to_dict(),
         "minimum_data_contract": build_minimum_data_status(db),
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
