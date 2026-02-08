@@ -317,3 +317,4 @@
 | 2026-02-07-runbook-console-jobs-a15 | done | feat/2026-02-07-runbook-console-jobs-a15 | /home/zhan/worktrees/2026-02-07-runbook-console-jobs-a15 | docs/TASK_PACKAGES/TP-2026-02-07-runbook-console-jobs-a15.md | 2026-02-07 |
 | 2026-02-07-full-dedemo-core-imports-a15 | active | feat/2026-02-07-full-dedemo-core-imports-a15 | /home/zhan/worktrees/2026-02-07-full-dedemo-core-imports-a15 | docs/TASK_PACKAGES/TP-2026-02-07-pack-runtime-core-imports-a13.md | 2026-02-07 |
 | 2026-02-07-deploy-migration-guardrails-a15 | done | feat/2026-02-07-deploy-migration-guardrails-a15 | /home/zhan/worktrees/2026-02-07-deploy-migration-guardrails-a15 | docs/TASK_PACKAGES/TP-2026-02-07-deploy-migration-guardrails-a15.md | 2026-02-08 |
+| 2026-02-08-outbox-safety-hardstop-a16 | active | feat/2026-02-08-outbox-safety-hardstop-a16 | /home/zhan/worktrees/2026-02-08-outbox-safety-hardstop-a16 | docs/TASK_PACKAGES/TP-2026-02-07-outbox-false-sent-guard.md | 2026-02-08 |
