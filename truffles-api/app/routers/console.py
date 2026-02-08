@@ -912,6 +912,7 @@ _CLIENT_STATUS_ACTIVE = "active"
 _CLIENT_STATUS_ARCHIVED = "deleted"
 _CLIENT_LIFECYCLE_REASON_MAX_LEN = 500
 _ACCESS_REASON_MAX_LEN = 500
+_PRIVILEGED_ACCESS_ROLES = {"platform_admin", "owner", "admin"}
 _CLIENT_ARCHIVE_SAMPLE_LIMIT = 20
 _BRANCH_BOOTSTRAP_ACCOUNTS_MAX = 20
 _INTEGRATION_DEFAULT_STALE_MINUTES = 60
@@ -1194,6 +1195,151 @@ def _assert_agent_matches_membership_target(
             raise ConsoleAPIError(400, "INVALID_PARAM", "Agent belongs to another company")
 
 
+def _ensure_membership_role_is_assignable(role: Optional[str]) -> None:
+    if role == "platform_admin":
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            "platform_admin role cannot be assigned via membership",
+        )
+
+
+def _ensure_membership_agent_is_mutable(agent: Agent) -> None:
+    if agent.role == "platform_admin":
+        raise ConsoleAPIError(
+            409,
+            "INVALID_STATE",
+            "platform_admin membership is managed automatically",
+        )
+
+
+def _is_privileged_access_role(role: Optional[str]) -> bool:
+    return (role or "").strip().lower() in _PRIVILEGED_ACCESS_ROLES
+
+
+def _has_other_privileged_access_for_client(
+    db: Session,
+    *,
+    client: Client,
+    excluded_agent_ids: Optional[set[UUID]] = None,
+    excluded_membership_ids: Optional[set[UUID]] = None,
+) -> bool:
+    excluded_agent_ids = excluded_agent_ids or set()
+    excluded_membership_ids = excluded_membership_ids or set()
+
+    platform_admin_query = db.query(Agent.id).filter(
+        Agent.is_active.is_(True),
+        Agent.role == "platform_admin",
+    )
+    if excluded_agent_ids:
+        platform_admin_query = platform_admin_query.filter(~Agent.id.in_(excluded_agent_ids))
+    if platform_admin_query.first():
+        return True
+
+    branch_ids = [row[0] for row in db.query(Branch.id).filter(Branch.client_id == client.id).all()]
+    scope_filters = [and_(AgentMembership.scope == "client", AgentMembership.client_id == client.id)]
+    if branch_ids:
+        scope_filters.append(and_(AgentMembership.scope == "branch", AgentMembership.branch_id.in_(branch_ids)))
+    if client.company_id:
+        scope_filters.append(and_(AgentMembership.scope == "company", AgentMembership.company_id == client.company_id))
+
+    membership_query = (
+        db.query(AgentMembership.id)
+        .join(Agent, Agent.id == AgentMembership.agent_id)
+        .filter(
+            Agent.is_active.is_(True),
+            AgentMembership.is_active.is_(True),
+            AgentMembership.role.in_(tuple(_PRIVILEGED_ACCESS_ROLES)),
+            or_(*scope_filters),
+        )
+    )
+    if excluded_agent_ids:
+        membership_query = membership_query.filter(~AgentMembership.agent_id.in_(excluded_agent_ids))
+    if excluded_membership_ids:
+        membership_query = membership_query.filter(~AgentMembership.id.in_(excluded_membership_ids))
+    if membership_query.first():
+        return True
+
+    legacy_agent_query = db.query(Agent).filter(
+        Agent.is_active.is_(True),
+        Agent.client_id == client.id,
+        Agent.role.in_(tuple(_PRIVILEGED_ACCESS_ROLES)),
+    )
+    if excluded_agent_ids:
+        legacy_agent_query = legacy_agent_query.filter(~Agent.id.in_(excluded_agent_ids))
+    legacy_candidates = legacy_agent_query.all()
+    if not legacy_candidates:
+        return False
+
+    candidate_ids = [agent.id for agent in legacy_candidates]
+    membership_agent_ids = set()
+    if candidate_ids:
+        membership_agent_ids = {
+            row[0]
+            for row in db.query(AgentMembership.agent_id)
+            .filter(AgentMembership.agent_id.in_(candidate_ids))
+            .distinct()
+            .all()
+        }
+    return any(agent.id not in membership_agent_ids for agent in legacy_candidates)
+
+
+def _ensure_membership_change_keeps_privileged_access(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    membership: AgentMembership,
+    agent: Agent,
+    next_role: str,
+    next_is_active: bool,
+) -> None:
+    current_privileged = membership.is_active and _is_privileged_access_role(membership.role)
+    next_privileged = next_is_active and _is_privileged_access_role(next_role)
+    if not current_privileged or next_privileged:
+        return
+    if membership.agent_id == context.agent.id:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Cannot disable or downgrade your own privileged membership")
+
+    client = db.query(Client).filter(Client.id == agent.client_id).first()
+    if not client:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+    if not _has_other_privileged_access_for_client(
+        db,
+        client=client,
+        excluded_membership_ids={membership.id},
+    ):
+        raise ConsoleAPIError(
+            409,
+            "INVALID_STATE",
+            "Cannot remove last active privileged membership for this client",
+        )
+
+
+def _ensure_agent_lifecycle_is_mutable(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    agent: Agent,
+    enabling: bool,
+) -> None:
+    if agent.role == "platform_admin":
+        raise ConsoleAPIError(409, "INVALID_STATE", "platform_admin account is protected")
+    if not enabling and agent.id == context.agent.id:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Cannot disable your own account")
+    if enabling or not _is_privileged_access_role(agent.role):
+        return
+
+    client = db.query(Client).filter(Client.id == agent.client_id).first()
+    if not client:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+    if not _has_other_privileged_access_for_client(
+        db,
+        client=client,
+        excluded_agent_ids={agent.id},
+    ):
+        raise ConsoleAPIError(409, "INVALID_STATE", "Cannot disable the last active privileged account for this client")
+
+
 def _create_agent_with_membership(
     db: Session,
     *,
@@ -1221,19 +1367,21 @@ def _create_agent_with_membership(
     )
     db.add(agent)
 
-    membership = AgentMembership(
-        id=uuid4(),
-        agent_id=agent.id,
-        scope="branch" if branch else "client",
-        company_id=client.company_id,
-        client_id=client.id,
-        branch_id=branch.id if branch else None,
-        role=role,
-        is_active=is_active,
-        created_at=created_at,
-        updated_at=created_at,
-    )
-    db.add(membership)
+    # platform_admin is a global agent role; memberships are tenant-scoped only.
+    if role != "platform_admin":
+        membership = AgentMembership(
+            id=uuid4(),
+            agent_id=agent.id,
+            scope="branch" if branch else "client",
+            company_id=client.company_id,
+            client_id=client.id,
+            branch_id=branch.id if branch else None,
+            role=role,
+            is_active=is_active,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+        db.add(membership)
 
     if normalized_subject:
         identity = AgentIdentity(
@@ -7232,10 +7380,14 @@ async def list_memberships(
         if not accessible:
             continue
 
+        agent = agents_by_id.get(membership.agent_id)
+        if agent and agent.role == "platform_admin":
+            continue
+
         items.append(
             _serialize_membership(
                 membership,
-                agent=agents_by_id.get(membership.agent_id),
+                agent=agent,
             )
         )
 
@@ -7269,6 +7421,8 @@ async def create_membership(
     if not agent:
         raise ConsoleAPIError(404, "NOT_FOUND", "Agent not found")
     _require_client_access(context, agent.client_id)
+    _ensure_membership_agent_is_mutable(agent)
+    _ensure_membership_role_is_assignable(body.role)
 
     target = _resolve_membership_target(
         db,
@@ -7371,6 +7525,7 @@ async def update_membership(
         raise ConsoleAPIError(404, "NOT_FOUND", "Agent not found")
 
     _require_client_access(context, agent.client_id)
+    _ensure_membership_agent_is_mutable(agent)
 
     previous_scope = membership.scope
     previous_company_id = membership.company_id
@@ -7380,10 +7535,14 @@ async def update_membership(
     previous_role = membership.role
 
     fields_set = body.model_fields_set
+    if "role" in fields_set:
+        _ensure_membership_role_is_assignable(body.role)
     next_scope = body.scope if "scope" in fields_set else membership.scope
     next_company_id = body.company_id if "company_id" in fields_set else membership.company_id
     next_client_id = body.client_id if "client_id" in fields_set else membership.client_id
     next_branch_id = body.branch_id if "branch_id" in fields_set else membership.branch_id
+    next_role = body.role if "role" in fields_set and body.role else membership.role
+    next_is_active = body.is_active if "is_active" in fields_set and body.is_active is not None else membership.is_active
 
     target = _resolve_membership_target(
         db,
@@ -7403,6 +7562,14 @@ async def update_membership(
     )
     deactivation = "is_active" in fields_set and previous_active and body.is_active is False
     reason = _normalize_access_reason(body.reason, required=rescope_changed or deactivation)
+    _ensure_membership_change_keeps_privileged_access(
+        db,
+        context=context,
+        membership=membership,
+        agent=agent,
+        next_role=next_role,
+        next_is_active=next_is_active,
+    )
 
     duplicate_query = db.query(AgentMembership).filter(
         AgentMembership.id != membership.id,
@@ -7486,6 +7653,12 @@ async def disable_agent_access(
     if not agent:
         raise ConsoleAPIError(404, "NOT_FOUND", "Agent not found")
     _require_client_access(context, agent.client_id)
+    _ensure_agent_lifecycle_is_mutable(
+        db,
+        context=context,
+        agent=agent,
+        enabling=False,
+    )
     if not agent.is_active:
         raise ConsoleAPIError(409, "INVALID_STATE", "Agent is already disabled")
 
@@ -7534,6 +7707,12 @@ async def enable_agent_access(
     if not agent:
         raise ConsoleAPIError(404, "NOT_FOUND", "Agent not found")
     _require_client_access(context, agent.client_id)
+    _ensure_agent_lifecycle_is_mutable(
+        db,
+        context=context,
+        agent=agent,
+        enabling=True,
+    )
     if agent.is_active:
         raise ConsoleAPIError(409, "INVALID_STATE", "Agent is already active")
 
@@ -7585,6 +7764,8 @@ async def rebind_agent_oidc_identity(
     if not agent:
         raise ConsoleAPIError(404, "NOT_FOUND", "Agent not found")
     _require_client_access(context, agent.client_id)
+    if agent.role == "platform_admin" and context.role != "platform_admin":
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Only platform admin can rebind platform_admin OIDC")
 
     now = datetime.now(timezone.utc)
     oidc_identity = (

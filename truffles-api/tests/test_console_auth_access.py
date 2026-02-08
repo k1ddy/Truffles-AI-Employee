@@ -10,6 +10,7 @@ from app.services.console_auth import (
     _resolve_branch_selection,
     _resolve_client_selection,
     _resolve_company_selection,
+    _resolve_legacy_agents,
     _resolve_role,
 )
 from app.services.console_errors import ConsoleAPIError
@@ -98,6 +99,32 @@ def test_build_access_map_legacy_agent_fallback():
     assert entry.branch_ids == {branch_id}
     assert entry.roles == {"admin"}
     assert agent.id in entry.agent_ids
+
+
+def test_resolve_legacy_agents_excludes_agents_with_inactive_membership_rows():
+    legacy_agent = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        branch_id=None,
+        role="manager",
+    )
+    managed_agent = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        branch_id=None,
+        role="manager",
+    )
+    inactive_membership = SimpleNamespace(
+        agent_id=managed_agent.id,
+        is_active=False,
+    )
+
+    legacy_agents = _resolve_legacy_agents(
+        [legacy_agent, managed_agent],
+        [inactive_membership],
+    )
+
+    assert [agent.id for agent in legacy_agents] == [legacy_agent.id]
 
 
 def test_resolve_role_priority():

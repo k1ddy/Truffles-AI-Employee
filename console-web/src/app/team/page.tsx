@@ -39,7 +39,7 @@ type TeamBranch = { id?: string; name?: string };
 type TeamClient = { id?: string; name?: string };
 
 type TeamMe = {
-    agent?: { role?: ConsoleRole | null };
+    agent?: { id?: string | null; role?: ConsoleRole | null };
     client?: TeamClient | null;
     branches?: TeamBranch[];
     selected_branch_id?: string | null;
@@ -121,11 +121,13 @@ function UsersPanel({
     role,
     branches,
     clientId,
+    currentAgentId,
 }: {
     session: SessionData;
     role: ConsoleRole;
     branches: TeamBranch[];
     clientId?: string | null;
+    currentAgentId?: string | null;
 }) {
     const { handleError } = useErrorHandler();
     const queryClient = useQueryClient();
@@ -170,6 +172,15 @@ function UsersPanel({
     const agents = useMemo(() => {
         return (agentsQuery.data?.items ?? []) as Array<AgentBase | AgentWithIdentities>;
     }, [agentsQuery.data]);
+    const agentsById = useMemo(() => {
+        const mapped = new Map<string, AgentBase | AgentWithIdentities>();
+        agents.forEach((agent) => {
+            if (agent.id) {
+                mapped.set(agent.id, agent);
+            }
+        });
+        return mapped;
+    }, [agents]);
 
     useEffect(() => {
         setMembershipClientId(clientId ?? "");
@@ -203,6 +214,13 @@ function UsersPanel({
     const memberships = useMemo(() => {
         return (membershipsQuery.data?.items ?? []) as AgentMembership[];
     }, [membershipsQuery.data]);
+    const selectedMembershipAgent = membershipAgentId ? agentsById.get(membershipAgentId) : undefined;
+    const selectedMembershipAgentIsProtected = selectedMembershipAgent?.role === "platform_admin";
+
+    const isProtectedMembership = (membership: AgentMembership) => {
+        const membershipAgent = agentsById.get(membership.agent_id);
+        return membership.role === "platform_admin" || membershipAgent?.role === "platform_admin";
+    };
 
     useEffect(() => {
         if (membershipCompanyId) {
@@ -330,6 +348,10 @@ function UsersPanel({
     });
 
     const startMembershipEdit = (membership: AgentMembership) => {
+        if (isProtectedMembership(membership)) {
+            toast.error("platform_admin membership защищен и не редактируется");
+            return;
+        }
         setEditingMembershipId(membership.id);
         setEditingRole(membership.role);
         setEditingScope(membership.scope);
@@ -341,6 +363,10 @@ function UsersPanel({
     };
 
     const saveMembershipEdit = (membership: AgentMembership) => {
+        if (isProtectedMembership(membership)) {
+            toast.error("platform_admin membership защищен и не редактируется");
+            return;
+        }
         if (editingRole === "platform_admin" && role !== "platform_admin") {
             toast.error("Только platform_admin может назначать role=platform_admin");
             return;
@@ -381,6 +407,10 @@ function UsersPanel({
     };
 
     const toggleMembershipActive = (membership: AgentMembership) => {
+        if (isProtectedMembership(membership)) {
+            toast.error("platform_admin membership защищен и не отключается");
+            return;
+        }
         const nextActive = !membership.is_active;
         const reason = window.prompt(nextActive ? "Причина включения membership" : "Причина отключения membership");
         if (!reason || !reason.trim()) {
@@ -456,19 +486,36 @@ function UsersPanel({
         },
     });
 
-    const handleToggleAccess = (agentId: string, isActive: boolean) => {
+    const handleToggleAccess = (agent: AgentBase | AgentWithIdentities) => {
+        if (!agent.id) {
+            return;
+        }
+        if (agent.role === "platform_admin") {
+            toast.error("platform_admin аккаунт защищен");
+            return;
+        }
+        if (currentAgentId && agent.id === currentAgentId && agent.is_active) {
+            toast.error("Нельзя отключить собственную учетную запись");
+            return;
+        }
+        const isActive = Boolean(agent.is_active);
         const reason = window.prompt(isActive ? "Причина отключения доступа" : "Причина включения доступа");
         if (!reason || !reason.trim()) {
             return;
         }
         accessMutation.mutate({
-            agentId,
+            agentId: agent.id,
             enable: !isActive,
             reason: reason.trim(),
         });
     };
 
     const handleRebindOidc = (agentId: string) => {
+        const targetAgent = agentsById.get(agentId);
+        if (targetAgent?.role === "platform_admin" && role !== "platform_admin") {
+            toast.error("Только platform_admin может менять OIDC у platform_admin");
+            return;
+        }
         const oidcSubject = window.prompt("Новый oidc_subject");
         if (!oidcSubject || !oidcSubject.trim()) {
             return;
@@ -503,6 +550,10 @@ function UsersPanel({
     const handleCreateMembership = () => {
         if (!membershipAgentId) {
             toast.error("Выберите пользователя");
+            return;
+        }
+        if (selectedMembershipAgentIsProtected) {
+            toast.error("platform_admin membership не создается через Team");
             return;
         }
         if (membershipRole === "platform_admin" && role !== "platform_admin") {
@@ -573,7 +624,9 @@ function UsersPanel({
                         disabled={!canCreateAgent}
                     >
                         {TEAM_AGENT_ROLES.map((roleValue) => (
-                            <option key={roleValue} value={roleValue}>{roleValue}</option>
+                            <option key={roleValue} value={roleValue} disabled={roleValue === "platform_admin"}>
+                                {roleValue}
+                            </option>
                         ))}
                     </select>
                     <input
@@ -673,7 +726,11 @@ function UsersPanel({
                         {agents
                             .filter((agent) => Boolean(agent.id))
                             .map((agent, index) => (
-                                <option key={agent.id ?? `agent-create-${index}`} value={agent.id}>
+                                <option
+                                    key={agent.id ?? `agent-create-${index}`}
+                                    value={agent.id}
+                                    disabled={agent.role === "platform_admin"}
+                                >
                                     {(agent.name || "Без имени")} · {agent.role}
                                 </option>
                             ))}
@@ -744,11 +801,16 @@ function UsersPanel({
                         type="button"
                         className="btn-ghost disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={handleCreateMembership}
-                        disabled={!canManage || createMembershipMutation.isPending}
+                        disabled={!canManage || createMembershipMutation.isPending || selectedMembershipAgentIsProtected}
                     >
                         {createMembershipMutation.isPending ? "Сохранение..." : "Добавить membership"}
                     </button>
                 </div>
+                {selectedMembershipAgentIsProtected ? (
+                    <p className="mt-2 text-xs text-amber-700">
+                        Для `platform_admin` memberships управляются автоматически и не редактируются вручную.
+                    </p>
+                ) : null}
 
                 <div className="mt-4 space-y-2">
                     {membershipsQuery.isLoading ? (
@@ -759,6 +821,7 @@ function UsersPanel({
                         memberships.map((membership) => {
                             const isEditing = editingMembershipId === membership.id;
                             const rowLoading = membershipTarget === membership.id;
+                            const protectedMembership = isProtectedMembership(membership);
                             return (
                                 <div key={membership.id} className="rounded-lg border border-border/60 px-3 py-3">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -771,12 +834,15 @@ function UsersPanel({
                                             <span className={`text-xs ${membership.is_active ? "text-green-700" : "text-muted-foreground"}`}>
                                                 {membership.is_active ? "active" : "inactive"}
                                             </span>
+                                            {protectedMembership ? (
+                                                <span className="text-xs text-amber-700">protected</span>
+                                            ) : null}
                                             {canManage ? (
                                                 <button
                                                     type="button"
                                                     className="btn-ghost"
                                                     onClick={() => toggleMembershipActive(membership)}
-                                                    disabled={rowLoading}
+                                                    disabled={rowLoading || protectedMembership}
                                                 >
                                                     {rowLoading ? "..." : membership.is_active ? "Disable" : "Enable"}
                                                 </button>
@@ -786,7 +852,7 @@ function UsersPanel({
                                                     type="button"
                                                     className="btn-ghost"
                                                     onClick={() => startMembershipEdit(membership)}
-                                                    disabled={rowLoading}
+                                                    disabled={rowLoading || protectedMembership}
                                                 >
                                                     Edit
                                                 </button>
@@ -796,7 +862,7 @@ function UsersPanel({
                                     <div className="mt-1 text-xs text-muted-foreground">
                                         scope={membership.scope} · company={membership.company_id ?? "—"} · client={membership.client_id ?? "—"} · branch={membership.branch_id ?? "—"}
                                     </div>
-                                    {isEditing && canManage ? (
+                                    {isEditing && canManage && !protectedMembership ? (
                                         <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-6">
                                             <select
                                                 className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -804,7 +870,9 @@ function UsersPanel({
                                                 onChange={(event) => setEditingRole(event.target.value as AgentRole)}
                                             >
                                                 {TEAM_AGENT_ROLES.map((roleValue) => (
-                                                    <option key={roleValue} value={roleValue}>{roleValue}</option>
+                                                    <option key={roleValue} value={roleValue} disabled={roleValue === "platform_admin"}>
+                                                        {roleValue}
+                                                    </option>
                                                 ))}
                                             </select>
                                             <select
@@ -918,6 +986,8 @@ function UsersPanel({
                     const displayHandle = identity?.username ? `@${identity.username}` : identity?.external_id;
                     const agentBranchLabel = formatBranchLabel(agent.branch_id ?? null, branches);
                     const agentKey = agent.id ?? `agent-${index}`;
+                    const isProtectedAgent = agent.role === "platform_admin";
+                    const isSelfDisableBlocked = Boolean(currentAgentId && agent.id && agent.id === currentAgentId && agent.is_active);
 
                     return (
                         <div key={agentKey} className="card-surface p-5">
@@ -971,8 +1041,8 @@ function UsersPanel({
                                         <button
                                             type="button"
                                             className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() => handleToggleAccess(agent.id as string, Boolean(agent.is_active))}
-                                            disabled={accessTarget === agent.id}
+                                            onClick={() => handleToggleAccess(agent)}
+                                            disabled={accessTarget === agent.id || isProtectedAgent || isSelfDisableBlocked}
                                         >
                                             {accessTarget === agent.id
                                                 ? "Сохранение..."
@@ -984,7 +1054,7 @@ function UsersPanel({
                                             type="button"
                                             className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
                                             onClick={() => handleRebindOidc(agent.id as string)}
-                                            disabled={oidcTarget === agent.id}
+                                            disabled={oidcTarget === agent.id || (isProtectedAgent && role !== "platform_admin")}
                                         >
                                             {oidcTarget === agent.id ? "Сохранение..." : "OIDC rebind"}
                                         </button>
@@ -1239,6 +1309,7 @@ export default function TeamPage() {
                     role={role}
                     branches={branches}
                     clientId={meQuery.data?.client?.id ?? null}
+                    currentAgentId={meQuery.data?.agent?.id ?? null}
                 />
             ) : (
                 <SpecialistsPanel
