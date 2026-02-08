@@ -206,3 +206,119 @@ def test_create_agent_with_membership_skips_membership_for_platform_admin(monkey
 
     assert agent.role == "platform_admin"
     assert not any(isinstance(item, AgentMembership) for item in added)
+
+
+def test_membership_guard_blocks_self_privileged_downgrade():
+    actor_id = uuid4()
+    membership = SimpleNamespace(
+        id=uuid4(),
+        agent_id=actor_id,
+        is_active=True,
+        role="owner",
+    )
+    context = SimpleNamespace(agent=SimpleNamespace(id=actor_id))
+    agent = SimpleNamespace(client_id=uuid4())
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._ensure_membership_change_keeps_privileged_access(
+            Mock(),
+            context=context,
+            membership=membership,
+            agent=agent,
+            next_role="manager",
+            next_is_active=False,
+        )
+
+    assert exc_info.value.code == "INVALID_STATE"
+
+
+def test_membership_guard_blocks_last_privileged_membership(monkeypatch):
+    actor_id = uuid4()
+    membership = SimpleNamespace(
+        id=uuid4(),
+        agent_id=uuid4(),
+        is_active=True,
+        role="admin",
+    )
+    client_id = uuid4()
+    client = SimpleNamespace(id=client_id)
+    context = SimpleNamespace(agent=SimpleNamespace(id=actor_id))
+    agent = SimpleNamespace(client_id=client_id)
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = client
+
+    monkeypatch.setattr(
+        console_router,
+        "_has_other_privileged_access_for_client",
+        lambda *_args, **_kwargs: False,
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._ensure_membership_change_keeps_privileged_access(
+            db,
+            context=context,
+            membership=membership,
+            agent=agent,
+            next_role="manager",
+            next_is_active=False,
+        )
+
+    assert exc_info.value.code == "INVALID_STATE"
+
+
+def test_agent_lifecycle_guard_blocks_platform_admin():
+    context = SimpleNamespace(agent=SimpleNamespace(id=uuid4()))
+    agent = SimpleNamespace(id=uuid4(), role="platform_admin", client_id=uuid4())
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._ensure_agent_lifecycle_is_mutable(
+            Mock(),
+            context=context,
+            agent=agent,
+            enabling=False,
+        )
+
+    assert exc_info.value.code == "INVALID_STATE"
+
+
+def test_agent_lifecycle_guard_blocks_self_disable():
+    actor_id = uuid4()
+    context = SimpleNamespace(agent=SimpleNamespace(id=actor_id))
+    agent = SimpleNamespace(id=actor_id, role="owner", client_id=uuid4())
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._ensure_agent_lifecycle_is_mutable(
+            Mock(),
+            context=context,
+            agent=agent,
+            enabling=False,
+        )
+
+    assert exc_info.value.code == "INVALID_STATE"
+
+
+def test_agent_lifecycle_guard_blocks_last_privileged_agent(monkeypatch):
+    actor_id = uuid4()
+    target_agent_id = uuid4()
+    client_id = uuid4()
+    client = SimpleNamespace(id=client_id)
+    context = SimpleNamespace(agent=SimpleNamespace(id=actor_id))
+    agent = SimpleNamespace(id=target_agent_id, role="admin", client_id=client_id)
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = client
+
+    monkeypatch.setattr(
+        console_router,
+        "_has_other_privileged_access_for_client",
+        lambda *_args, **_kwargs: False,
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._ensure_agent_lifecycle_is_mutable(
+            db,
+            context=context,
+            agent=agent,
+            enabling=False,
+        )
+
+    assert exc_info.value.code == "INVALID_STATE"
