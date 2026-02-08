@@ -3,6 +3,7 @@ from app.schemas.intent import validate_llm_policy_core_output
 
 def test_validate_llm_policy_core_output_valid():
     payload = {
+        "intent": "pricing",
         "action": "fact",
         "tool_action": "info",
         "tool_args": {"service_query": "маникюр"},
@@ -27,7 +28,7 @@ def test_validate_llm_policy_core_output_valid():
 
 
 def test_validate_llm_policy_core_output_invalid():
-    payload = {"action": "", "confidence": 1.2}
+    payload = {"action": "", "tool_action": "info", "slots": {}, "confidence": 1.2}
 
     contract, error = validate_llm_policy_core_output(payload)
 

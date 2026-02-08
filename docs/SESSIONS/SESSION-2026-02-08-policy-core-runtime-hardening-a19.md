@@ -1,0 +1,47 @@
+# SESSION 2026-02-08-policy-core-runtime-hardening-a19 — Session 2026-02-08-policy-core-runtime-hardening-a19
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-08-policy-core-runtime-hardening-a19.md
+- branch: feat/2026-02-08-policy-core-runtime-hardening-a19
+- worktree: /home/zhan/worktrees/2026-02-08-policy-core-runtime-hardening-a19
+- base_ref: origin/main
+- scope: policy-core runtime hardening (envelope contract, degraded-safe guard, budget reserve, strict replay judge gate)
+- done:
+  - Session created.
+  - Hardened policy-core envelope contract:
+    - `intent` added as required contract field.
+    - `tool_action` and `slots` made required in schema validation.
+    - Prompt contract updated to include required `intent`.
+  - Runtime hardening in decision pipeline:
+    - Multi-intent reserve now keeps budget for `policy_core` and `answer_interpreter`.
+    - `decision_meta` now records `policy_core_mode` (`policy_core` / `degraded_fallback`) and `policy_core_degrade_reason`.
+    - Added `policy_core_guard` safe path for degraded critical contexts (booking/pending/handoff-safe).
+    - Narrowed guard scope after regression check:
+      - apply only when policy-core was actually attempted;
+      - keep strict hold for `pending` / `manager_active`;
+      - booking hold only for explicit booking request without info/consult signals.
+  - Strict replay judge gate in `ops/diagnose.py`:
+    - replay with `--scenarios-file` now fails when judge is disabled;
+    - explicit debug override via `--allow-judge-off`.
+  - Tests updated:
+    - contract tests for required policy-core envelope fields;
+    - message endpoint regression for degraded booking guard.
+  - Checks run:
+    - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/app/services/intent_service.py truffles-api/app/schemas/intent.py ops/diagnose.py truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_llm_policy_core.py`
+    - `pytest -q truffles-api/tests/test_llm_policy_core.py`
+    - `pytest -q truffles-api/tests/test_ai_service.py -k \"reserves_budget_for_controller\"`
+    - `pytest -q truffles-api/tests/test_llm_policy_core.py truffles-api/tests/test_ai_service.py -k \"reserves_budget_for_controller or llm_policy_core\"`
+    - `pytest -q truffles-api/tests/test_message_endpoint.py -k \"llm_policy_core_collect_sets_expected_reply_type or llm_policy_core_allows_plan_with_expected_reply or llm_policy_core_degraded_booking_guard_uses_safe_collect or unknown_state_fallback_sends_reply\"`
+    - `pytest -q truffles-api/tests/test_message_endpoint.py -k \"consult_precedence_over_booking_flow or booking_info_interrupt_appends_prompt or booking_time_service_question_keeps_time_contract or clarify_limit_escalates_after_two_attempts or multi_intent_long_message_prioritizes_booking or intent_queue_info_limit_skips_booking or intent_queue_choice_booking_starts_prompt_and_clears_queue or expected_reply_type_clears_on_match or expected_reply_type_off_topic_keeps_contract or expected_reply_type_invalid_choice_keeps_contract or booking_confirm_requires_yes_for_llm_slot or multi_truth_reply_handles_hours_and_service_without_booking\"` (9 passed / 3 failed)
+    - `set -a; source /home/zhan/truffles-main/truffles-api/.env; set +a; pytest -q truffles-api/tests/test_message_endpoint.py -k \"booking_time_service_question_keeps_time_contract or expected_reply_type_clears_on_match or multi_truth_reply_handles_hours_and_service_without_booking\"` (1 passed / 2 failed)
+    - `set -a; source /home/zhan/truffles-main/truffles-api/.env; set +a; pytest -q truffles-api/tests/test_message_endpoint.py -k \"booking_time_service_question_keeps_time_contract or expected_reply_type_clears_on_match or multi_truth_reply_handles_hours_and_service_without_booking\"` on `/home/zhan/truffles-main` (same: 1 passed / 2 failed)
+    - `python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/nonexistent.json --judge-mode off --dry-run`
+    - `python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/nonexistent.json --judge-mode off --allow-judge-off --dry-run`
+- next:
+  - Run full strict frozen replay with judge enabled (`count=10`) and compare baseline deltas.
+  - Infra blocker for strict replay: `ops/diagnose.py llm-quality` stalled in `_poll_decision_meta` (`docker exec ... psql` polling path) during long run; requires infra-safe mitigation before final `count=10` evidence.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-08-policy-core-runtime-hardening-a19.md
+  - command outputs from local checks listed above
+- last_updated: 2026-02-08

@@ -4050,6 +4050,11 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--judge-timeout", type=float, default=25.0)
     parser.add_argument("--judge-seed", type=int, default=None)
     parser.add_argument("--judge-no-redact", action="store_false", dest="judge_redact")
+    parser.add_argument(
+        "--allow-judge-off",
+        action="store_true",
+        help="Allow strict replay without judge (debug only).",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.set_defaults(judge_redact=True)
     return parser.parse_args(argv)
@@ -5920,10 +5925,17 @@ def _run_llm_quality(args):
     judge_mode = args.judge_mode
     judge_api_key = args.judge_api_key or os.environ.get("OPENAI_API_KEY")
     judge_enabled = judge_mode != "off"
-    judge_skip_reason = None
+    judge_skip_reason = "judge_mode_off" if judge_mode == "off" else None
     if judge_enabled and not judge_api_key:
         judge_enabled = False
         judge_skip_reason = "missing_api_key"
+    judge_required = bool(args.scenarios_file and not args.allow_judge_off)
+    if judge_required and not judge_enabled:
+        raise SystemExit(
+            "llm-quality: strict replay requires judge enabled "
+            f"(reason={judge_skip_reason or 'judge_disabled'}; use --judge-mode sample|all and API key, "
+            "or pass --allow-judge-off for debug-only runs)"
+        )
     judge_seed = args.judge_seed if args.judge_seed is not None else args.seed
     judge_rng = random.Random(judge_seed or int(time.time()))
 
@@ -6056,6 +6068,7 @@ def _run_llm_quality(args):
     judge_stats = {
         "enabled": judge_enabled,
         "mode": judge_mode if judge_enabled else "off",
+        "required": judge_required,
         "sample": args.judge_sample,
         "model": args.judge_model if judge_enabled else None,
         "base_url": args.judge_base_url if judge_enabled else None,
@@ -7297,6 +7310,7 @@ def _run_llm_quality(args):
         "baseline_summary": args.baseline_summary,
         "regression_tolerance": args.regression_tolerance,
         "judge_mode": judge_mode,
+        "judge_required": judge_required,
         "judge_sample": args.judge_sample,
         "judge_model": args.judge_model if judge_enabled else None,
         "judge_redact": args.judge_redact,

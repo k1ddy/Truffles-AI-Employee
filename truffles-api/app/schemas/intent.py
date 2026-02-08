@@ -203,11 +203,12 @@ class LlmPlanOutput(BaseModel):
 class LlmPolicyCoreOutput(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    intent: str
     action: str
-    tool_action: str | None = None
+    tool_action: str
     tool_args: dict[str, Any] = Field(default_factory=dict)
     pack_refs: list[str] = Field(default_factory=list)
-    slots: dict[str, str] = Field(default_factory=dict)
+    slots: dict[str, str]
     next_question: str | None = None
     open_questions: list[str] = Field(default_factory=list)
     needs_manager: bool = False
@@ -217,10 +218,10 @@ class LlmPolicyCoreOutput(BaseModel):
     reason: str | None = None
     goal: str | None = None
 
-    @field_validator("action", mode="before")
+    @field_validator("intent", "action", "tool_action", mode="before")
     @classmethod
-    def _validate_action(cls, value: Any) -> str:
-        return _normalize_required_string(value, field="action")
+    def _validate_action(cls, value: Any, info) -> str:
+        return _normalize_required_string(value, field=info.field_name)
 
     @field_validator("tool_action", "language", "reason", "goal", "next_question", mode="before")
     @classmethod
