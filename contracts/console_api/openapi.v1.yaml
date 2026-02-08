@@ -1375,7 +1375,13 @@ paths:
           schema:
             type: string
             enum: ["true", "false"]
-          description: Include fleet/commercial derived fields and response summary.
+          description: Include fleet/commercial derived fields on each client item.
+        - name: include_summary
+          in: query
+          schema:
+            type: string
+            enum: ["true", "false"]
+          description: Include full-scope fleet summary for the current filter set.
         - name: fleet_lifecycle
           in: query
           schema:

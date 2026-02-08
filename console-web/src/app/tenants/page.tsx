@@ -185,6 +185,7 @@ export default function TenantsPage() {
                 q: clientQueryValue,
                 lifecycle: tenantLifecycle,
                 include_fleet: "true",
+                include_summary: cursor ? undefined : "true",
                 fleet_lifecycle: fleetLifecycleFilter === "all" ? undefined : fleetLifecycleFilter,
                 payment_status: fleetPaymentFilter === "all" ? undefined : fleetPaymentFilter,
                 service_state: fleetServiceFilter === "all" ? undefined : fleetServiceFilter,

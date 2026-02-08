@@ -175,7 +175,7 @@ async def test_list_clients_include_fleet_enriches_items_and_summary(monkeypatch
         raise AssertionError(f"Unexpected model: {model}")
 
     db.query.side_effect = _query_side_effect
-    request = SimpleNamespace(query_params={"include_fleet": "true"})
+    request = SimpleNamespace(query_params={"include_fleet": "true", "include_summary": "true"})
 
     monkeypatch.setattr(
         console_router,
@@ -204,6 +204,7 @@ async def test_list_clients_include_fleet_enriches_items_and_summary(monkeypatch
     response = await console_router.list_clients(
         request=request,
         include_fleet="true",
+        include_summary="true",
         db=db,
     )
 

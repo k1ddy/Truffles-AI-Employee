@@ -7,7 +7,7 @@ from datetime import date as dt_date
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
@@ -927,6 +927,17 @@ _FLEET_LIFECYCLE_STATES = {
 }
 _FLEET_PAYMENT_STATES = {"pending", "confirmed", "rejected", "unknown"}
 _FLEET_SERVICE_STATES = {"ok", "degraded", "attention"}
+_FLEET_LIFECYCLE_ORDER = [
+    "lead",
+    "contracting",
+    "onboarding",
+    "go_live_ready",
+    "active",
+    "paused",
+    "archived",
+]
+_FLEET_PAYMENT_ORDER = ["pending", "confirmed", "rejected", "unknown"]
+_FLEET_SERVICE_ORDER = ["ok", "degraded", "attention"]
 
 
 @dataclass
@@ -1240,38 +1251,17 @@ def _fleet_client_matches_filters(
     return True
 
 
-def _build_fleet_summary(
+def _compose_fleet_summary(
     *,
-    clients: list[Client],
-    details_map: dict[UUID, _FleetClientDetails],
+    total_clients: int,
+    company_ids: set[UUID],
+    lifecycle_counts: dict[str, int],
+    payment_counts: dict[str, int],
+    service_counts: dict[str, int],
 ) -> ConsoleFleetSummary:
-    lifecycle_order = [
-        "lead",
-        "contracting",
-        "onboarding",
-        "go_live_ready",
-        "active",
-        "paused",
-        "archived",
-    ]
-    payment_order = ["pending", "confirmed", "rejected", "unknown"]
-    service_order = ["ok", "degraded", "attention"]
-    lifecycle_counts = {state: 0 for state in lifecycle_order}
-    payment_counts = {state: 0 for state in payment_order}
-    service_counts = {state: 0 for state in service_order}
-    company_ids = {client.company_id for client in clients if client.company_id}
-
-    for client in clients:
-        details = details_map.get(client.id)
-        if not details:
-            continue
-        lifecycle_counts[details.lifecycle_state] += 1
-        payment_counts[details.payment_status] += 1
-        service_counts[details.service_state] += 1
-
     return ConsoleFleetSummary(
         total_companies=len(company_ids),
-        total_clients=len(clients),
+        total_clients=total_clients,
         active_clients=lifecycle_counts["active"],
         onboarding_clients=lifecycle_counts["onboarding"],
         archived_clients=lifecycle_counts["archived"],
@@ -1280,6 +1270,75 @@ def _build_fleet_summary(
         degraded_clients=service_counts["degraded"],
         payment_pending_clients=payment_counts["pending"],
         payment_confirmed_clients=payment_counts["confirmed"],
+        lifecycle_counts=lifecycle_counts,
+        payment_counts=payment_counts,
+        service_counts=service_counts,
+    )
+
+
+def _build_fleet_summary_for_scope(
+    db: Session,
+    *,
+    build_client_query: Callable[[Optional[datetime]], object],
+    fleet_lifecycle: Optional[str],
+    payment_status: Optional[str],
+    service_state: Optional[str],
+    batch_size: int = 200,
+) -> ConsoleFleetSummary:
+    lifecycle_counts = {state: 0 for state in _FLEET_LIFECYCLE_ORDER}
+    payment_counts = {state: 0 for state in _FLEET_PAYMENT_ORDER}
+    service_counts = {state: 0 for state in _FLEET_SERVICE_ORDER}
+    total_clients = 0
+    company_ids: set[UUID] = set()
+    scan_cursor: Optional[datetime] = None
+
+    while True:
+        batch = (
+            build_client_query(scan_cursor)
+            .order_by(Client.created_at.desc(), Client.id.desc())
+            .limit(batch_size)
+            .all()
+        )
+        if not batch:
+            break
+
+        batch_company_ids = {client.company_id for client in batch if client.company_id}
+        batch_companies_by_id: dict[UUID, Company] = {}
+        if batch_company_ids:
+            batch_companies = db.query(Company).filter(Company.id.in_(batch_company_ids)).all()
+            batch_companies_by_id = {company.id: company for company in batch_companies}
+
+        batch_details = _build_fleet_client_details_map(
+            db,
+            clients=batch,
+            companies_by_id=batch_companies_by_id,
+        )
+
+        for client in batch:
+            details = batch_details.get(client.id)
+            if not details:
+                continue
+            if not _fleet_client_matches_filters(
+                details,
+                fleet_lifecycle=fleet_lifecycle,
+                payment_status=payment_status,
+                service_state=service_state,
+            ):
+                continue
+            total_clients += 1
+            if client.company_id:
+                company_ids.add(client.company_id)
+            lifecycle_counts[details.lifecycle_state] += 1
+            payment_counts[details.payment_status] += 1
+            service_counts[details.service_state] += 1
+
+        if len(batch) < batch_size:
+            break
+        scan_cursor = batch[-1].created_at
+
+    return _compose_fleet_summary(
+        total_clients=total_clients,
+        company_ids=company_ids,
         lifecycle_counts=lifecycle_counts,
         payment_counts=payment_counts,
         service_counts=service_counts,
@@ -5620,6 +5679,7 @@ async def list_clients(
     company_id: Optional[str] = None,
     lifecycle: Optional[str] = None,
     include_fleet: Optional[str] = None,
+    include_summary: Optional[str] = None,
     fleet_lifecycle: Optional[str] = None,
     payment_status: Optional[str] = None,
     service_state: Optional[str] = None,
@@ -5627,10 +5687,13 @@ async def list_clients(
 ) -> ConsoleClientListResponse:
     lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
     include_fleet_mode = _parse_bool_param("include_fleet", include_fleet, default=False)
+    include_summary_mode = _parse_bool_param("include_summary", include_summary, default=False)
     fleet_lifecycle_filter = _parse_fleet_lifecycle_param(fleet_lifecycle)
     payment_status_filter = _parse_fleet_payment_param(payment_status)
     service_state_filter = _parse_fleet_service_param(service_state)
     if fleet_lifecycle_filter or payment_status_filter or service_state_filter:
+        include_fleet_mode = True
+    if include_summary_mode:
         include_fleet_mode = True
     context = get_console_context(
         request,
@@ -5648,6 +5711,7 @@ async def list_clients(
             "company_id",
             "lifecycle",
             "include_fleet",
+            "include_summary",
             "fleet_lifecycle",
             "payment_status",
             "service_state",
@@ -5756,7 +5820,16 @@ async def list_clients(
             companies_by_id=companies_by_id,
         )
 
-    summary = _build_fleet_summary(clients=clients, details_map=fleet_details_map) if include_fleet_mode else None
+    summary = None
+    if include_summary_mode:
+        summary = _build_fleet_summary_for_scope(
+            db,
+            build_client_query=_build_client_query,
+            fleet_lifecycle=fleet_lifecycle_filter,
+            payment_status=payment_status_filter,
+            service_state=service_state_filter,
+            batch_size=max(limit * 4, 100),
+        )
 
     return ConsoleClientListResponse(
         items=[

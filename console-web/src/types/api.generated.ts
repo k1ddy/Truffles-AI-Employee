@@ -3865,8 +3865,10 @@ export interface operations {
                 company_id?: string;
                 /** @description Tenant lifecycle filter (`active` by default). */
                 lifecycle?: "active" | "archived" | "all";
-                /** @description Include fleet/commercial derived fields and response summary. */
+                /** @description Include fleet/commercial derived fields on each client item. */
                 include_fleet?: "true" | "false";
+                /** @description Include full-scope fleet summary for the current filter set. */
+                include_summary?: "true" | "false";
                 /** @description Filter by derived fleet lifecycle state. */
                 fleet_lifecycle?: "lead" | "contracting" | "onboarding" | "go_live_ready" | "active" | "paused" | "archived" | "all";
                 /** @description Filter by latest onboarding contract payment status. */
