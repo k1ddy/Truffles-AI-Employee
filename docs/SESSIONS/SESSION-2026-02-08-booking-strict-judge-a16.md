@@ -9,10 +9,30 @@
 - scope: strict llm-quality evaluator hard-fail gates to prevent false OK, plus frozen replay validation and operator SOP update.
 - done:
   - Session created.
+  - Added strict evaluator gates in `ops/diagnose.py`:
+    - `strict_pass_rate` + `hard_fail_rate` metrics and per-turn `evaluation.strict_ok`.
+    - New reason codes: `false_booking_confirmation`, `calendar_tool_contract_miss`, `judge_fail`.
+    - Hard-fail taxonomy set (`LLM_QUALITY_HARD_FAIL_REASONS`) and strict failure accounting.
+  - Fixed stale trace leakage in info matching:
+    - current-turn trace filtering by `decision_meta.timing.pipeline_started_at/pipeline_finished_at`;
+    - no fallback to old trace tail when pipeline window is present but empty.
+  - Added regressions:
+    - `truffles-api/tests/test_booking_quality_response_guard.py` (+calendar/false-confirm tests).
+    - `truffles-api/tests/test_booking_quality_info_sections.py` (+pipeline-window stale-trace tests).
+  - Updated operator/human runbook with strict replay SOP, timeout/recovery protocol, strict metrics interpretation, and extended reason taxonomy.
+  - Ran checks:
+    - `python3 -m py_compile ops/diagnose.py`
+    - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py` (9 passed)
+    - `pytest -q truffles-api/tests/test_booking_quality_info_sections.py` (5 passed)
+    - `pytest -q truffles-api/tests/test_booking_quality_progress_gate.py` (3 passed)
+  - Ran frozen replay smoke on main seed=1337 (`count=1`) without modifying source artifacts.
 - next:
-  - Implement strict evaluator hard-fail contract and regression tests.
-  - Replay frozen main seed=1337 scenarios and collect evidence.
-  - Update runbook with detailed future-agent/human instructions.
+  - Run full frozen replay (`count=10`) with timeout/resume command from runbook to collect full-matrix strict deltas.
+  - Triage dominant expectation failures (`expected_state_mismatch`, `expected_reply_mismatch`) vs scenario contract.
+  - If full replay confirms reproducibility, open/update PR summary with strict metrics and handoff command.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-08-booking-strict-judge.md
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke1b/summary.json
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke1b/responses.jsonl
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke1b/brief.md
 - last_updated: 2026-02-08

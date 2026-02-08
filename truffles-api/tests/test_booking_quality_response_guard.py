@@ -24,12 +24,18 @@ def _load_evaluate_turn():
     tree = ast.parse(source, filename=str(script_path))
     wanted_functions = {
         "_llm_quality_evaluate_turn",
+        "_llm_quality_is_booking_confirmation_text",
+        "_llm_quality_normalize_tool_token",
     }
     selected_nodes = []
     for node in tree.body:
         if isinstance(node, ast.Assign):
             names = {target.id for target in node.targets if isinstance(target, ast.Name)}
-            if "LLM_QUALITY_KNOWN_STATES" in names:
+            if {
+                "LLM_QUALITY_KNOWN_STATES",
+                "LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS",
+                "LLM_QUALITY_BOOKING_CONFIRM_PHRASES",
+            } & names:
                 selected_nodes.append(node)
         if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
             selected_nodes.append(node)
@@ -178,6 +184,90 @@ def test_booking_slot_stall_reported_in_bot_active_state():
         allow_booking_stall=False,
     )
     assert "booking_slot_stall" in reasons
+
+
+def test_false_booking_confirmation_is_reported_without_calendar_proof():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "reply"},
+        trace_entries=[{"stage": "booking"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Вы записаны на завтра в 18:30.",
+        tool_signals={},
+    )
+    assert "false_booking_confirmation" in reasons
+
+
+def test_calendar_contract_miss_reported_when_appointment_has_no_calendar_success():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "booking_escalated", "appointment_id": "apt-1", "appointment_status": "PENDING_CONFIRMATION"},
+        trace_entries=[{"stage": "booking_commit"}],
+        state="pending",
+        conv_meta={},
+        handover_meta={"handover_id": "h-1"},
+        bot_response=True,
+        expected_response=False,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Передал менеджеру.",
+        tool_signals={"calendar": {"outcome": "pending"}},
+    )
+    assert "calendar_tool_contract_miss" in reasons
+
+
+def test_calendar_contract_passes_when_calendar_success_present():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "booking_escalated", "appointment_id": "apt-1", "appointment_status": "PENDING_CONFIRMATION"},
+        trace_entries=[{"stage": "booking_commit"}],
+        state="pending",
+        conv_meta={},
+        handover_meta={"handover_id": "h-1"},
+        bot_response=True,
+        expected_response=False,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Передал менеджеру.",
+        tool_signals={"calendar": {"outcome": "success"}},
+    )
+    assert "calendar_tool_contract_miss" not in reasons
 
 
 def test_state_fallback_allows_pending_when_expected_bot_active():

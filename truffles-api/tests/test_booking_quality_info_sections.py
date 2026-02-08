@@ -1,4 +1,5 @@
 import ast
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -11,8 +12,12 @@ def _load_expected_section_matcher():
         "LLM_QUALITY_INFO_SECTION_MAP",
         "LLM_QUALITY_SECTION_TAG_MAP",
         "LLM_QUALITY_INTENT_TAG_MAP",
+        "LLM_QUALITY_INFO_TRACE_LOOKBACK",
+        "LLM_QUALITY_TRACE_WINDOW_PADDING_SECONDS",
     }
     wanted_functions = {
+        "_parse_iso_datetime",
+        "_llm_quality_current_turn_trace_entries",
         "_llm_quality_collect_info_signals",
         "_llm_quality_token_to_info_tags",
         "_llm_quality_expected_section_answered",
@@ -30,7 +35,7 @@ def _load_expected_section_matcher():
         elif isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
             selected_nodes.append(node)
     module = ast.Module(body=selected_nodes, type_ignores=[])
-    namespace = {}
+    namespace = {"datetime": datetime, "timedelta": timedelta}
     exec(compile(module, str(script_path), "exec"), namespace, namespace)
     return namespace["_llm_quality_expected_section_answered"]
 
@@ -66,3 +71,43 @@ def test_expected_sections_keep_mismatch_when_unrelated():
         [],
     )
     assert matched is False
+
+
+def test_expected_sections_ignore_stale_trace_outside_current_pipeline_window():
+    matched, info_sections, intents = _expected_section_answered(
+        ["location"],
+        {
+            "intent": "booking",
+            "timing": {
+                "pipeline_started_at": "2026-02-08T10:00:00+00:00",
+                "pipeline_finished_at": "2026-02-08T10:00:10+00:00",
+            },
+        },
+        [
+            {"recorded_at": "2026-02-08T09:58:00+00:00", "info_sections": ["address"]},
+            {"recorded_at": "2026-02-08T10:00:06+00:00", "stage": "booking"},
+        ],
+    )
+    assert matched is False
+    assert "address" not in info_sections
+    assert "booking" in intents
+
+
+def test_expected_sections_do_not_fallback_to_tail_when_window_is_empty():
+    matched, info_sections, intents = _expected_section_answered(
+        ["location"],
+        {
+            "intent": "booking",
+            "timing": {
+                "pipeline_started_at": "2026-02-08T11:00:00+00:00",
+                "pipeline_finished_at": "2026-02-08T11:00:05+00:00",
+            },
+        },
+        [
+            {"recorded_at": "2026-02-08T10:30:00+00:00", "info_sections": ["address"]},
+            {"recorded_at": "2026-02-08T10:30:01+00:00", "intent": "hours"},
+        ],
+    )
+    assert matched is False
+    assert "address" not in info_sections
+    assert intents == {"booking"}
