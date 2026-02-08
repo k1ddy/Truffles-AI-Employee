@@ -1,3 +1,5 @@
+import base64
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -12,6 +14,11 @@ from app.schemas.webhook import WebhookBody, WebhookMetadata, WebhookRequest
 from app.services.chatflow_service import get_instance_id
 from app.services.conversation_service import get_or_create_conversation
 from app.services.state_machine import ConversationState
+
+
+def _encode_instance_id(uid: str, client_id: str) -> str:
+    payload = json.dumps({"uid": uid, "client_id": client_id}, separators=(",", ":")).encode("utf-8")
+    return base64.b64encode(payload).decode("utf-8")
 
 
 def test_instance_id_overrides_existing_branch():
@@ -39,6 +46,54 @@ def test_instance_id_overrides_existing_branch():
 
     query = Mock()
     query.filter.return_value.first.return_value = branch_b
+    db = Mock()
+    db.query.return_value = query
+
+    result = _handle_branch_selection_gate(
+        db=db,
+        client_id=client_id,
+        settings=settings,
+        conversation=conversation,
+        user=user,
+        metadata=metadata,
+        message_text="hello",
+        now=datetime.now(timezone.utc),
+        send_and_save=Mock(return_value=("ok", True)),
+    )
+
+    assert result is None
+    assert conversation.branch_id == branch_b_id
+    assert user.user_metadata.get("branch_id") == str(branch_b_id)
+
+
+def test_instance_uid_alias_overrides_existing_branch():
+    client_id = uuid4()
+    branch_a_id = uuid4()
+    branch_b_id = uuid4()
+    canonical_instance = _encode_instance_id("shared-uid", "demo_salon")
+    alias_instance = _encode_instance_id("shared-uid", "salon")
+
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        branch_id=branch_a_id,
+        context={},
+        state=ConversationState.BOT_ACTIVE.value,
+    )
+    user = SimpleNamespace(user_metadata={})
+    settings = SimpleNamespace(branch_resolution_mode="hybrid", remember_branch_preference=True)
+    metadata = SimpleNamespace(instanceId=alias_instance)
+    branch_b = SimpleNamespace(
+        id=branch_b_id,
+        client_id=client_id,
+        instance_id=canonical_instance,
+        is_active=True,
+        name="Branch B",
+        slug="branch_b",
+    )
+
+    query = Mock()
+    query.filter.return_value.first.return_value = None
+    query.filter.return_value.all.return_value = [branch_b]
     db = Mock()
     db.query.return_value = query
 
@@ -180,6 +235,69 @@ def test_preflight_rejects_unknown_instance_id_hybrid():
     assert response.success is False
     assert response.message == "Unknown instanceId"
     assert preflight_payload == {}
+
+
+def test_preflight_resolves_branch_instance_uid_alias():
+    client = SimpleNamespace(id=uuid4(), name="demo_salon")
+    settings = SimpleNamespace(branch_resolution_mode="by_instance", webhook_secret=None)
+    canonical_instance = _encode_instance_id("shared-uid", "demo_salon")
+    alias_instance = _encode_instance_id("shared-uid", "salon")
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=client.id,
+        instance_id=canonical_instance,
+        knowledge_tag="branch-tag",
+        is_active=True,
+    )
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    branch_query = Mock()
+    branch_query.filter.return_value.first.return_value = None
+    branch_query.filter.return_value.all.side_effect = [[], [branch]]
+
+    def _query_side_effect(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Branch or getattr(model, "key", None) == "phone":
+            return branch_query
+        return Mock()
+
+    db = Mock()
+    db.query.side_effect = _query_side_effect
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="hello",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                instanceId=alias_instance,
+            ),
+        ),
+    )
+
+    with patch("app.routers.webhook.http._lookup_sender_branch", return_value=None):
+        response, preflight_payload = _run_preflight(
+            payload,
+            db,
+            provided_secret=None,
+            enforce_secret=False,
+            conversation_id=None,
+            resolve_trace_conversation=lambda **_: None,
+            record_early_trace=lambda *args, **kwargs: False,
+        )
+
+    assert response is None
+    assert preflight_payload.get("resolved_branch_id") == branch.id
+    assert preflight_payload.get("resolved_instance_match_mode") == "uid_alias"
+    assert preflight_payload.get("tenant_context", {}).get("instance_id") == canonical_instance
 
 
 def test_preflight_resolves_branch_instance_id():
