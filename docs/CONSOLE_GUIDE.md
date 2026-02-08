@@ -178,6 +178,24 @@ Usually means the admin is mapped to the wrong `client_id` or the wrong client w
 - `specialists`, `bookings` (calendar)
 - `audit_events` (audit tab)
 
+### 2.1 Enterprise Fleet management surface (current vs missing)
+
+**Already in Console (code-backed):**
+- Tenant registry CRUD: `companies|clients|branches|agents` (`/console/v1/admin/*`).
+- Lifecycle read filters for tenants: `lifecycle=active|archived|all` in clients/branches list.
+- Client lifecycle actions: `POST /console/v1/admin/clients/{client_id}/archive|restore` with reason/prechecks/audit.
+- Integrations registry: `GET /console/v1/admin/integrations` with drift diagnostics.
+- Onboarding control: status/advance, autopilot, onboarding contract, capabilities, reference packs.
+
+**Still missing for fleet-scale operations:**
+- Membership admin completeness: update/re-scope/disable/enable memberships and identity rebind as first-class UI/API.
+- Runbook-to-Console jobs coverage for `sync_client` and branch RAG backfill (today they remain script-first).
+- Full migration off legacy `/admin/*` consumers (CI/runbooks still depend on compatibility endpoints).
+- Commercial lifecycle model beyond `billing_info` + onboarding `payment_status` (no invoice/subscription surface).
+
+**Execution source of truth:**
+- `docs/REPORTS/2026-02-08-enterprise-fleet-program.md` (PR-1..PR-5 plan, risks, owner manual checks).
+
 ---
 
 ## 3) Console Pages → API Endpoints

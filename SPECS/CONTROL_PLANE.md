@@ -2,10 +2,10 @@
 
 **Статус:** CANON  
 **Owner:** Top Architect  
-**Обновлено:** 2026-01-24  
+**Обновлено:** 2026-02-08  
 **Scope:** Web‑Console как Control Plane, роли/RBAC, IA, онбординг, capabilities, Knowledge Studio, Team/Calendar, Inbox UX, API границы, фазы работ.  
 **Out of scope:** реализация, миграции БД, UI‑макеты, доказательства.  
-**Links:** `STATE.md`, `docs/IMPERIUM_DECISIONS.yaml`, `SPECS/ESCALATION.md`, `SPECS/MULTI_TENANT.md`, `docs/CONSOLE_GUIDE.md`, `STRATEGY/TECH_ROADMAP.md`, `STRATEGY/REQUIREMENTS.md`.
+**Links:** `STATE.md`, `docs/IMPERIUM_DECISIONS.yaml`, `SPECS/ESCALATION.md`, `SPECS/MULTI_TENANT.md`, `docs/CONSOLE_GUIDE.md`, `STRATEGY/TECH_ROADMAP.md`, `STRATEGY/REQUIREMENTS.md`, `docs/REPORTS/2026-02-08-enterprise-fleet-program.md`.
 
 ---
 
@@ -279,14 +279,30 @@ Pack‑файл — **генерируемый артефакт** при publish
 
 ---
 
-## 13) No‑go (жёсткие ограничения)
+## 13) Enterprise Fleet Program (100000+ компаний)
+
+Для fleet-scale управления принимаем программу `docs/REPORTS/2026-02-08-enterprise-fleet-program.md`
+как обязательную roadmap-плоскость поверх этого спека.
+
+Обязательные куски программы:
+- `PR-1` Fleet Registry Read + context semantics.
+- `PR-2` Lifecycle actions + bulk safety (dry-run/execute/audit).
+- `PR-3` Membership/RBAC admin completeness.
+- `PR-4` Runbook-to-Console Jobs.
+- `PR-5` Unified admin surface + legacy consumer migration.
+
+Правило: migration legacy `/admin/*` выполняется по phased consumer matrix, без one-shot выключения.
+
+---
+
+## 14) No‑go (жёсткие ограничения)
 
 - Никаких “догадок” о tenant‑контексте.
 - Никакого write‑доступа к runtime контейнеру (без `docker cp`, без `-v`).
 
 ---
 
-## 14) Production Go/No‑Go (Live Customers)
+## 15) Production Go/No‑Go (Live Customers)
 
 **DEC‑014:** живые заказчики допускаются только после выполнения чеклиста и фиксации evidence в `STATE.md`.
 
@@ -305,7 +321,7 @@ Pack‑файл — **генерируемый артефакт** при publish
 
 ---
 
-## 14) Связь с каноном
+## 16) Связь с каноном
 
 - Web‑first и Telegram fallback: `SPECS/ESCALATION.md`.
 - Tenant context и RBAC: `SPECS/MULTI_TENANT.md`.
