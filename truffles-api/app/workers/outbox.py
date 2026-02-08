@@ -11,6 +11,7 @@ from app.services.metrics_daily_service import (
     run_metrics_daily_snapshot,
 )
 from app.services.outbox_service import claim_pending_outbox_batches, release_stale_processing
+from app.services.runtime_safety import assert_outbox_worker_startup_safe
 
 setup_logging()
 logger = get_logger("outbox_worker")
@@ -135,6 +136,12 @@ async def run_worker():
         logger.info("Outbox Worker disabled via OUTBOX_WORKER_ENABLED")
         while True:
             await asyncio.sleep(60)
+
+    safety_snapshot = assert_outbox_worker_startup_safe()
+    logger.info(
+        "Outbox startup safety",
+        extra={"context": safety_snapshot.to_dict()},
+    )
 
     # 1. Setup OTel
     _setup_otel()

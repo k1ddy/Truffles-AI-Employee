@@ -65,6 +65,9 @@ TESTING CONTRACT (summary)
 - CI livecheck is allowed only with safety gates (TEST_MODE=1 + allowlist); evidence is `livecheck-evidence.md`.
 - Live-check uses JID pool (comma list). One suite -> one JID. Instance->instance simulation is valid only if inbound is recorded in DB with decision_meta/trace; **CA‑13** may use simulated inbound when allowlist is unavailable (mark as `simulated` in `STATE.md`).
 - Definitions for JID/instance_id/instance->instance are fixed in `SPECS/SYSTEM_REFERENCE.md`.
+- Before any outbound/live-check run, validate runtime safety markers:
+  - `curl -s http://localhost:8000/admin/health | jq '.safety'`
+  - `danger_flags` must be empty; otherwise stop and fix env.
 - Do NOT assert on raw response text for LLM; assert via decision_meta/trace + policy/intent gates.
 - Coverage must include anchors + variations + noise (typos/topic switch), ASR-like inputs, and multi-turn dialogs (up to 10).
 

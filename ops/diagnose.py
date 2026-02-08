@@ -5309,6 +5309,19 @@ def _chaos_preflight(base_url, timeout):
             "error": error,
             "body": (body or "")[:300],
         }
+        if name == "admin_health" and body and not error and status and status < 500:
+            try:
+                payload = json.loads(body)
+            except Exception:
+                payload = None
+            if isinstance(payload, dict):
+                safety = payload.get("safety")
+                if isinstance(safety, dict):
+                    danger_flags = safety.get("danger_flags")
+                    if isinstance(danger_flags, list):
+                        checks[name]["danger_flags"] = danger_flags
+                        if danger_flags:
+                            ok = False
         if error or status is None or status >= 500:
             ok = False
     return {"ok": ok, "checks": checks}
