@@ -310,7 +310,7 @@ Detailed operator workflow (future agents + humans)
    - First: `stop_reason`, `webhook_errors`, `infra_errors` (hard blockers).
    - Second: `strict_pass_rate`, `hard_fail_rate`, `unknown_state_rate`, `decision_meta_coverage`.
    - Third: `pass_rate` as supporting metric only.
-   - Fourth: reason deltas (`expected_*`, `info_section_miss`, `missing_bot_reply`, `booking_slot_stall`, `false_booking_confirmation`, `calendar_tool_contract_miss`).
+   - Fourth: reason deltas (`expected_*`, `info_section_miss`, `missing_bot_reply`, `outbox_delivery_failed`, `outbox_delivery_timeout`, `booking_slot_stall`, `false_booking_confirmation`, `calendar_tool_contract_miss`).
    - Fifth: inspect top 3 reasons in `summary.top_failures` and confirm on `responses.jsonl`.
 6. Fix loop contract
    - One dominant repeatable reason -> one code/data/evaluator fix.
@@ -334,7 +334,7 @@ Artifacts
 Evaluation contract (state-aware)
 - `decision_meta` and `decision_trace` are required per inbound turn.
 - `evaluation.ok` is legacy compatibility; use `evaluation.strict_ok` + `strict_pass_rate` for real quality gate.
-- Hard-fail reasons (`missing_bot_reply`, `false_booking_confirmation`, `calendar_tool_contract_miss`, meta/trace/state contract breaks) must never be treated as OK.
+- Hard-fail reasons (`missing_bot_reply`, `outbox_delivery_failed`, `outbox_delivery_timeout`, `false_booking_confirmation`, `calendar_tool_contract_miss`, meta/trace/state contract breaks) must never be treated as OK.
 - If `turn.expect` is present, it overrides heuristic matching for action/info_sections/reply_type/state.
 - Known states: `bot_active`, `pending`, `manager_active`; anything else is `unknown_state`.
 - `manager_active`/`pending` mean no bot reply expected; replies here are flagged.
@@ -358,6 +358,8 @@ Reason codes (summary.failures / failure_counts)
 - expected_reply_mismatch
 - expected_info_section_miss
 - missing_bot_reply
+- outbox_delivery_failed
+- outbox_delivery_timeout
 - unexpected_bot_reply_manager
 - handover_missing
 - info_section_miss
@@ -372,7 +374,7 @@ Reason codes (summary.failures / failure_counts)
 Taxonomy (summary.taxonomy)
 - expectation: expected_* mismatches (scenario/expectations drift).
 - canon: missing decision_meta/trace or unknown_state (invariant breaks).
-- code: missing_bot_reply, booking_slot_stall, false_booking_confirmation, calendar_tool_contract_miss, handover state/status mismatches, manager_action_failed.
+- code: missing_bot_reply, outbox_delivery_failed, outbox_delivery_timeout, booking_slot_stall, false_booking_confirmation, calendar_tool_contract_miss, handover state/status mismatches, manager_action_failed.
 - data: info_section_miss (packs/content gaps).
 
 Thresholds (summary.thresholds)

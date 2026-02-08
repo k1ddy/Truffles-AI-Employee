@@ -9,8 +9,23 @@ def _load_retry_helper():
     source = script_path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(script_path))
     selected_nodes = []
+    wanted_functions = {
+        "_llm_quality_retry_outbox_for_expected_reply",
+        "_llm_quality_has_bot_reply",
+        "_llm_quality_outbox_delivery_state",
+        "_llm_quality_resolve_outbox_status",
+        "_llm_quality_normalize_outbox_status",
+    }
     for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name == "_llm_quality_retry_outbox_for_expected_reply":
+        if isinstance(node, ast.Assign):
+            names = {target.id for target in node.targets if isinstance(target, ast.Name)}
+            if {
+                "LLM_QUALITY_OUTBOX_SUCCESS_STATUSES",
+                "LLM_QUALITY_OUTBOX_FAILURE_STATUSES",
+                "LLM_QUALITY_OUTBOX_PENDING_STATUSES",
+            } & names:
+                selected_nodes.append(node)
+        if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
             selected_nodes.append(node)
     module = ast.Module(body=selected_nodes, type_ignores=[])
     namespace = {"math": math, "time": SimpleNamespace(sleep=lambda _sec: None)}
@@ -26,6 +41,9 @@ def _load_evaluate_turn():
         "_llm_quality_evaluate_turn",
         "_llm_quality_is_booking_confirmation_text",
         "_llm_quality_normalize_tool_token",
+        "_llm_quality_outbox_delivery_state",
+        "_llm_quality_resolve_outbox_status",
+        "_llm_quality_normalize_outbox_status",
     }
     selected_nodes = []
     for node in tree.body:
@@ -35,6 +53,9 @@ def _load_evaluate_turn():
                 "LLM_QUALITY_KNOWN_STATES",
                 "LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS",
                 "LLM_QUALITY_BOOKING_CONFIRM_PHRASES",
+                "LLM_QUALITY_OUTBOX_SUCCESS_STATUSES",
+                "LLM_QUALITY_OUTBOX_FAILURE_STATUSES",
+                "LLM_QUALITY_OUTBOX_PENDING_STATUSES",
             } & names:
                 selected_nodes.append(node)
         if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
@@ -134,6 +155,47 @@ def test_retry_helper_marks_bot_response_when_outbox_appears():
     assert outbox_text == "ok"
 
 
+def test_retry_helper_keeps_missing_when_outbox_failed_only():
+    namespace = _load_retry_helper()
+    helper = namespace["_llm_quality_retry_outbox_for_expected_reply"]
+
+    calls = {"summary": 0}
+
+    def _fetch_summary(_db_user, _client_id, _inbound_message_id):
+        calls["summary"] += 1
+        return {"count": 1, "status": "FAILED"}, None
+
+    def _fetch_payload(_db_user, _client_id, _inbound_message_id):
+        return {"body": {"text": "unsent"}}, "FAILED", None
+
+    namespace["_fetch_outbox_summary"] = _fetch_summary
+    namespace["_llm_quality_fetch_outbox_payload"] = _fetch_payload
+    namespace["_llm_quality_extract_outbox_text"] = (
+        lambda payload: payload["body"]["text"] if payload else None
+    )
+
+    outbox_summary, _payload, status, outbox_text, bot_response = helper(
+        expected_response=True,
+        bot_response=False,
+        db_user="postgres",
+        client_id="client",
+        inbound_message_id="msg",
+        inline_response_text=None,
+        outbox_summary={"count": 0, "status": None},
+        outbox_payload=None,
+        outbox_payload_status=None,
+        outbox_text=None,
+        outbox_wait_seconds=0.6,
+        poll_interval=0.2,
+    )
+
+    assert calls["summary"] >= 1
+    assert outbox_summary["status"] == "FAILED"
+    assert status == "FAILED"
+    assert outbox_text == "unsent"
+    assert bot_response is False
+
+
 def test_booking_slot_stall_not_reported_in_pending_state():
     evaluate_turn = _load_evaluate_turn()
     reasons = evaluate_turn(
@@ -184,6 +246,66 @@ def test_booking_slot_stall_reported_in_bot_active_state():
         allow_booking_stall=False,
     )
     assert "booking_slot_stall" in reasons
+
+
+def test_missing_bot_reply_marks_outbox_failed_reason():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "reply"},
+        trace_entries=[{"stage": "booking"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=False,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_summary={"count": 1, "status": "FAILED"},
+        outbox_payload_status="FAILED",
+    )
+    assert "missing_bot_reply" in reasons
+    assert "outbox_delivery_failed" in reasons
+    assert "outbox_delivery_timeout" not in reasons
+
+
+def test_missing_bot_reply_marks_outbox_timeout_reason():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "reply"},
+        trace_entries=[{"stage": "booking"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=False,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_summary={"count": 1, "status": "PROCESSING"},
+        outbox_payload_status="PROCESSING",
+    )
+    assert "missing_bot_reply" in reasons
+    assert "outbox_delivery_timeout" in reasons
+    assert "outbox_delivery_failed" not in reasons
 
 
 def test_false_booking_confirmation_is_reported_without_calendar_proof():

@@ -26,8 +26,25 @@
     - `pytest -q truffles-api/tests/test_booking_quality_info_sections.py` (5 passed)
     - `pytest -q truffles-api/tests/test_booking_quality_progress_gate.py` (3 passed)
   - Ran frozen replay smoke on main seed=1337 (`count=1`) without modifying source artifacts.
+  - Synced branch with latest `origin/main`, resolved `docs/SESSION_INDEX.md` merge conflict (kept both active sessions), and completed merge commit.
+  - Opened PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/578
+  - Hardened outbox delivery semantics for strict replay in `ops/diagnose.py`:
+    - reply is no longer considered delivered just because `outbox.count>0`;
+    - delivery now depends on status-aware contract (`SENT` vs `FAILED`/`PENDING`/`PROCESSING`) or inline webhook reply;
+    - retry helper now returns the latest observed outbox status/payload even when reply is still missing.
+  - Added strict outbox failure taxonomy:
+    - new reasons: `outbox_delivery_failed`, `outbox_delivery_timeout`;
+    - both added to hard-fail set and runbook reason map.
+  - Extended regressions in `truffles-api/tests/test_booking_quality_response_guard.py`:
+    - `FAILED` outbox does not produce false delivered reply;
+    - evaluator emits `outbox_delivery_failed` / `outbox_delivery_timeout` on missing expected reply path.
+  - Re-ran checks:
+    - `python3 -m py_compile ops/diagnose.py`
+    - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_booking_quality_info_sections.py truffles-api/tests/test_booking_quality_progress_gate.py` (20 passed)
+  - Ran accelerated frozen replay (`seed=1337`, `count=2`) to verify outbox-path instrumentation; run interrupted before `summary.json`, partial artifacts preserved for continuation.
+  - Ran frozen smoke replay on updated outbox contract (`seed=1337`, `count=1`) and produced fresh `summary.json` with strict/hard metrics.
 - next:
-  - Run full frozen replay (`count=10`) with timeout/resume command from runbook to collect full-matrix strict deltas.
+  - Resume frozen replay (`seed=1337`) with timeout/resume command from runbook until `summary.json` is produced, then compare strict/hard metrics.
   - Triage dominant expectation failures (`expected_state_mismatch`, `expected_reply_mismatch`) vs scenario contract.
   - If full replay confirms reproducibility, open/update PR summary with strict metrics and handoff command.
 - evidence:
@@ -35,4 +52,9 @@
   - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke1b/summary.json
   - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke1b/responses.jsonl
   - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke1b/brief.md
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-replay3/responses.jsonl
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-replay3/trace_bundle.jsonl
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke2/summary.json
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke2/responses.jsonl
+  - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke2/brief.md
 - last_updated: 2026-02-08

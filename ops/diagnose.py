@@ -816,6 +816,8 @@ LLM_QUALITY_REASON_LABELS = {
     "expected_reply_mismatch": "reply expectation does not match scenario expectation",
     "expected_info_section_miss": "expected info_sections missing in meta/trace",
     "missing_bot_reply": "expected response but no bot reply observed",
+    "outbox_delivery_failed": "expected response but outbox delivery is FAILED",
+    "outbox_delivery_timeout": "expected response but outbox did not deliver within wait window",
     "unexpected_bot_reply_manager": "bot replied while manager_active",
     "handover_missing": "manager_active but handover missing",
     "info_section_miss": "info request not answered per meta/trace",
@@ -838,6 +840,8 @@ LLM_QUALITY_REASON_TAXONOMY = {
     "expected_reply_mismatch": "expectation",
     "expected_info_section_miss": "expectation",
     "missing_bot_reply": "code",
+    "outbox_delivery_failed": "code",
+    "outbox_delivery_timeout": "code",
     "unexpected_bot_reply_manager": "code",
     "handover_missing": "code",
     "info_section_miss": "data",
@@ -854,6 +858,8 @@ LLM_QUALITY_HARD_FAIL_REASONS = {
     "decision_trace_missing",
     "unknown_state",
     "missing_bot_reply",
+    "outbox_delivery_failed",
+    "outbox_delivery_timeout",
     "false_booking_confirmation",
     "calendar_tool_contract_miss",
     "unexpected_bot_reply_manager",
@@ -878,6 +884,9 @@ LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS = {
     "active",
 }
 LLM_QUALITY_TOOL_OUTCOMES = ("success", "failure", "pending")
+LLM_QUALITY_OUTBOX_SUCCESS_STATUSES = {"SENT"}
+LLM_QUALITY_OUTBOX_FAILURE_STATUSES = {"FAILED"}
+LLM_QUALITY_OUTBOX_PENDING_STATUSES = {"PENDING", "PROCESSING"}
 LLM_QUALITY_JUDGE_REASONS = {
     "irrelevant_reply": "reply does not address the user's intent/question",
     "missed_question": "question not answered or slot not collected",
@@ -2999,6 +3008,48 @@ def _llm_quality_expected_manager_state(action, state_before):
         return state_before, None
     return None, None
 
+def _llm_quality_normalize_outbox_status(status):
+    if not isinstance(status, str):
+        return ""
+    return status.strip().upper()
+
+def _llm_quality_resolve_outbox_status(outbox_payload_status, outbox_summary):
+    status = _llm_quality_normalize_outbox_status(outbox_payload_status)
+    if status:
+        return status
+    if isinstance(outbox_summary, dict):
+        return _llm_quality_normalize_outbox_status(outbox_summary.get("status"))
+    return ""
+
+def _llm_quality_outbox_delivery_state(outbox_payload_status, outbox_summary):
+    status = _llm_quality_resolve_outbox_status(outbox_payload_status, outbox_summary)
+    if status in LLM_QUALITY_OUTBOX_SUCCESS_STATUSES:
+        return "sent"
+    if status in LLM_QUALITY_OUTBOX_FAILURE_STATUSES:
+        return "failed"
+    if status in LLM_QUALITY_OUTBOX_PENDING_STATUSES:
+        return "pending"
+    count = (outbox_summary or {}).get("count") if isinstance(outbox_summary, dict) else 0
+    if isinstance(count, int) and count > 0:
+        return "unknown"
+    return "missing"
+
+def _llm_quality_has_bot_reply(
+    *,
+    outbox_summary,
+    outbox_payload_status,
+    outbox_text,
+    inline_response_text,
+):
+    if isinstance(inline_response_text, str) and inline_response_text.strip():
+        return True
+    delivery_state = _llm_quality_outbox_delivery_state(outbox_payload_status, outbox_summary)
+    if delivery_state == "sent":
+        return True
+    if delivery_state == "unknown":
+        return bool((outbox_text or "").strip())
+    return False
+
 def _llm_quality_extract_outbox_text(payload):
     if not isinstance(payload, dict):
         return None
@@ -3161,6 +3212,8 @@ def _llm_quality_next_step_for_reason(reason):
     mapping = {
         "booking_slot_stall": "trace booking stages and verify slot extraction for this turn",
         "missing_bot_reply": "inspect outbox_summary/outbox_payload_status for blocked send",
+        "outbox_delivery_failed": "inspect outbox last_error/provider status and retry/backoff policy",
+        "outbox_delivery_timeout": "increase poll/outbox wait for replay and verify worker/outbox process timing",
         "false_booking_confirmation": "verify booking confirmation text against appointment_id and calendar outcome",
         "calendar_tool_contract_miss": "inspect tool_signals.calendar + appointment_status before confirming booking",
         "judge_fail": "review semantic mismatch in judge summary and convert to deterministic guard/test",
@@ -3455,6 +3508,8 @@ def _llm_quality_evaluate_turn(
     allow_booking_stall,
     outbox_text=None,
     tool_signals=None,
+    outbox_summary=None,
+    outbox_payload_status=None,
 ):
     reasons = []
     if meta is None:
@@ -3506,6 +3561,13 @@ def _llm_quality_evaluate_turn(
             reasons.append("expected_info_section_miss")
     if expected_response and not bot_response:
         reasons.append("missing_bot_reply")
+        delivery_state = _llm_quality_outbox_delivery_state(
+            outbox_payload_status, outbox_summary
+        )
+        if delivery_state == "failed":
+            reasons.append("outbox_delivery_failed")
+        elif delivery_state in {"pending", "unknown"}:
+            reasons.append("outbox_delivery_timeout")
     if state == "manager_active" and bot_response:
         reasons.append("unexpected_bot_reply_manager")
     if state == "manager_active" and not handover_meta:
@@ -4578,6 +4640,10 @@ def _llm_quality_retry_outbox_for_expected_reply(
     sleep_seconds = max(0.2, min(float(poll_interval or 0.6), 0.8))
     wait_budget = max(float(outbox_wait_seconds or 0.0), sleep_seconds * 2)
     attempts = max(1, min(6, int(math.ceil(wait_budget / sleep_seconds))))
+    last_summary = outbox_summary
+    last_payload = outbox_payload
+    last_status = outbox_payload_status
+    last_text = outbox_text
     for _ in range(attempts):
         time.sleep(sleep_seconds)
         retry_summary, _ = _fetch_outbox_summary(db_user, client_id, inbound_message_id)
@@ -4587,10 +4653,19 @@ def _llm_quality_retry_outbox_for_expected_reply(
         retry_text = _llm_quality_extract_outbox_text(retry_payload)
         if not retry_text and inline_response_text:
             retry_text = inline_response_text
-        retry_bot_response = bool((retry_summary or {}).get("count")) or bool(retry_text)
+        last_summary = retry_summary
+        last_payload = retry_payload
+        last_status = retry_status
+        last_text = retry_text
+        retry_bot_response = _llm_quality_has_bot_reply(
+            outbox_summary=retry_summary,
+            outbox_payload_status=retry_status,
+            outbox_text=retry_text,
+            inline_response_text=inline_response_text,
+        )
         if retry_bot_response:
             return retry_summary, retry_payload, retry_status, retry_text, True
-    return outbox_summary, outbox_payload, outbox_payload_status, outbox_text, bot_response
+    return last_summary, last_payload, last_status, last_text, bot_response
 
 def _fetch_outbox_rows(db_user, client_id, inbound_message_id, limit=5):
     safe_client = _escape_sql_literal(client_id)
@@ -6459,9 +6534,12 @@ def _run_llm_quality(args):
                 if not outbox_text and inline_response_text:
                     outbox_text = inline_response_text
 
-                bot_response = bool((outbox_summary or {}).get("count")) if outbox_summary else False
-                if inline_response_text:
-                    bot_response = True
+                bot_response = _llm_quality_has_bot_reply(
+                    outbox_summary=outbox_summary,
+                    outbox_payload_status=outbox_payload_status,
+                    outbox_text=outbox_text,
+                    inline_response_text=inline_response_text,
+                )
                 expected_response, expected_reason = _llm_quality_expected_response(state, meta)
                 if not args.dry_run:
                     (
@@ -6635,6 +6713,8 @@ def _run_llm_quality(args):
                     allow_booking_stall=allow_booking_stall,
                     outbox_text=outbox_text,
                     tool_signals=tool_signals,
+                    outbox_summary=outbox_summary,
+                    outbox_payload_status=outbox_payload_status,
                 )
                 if evaluation_reasons:
                     stats["turns_failed"] += 1
