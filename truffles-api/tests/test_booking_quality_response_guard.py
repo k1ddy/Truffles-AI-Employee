@@ -1,4 +1,5 @@
 import ast
+import json
 import math
 from pathlib import Path
 from types import SimpleNamespace
@@ -85,6 +86,10 @@ def _load_expectation_helpers():
     }
     selected_nodes = []
     for node in tree.body:
+        if isinstance(node, ast.Assign):
+            names = {target.id for target in node.targets if isinstance(target, ast.Name)}
+            if {"CHAOS_PENDING_ACTIONS"} & names:
+                selected_nodes.append(node)
         if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
             selected_nodes.append(node)
     module = ast.Module(body=selected_nodes, type_ignores=[])
@@ -107,6 +112,28 @@ def _load_expectation_helpers():
         ),
         "_llm_quality_expected_section_answered": lambda *_args, **_kwargs: (False, set(), set()),
     }
+    exec(compile(module, str(script_path), "exec"), namespace, namespace)
+    return namespace
+
+
+def _load_duplicate_ack_helpers():
+    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
+    source = script_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(script_path))
+    wanted_functions = {
+        "_llm_quality_payload_is_duplicate_ack",
+        "_llm_quality_should_infer_bot_response_from_duplicate_ack",
+    }
+    selected_nodes = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            names = {target.id for target in node.targets if isinstance(target, ast.Name)}
+            if {"CHAOS_PENDING_ACTIONS"} & names:
+                selected_nodes.append(node)
+        if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
+            selected_nodes.append(node)
+    module = ast.Module(body=selected_nodes, type_ignores=[])
+    namespace = {"json": json}
     exec(compile(module, str(script_path), "exec"), namespace, namespace)
     return namespace
 
@@ -308,6 +335,73 @@ def test_missing_bot_reply_marks_outbox_timeout_reason():
     assert "outbox_delivery_failed" not in reasons
 
 
+def test_missing_bot_reply_suppressed_on_infra_webhook_error():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "reply"},
+        trace_entries=[{"stage": "booking"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=False,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        webhook_error="timeout while posting webhook",
+    )
+    assert "missing_bot_reply" not in reasons
+    assert "outbox_delivery_failed" not in reasons
+    assert "outbox_delivery_timeout" not in reasons
+
+
+def test_duplicate_ack_detector_handles_nested_string_payload():
+    helpers = _load_duplicate_ack_helpers()
+    fn = helpers["_llm_quality_payload_is_duplicate_ack"]
+    payload = {
+        "success": True,
+        "response": json.dumps({"message": "Duplicate message_id detected"}),
+    }
+    assert fn(payload) is True
+
+
+def test_duplicate_ack_infers_bot_response_for_reply_action():
+    helpers = _load_duplicate_ack_helpers()
+    fn = helpers["_llm_quality_should_infer_bot_response_from_duplicate_ack"]
+    assert fn(
+        bot_response=False,
+        expected_response=True,
+        response_payload={"message": "duplicate message_id"},
+        attempts=2,
+        meta={"action": "reply"},
+        meta_error=None,
+        state="bot_active",
+    )
+
+
+def test_duplicate_ack_does_not_infer_for_pending_actions():
+    helpers = _load_duplicate_ack_helpers()
+    fn = helpers["_llm_quality_should_infer_bot_response_from_duplicate_ack"]
+    assert not fn(
+        bot_response=False,
+        expected_response=True,
+        response_payload={"message": "duplicate message_id"},
+        attempts=2,
+        meta={"action": "booking_captured_pending"},
+        meta_error=None,
+        state="pending",
+    )
+
+
 def test_false_booking_confirmation_is_reported_without_calendar_proof():
     evaluate_turn = _load_evaluate_turn()
     reasons = evaluate_turn(
@@ -426,6 +520,20 @@ def test_expected_reply_fallback_allows_pending_transition():
         expected_state="bot_active",
         state="pending",
         meta={"action": "escalate"},
+        conv_meta={},
+        handover_meta={},
+    )
+
+
+def test_expected_reply_fallback_allows_manager_active_booking_escalated():
+    helpers = _load_expectation_helpers()
+    fn = helpers["_llm_quality_expected_reply_matches"]
+    assert fn(
+        expected_reply=True,
+        expected_response=False,
+        expected_state="bot_active",
+        state="manager_active",
+        meta={"action": "booking_escalated"},
         conv_meta={},
         handover_meta={},
     )

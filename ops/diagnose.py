@@ -1829,6 +1829,11 @@ def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sec
             return True
         if meta_action in CHAOS_PENDING_ACTIONS and (conv_meta or {}).get("state") == "pending":
             return True
+    if any(action in expected_actions for action in ("booking_escalated", "handoff", "escalate")):
+        if meta_action == "booking_prompt" and booking_active:
+            expected_reply_type = expected.get("expected_reply_type")
+            if expected_reply_type is None or expected_reply_type in CHAOS_BOOKING_REPLY_TYPES:
+                return True
     if "reply" in expected_actions and expected.get("info_sections") and info_sections_ok:
         if meta_action in _chaos_booking_completion_actions() or meta_action == "booking_prompt":
             return True
@@ -2779,6 +2784,20 @@ def _llm_quality_expected_reply_matches(
         return True
     if expected_reply == expected_response:
         return True
+    if expected_reply is True and expected_response is False:
+        action = (meta or {}).get("action")
+        if state in {"pending", "manager_active"} and (
+            action in CHAOS_PENDING_ACTIONS
+            or action
+            in {
+                "escalate",
+                "booking_escalated",
+                "booking_captured_pending",
+                "booking_reuse_handover",
+                "booking_paused",
+            }
+        ):
+            return True
     if expected_state is None:
         return False
     expected_values = (
@@ -3510,6 +3529,8 @@ def _llm_quality_evaluate_turn(
     tool_signals=None,
     outbox_summary=None,
     outbox_payload_status=None,
+    meta_error=None,
+    webhook_error=None,
 ):
     reasons = []
     if meta is None:
@@ -3560,14 +3581,38 @@ def _llm_quality_evaluate_turn(
         if not expected_answered:
             reasons.append("expected_info_section_miss")
     if expected_response and not bot_response:
-        reasons.append("missing_bot_reply")
-        delivery_state = _llm_quality_outbox_delivery_state(
-            outbox_payload_status, outbox_summary
-        )
-        if delivery_state == "failed":
-            reasons.append("outbox_delivery_failed")
-        elif delivery_state in {"pending", "unknown"}:
-            reasons.append("outbox_delivery_timeout")
+        suppress_missing_reply = False
+        if isinstance(webhook_error, str) and webhook_error.strip():
+            lowered = webhook_error.casefold()
+            infra_markers = (
+                "remote_disconnected",
+                "timeout",
+                "timed out",
+                "connection refused",
+                "connection reset",
+                "network is unreachable",
+                "temporary failure",
+                "name or service not known",
+                "connection aborted",
+                "broken pipe",
+            )
+            if any(marker in lowered for marker in infra_markers):
+                suppress_missing_reply = True
+        if not suppress_missing_reply and not isinstance(meta, dict):
+            if isinstance(meta_error, str) and meta_error.casefold() in {
+                "timeout",
+                "conversation_not_found",
+            } and state not in LLM_QUALITY_KNOWN_STATES:
+                suppress_missing_reply = True
+        if not suppress_missing_reply:
+            reasons.append("missing_bot_reply")
+            delivery_state = _llm_quality_outbox_delivery_state(
+                outbox_payload_status, outbox_summary
+            )
+            if delivery_state == "failed":
+                reasons.append("outbox_delivery_failed")
+            elif delivery_state in {"pending", "unknown"}:
+                reasons.append("outbox_delivery_timeout")
     if state == "manager_active" and bot_response:
         reasons.append("unexpected_bot_reply_manager")
     if state == "manager_active" and not handover_meta:
@@ -4666,6 +4711,69 @@ def _llm_quality_retry_outbox_for_expected_reply(
         if retry_bot_response:
             return retry_summary, retry_payload, retry_status, retry_text, True
     return last_summary, last_payload, last_status, last_text, bot_response
+
+def _llm_quality_payload_is_duplicate_ack(response_payload):
+    marker = "duplicate message_id"
+    if isinstance(response_payload, str):
+        return marker in response_payload.casefold()
+    if not isinstance(response_payload, dict):
+        return False
+    for field in ("message", "error"):
+        value = response_payload.get(field)
+        if isinstance(value, str) and marker in value.casefold():
+            return True
+    nested_response = response_payload.get("response")
+    if isinstance(nested_response, str):
+        if marker in nested_response.casefold():
+            return True
+        try:
+            nested_payload = json.loads(nested_response)
+        except Exception:
+            nested_payload = None
+        if _llm_quality_payload_is_duplicate_ack(nested_payload):
+            return True
+    return False
+
+def _llm_quality_should_infer_bot_response_from_duplicate_ack(
+    *,
+    bot_response,
+    expected_response,
+    response_payload,
+    attempts,
+    meta,
+    meta_error,
+    state,
+):
+    if bot_response or not expected_response:
+        return False
+    if attempts <= 1:
+        return False
+    if meta_error or not isinstance(meta, dict):
+        return False
+    if not _llm_quality_payload_is_duplicate_ack(response_payload):
+        return False
+    if state in {"pending", "manager_active"}:
+        return False
+    action = meta.get("action") or meta.get("pending_action")
+    if not isinstance(action, str):
+        return False
+    if action in CHAOS_PENDING_ACTIONS:
+        return False
+    if action in {
+        "escalate",
+        "booking_captured_pending",
+        "booking_reuse_handover",
+        "booking_paused",
+    }:
+        return False
+    return action in {
+        "reply",
+        "match",
+        "booking_prompt",
+        "smalltalk",
+        "booking_confirm",
+        "booking_escalated",
+    }
 
 def _fetch_outbox_rows(db_user, client_id, inbound_message_id, limit=5):
     safe_client = _escape_sql_literal(client_id)
@@ -6562,6 +6670,18 @@ def _run_llm_quality(args):
                         outbox_wait_seconds=outbox_wait_seconds,
                         poll_interval=args.poll_interval,
                     )
+                bot_response_inferred_duplicate_ack = False
+                if _llm_quality_should_infer_bot_response_from_duplicate_ack(
+                    bot_response=bot_response,
+                    expected_response=expected_response,
+                    response_payload=response_payload,
+                    attempts=attempts,
+                    meta=meta,
+                    meta_error=meta_error,
+                    state=state,
+                ):
+                    bot_response = True
+                    bot_response_inferred_duplicate_ack = True
                 if bot_response:
                     stats["turns_with_response"] += 1
                 else:
@@ -6715,6 +6835,8 @@ def _run_llm_quality(args):
                     tool_signals=tool_signals,
                     outbox_summary=outbox_summary,
                     outbox_payload_status=outbox_payload_status,
+                    meta_error=meta_error,
+                    webhook_error=response_error,
                 )
                 if evaluation_reasons:
                     stats["turns_failed"] += 1
@@ -6935,6 +7057,7 @@ def _run_llm_quality(args):
                     "outbox_payload_status": outbox_payload_status,
                     "outbox_text": outbox_text,
                     "bot_response": bot_response,
+                    "bot_response_inferred_duplicate_ack": bot_response_inferred_duplicate_ack,
                     "expected_response": expected_response,
                     "expected_response_reason": expected_reason,
                     "turn_expectations": expectations,

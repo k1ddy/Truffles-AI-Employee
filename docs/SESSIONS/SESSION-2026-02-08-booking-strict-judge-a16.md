@@ -43,10 +43,29 @@
     - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_booking_quality_info_sections.py truffles-api/tests/test_booking_quality_progress_gate.py` (20 passed)
   - Ran accelerated frozen replay (`seed=1337`, `count=2`) to verify outbox-path instrumentation; run interrupted before `summary.json`, partial artifacts preserved for continuation.
   - Ran frozen smoke replay on updated outbox contract (`seed=1337`, `count=1`) and produced fresh `summary.json` with strict/hard metrics.
+  - Verified PR ancestry and merge risk:
+    - PR570 commits are not ancestors of PR578 and not in `main`;
+    - simulated merge order `570 -> 578` produces conflicts in `ops/diagnose.py` and `truffles-api/tests/test_booking_quality_response_guard.py`.
+  - Ported PR570 deltas directly into PR578 branch (conflict-free path):
+    - Added duplicate-ack bot-reply inference in `ops/diagnose.py` (`_llm_quality_payload_is_duplicate_ack`, `_llm_quality_should_infer_bot_response_from_duplicate_ack`), with conservative guards for pending/handoff actions.
+    - Added missing-reply infra suppression in evaluator (`meta_error`/`webhook_error` aware) to avoid false negative on transport failures.
+    - Added booking expectation fallbacks from PR570 in `_chaos_action_fallback_ok` and `_llm_quality_expected_reply_matches`.
+    - Restored parking intent propagation in `truffles-api/app/routers/webhook/info.py`.
+  - Added regressions for ported logic:
+    - `truffles-api/tests/test_booking_quality_response_guard.py`:
+      - duplicate-ack detector/inference;
+      - infra suppression for missing_bot_reply;
+      - manager/pending expected_reply fallback.
+    - `truffles-api/tests/test_master_info_flow.py`:
+      - parking signal intent test.
+  - Re-ran checks:
+    - `python3 -m py_compile ops/diagnose.py`
+    - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_booking_quality_info_sections.py truffles-api/tests/test_booking_quality_progress_gate.py` (29 passed)
+  - Ran frozen smoke replay after PR570-port (`seed=1337`, `count=1`) and produced summary/brief artifacts.
 - next:
-  - Resume frozen replay (`seed=1337`) with timeout/resume command from runbook until `summary.json` is produced, then compare strict/hard metrics.
+  - Resume full frozen replay (`seed=1337`, `count=10`) after PR570-port and compare against pre-port strict metrics.
   - Triage dominant expectation failures (`expected_state_mismatch`, `expected_reply_mismatch`) vs scenario contract.
-  - If full replay confirms reproducibility, open/update PR summary with strict metrics and handoff command.
+  - If full replay confirms reproducibility, close PR570 as superseded by PR578 and keep single merge path.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-08-booking-strict-judge.md
   - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke1b/summary.json
@@ -57,4 +76,7 @@
   - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke2/summary.json
   - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke2/responses.jsonl
   - /tmp/booking_quality/20260208-strict-main-seed-1337-smoke2/brief.md
+  - /tmp/booking_quality/20260208-pr570-port-smoke1/summary.json
+  - /tmp/booking_quality/20260208-pr570-port-smoke1/responses.jsonl
+  - /tmp/booking_quality/20260208-pr570-port-smoke1/brief.md
 - last_updated: 2026-02-08
