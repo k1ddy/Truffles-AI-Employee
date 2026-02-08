@@ -62,6 +62,19 @@
     - `python3 -m py_compile ops/diagnose.py`
     - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_booking_quality_info_sections.py truffles-api/tests/test_booking_quality_progress_gate.py` (29 passed)
   - Ran frozen smoke replay after PR570-port (`seed=1337`, `count=1`) and produced summary/brief artifacts.
+  - Core-eval semantic hardening (without string `must_include*` gates in core tier):
+    - Added `core_eval_mode` path in `truffles-api/tests/test_demo_salon_eval.py`.
+    - Core tier now checks semantic contracts via `decision_meta`/trace and non-empty reply contracts, while keeping strict trace assertions.
+    - Disabled local fake `detect_multi_intent`/`_extract_service_hint` patches for core-tier run path only.
+  - Fixed tenant-context false negatives in eval harness:
+    - switched fake `client_id` to valid UUID contract (`TEST_CLIENT_ID`) for webhook simulation helpers.
+  - Added policy regression guard for cancel-policy questions:
+    - `truffles-api/app/routers/webhook/policy.py`: avoid classifying policy question about cancellation terms as hard-law cancel request.
+    - `truffles-api/tests/test_demo_salon_eval.py`: added `test_cancel_policy_question_not_escalated_as_cancel_request` and `test_cancel_request_still_escalates`.
+  - Re-ran checks for updated core path:
+    - `python3 -m py_compile truffles-api/tests/test_demo_salon_eval.py truffles-api/app/routers/webhook/policy.py`
+    - `OPENAI_API_KEY= CI=1 pytest -q truffles-api/tests/test_demo_salon_eval.py` (15 passed)
+    - `OPENAI_API_KEY= pytest -q truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_booking_quality_info_sections.py truffles-api/tests/test_booking_quality_progress_gate.py` (29 passed)
 - next:
   - Resume full frozen replay (`seed=1337`, `count=10`) after PR570-port and compare against pre-port strict metrics.
   - Triage dominant expectation failures (`expected_state_mismatch`, `expected_reply_mismatch`) vs scenario contract.
