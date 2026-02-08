@@ -358,6 +358,14 @@ def _add_access_entry(
     entry.agent_ids.add(agent_id)
 
 
+def _resolve_legacy_agents(
+    agents: list[Agent],
+    memberships: list[AgentMembership],
+) -> list[Agent]:
+    membership_agent_ids = {membership.agent_id for membership in memberships}
+    return [agent for agent in agents if agent.id not in membership_agent_ids]
+
+
 def _build_access_map(
     memberships: list[AgentMembership],
     legacy_agents: list[Agent],
@@ -453,13 +461,15 @@ def get_console_context(
         raise ConsoleAPIError(403, "ACCOUNT_DISABLED", "Agent is disabled")
 
     agent_ids = list(agents_by_id.keys())
+    all_memberships = []
     memberships = []
     if agent_ids:
-        memberships = (
+        all_memberships = (
             db.query(AgentMembership)
-            .filter(AgentMembership.agent_id.in_(agent_ids), AgentMembership.is_active == True)
+            .filter(AgentMembership.agent_id.in_(agent_ids))
             .all()
         )
+        memberships = [membership for membership in all_memberships if membership.is_active]
 
     platform_admin_agents = [agent for agent in agents if agent.role == "platform_admin"]
     clients_by_id: dict[UUID, Client] = {}
@@ -476,11 +486,7 @@ def get_console_context(
         access_map = _build_platform_admin_access_map(clients, platform_admin_agents)
         accessible_clients = clients
     else:
-        memberships_by_agent: dict[UUID, list[AgentMembership]] = defaultdict(list)
-        for membership in memberships:
-            memberships_by_agent[membership.agent_id].append(membership)
-
-        legacy_agents = [agent for agent in agents if not memberships_by_agent.get(agent.id)]
+        legacy_agents = _resolve_legacy_agents(agents, all_memberships)
 
         membership_branch_ids = {m.branch_id for m in memberships if m.scope == "branch" and m.branch_id}
         membership_client_ids = {m.client_id for m in memberships if m.scope == "client" and m.client_id}

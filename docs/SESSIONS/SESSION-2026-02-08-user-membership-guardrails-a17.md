@@ -1,0 +1,22 @@
+# SESSION 2026-02-08-user-membership-guardrails-a17 — Session 2026-02-08-user-membership-guardrails-a17
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-08-user-membership-guardrails-a17.md
+- branch: feat/2026-02-08-user-membership-guardrails-a17
+- worktree: /home/zhan/worktrees/2026-02-08-user-membership-guardrails-a17
+- base_ref: origin/main
+- scope: Membership safety guardrails for platform_admin and legacy fallback in console auth.
+- done:
+  - Session created.
+  - Added backend guards for membership role assignment and platform_admin membership mutations.
+  - Updated console auth fallback: only agents without any membership rows use legacy access path.
+  - Added tests for new guardrails and legacy resolution behavior.
+  - Ran targeted pytest suites successfully.
+- next:
+  - Open PR and request merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-08-user-membership-guardrails-a17.md
+  - `pytest tests/test_console_access_admin_pr2.py -q`
+  - `pytest tests/test_console_auth_access.py -q`
+- last_updated: 2026-02-08

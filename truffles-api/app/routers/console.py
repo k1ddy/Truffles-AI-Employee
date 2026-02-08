@@ -1194,6 +1194,24 @@ def _assert_agent_matches_membership_target(
             raise ConsoleAPIError(400, "INVALID_PARAM", "Agent belongs to another company")
 
 
+def _ensure_membership_role_is_assignable(role: Optional[str]) -> None:
+    if role == "platform_admin":
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            "platform_admin role cannot be assigned via membership",
+        )
+
+
+def _ensure_membership_agent_is_mutable(agent: Agent) -> None:
+    if agent.role == "platform_admin":
+        raise ConsoleAPIError(
+            409,
+            "INVALID_STATE",
+            "platform_admin membership is managed automatically",
+        )
+
+
 def _create_agent_with_membership(
     db: Session,
     *,
@@ -1221,19 +1239,21 @@ def _create_agent_with_membership(
     )
     db.add(agent)
 
-    membership = AgentMembership(
-        id=uuid4(),
-        agent_id=agent.id,
-        scope="branch" if branch else "client",
-        company_id=client.company_id,
-        client_id=client.id,
-        branch_id=branch.id if branch else None,
-        role=role,
-        is_active=is_active,
-        created_at=created_at,
-        updated_at=created_at,
-    )
-    db.add(membership)
+    # platform_admin is a global agent role; memberships are tenant-scoped only.
+    if role != "platform_admin":
+        membership = AgentMembership(
+            id=uuid4(),
+            agent_id=agent.id,
+            scope="branch" if branch else "client",
+            company_id=client.company_id,
+            client_id=client.id,
+            branch_id=branch.id if branch else None,
+            role=role,
+            is_active=is_active,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+        db.add(membership)
 
     if normalized_subject:
         identity = AgentIdentity(
@@ -7269,6 +7289,8 @@ async def create_membership(
     if not agent:
         raise ConsoleAPIError(404, "NOT_FOUND", "Agent not found")
     _require_client_access(context, agent.client_id)
+    _ensure_membership_agent_is_mutable(agent)
+    _ensure_membership_role_is_assignable(body.role)
 
     target = _resolve_membership_target(
         db,
@@ -7371,6 +7393,7 @@ async def update_membership(
         raise ConsoleAPIError(404, "NOT_FOUND", "Agent not found")
 
     _require_client_access(context, agent.client_id)
+    _ensure_membership_agent_is_mutable(agent)
 
     previous_scope = membership.scope
     previous_company_id = membership.company_id
@@ -7380,6 +7403,8 @@ async def update_membership(
     previous_role = membership.role
 
     fields_set = body.model_fields_set
+    if "role" in fields_set:
+        _ensure_membership_role_is_assignable(body.role)
     next_scope = body.scope if "scope" in fields_set else membership.scope
     next_company_id = body.company_id if "company_id" in fields_set else membership.company_id
     next_client_id = body.client_id if "client_id" in fields_set else membership.client_id

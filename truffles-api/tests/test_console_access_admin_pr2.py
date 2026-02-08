@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.models.agent_membership import AgentMembership
 from app.routers import console as console_router
 from app.schemas.console import (
     ConsoleAgentCreateRequest,
@@ -168,3 +169,40 @@ async def test_create_branch_bootstrap_accounts_return_created_agents(monkeypatc
     assert helper_calls[1]["role"] == "manager"
     assert helper_calls[1]["branch_id"] == response.branch.id
     db.commit.assert_called_once()
+
+
+def test_membership_role_guard_rejects_platform_admin():
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._ensure_membership_role_is_assignable("platform_admin")
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
+def test_membership_agent_guard_rejects_platform_admin_agent():
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._ensure_membership_agent_is_mutable(
+            SimpleNamespace(role="platform_admin"),
+        )
+    assert exc_info.value.code == "INVALID_STATE"
+
+
+def test_create_agent_with_membership_skips_membership_for_platform_admin(monkeypatch):
+    db = Mock()
+    added = []
+    db.add.side_effect = added.append
+    client = SimpleNamespace(id=uuid4(), company_id=uuid4())
+
+    monkeypatch.setattr(console_router, "_ensure_unique_oidc_subject", lambda *_args, **_kwargs: None)
+
+    agent = console_router._create_agent_with_membership(
+        db,
+        client=client,
+        role="platform_admin",
+        branch=None,
+        name="Platform Admin",
+        is_active=True,
+        oidc_subject=None,
+        linked_from="test",
+    )
+
+    assert agent.role == "platform_admin"
+    assert not any(isinstance(item, AgentMembership) for item in added)
