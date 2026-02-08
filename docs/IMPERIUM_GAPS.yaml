@@ -322,3 +322,69 @@ gaps:
       - "Appointment create enqueues outbox event and updates appointment_sync_states with external_id"
       - "Inbound Google event creates/updates calendar_blocks only (no SoT overwrite)"
       - "Stale sync disables confirm_slots and falls back to collect_preferences"
+
+  - id: "GAP-026"
+    title: "Membership/RBAC admin completeness missing in Console"
+    status: "NOT_IMPLEMENTED"
+    why_it_matters: "Fleet-scale access management cannot rely on manual DB changes; this risks access drift and outages."
+    evidence:
+      - "truffles-api/app/routers/console.py:6147 (only POST /admin/agents exists for provisioning)"
+      - "rg -n '\"/admin/agents\\{' truffles-api/app/routers/console.py (no update/disable/re-scope endpoints)"
+      - "docs/PROCESSES.md:434-436 (manual gaps called out)"
+    proposed_fix_mvp: "Add membership management API/UI: list/update/disable/enable/re-scope memberships and identity rebind with audit."
+    acceptance_tests:
+      - "Disable membership immediately revokes Console access for that scope"
+      - "Re-scope branch membership moves access without cross-tenant leak"
+      - "Duplicate OIDC binding is blocked with explicit error"
+
+  - id: "GAP-027"
+    title: "Runbook-to-Console Jobs coverage is incomplete"
+    status: "PARTIAL"
+    why_it_matters: "Critical operations still depend on scripts and operator memory, which does not scale to large fleets."
+    evidence:
+      - "truffles-api/app/routers/console.py:1293 (_OPS_JOB_DEFINITIONS only outbox_process|heal|metrics_snapshot)"
+      - "ops/sync_client.py (knowledge sync remains script-first)"
+      - "ops/backfill_branch_rag.py (branch RAG backfill remains script-first)"
+    proposed_fix_mvp: "Expose typed Console jobs for sync_client and branch_rag_backfill with dry-run/execute/history/artifacts."
+    acceptance_tests:
+      - "Console can run sync_client dry-run and execute with artifact links"
+      - "Console can run branch_rag_backfill dry-run and execute with branch-scoped evidence"
+
+  - id: "GAP-028"
+    title: "Legacy /admin consumers are not migrated to unified Console admin surface"
+    status: "PARTIAL"
+    why_it_matters: "Dual admin surfaces create drift risk; one-shot deprecation can break CI/runbooks."
+    evidence:
+      - ".github/workflows/ci.yml:1250 (depends on /admin/health)"
+      - "ops/diagnose.py:5602-5603 (/admin/health and /admin/version checks)"
+      - "ops/diagnose.py:5760 (/admin/outbox/process usage)"
+      - "docs/SESSIONS/SESSION-2026-02-07-legacy-admin-security-hardening-a15.md (compatibility kept intentionally)"
+    proposed_fix_mvp: "Create consumer migration matrix and phased switch to /console/v1/ops + /console/v1/admin; keep compatibility window with telemetry."
+    acceptance_tests:
+      - "CI/livecheck use new surface or compatibility wrapper without behavior drift"
+      - "Legacy-only operational write paths are eliminated from daily workflows"
+
+  - id: "GAP-029"
+    title: "Company commercial lifecycle model is not formalized for enterprise operations"
+    status: "NOT_IMPLEMENTED"
+    why_it_matters: "Platform cannot reliably govern contract/payment/service state transitions at large portfolio scale."
+    evidence:
+      - "docs/PROCESSES.md:434 (billing runtime has company.billing_info only; no invoice/subscription model)"
+      - "truffles-api/app/models/company.py (billing_info exists, no subscription/invoice entities)"
+      - "truffles-api/app/models/client_onboarding_contract.py:20 (payment_status limited to onboarding contract)"
+    proposed_fix_mvp: "Define company commercial lifecycle states and minimum contract/billing fields in Console registry with auditable transitions."
+    acceptance_tests:
+      - "Company state transitions require reason and are audit-logged"
+      - "Operational gates (onboarding/go-live/support) can read commercial state deterministically"
+
+  - id: "GAP-030"
+    title: "No fleet bulk operations with approval and dry-run safeguards"
+    status: "NOT_IMPLEMENTED"
+    why_it_matters: "At high tenant volume, manual one-by-one actions are error-prone and too slow for incident response."
+    evidence:
+      - "rg -n '/admin/.*/bulk|/bulk' truffles-api/app/routers/console.py contracts/console_api/openapi.v1.yaml (no matches)"
+      - "Current lifecycle and ops actions are single-entity or narrow-scope endpoints"
+    proposed_fix_mvp: "Add bulk action framework (dry-run -> confirmation -> execute) for lifecycle and remediation tasks with idempotency keys."
+    acceptance_tests:
+      - "Bulk archive dry-run lists exact entities and blockers before execute"
+      - "Bulk execute is idempotent and fully audit-traced"

@@ -443,6 +443,26 @@ POST /console/v1/cases/{case_id}/return
 - UX debt register: `docs/CONSOLE_AUDIT/UX_BACKLOG.md`.
 - Any Control Plane behavior change requires a separate Task Package and audit doc updates.
 
+#### 2.6.5 Enterprise fleet management contract (100000+ companies)
+
+**Цель:** управление уже подключенными и новыми компаниями должно быть одним операционным контуром, без split между Console/legacy/scripts.
+
+**Current truth (code-backed):**
+- Tenant lifecycle read (`active|archived|all`) реализован в `GET /console/v1/admin/clients|branches`.
+- Client lifecycle write реализован через явные actions `archive/restore` с prechecks и audit reason.
+- Integrations drift registry реализован в `GET /console/v1/admin/integrations` (mismatch/webhook/inbound freshness).
+
+**Remaining fleet-gaps (must close before enterprise-ready):**
+- Membership admin completeness (disable/enable/re-scope/rebind) отсутствует как полноценный Console surface.
+- Runbook jobs неполные: ключевые операции (`sync_client`, branch RAG backfill) еще script-first.
+- Legacy `/admin/*` остается operational dependency для CI/runbooks и требует phased migration, а не one-shot cutoff.
+- Company commercial lifecycle (subscription/invoice class) не формализован в core DB, только `billing_info` + onboarding `payment_status`.
+
+**Execution contract:**
+- Fleet roadmap и owner-acceptance фиксируются в `docs/REPORTS/2026-02-08-enterprise-fleet-program.md`.
+- Изменения этого контура выполняются только по staged PR-плану (`PR-1..PR-5`) с manual checks и evidence bundle.
+- Любая deprecation legacy `/admin/*` выполняется только после consumer migration matrix и dual-run периода.
+
 ### 2.7 Unified Client Onboarding Runbook (operational, step-by-step)
 
 **Назначение:** единая инструкция запуска клиента от подписания документов до поддержки. Используется Brain/Hands/OPS как исполняемый порядок действий.
