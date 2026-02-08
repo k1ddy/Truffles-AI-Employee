@@ -12,6 +12,19 @@ Quick checks
 curl -s http://localhost:8000/admin/health
 ```
 
+Mandatory safety preflight
+- Before running `ops/diagnose.py` suites or any outbound live-check, verify runtime guard flags:
+```bash
+curl -s http://localhost:8000/admin/health | jq '.safety'
+```
+- Expected:
+  - `status` is `ok` or `warning`.
+  - `danger_flags` is empty.
+- If `danger_flags` is not empty, stop and fix environment first.
+  - Typical blockers:
+    - `test_mode_outbox_worker_on_nonlocal_db`
+    - `test_mode_outbox_worker_without_allowlist`
+
 Contract guardrails
 - Outbox payload types:
   - `schema_version=outbox.v1` + `event_type=whatsapp.send_text` for send-only delivery.
@@ -103,3 +116,4 @@ Evidence to capture
 Notes
 - Do not modify DB/trace to fabricate evidence. Use DB updates only for recovery.
 - `WEBHOOK_ENQUEUE_ONLY=1` forces `/webhook` to enqueue-only (bypasses full decision pipeline).
+- Outbox worker now has startup hard-stop for unsafe test-mode combinations; override exists only for explicit local debug: `OUTBOX_WORKER_UNSAFE_ALLOW=1`.
