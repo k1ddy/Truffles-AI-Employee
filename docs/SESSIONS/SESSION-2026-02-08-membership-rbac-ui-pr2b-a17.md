@@ -1,0 +1,24 @@
+# SESSION 2026-02-08-membership-rbac-ui-pr2b-a17 — Session 2026-02-08-membership-rbac-ui-pr2b-a17
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-08-membership-rbac-ui-pr2b-a17.md
+- branch: feat/2026-02-08-membership-rbac-ui-pr2b-a17
+- worktree: /home/zhan/worktrees/2026-02-08-membership-rbac-ui-pr2b-a17
+- base_ref: origin/main
+- scope: Team UI completeness for account and membership admin using existing Console API (`/admin/agents`, `/admin/memberships`).
+- done:
+  - Session created.
+  - Added Team users tab section for account creation (role/name/oidc/branch/is_active) via `adminApi.createAgent`.
+  - Added Team users tab memberships section with list/filter/create and inline edit for role/scope/target/is_active + reason via `adminApi.listMemberships/createMembership/patchMembership`.
+  - Added activate/deactivate quick action for memberships with reason prompt and audit-compatible payload.
+  - Wired current client context into Team users panel to avoid cross-tenant ambiguous account creation.
+  - Ran checks: `npm run lint`, `npm run build`, `SESSION_AGENT=a17 scripts/session_check.sh`.
+- next:
+  - Commit changes.
+  - Push branch and open PR.
+  - Wait CI and merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-08-membership-rbac-ui-pr2b-a17.md
+  - console-web/src/app/team/page.tsx
+- last_updated: 2026-02-08
