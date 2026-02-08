@@ -1,0 +1,21 @@
+# SESSION 2026-02-08-console-proxy-methods-user-admin-a17 — Session 2026-02-08-console-proxy-methods-user-admin-a17
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-08-console-proxy-methods-user-admin-a17.md
+- branch: feat/2026-02-08-console-proxy-methods-user-admin-a17
+- worktree: /home/zhan/worktrees/2026-02-08-console-proxy-methods-user-admin-a17
+- base_ref: origin/main
+- scope: Fix 405 for Team user-management actions by adding PATCH/PUT/DELETE support in console proxy route.
+- done:
+  - Session created.
+  - Implemented shared proxy forwarder and added PATCH/PUT/DELETE handlers.
+  - Verified console-web lint and build on worktree.
+  - Verified PATCH /api/proxy/* returns AUTH_REQUIRED (401) instead of framework 405.
+- next:
+  - Open PR and run CI.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-08-console-proxy-methods-user-admin-a17.md
+  - console-web lint/build output
+  - curl PATCH check on localhost:3101 (401 expected)
+- last_updated: 2026-02-08

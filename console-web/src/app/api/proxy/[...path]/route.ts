@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 const MAX_UPSTREAM_PREVIEW = 500;
+type ProxyRouteContext = { params: Promise<{ path: string[] }> };
 
 function missingApiBaseResponse() {
     return NextResponse.json(
@@ -69,15 +70,10 @@ async function parseUpstreamPayload(response: Response): Promise<unknown> {
     }
 }
 
-/**
- * Proxy API route to forward requests to the backend API.
- * This avoids CORS issues by making the API call server-side.
- * 
- * Usage: /api/proxy/cases -> http://api-server/console/v1/cases
- */
-export async function GET(
+async function forwardProxyRequest(
     request: NextRequest,
-    { params }: { params: Promise<{ path: string[] }> }
+    { params }: ProxyRouteContext,
+    method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
 ) {
     const session = await getServerSession(authOptions);
     const { path } = await params;
@@ -95,15 +91,34 @@ export async function GET(
 
     const apiPath = path.join('/');
     const url = new URL(request.url);
-    const queryString = url.search;
-    const targetUrl = `${API_BASE_URL}/${apiPath}${queryString}`;
+    const targetUrl = `${API_BASE_URL}/${apiPath}${url.search}`;
 
     try {
+        const headers: Record<string, string> = buildForwardHeaders(session.accessToken, request);
+        let body: FormData | string | undefined;
+
+        if (method === 'GET') {
+            headers['Content-Type'] = 'application/json';
+        } else {
+            const contentType = request.headers.get('content-type') ?? '';
+            const isMultipart = contentType.includes('multipart/form-data');
+            const idempotencyKey =
+                request.headers.get('Idempotency-Key') ?? request.headers.get('X-Idempotency-Key');
+            if (idempotencyKey) {
+                headers['Idempotency-Key'] = idempotencyKey;
+            }
+            if (isMultipart) {
+                body = await request.formData();
+            } else {
+                body = await request.text();
+                headers['Content-Type'] = 'application/json';
+            }
+        }
+
         const response = await fetch(targetUrl, {
-            method: 'GET',
-            headers: buildForwardHeaders(session.accessToken, request, {
-                'Content-Type': 'application/json',
-            }),
+            method,
+            headers,
+            ...(body !== undefined ? { body } : {}),
         });
         const data = await parseUpstreamPayload(response);
         if (
@@ -129,64 +144,43 @@ export async function GET(
     }
 }
 
+/**
+ * Proxy API route to forward requests to the backend API.
+ * This avoids CORS issues by making the API call server-side.
+ * 
+ * Usage: /api/proxy/cases -> http://api-server/console/v1/cases
+ */
+export async function GET(
+    request: NextRequest,
+    context: ProxyRouteContext,
+) {
+    return forwardProxyRequest(request, context, 'GET');
+}
+
 export async function POST(
     request: NextRequest,
-    { params }: { params: Promise<{ path: string[] }> }
+    context: ProxyRouteContext,
 ) {
-    const session = await getServerSession(authOptions);
-    const { path } = await params;
+    return forwardProxyRequest(request, context, 'POST');
+}
 
-    if (!session?.accessToken) {
-        return NextResponse.json(
-            { error: { code: 'AUTH_REQUIRED', message: 'Not authenticated' } },
-            { status: 401 }
-        );
-    }
+export async function PATCH(
+    request: NextRequest,
+    context: ProxyRouteContext,
+) {
+    return forwardProxyRequest(request, context, 'PATCH');
+}
 
-    if (!API_BASE_URL) {
-        return missingApiBaseResponse();
-    }
+export async function PUT(
+    request: NextRequest,
+    context: ProxyRouteContext,
+) {
+    return forwardProxyRequest(request, context, 'PUT');
+}
 
-    const apiPath = path.join('/');
-    const targetUrl = `${API_BASE_URL}/${apiPath}`;
-    const contentType = request.headers.get('content-type') ?? '';
-    const isMultipart = contentType.includes('multipart/form-data');
-    const body = isMultipart ? await request.formData() : await request.text();
-
-    try {
-        const idempotencyKey =
-            request.headers.get('Idempotency-Key') ?? request.headers.get('X-Idempotency-Key');
-        const headers: Record<string, string> = buildForwardHeaders(session.accessToken, request, {
-            ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
-        });
-        if (!isMultipart) {
-            headers['Content-Type'] = 'application/json';
-        }
-        const response = await fetch(targetUrl, {
-            method: 'POST',
-            headers,
-            body,
-        });
-        const data = await parseUpstreamPayload(response);
-        if (
-            response.ok
-            && isApiErrorPayload(data)
-            && data.error.code === 'UPSTREAM_INVALID_RESPONSE'
-        ) {
-            return NextResponse.json(data, { status: 502 });
-        }
-        return NextResponse.json(data, { status: response.status });
-    } catch (error) {
-        console.error('Proxy error:', error);
-        return NextResponse.json(
-            {
-                error: {
-                    code: 'PROXY_ERROR',
-                    message: 'Failed to reach API',
-                    details: { target_url: targetUrl },
-                },
-            },
-            { status: 502 }
-        );
-    }
+export async function DELETE(
+    request: NextRequest,
+    context: ProxyRouteContext,
+) {
+    return forwardProxyRequest(request, context, 'DELETE');
 }
