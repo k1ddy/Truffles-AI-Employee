@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.logging_config import get_logger
 from app.models import Branch, Client, ClientSettings
+from app.routers.webhook.instance_routing import resolve_active_branch_by_instance
 from app.routers.webhook.media import _extract_media_info
 from app.routers.webhook.parsing import _parse_webhook_request
 from app.routers.webhook.secrets import _get_request_webhook_secret, _resolve_expected_webhook_secret
@@ -242,6 +243,7 @@ def _run_preflight(
     branch_mode = settings.branch_resolution_mode if settings and settings.branch_resolution_mode else "hybrid"
     instance_id = metadata.instanceId if metadata else None
     resolved_branch = None
+    instance_match_mode = None
     if branch_mode in {"by_instance", "hybrid"}:
         if not instance_id:
             if branch_mode == "by_instance":
@@ -261,15 +263,13 @@ def _run_preflight(
                     db.commit()
                 return WebhookResponse(success=False, message="Missing instanceId"), {}
         else:
-            resolved_branch = (
-                db.query(Branch)
-                .filter(
-                    Branch.client_id == client.id,
-                    Branch.instance_id == instance_id,
-                    Branch.is_active == True,
-                )
-                .first()
+            resolution = resolve_active_branch_by_instance(
+                db,
+                client_id=client.id,
+                instance_id=instance_id,
             )
+            resolved_branch = resolution.branch
+            instance_match_mode = resolution.match_mode
             if not resolved_branch:
                 trace_conversation = resolve_trace_conversation(
                     trace_client=client,
@@ -282,7 +282,11 @@ def _run_preflight(
                     stage="preflight",
                     decision="reject",
                     reason="unknown_instance_id",
-                    meta={"branch_mode": branch_mode, "instance_id": instance_id},
+                    meta={
+                        "branch_mode": branch_mode,
+                        "instance_id": instance_id,
+                        "instance_match_mode": instance_match_mode,
+                    },
                 ):
                     db.commit()
                 return WebhookResponse(success=False, message="Unknown instanceId"), {}
@@ -347,6 +351,8 @@ def _run_preflight(
                 resolved_branch = tenant_branch
 
     effective_instance_id = instance_id
+    if resolved_branch and resolved_branch.instance_id:
+        effective_instance_id = resolved_branch.instance_id
     if not effective_instance_id and incoming_tenant_context:
         effective_instance_id = incoming_tenant_context.instance_id
 
@@ -409,6 +415,7 @@ def _run_preflight(
             "media_info": media_info,
             "resolved_branch_id": resolved_branch.id if resolved_branch else None,
             "resolved_knowledge_tag": resolved_branch.knowledge_tag if resolved_branch else None,
+            "resolved_instance_match_mode": instance_match_mode,
             "tenant_context": effective_tenant_context,
         },
     )
@@ -464,15 +471,11 @@ async def handle_webhook_direct(client_slug: str, request: Request, db: Session 
     instance_id = metadata.instanceId if metadata else None
     resolved_branch = None
     if instance_id:
-        resolved_branch = (
-            db.query(Branch)
-            .filter(
-                Branch.client_id == client.id,
-                Branch.instance_id == instance_id,
-                Branch.is_active == True,
-            )
-            .first()
-        )
+        resolved_branch = resolve_active_branch_by_instance(
+            db,
+            client_id=client.id,
+            instance_id=instance_id,
+        ).branch
     expected_secret = _resolve_expected_webhook_secret(
         settings=settings,
         branch=resolved_branch,

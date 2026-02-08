@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Branch, Conversation, User
 from app.routers.webhook.context_manager import _get_conversation_context, _set_conversation_context
+from app.routers.webhook.instance_routing import resolve_active_branch_by_instance
 from app.schemas.webhook import WebhookResponse
 from app.services.state_machine import ConversationState
 
@@ -178,15 +179,11 @@ def _handle_branch_selection_gate(
 
     instance_id = metadata.instanceId if metadata else None
     if branch_mode in {"by_instance", "hybrid"} and instance_id:
-        branch = (
-            db.query(Branch)
-            .filter(
-                Branch.client_id == client_id,
-                Branch.instance_id == instance_id,
-                Branch.is_active == True,
-            )
-            .first()
-        )
+        branch = resolve_active_branch_by_instance(
+            db,
+            client_id=client_id,
+            instance_id=instance_id,
+        ).branch
         if branch:
             if branch_id != branch.id:
                 _apply_branch_selection(

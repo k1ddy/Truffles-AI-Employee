@@ -1,0 +1,26 @@
+# SESSION 2026-02-08-instance-routing-alias-a17 — Session 2026-02-08-instance-routing-alias-a17
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-08-instance-routing-alias-a17.md
+- branch: feat/2026-02-08-instance-routing-alias-a17
+- worktree: /home/zhan/worktrees/2026-02-08-instance-routing-alias-a17
+- base_ref: origin/main
+- scope: Stabilize demo_salon inbound/outbound under instanceId drift and restore runtime delivery.
+- done:
+  - Session created.
+  - Added safe instance alias resolver by decoded uid (`instance_routing`) and wired it into preflight + branch selection + direct webhook secret resolution.
+  - Added tests for uid-alias routing (preflight + branch selection) and kept unknown-instance reject behavior.
+  - Runtime remediation on host: `TEST_MODE=0`, restarted API/workers, aligned `branches.instance_id` with canonical client instance, temporary `branch_resolution_mode=disabled` for demo_salon to avoid immediate drops until alias code deploy.
+  - Verified runtime delivery evidence: outbound row `51a1de45-5e6f-4be6-bb36-c86b849ed848` status `SENT` for `77759841926@s.whatsapp.net`.
+- next:
+  - Open PR and merge/deploy alias code fix.
+  - After deploy, return `client_settings.branch_resolution_mode` from `disabled` to `by_instance`.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-08-instance-routing-alias-a17.md
+  - `pytest -q truffles-api/tests/test_branch_routing_instance.py` (18 passed)
+  - `pytest -q truffles-api/tests/test_provider_gateway_integration.py -k tenant` (8 passed)
+  - Traefik evidence: `/webhook/demo_salon` at `2026-02-08 01:36:28+00` with `instanceId ...\"client_id\":\"salon\"...` and `200 91`.
+  - SQL evidence: missing inbound around `01:30-01:40+00`; failed outbox `7bc3919a-8a74-40e9-9bdd-15a4be8cfd5b` (`payload_instance_id=...salon...`).
+  - Runtime restore evidence: `admin/health` safety `status=ok`; outbox startup safety ok; ChatFlow send success for marker `REALFIX-1770516042`.
+- last_updated: 2026-02-08
