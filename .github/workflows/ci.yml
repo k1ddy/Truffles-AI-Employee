@@ -351,6 +351,10 @@ jobs:
       - name: Guard console contract auth
         id: guard
         run: |
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ -n "${CONSOLE_API_TOKEN}" ]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -369,15 +373,21 @@ jobs:
           python-version: "3.11"
 
       - name: Install Schemathesis
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.guard.outputs.skip != 'true' && github.event_name != 'pull_request'
         run: pip install schemathesis
 
+      - name: Validate console OpenAPI (PR)
+        if: steps.guard.outputs.skip != 'true' && github.event_name == 'pull_request'
+        run: |
+          pip install openapi-spec-validator
+          python -m openapi_spec_validator contracts/console_api/openapi.v1.yaml
+
       - name: Use pre-provisioned token
-        if: steps.guard.outputs.skip != 'true' && env.CONSOLE_API_TOKEN != ''
+        if: steps.guard.outputs.skip != 'true' && github.event_name != 'pull_request' && env.CONSOLE_API_TOKEN != ''
         run: echo "SCHEMATHESIS_TOKEN=${CONSOLE_API_TOKEN}" >> $GITHUB_ENV
 
       - name: Fetch console token
-        if: steps.guard.outputs.skip != 'true' && env.CONSOLE_API_TOKEN == ''
+        if: steps.guard.outputs.skip != 'true' && github.event_name != 'pull_request' && env.CONSOLE_API_TOKEN == ''
         run: |
           python - <<'PY'
           import json
@@ -403,7 +413,7 @@ jobs:
           PY
 
       - name: Resolve console selection headers
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.guard.outputs.skip != 'true' && github.event_name != 'pull_request'
         run: |
           python - <<'PY'
           import json
@@ -435,7 +445,7 @@ jobs:
           PY
 
       - name: Schemathesis GET-only smoke
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.guard.outputs.skip != 'true' && github.event_name != 'pull_request'
         run: |
           headers=(--header "Authorization: Bearer ${SCHEMATHESIS_TOKEN}")
           if [ -n "${SCHEMATHESIS_CLIENT_ID:-}" ]; then
