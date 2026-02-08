@@ -1,0 +1,28 @@
+# SESSION 2026-02-08-ci-deploy-host-sync-hardening-a18 — Session 2026-02-08-ci-deploy-host-sync-hardening-a18
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-08-ci-deploy-host-sync-hardening-a18.md
+- branch: feat/2026-02-08-ci-deploy-host-sync-hardening-a18
+- worktree: /home/zhan/worktrees/2026-02-08-ci-deploy-host-sync-hardening-a18
+- base_ref: origin/main
+- scope: CI deploy hardening after missing release-script incident (host repo sync, fail-fast, canonical script path only, evidence update).
+- done:
+  - Session created.
+  - Updated `.github/workflows/ci.yml` deploy SSH script: strict `set -euo pipefail`, host repo sync (`fetch/checkout/pull --ff-only`), canonical script path checks, removed fallback to `/home/zhan/restart_release.sh`.
+  - Added incident + fix evidence entry to `STATE.md`.
+  - Completed local checks from TP (`py_compile`, migration governance strict, `pytest tests/test_apply_sql_migrations.py`, `session_check`).
+- next:
+  - Commit changes.
+  - Push branch and open PR.
+  - Wait CI and merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-08-ci-deploy-host-sync-hardening-a18.md
+  - /tmp/ci_deploy_missing_release_script_20260208_a18.txt
+  - /tmp/prod_version_after_manual_release_20260208_a18.txt
+  - /tmp/prod_container_parity_after_manual_release_20260208_a18.txt
+  - /tmp/py_compile_ci_deploy_host_sync_hardening_20260208_a18.txt
+  - /tmp/check_migration_governance_strict_ci_deploy_host_sync_hardening_20260208_a18.txt
+  - /tmp/pytest_apply_sql_migrations_ci_deploy_host_sync_hardening_20260208_a18.txt
+  - /tmp/session_check_ci_deploy_host_sync_hardening_20260208_a18.txt
+- last_updated: 2026-02-08
