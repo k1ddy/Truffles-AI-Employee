@@ -1,9 +1,9 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
 from uuid import UUID, uuid4
 
 import pytest
-from datetime import datetime, timezone
 
 from app.routers import console as console_router
 from app.services.console_errors import ConsoleAPIError
