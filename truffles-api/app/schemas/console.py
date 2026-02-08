@@ -44,6 +44,18 @@ class ConsoleAgentWithIdentities(BaseModel):
     identities: list[ConsoleAgentIdentity] = []
 
 
+ConsoleAgentRole = Literal[
+    "owner",
+    "admin",
+    "manager",
+    "support",
+    "platform_admin",
+    "specialist",
+    "viewer",
+]
+ConsoleMembershipScope = Literal["company", "client", "branch"]
+
+
 class ConsoleCompany(BaseModel):
     id: UUID
     name: str
@@ -189,6 +201,13 @@ class ConsoleClientLifecycleActionRequest(BaseModel):
     reason: str
 
 
+class ConsoleBranchBootstrapAccountTemplate(BaseModel):
+    role: ConsoleAgentRole
+    name: Optional[str] = None
+    oidc_subject: Optional[str] = None
+    is_active: Optional[bool] = True
+
+
 class ConsoleBranchCreateRequest(BaseModel):
     client_id: UUID
     slug: str
@@ -201,10 +220,12 @@ class ConsoleBranchCreateRequest(BaseModel):
     working_hours: Optional[dict] = None
     booking_settings: Optional[dict] = None
     is_active: Optional[bool] = None
+    bootstrap_accounts: list[ConsoleBranchBootstrapAccountTemplate] = []
 
 
 class ConsoleBranchCreateResponse(BaseModel):
     branch: ConsoleBranch
+    created_agents: list[ConsoleAgent] = []
 
 
 class ConsoleBranchUpdateRequest(BaseModel):
@@ -275,7 +296,7 @@ class ConsoleConfirmationResponse(BaseModel):
 class ConsoleAgentCreateRequest(BaseModel):
     client_id: UUID
     branch_id: Optional[UUID] = None
-    role: Literal["owner", "admin", "manager", "support", "platform_admin", "specialist", "viewer"]
+    role: ConsoleAgentRole
     name: Optional[str] = None
     is_active: Optional[bool] = True
     oidc_subject: Optional[str] = None
@@ -283,6 +304,60 @@ class ConsoleAgentCreateRequest(BaseModel):
 
 class ConsoleAgentCreateResponse(BaseModel):
     agent: ConsoleAgent
+
+
+class ConsoleAgentMembership(BaseModel):
+    id: UUID
+    agent_id: UUID
+    agent_name: Optional[str] = None
+    agent_client_id: Optional[UUID] = None
+    scope: ConsoleMembershipScope
+    company_id: Optional[UUID] = None
+    client_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
+    role: ConsoleAgentRole
+    is_active: bool
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleMembershipListResponse(BaseModel):
+    items: list[ConsoleAgentMembership]
+
+
+class ConsoleMembershipCreateRequest(BaseModel):
+    agent_id: UUID
+    scope: ConsoleMembershipScope
+    role: ConsoleAgentRole
+    company_id: Optional[UUID] = None
+    client_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
+    is_active: Optional[bool] = True
+
+
+class ConsoleMembershipUpdateRequest(BaseModel):
+    scope: Optional[ConsoleMembershipScope] = None
+    role: Optional[ConsoleAgentRole] = None
+    company_id: Optional[UUID] = None
+    client_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
+    is_active: Optional[bool] = None
+    reason: Optional[str] = None
+
+
+class ConsoleAgentLifecycleActionRequest(BaseModel):
+    reason: str
+
+
+class ConsoleAgentOidcRebindRequest(BaseModel):
+    oidc_subject: str
+    reason: str
+
+
+class ConsoleAgentOidcRebindResponse(BaseModel):
+    agent_id: UUID
+    oidc_subject: str
+    previous_oidc_subject: Optional[str] = None
 
 
 class ConsoleMeResponse(BaseModel):

@@ -505,6 +505,18 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         workingHours: "",
         bookingSettings: "",
     });
+    const [branchBootstrap, setBranchBootstrap] = useState({
+        enabled: true,
+        createOwner: true,
+        createAdmin: true,
+        createManager: true,
+        ownerName: "",
+        ownerOidcSubject: "",
+        adminName: "",
+        adminOidcSubject: "",
+        managerName: "",
+        managerOidcSubject: "",
+    });
     const [workingHoursDays, setWorkingHoursDays] = useState<string[]>([]);
     const [workingHoursStart, setWorkingHoursStart] = useState("");
     const [workingHoursEnd, setWorkingHoursEnd] = useState("");
@@ -964,8 +976,17 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         },
         onSuccess: (data) => {
             setBranchData(data.branch as ProvisioningBranch);
+            const bootstrapAgents = (data.created_agents ?? []) as ProvisioningAgent[];
+            if (bootstrapAgents.length > 0) {
+                setCreatedAgents((prev) => [...bootstrapAgents, ...prev]);
+                queryClient.invalidateQueries({ queryKey: ["agents"] });
+            }
             refetchOnboarding();
-            toast.success("Филиал создан");
+            toast.success(
+                bootstrapAgents.length > 0
+                    ? `Филиал создан, добавлено аккаунтов: ${bootstrapAgents.length}`
+                    : "Филиал создан"
+            );
         },
         onError: (error) => {
             handleError(error);
@@ -1410,6 +1431,36 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         });
     };
 
+    const buildBranchBootstrapAccounts = (): components["schemas"]["BranchBootstrapAccountTemplate"][] => {
+        if (!branchBootstrap.enabled) {
+            return [];
+        }
+        const branchLabel = branchForm.name.trim() || "Branch";
+        const accounts: components["schemas"]["BranchBootstrapAccountTemplate"][] = [];
+        if (branchBootstrap.createOwner) {
+            accounts.push({
+                role: "owner",
+                name: branchBootstrap.ownerName.trim() || `${branchLabel} Owner`,
+                oidc_subject: branchBootstrap.ownerOidcSubject.trim() || undefined,
+            });
+        }
+        if (branchBootstrap.createAdmin) {
+            accounts.push({
+                role: "admin",
+                name: branchBootstrap.adminName.trim() || `${branchLabel} Admin`,
+                oidc_subject: branchBootstrap.adminOidcSubject.trim() || undefined,
+            });
+        }
+        if (branchBootstrap.createManager) {
+            accounts.push({
+                role: "manager",
+                name: branchBootstrap.managerName.trim() || `${branchLabel} Manager`,
+                oidc_subject: branchBootstrap.managerOidcSubject.trim() || undefined,
+            });
+        }
+        return accounts;
+    };
+
     const handleCreateBranch = () => {
         if (!clientId) {
             toast.error("Укажите client_id");
@@ -1421,6 +1472,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.error("Заполните название и slug");
             return;
         }
+        const bootstrapAccounts = buildBranchBootstrapAccounts();
         createBranchMutation.mutate({
             client_id: clientId,
             name,
@@ -1428,6 +1480,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             timezone: branchForm.timezone.trim() || undefined,
             phone: branchForm.phone.trim() || undefined,
             is_active: false,
+            bootstrap_accounts: bootstrapAccounts.length > 0 ? bootstrapAccounts : undefined,
         });
     };
 
@@ -2244,6 +2297,147 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                     disabled={!canEdit}
                                 />
                             </div>
+                        </div>
+                        <div className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-3">
+                            <label className="flex items-center gap-2 text-sm font-medium">
+                                <input
+                                    type="checkbox"
+                                    checked={branchBootstrap.enabled}
+                                    onChange={(event) =>
+                                        setBranchBootstrap((prev) => ({ ...prev, enabled: event.target.checked }))
+                                    }
+                                    disabled={!canEdit}
+                                />
+                                Branch Account Factory (owner/admin/manager)
+                            </label>
+                            {branchBootstrap.enabled && (
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                        <label className="text-xs text-muted-foreground">
+                                            <span className="flex items-center gap-2">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={branchBootstrap.createOwner}
+                                                    onChange={(event) =>
+                                                        setBranchBootstrap((prev) => ({
+                                                            ...prev,
+                                                            createOwner: event.target.checked,
+                                                        }))
+                                                    }
+                                                    disabled={!canEdit}
+                                                />
+                                                owner
+                                            </span>
+                                            <input
+                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                value={branchBootstrap.ownerName}
+                                                onChange={(event) =>
+                                                    setBranchBootstrap((prev) => ({ ...prev, ownerName: event.target.value }))
+                                                }
+                                                placeholder="Имя owner"
+                                                disabled={!canEdit || !branchBootstrap.createOwner}
+                                            />
+                                        </label>
+                                        <label className="text-xs text-muted-foreground">
+                                            <span className="flex items-center gap-2">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={branchBootstrap.createAdmin}
+                                                    onChange={(event) =>
+                                                        setBranchBootstrap((prev) => ({
+                                                            ...prev,
+                                                            createAdmin: event.target.checked,
+                                                        }))
+                                                    }
+                                                    disabled={!canEdit}
+                                                />
+                                                admin
+                                            </span>
+                                            <input
+                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                value={branchBootstrap.adminName}
+                                                onChange={(event) =>
+                                                    setBranchBootstrap((prev) => ({ ...prev, adminName: event.target.value }))
+                                                }
+                                                placeholder="Имя admin"
+                                                disabled={!canEdit || !branchBootstrap.createAdmin}
+                                            />
+                                        </label>
+                                        <label className="text-xs text-muted-foreground">
+                                            <span className="flex items-center gap-2">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={branchBootstrap.createManager}
+                                                    onChange={(event) =>
+                                                        setBranchBootstrap((prev) => ({
+                                                            ...prev,
+                                                            createManager: event.target.checked,
+                                                        }))
+                                                    }
+                                                    disabled={!canEdit}
+                                                />
+                                                manager
+                                            </span>
+                                            <input
+                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                value={branchBootstrap.managerName}
+                                                onChange={(event) =>
+                                                    setBranchBootstrap((prev) => ({ ...prev, managerName: event.target.value }))
+                                                }
+                                                placeholder="Имя manager"
+                                                disabled={!canEdit || !branchBootstrap.createManager}
+                                            />
+                                        </label>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                        <label className="text-xs text-muted-foreground">
+                                            owner oidc_subject (optional)
+                                            <input
+                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                value={branchBootstrap.ownerOidcSubject}
+                                                onChange={(event) =>
+                                                    setBranchBootstrap((prev) => ({
+                                                        ...prev,
+                                                        ownerOidcSubject: event.target.value,
+                                                    }))
+                                                }
+                                                placeholder="oidc-sub-owner"
+                                                disabled={!canEdit || !branchBootstrap.createOwner}
+                                            />
+                                        </label>
+                                        <label className="text-xs text-muted-foreground">
+                                            admin oidc_subject (optional)
+                                            <input
+                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                value={branchBootstrap.adminOidcSubject}
+                                                onChange={(event) =>
+                                                    setBranchBootstrap((prev) => ({
+                                                        ...prev,
+                                                        adminOidcSubject: event.target.value,
+                                                    }))
+                                                }
+                                                placeholder="oidc-sub-admin"
+                                                disabled={!canEdit || !branchBootstrap.createAdmin}
+                                            />
+                                        </label>
+                                        <label className="text-xs text-muted-foreground">
+                                            manager oidc_subject (optional)
+                                            <input
+                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                value={branchBootstrap.managerOidcSubject}
+                                                onChange={(event) =>
+                                                    setBranchBootstrap((prev) => ({
+                                                        ...prev,
+                                                        managerOidcSubject: event.target.value,
+                                                    }))
+                                                }
+                                                placeholder="oidc-sub-manager"
+                                                disabled={!canEdit || !branchBootstrap.createManager}
+                                            />
+                                        </label>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                         <div className="flex flex-wrap gap-3">
                             <button

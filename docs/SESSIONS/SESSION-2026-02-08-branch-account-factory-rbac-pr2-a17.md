@@ -1,0 +1,27 @@
+# SESSION 2026-02-08-branch-account-factory-rbac-pr2-a17 — Session 2026-02-08-branch-account-factory-rbac-pr2-a17
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-08-branch-account-factory-rbac-pr2-a17.md
+- branch: feat/2026-02-08-branch-account-factory-rbac-pr2-a17
+- worktree: /home/zhan/worktrees/2026-02-08-branch-account-factory-rbac-pr2-a17
+- base_ref: origin/main
+- scope: PR-2 backend control-plane access API + branch account factory UI wiring
+- done:
+  - Added backend API for memberships (`list/create/update`) and agent access lifecycle (`disable/enable`, `oidc rebind`).
+  - Added guards: cross-tenant access checks, duplicate `oidc_subject` fail-closed, reason checks for destructive membership changes.
+  - Extended branch create with `bootstrap_accounts` and backend account factory flow.
+  - Updated OpenAPI contract + regenerated frontend types + API client methods.
+  - Updated UI:
+  - `ProvisioningWizard`: branch account factory controls in draft step.
+  - `Team` page: access toggle and OIDC rebind actions.
+  - Added tests: `truffles-api/tests/test_console_access_admin_pr2.py`.
+- next:
+  - Add richer UI for membership CRUD (beyond API methods) and extend negative tests for membership update edge cases.
+  - Prepare PR description/evidence and run final session close flow.
+- evidence:
+  - `pytest -q truffles-api/tests/test_console_rbac.py truffles-api/tests/test_console_admin_provisioning.py truffles-api/tests/test_console_access_admin_pr2.py` -> pass
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check` -> pass
+  - `cd console-web && npm run lint` -> pass
+  - `cd console-web && npm run build` -> pass
+- last_updated: 2026-02-08

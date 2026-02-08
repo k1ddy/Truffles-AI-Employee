@@ -1035,6 +1035,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/memberships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List memberships */
+        get: operations["listAdminMemberships"];
+        put?: never;
+        /** Create membership */
+        post: operations["createAdminMembership"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/memberships/{membership_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update membership */
+        patch: operations["updateAdminMembership"];
+        trace?: never;
+    };
+    "/admin/agents/{agent_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable agent access */
+        post: operations["disableAdminAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/agents/{agent_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable agent access */
+        post: operations["enableAdminAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/agents/{agent_id}/oidc/rebind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rebind OIDC identity for agent */
+        post: operations["rebindAdminAgentOidc"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/capabilities": {
         parameters: {
             query?: never;
@@ -1332,6 +1418,13 @@ export interface components {
             /** Format: date-time */
             onboarding_updated_at?: string | null;
         };
+        BranchBootstrapAccountTemplate: {
+            /** @enum {string} */
+            role: "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer";
+            name?: string | null;
+            oidc_subject?: string | null;
+            is_active?: boolean | null;
+        };
         BranchCreateRequest: {
             /** Format: uuid */
             client_id: string;
@@ -1349,11 +1442,11 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             is_active?: boolean | null;
-            /** Format: uuid */
-            confirmation_id?: string | null;
+            bootstrap_accounts?: components["schemas"]["BranchBootstrapAccountTemplate"][];
         };
         BranchCreateResponse: {
             branch?: components["schemas"]["Branch"];
+            created_agents?: components["schemas"]["Agent"][];
         };
         BranchUpdateRequest: {
             slug?: string | null;
@@ -1569,6 +1662,75 @@ export interface components {
         };
         AgentCreateResponse: {
             agent?: components["schemas"]["Agent"];
+        };
+        AgentLifecycleActionRequest: {
+            reason: string;
+        };
+        AgentOidcRebindRequest: {
+            oidc_subject: string;
+            reason: string;
+        };
+        AgentOidcRebindResponse: {
+            /** Format: uuid */
+            agent_id: string;
+            oidc_subject: string;
+            previous_oidc_subject?: string | null;
+        };
+        AgentMembership: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            agent_id: string;
+            agent_name?: string | null;
+            /** Format: uuid */
+            agent_client_id?: string | null;
+            /** @enum {string} */
+            scope: "company" | "client" | "branch";
+            /** Format: uuid */
+            company_id?: string | null;
+            /** Format: uuid */
+            client_id?: string | null;
+            /** Format: uuid */
+            branch_id?: string | null;
+            /** @enum {string} */
+            role: "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer";
+            is_active: boolean;
+            /** Format: date-time */
+            created_at?: string | null;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        MembershipListResponse: {
+            items?: components["schemas"]["AgentMembership"][];
+        };
+        MembershipCreateRequest: {
+            /** Format: uuid */
+            agent_id: string;
+            /** @enum {string} */
+            scope: "company" | "client" | "branch";
+            /** @enum {string} */
+            role: "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer";
+            /** Format: uuid */
+            company_id?: string | null;
+            /** Format: uuid */
+            client_id?: string | null;
+            /** Format: uuid */
+            branch_id?: string | null;
+            is_active?: boolean | null;
+        };
+        MembershipUpdateRequest: {
+            /** @enum {string|null} */
+            scope?: "company" | "client" | "branch" | null;
+            /** @enum {string|null} */
+            role?: "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer" | null;
+            /** Format: uuid */
+            company_id?: string | null;
+            /** Format: uuid */
+            client_id?: string | null;
+            /** Format: uuid */
+            branch_id?: string | null;
+            is_active?: boolean | null;
+            reason?: string | null;
         };
         Message: {
             /** Format: uuid */
@@ -4169,6 +4331,195 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listAdminMemberships: {
+        parameters: {
+            query?: {
+                agent_id?: string;
+                scope?: "company" | "client" | "branch";
+                company_id?: string;
+                client_id?: string;
+                branch_id?: string;
+                include_inactive?: "true" | "false";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Membership list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembershipListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    createAdminMembership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MembershipCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Membership created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentMembership"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    updateAdminMembership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                membership_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MembershipUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Membership updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentMembership"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    disableAdminAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentLifecycleActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Agent disabled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Agent"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    enableAdminAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentLifecycleActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Agent enabled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Agent"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    rebindAdminAgentOidc: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentOidcRebindRequest"];
+            };
+        };
+        responses: {
+            /** @description OIDC identity rebound */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentOidcRebindResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
         };
     };

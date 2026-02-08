@@ -48,11 +48,16 @@ from app.schemas.console import (
     ConsoleAgentCreateResponse,
     ConsoleAgentIdentity,
     ConsoleAgentInfo,
+    ConsoleAgentLifecycleActionRequest,
     ConsoleAgentListResponse,
+    ConsoleAgentMembership,
+    ConsoleAgentOidcRebindRequest,
+    ConsoleAgentOidcRebindResponse,
     ConsoleAgentWithIdentities,
     ConsoleAuditEvent,
     ConsoleAuditListResponse,
     ConsoleBranch,
+    ConsoleBranchBootstrapAccountTemplate,
     ConsoleBranchCreateRequest,
     ConsoleBranchCreateResponse,
     ConsoleBranchIntegrationStatus,
@@ -100,6 +105,9 @@ from app.schemas.console import (
     ConsoleMacroUpdateRequest,
     ConsoleManagerMessageRequest,
     ConsoleManagerMessageResponse,
+    ConsoleMembershipCreateRequest,
+    ConsoleMembershipListResponse,
+    ConsoleMembershipUpdateRequest,
     ConsoleMeResponse,
     ConsoleMessage,
     ConsoleMessageListResponse,
@@ -903,7 +911,9 @@ _TENANT_LIFECYCLE_MODES = {"active", "archived", "all"}
 _CLIENT_STATUS_ACTIVE = "active"
 _CLIENT_STATUS_ARCHIVED = "deleted"
 _CLIENT_LIFECYCLE_REASON_MAX_LEN = 500
+_ACCESS_REASON_MAX_LEN = 500
 _CLIENT_ARCHIVE_SAMPLE_LIMIT = 20
+_BRANCH_BOOTSTRAP_ACCOUNTS_MAX = 20
 _INTEGRATION_DEFAULT_STALE_MINUTES = 60
 _INTEGRATION_MIN_STALE_MINUTES = 5
 _INTEGRATION_MAX_STALE_MINUTES = 24 * 60
@@ -954,6 +964,17 @@ class _FleetClientDetails:
     go_live_ready_branches: int
 
 
+@dataclass
+class _MembershipTarget:
+    scope: str
+    company_id: Optional[UUID]
+    client_id: Optional[UUID]
+    branch_id: Optional[UUID]
+    company: Optional[Company]
+    client: Optional[Client]
+    branch: Optional[Branch]
+
+
 def _parse_tenant_lifecycle_param(value: Optional[str]) -> str:
     if value is None:
         return "active"
@@ -970,6 +991,288 @@ def _normalize_client_lifecycle_reason(reason: str) -> str:
     if len(value) > _CLIENT_LIFECYCLE_REASON_MAX_LEN:
         raise ConsoleAPIError(400, "INVALID_PARAM", "reason too long")
     return value
+
+
+def _normalize_access_reason(
+    reason: Optional[str],
+    *,
+    required: bool = False,
+) -> Optional[str]:
+    value = (reason or "").strip()
+    if required and not value:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "reason required")
+    if value and len(value) > _ACCESS_REASON_MAX_LEN:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "reason too long")
+    return value or None
+
+
+def _accessible_client_ids(context: ConsoleAuthContext) -> set[UUID]:
+    client_ids = {client.id for client in (context.accessible_clients or [])}
+    if context.client and context.client.id:
+        client_ids.add(context.client.id)
+    return client_ids
+
+
+def _accessible_company_ids(context: ConsoleAuthContext) -> set[UUID]:
+    return {client.company_id for client in (context.accessible_clients or []) if client.company_id}
+
+
+def _require_client_access(
+    context: ConsoleAuthContext,
+    client_id: UUID,
+    *,
+    message: str = "Client belongs to another tenant",
+) -> None:
+    if client_id not in _accessible_client_ids(context):
+        raise ConsoleAPIError(403, "ACCESS_DENIED", message)
+
+
+def _require_company_access(
+    context: ConsoleAuthContext,
+    company_id: UUID,
+    *,
+    message: str = "Company belongs to another tenant",
+) -> None:
+    if company_id not in _accessible_company_ids(context):
+        raise ConsoleAPIError(403, "ACCESS_DENIED", message)
+
+
+def _ensure_unique_oidc_subject(
+    db: Session,
+    oidc_subject: Optional[str],
+    *,
+    exclude_agent_id: Optional[UUID] = None,
+) -> Optional[str]:
+    normalized_subject = _normalize_optional_text(oidc_subject)
+    if not normalized_subject:
+        return None
+    query = db.query(AgentIdentity).filter(
+        AgentIdentity.channel == "oidc",
+        AgentIdentity.external_id == normalized_subject,
+    )
+    if exclude_agent_id:
+        query = query.filter(AgentIdentity.agent_id != exclude_agent_id)
+    if query.first():
+        raise ConsoleAPIError(409, "OIDC_SUBJECT_IN_USE", "oidc_subject already linked to another agent")
+    return normalized_subject
+
+
+def _serialize_agent(agent: Agent) -> ConsoleAgent:
+    return ConsoleAgent(
+        id=agent.id,
+        name=agent.name,
+        role=agent.role,
+        client_id=agent.client_id,
+        branch_id=agent.branch_id,
+        is_active=agent.is_active,
+    )
+
+
+def _serialize_membership(
+    membership: AgentMembership,
+    *,
+    agent: Optional[Agent] = None,
+) -> ConsoleAgentMembership:
+    member_agent = agent or membership.agent
+    return ConsoleAgentMembership(
+        id=membership.id,
+        agent_id=membership.agent_id,
+        agent_name=member_agent.name if member_agent else None,
+        agent_client_id=member_agent.client_id if member_agent else None,
+        scope=membership.scope,
+        company_id=membership.company_id,
+        client_id=membership.client_id,
+        branch_id=membership.branch_id,
+        role=membership.role,
+        is_active=membership.is_active,
+        created_at=membership.created_at.isoformat() if membership.created_at else None,
+        updated_at=membership.updated_at.isoformat() if membership.updated_at else None,
+    )
+
+
+def _resolve_membership_target(
+    db: Session,
+    *,
+    scope: str,
+    company_id: Optional[UUID],
+    client_id: Optional[UUID],
+    branch_id: Optional[UUID],
+) -> _MembershipTarget:
+    normalized_scope = (scope or "").strip().lower()
+    if normalized_scope not in {"company", "client", "branch"}:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid scope")
+
+    if normalized_scope == "company":
+        if not company_id:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "company_id required for company scope")
+        if client_id or branch_id:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Only company_id is allowed for company scope")
+        company = db.query(Company).filter(Company.id == company_id).first()
+        if not company:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
+        return _MembershipTarget(
+            scope=normalized_scope,
+            company_id=company.id,
+            client_id=None,
+            branch_id=None,
+            company=company,
+            client=None,
+            branch=None,
+        )
+
+    if normalized_scope == "client":
+        if not client_id:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "client_id required for client scope")
+        if company_id or branch_id:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Only client_id is allowed for client scope")
+        client = db.query(Client).filter(Client.id == client_id).first()
+        if not client:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+        company = db.query(Company).filter(Company.id == client.company_id).first() if client.company_id else None
+        return _MembershipTarget(
+            scope=normalized_scope,
+            company_id=client.company_id,
+            client_id=client.id,
+            branch_id=None,
+            company=company,
+            client=client,
+            branch=None,
+        )
+
+    if not branch_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id required for branch scope")
+    if company_id or client_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Only branch_id is allowed for branch scope")
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    client = db.query(Client).filter(Client.id == branch.client_id).first()
+    if not client:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found for branch")
+    company = db.query(Company).filter(Company.id == client.company_id).first() if client.company_id else None
+    return _MembershipTarget(
+        scope=normalized_scope,
+        company_id=client.company_id,
+        client_id=client.id,
+        branch_id=branch.id,
+        company=company,
+        client=client,
+        branch=branch,
+    )
+
+
+def _assert_membership_target_access(
+    context: ConsoleAuthContext,
+    target: _MembershipTarget,
+) -> None:
+    if target.client_id:
+        _require_client_access(context, target.client_id)
+    elif target.company_id:
+        _require_company_access(context, target.company_id)
+
+    if target.branch_id:
+        _require_branch_access(
+            context,
+            target.branch_id,
+            message="Branch belongs to another tenant",
+        )
+
+
+def _assert_agent_matches_membership_target(
+    db: Session,
+    *,
+    agent: Agent,
+    target: _MembershipTarget,
+) -> None:
+    if target.client_id and agent.client_id != target.client_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Agent belongs to another client")
+    if target.company_id:
+        agent_client = db.query(Client).filter(Client.id == agent.client_id).first()
+        if not agent_client:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Agent client not found")
+        if agent_client.company_id != target.company_id:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Agent belongs to another company")
+
+
+def _create_agent_with_membership(
+    db: Session,
+    *,
+    client: Client,
+    role: str,
+    branch: Optional[Branch],
+    name: Optional[str],
+    is_active: bool,
+    oidc_subject: Optional[str],
+    linked_from: str,
+    now: Optional[datetime] = None,
+) -> Agent:
+    created_at = now or datetime.now(timezone.utc)
+    normalized_subject = _ensure_unique_oidc_subject(db, oidc_subject)
+
+    agent = Agent(
+        id=uuid4(),
+        client_id=client.id,
+        branch_id=branch.id if branch else None,
+        role=role,
+        name=_normalize_optional_text(name),
+        is_active=is_active,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    db.add(agent)
+
+    membership = AgentMembership(
+        id=uuid4(),
+        agent_id=agent.id,
+        scope="branch" if branch else "client",
+        company_id=client.company_id,
+        client_id=client.id,
+        branch_id=branch.id if branch else None,
+        role=role,
+        is_active=is_active,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    db.add(membership)
+
+    if normalized_subject:
+        identity = AgentIdentity(
+            id=uuid4(),
+            agent_id=agent.id,
+            channel="oidc",
+            external_id=normalized_subject,
+            username=_normalize_optional_text(name),
+            identity_metadata={"linked_from": linked_from},
+            created_at=created_at,
+            updated_at=created_at,
+        )
+        db.add(identity)
+
+    return agent
+
+
+def _apply_membership_target_filters(
+    query,
+    *,
+    scope: str,
+    company_id: Optional[UUID],
+    client_id: Optional[UUID],
+    branch_id: Optional[UUID],
+):
+    query = query.filter(AgentMembership.scope == scope)
+    if company_id:
+        query = query.filter(AgentMembership.company_id == company_id)
+    else:
+        query = query.filter(AgentMembership.company_id.is_(None))
+    if client_id:
+        query = query.filter(AgentMembership.client_id == client_id)
+    else:
+        query = query.filter(AgentMembership.client_id.is_(None))
+    if branch_id:
+        query = query.filter(AgentMembership.branch_id == branch_id)
+    else:
+        query = query.filter(AgentMembership.branch_id.is_(None))
+    return query
 
 
 def _parse_fleet_lifecycle_param(value: Optional[str]) -> Optional[str]:
@@ -6416,7 +6719,12 @@ async def create_branch(
     body: ConsoleBranchCreateRequest,
     db: Session = Depends(get_db),
 ) -> ConsoleBranchCreateResponse:
-    context = get_console_context(request, db, require_selection=False)
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
     require_console_permission(
         context,
         "provisioning",
@@ -6427,6 +6735,7 @@ async def create_branch(
     client = db.query(Client).filter(Client.id == body.client_id).first()
     if not client:
         raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+    _require_client_access(context, client.id)
 
     slug = _normalize_slug(body.slug, "branch_slug")
     name = _normalize_required_text(body.name, "name")
@@ -6443,6 +6752,14 @@ async def create_branch(
     is_active = body.is_active if body.is_active is not None else bool(instance_id)
     if is_active and not instance_id:
         raise ConsoleAPIError(400, "INVALID_PARAM", "instance_id required to activate branch")
+
+    bootstrap_accounts = body.bootstrap_accounts or []
+    if len(bootstrap_accounts) > _BRANCH_BOOTSTRAP_ACCOUNTS_MAX:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"bootstrap_accounts limit is {_BRANCH_BOOTSTRAP_ACCOUNTS_MAX}",
+        )
 
     now = datetime.now(timezone.utc)
     branch = Branch(
@@ -6472,6 +6789,28 @@ async def create_branch(
             branch=branch,
             instance_id=instance_id,
         )
+
+    created_agents: list[Agent] = []
+    for account in bootstrap_accounts:
+        if account.role == "platform_admin" and context.role != "platform_admin":
+            raise ConsoleAPIError(403, "ACCESS_DENIED", "Only platform admin can assign platform_admin role")
+        membership_branch = branch if account.role in {"manager", "specialist"} else None
+        created_agents.append(
+            _create_agent_with_membership(
+                db,
+                client=client,
+                role=account.role,
+                branch=membership_branch,
+                name=account.name,
+                is_active=account.is_active if account.is_active is not None else True,
+                oidc_subject=account.oidc_subject,
+                linked_from="branch_account_factory",
+                now=now,
+            )
+        )
+    if created_agents:
+        ensure_onboarding_step(db, branch, OnboardingStep.TEAM)
+
     record_audit_event(
         db,
         actor=context.agent,
@@ -6483,13 +6822,18 @@ async def create_branch(
             "name": name,
             "is_active": is_active,
             "webhook_secret_generated": webhook_secret_changed,
+            "bootstrap_accounts_total": len(created_agents),
+            "bootstrap_roles": [agent.role for agent in created_agents],
         },
         client_id=client.id,
         branch_id=branch.id,
     )
     db.commit()
 
-    return ConsoleBranchCreateResponse(branch=_serialize_branch(branch))
+    return ConsoleBranchCreateResponse(
+        branch=_serialize_branch(branch),
+        created_agents=[_serialize_agent(agent) for agent in created_agents],
+    )
 
 
 @router.patch(
@@ -6675,7 +7019,12 @@ async def create_agent(
     body: ConsoleAgentCreateRequest,
     db: Session = Depends(get_db),
 ) -> ConsoleAgentCreateResponse:
-    context = get_console_context(request, db, require_selection=False)
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
     require_console_permission(
         context,
         "provisioning",
@@ -6686,6 +7035,7 @@ async def create_agent(
     client = db.query(Client).filter(Client.id == body.client_id).first()
     if not client:
         raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+    _require_client_access(context, client.id)
 
     if body.role in {"manager", "specialist"} and not body.branch_id:
         raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id required for manager/specialist role")
@@ -6701,6 +7051,7 @@ async def create_agent(
         )
         if not branch:
             raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+        _require_branch_access(context, branch.id, message="Branch belongs to another tenant")
 
     branch_for_onboarding = branch
     if not branch_for_onboarding and context.effective_branch_id:
@@ -6714,44 +7065,17 @@ async def create_agent(
 
     now = datetime.now(timezone.utc)
     is_active = body.is_active if body.is_active is not None else True
-    agent = Agent(
-        id=uuid4(),
-        client_id=client.id,
-        branch_id=branch.id if branch else None,
+    agent = _create_agent_with_membership(
+        db,
+        client=client,
         role=body.role,
-        name=_normalize_optional_text(body.name),
+        branch=branch,
+        name=body.name,
         is_active=is_active,
-        created_at=now,
-        updated_at=now,
+        oidc_subject=body.oidc_subject,
+        linked_from="admin_api",
+        now=now,
     )
-    db.add(agent)
-
-    membership = AgentMembership(
-        id=uuid4(),
-        agent_id=agent.id,
-        scope="branch" if branch else "client",
-        company_id=client.company_id,
-        client_id=client.id,
-        branch_id=branch.id if branch else None,
-        role=body.role,
-        is_active=is_active,
-        created_at=now,
-        updated_at=now,
-    )
-    db.add(membership)
-
-    if body.oidc_subject:
-        identity = AgentIdentity(
-            id=uuid4(),
-            agent_id=agent.id,
-            channel="oidc",
-            external_id=body.oidc_subject,
-            username=body.name,
-            identity_metadata={"linked_from": "admin_api"},
-            created_at=now,
-            updated_at=now,
-        )
-        db.add(identity)
 
     record_audit_event(
         db,
@@ -6770,14 +7094,554 @@ async def create_agent(
     db.commit()
 
     return ConsoleAgentCreateResponse(
-        agent=ConsoleAgent(
-            id=agent.id,
-            name=agent.name,
-            role=agent.role,
-            client_id=agent.client_id,
-            branch_id=agent.branch_id,
-            is_active=agent.is_active,
+        agent=_serialize_agent(agent)
+    )
+
+
+@router.get(
+    "/admin/memberships",
+    response_model=ConsoleMembershipListResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def list_memberships(
+    request: Request,
+    agent_id: Optional[str] = Query(default=None),
+    scope: Optional[str] = Query(default=None),
+    company_id: Optional[str] = Query(default=None),
+    client_id: Optional[str] = Query(default=None),
+    branch_id: Optional[str] = Query(default=None),
+    include_inactive: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+) -> ConsoleMembershipListResponse:
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can view memberships",
+    )
+
+    parsed_agent_id = _parse_uuid_param("agent_id", agent_id)
+    parsed_company_id = _parse_uuid_param("company_id", company_id)
+    parsed_client_id = _parse_uuid_param("client_id", client_id)
+    parsed_branch_id = _parse_uuid_param("branch_id", branch_id)
+    include_inactive_rows = _parse_bool_param("include_inactive", include_inactive, default=False)
+
+    normalized_scope = (scope or "").strip().lower() if scope else None
+    if normalized_scope and normalized_scope not in {"company", "client", "branch"}:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid scope")
+
+    query = db.query(AgentMembership)
+    if parsed_agent_id:
+        query = query.filter(AgentMembership.agent_id == parsed_agent_id)
+    if normalized_scope:
+        query = query.filter(AgentMembership.scope == normalized_scope)
+    if parsed_company_id:
+        _require_company_access(context, parsed_company_id)
+        company_client_ids = [
+            row[0]
+            for row in db.query(Client.id).filter(Client.company_id == parsed_company_id).all()
+        ]
+        company_branch_ids: list[UUID] = []
+        if company_client_ids:
+            company_branch_ids = [
+                row[0]
+                for row in db.query(Branch.id).filter(Branch.client_id.in_(company_client_ids)).all()
+            ]
+        company_conditions = [AgentMembership.company_id == parsed_company_id]
+        if company_client_ids:
+            company_conditions.append(AgentMembership.client_id.in_(company_client_ids))
+        if company_branch_ids:
+            company_conditions.append(AgentMembership.branch_id.in_(company_branch_ids))
+        query = query.filter(or_(*company_conditions))
+    if parsed_client_id:
+        _require_client_access(context, parsed_client_id)
+        target_client = db.query(Client).filter(Client.id == parsed_client_id).first()
+        if not target_client:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+        client_branch_ids = [
+            row[0]
+            for row in db.query(Branch.id).filter(Branch.client_id == parsed_client_id).all()
+        ]
+        client_conditions = [AgentMembership.client_id == parsed_client_id]
+        if client_branch_ids:
+            client_conditions.append(AgentMembership.branch_id.in_(client_branch_ids))
+        if target_client.company_id:
+            client_conditions.append(AgentMembership.company_id == target_client.company_id)
+        query = query.filter(or_(*client_conditions))
+    if parsed_branch_id:
+        branch = db.query(Branch).filter(Branch.id == parsed_branch_id).first()
+        if not branch:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+        _require_client_access(context, branch.client_id)
+        branch_client = db.query(Client).filter(Client.id == branch.client_id).first()
+        company_id_for_branch = branch_client.company_id if branch_client else None
+        branch_conditions = [
+            AgentMembership.branch_id == parsed_branch_id,
+            AgentMembership.client_id == branch.client_id,
+        ]
+        if company_id_for_branch:
+            branch_conditions.append(AgentMembership.company_id == company_id_for_branch)
+        query = query.filter(
+            or_(*branch_conditions)
         )
+    if not include_inactive_rows:
+        query = query.filter(AgentMembership.is_active.is_(True))
+
+    memberships = query.order_by(AgentMembership.created_at.desc()).all()
+    if not memberships:
+        return ConsoleMembershipListResponse(items=[])
+
+    accessible_client_ids = _accessible_client_ids(context)
+    accessible_company_ids = _accessible_company_ids(context)
+
+    agent_ids = {membership.agent_id for membership in memberships}
+    agents_by_id = {}
+    if agent_ids:
+        agents_by_id = {
+            agent.id: agent
+            for agent in db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
+        }
+
+    branch_ids = {membership.branch_id for membership in memberships if membership.branch_id}
+    branches_by_id = {}
+    if branch_ids:
+        branches_by_id = {
+            branch.id: branch
+            for branch in db.query(Branch).filter(Branch.id.in_(branch_ids)).all()
+        }
+
+    items: list[ConsoleAgentMembership] = []
+    for membership in memberships:
+        candidate_client_ids: set[UUID] = set()
+        if membership.client_id:
+            candidate_client_ids.add(membership.client_id)
+        if membership.branch_id and membership.branch_id in branches_by_id:
+            candidate_client_ids.add(branches_by_id[membership.branch_id].client_id)
+
+        accessible = False
+        if candidate_client_ids and candidate_client_ids & accessible_client_ids:
+            accessible = True
+        if not accessible and membership.company_id and membership.company_id in accessible_company_ids:
+            accessible = True
+        if not accessible:
+            continue
+
+        items.append(
+            _serialize_membership(
+                membership,
+                agent=agents_by_id.get(membership.agent_id),
+            )
+        )
+
+    return ConsoleMembershipListResponse(items=items)
+
+
+@router.post(
+    "/admin/memberships",
+    response_model=ConsoleAgentMembership,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def create_membership(
+    request: Request,
+    body: ConsoleMembershipCreateRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleAgentMembership:
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage memberships",
+    )
+
+    agent = db.query(Agent).filter(Agent.id == body.agent_id).first()
+    if not agent:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Agent not found")
+    _require_client_access(context, agent.client_id)
+
+    target = _resolve_membership_target(
+        db,
+        scope=body.scope,
+        company_id=body.company_id,
+        client_id=body.client_id,
+        branch_id=body.branch_id,
+    )
+    _assert_membership_target_access(context, target)
+    _assert_agent_matches_membership_target(db, agent=agent, target=target)
+
+    existing_query = db.query(AgentMembership).filter(AgentMembership.agent_id == agent.id)
+    existing_query = _apply_membership_target_filters(
+        existing_query,
+        scope=target.scope,
+        company_id=target.company_id,
+        client_id=target.client_id,
+        branch_id=target.branch_id,
+    )
+    existing = existing_query.order_by(AgentMembership.created_at.desc()).first()
+    if existing and existing.is_active:
+        raise ConsoleAPIError(409, "MEMBERSHIP_EXISTS", "Membership already exists")
+
+    now = datetime.now(timezone.utc)
+    is_active = body.is_active if body.is_active is not None else True
+
+    if existing:
+        existing.role = body.role
+        existing.is_active = is_active
+        existing.updated_at = now
+        membership = existing
+        event_type = "membership_reactivated"
+    else:
+        membership = AgentMembership(
+            id=uuid4(),
+            agent_id=agent.id,
+            scope=target.scope,
+            company_id=target.company_id,
+            client_id=target.client_id,
+            branch_id=target.branch_id,
+            role=body.role,
+            is_active=is_active,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(membership)
+        event_type = "membership_created"
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type=event_type,
+        entity_type="agent_membership",
+        entity_id=membership.id,
+        payload={
+            "agent_id": str(agent.id),
+            "scope": membership.scope,
+            "company_id": str(membership.company_id) if membership.company_id else None,
+            "client_id": str(membership.client_id) if membership.client_id else None,
+            "branch_id": str(membership.branch_id) if membership.branch_id else None,
+            "role": membership.role,
+            "is_active": membership.is_active,
+        },
+        client_id=membership.client_id or agent.client_id,
+        branch_id=membership.branch_id,
+    )
+    db.commit()
+    return _serialize_membership(membership, agent=agent)
+
+
+@router.patch(
+    "/admin/memberships/{membership_id}",
+    response_model=ConsoleAgentMembership,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def update_membership(
+    membership_id: UUID,
+    request: Request,
+    body: ConsoleMembershipUpdateRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleAgentMembership:
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage memberships",
+    )
+
+    membership = db.query(AgentMembership).filter(AgentMembership.id == membership_id).first()
+    if not membership:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Membership not found")
+    agent = db.query(Agent).filter(Agent.id == membership.agent_id).first()
+    if not agent:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Agent not found")
+
+    _require_client_access(context, agent.client_id)
+
+    previous_scope = membership.scope
+    previous_company_id = membership.company_id
+    previous_client_id = membership.client_id
+    previous_branch_id = membership.branch_id
+    previous_active = membership.is_active
+    previous_role = membership.role
+
+    fields_set = body.model_fields_set
+    next_scope = body.scope if "scope" in fields_set else membership.scope
+    next_company_id = body.company_id if "company_id" in fields_set else membership.company_id
+    next_client_id = body.client_id if "client_id" in fields_set else membership.client_id
+    next_branch_id = body.branch_id if "branch_id" in fields_set else membership.branch_id
+
+    target = _resolve_membership_target(
+        db,
+        scope=next_scope,
+        company_id=next_company_id,
+        client_id=next_client_id,
+        branch_id=next_branch_id,
+    )
+    _assert_membership_target_access(context, target)
+    _assert_agent_matches_membership_target(db, agent=agent, target=target)
+
+    rescope_changed = (
+        target.scope != previous_scope
+        or target.company_id != previous_company_id
+        or target.client_id != previous_client_id
+        or target.branch_id != previous_branch_id
+    )
+    deactivation = "is_active" in fields_set and previous_active and body.is_active is False
+    reason = _normalize_access_reason(body.reason, required=rescope_changed or deactivation)
+
+    duplicate_query = db.query(AgentMembership).filter(
+        AgentMembership.id != membership.id,
+        AgentMembership.agent_id == agent.id,
+    )
+    duplicate_query = _apply_membership_target_filters(
+        duplicate_query,
+        scope=target.scope,
+        company_id=target.company_id,
+        client_id=target.client_id,
+        branch_id=target.branch_id,
+    )
+    duplicate = duplicate_query.filter(AgentMembership.is_active.is_(True)).first()
+    if duplicate:
+        raise ConsoleAPIError(409, "MEMBERSHIP_EXISTS", "Membership already exists for this scope")
+
+    if "role" in fields_set and body.role:
+        membership.role = body.role
+    membership.scope = target.scope
+    membership.company_id = target.company_id
+    membership.client_id = target.client_id
+    membership.branch_id = target.branch_id
+    if "is_active" in fields_set and body.is_active is not None:
+        membership.is_active = body.is_active
+    membership.updated_at = datetime.now(timezone.utc)
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="membership_updated",
+        entity_type="agent_membership",
+        entity_id=membership.id,
+        payload={
+            "reason": reason,
+            "previous_scope": previous_scope,
+            "previous_company_id": str(previous_company_id) if previous_company_id else None,
+            "previous_client_id": str(previous_client_id) if previous_client_id else None,
+            "previous_branch_id": str(previous_branch_id) if previous_branch_id else None,
+            "previous_role": previous_role,
+            "previous_is_active": previous_active,
+            "next_scope": membership.scope,
+            "next_company_id": str(membership.company_id) if membership.company_id else None,
+            "next_client_id": str(membership.client_id) if membership.client_id else None,
+            "next_branch_id": str(membership.branch_id) if membership.branch_id else None,
+            "next_role": membership.role,
+            "next_is_active": membership.is_active,
+        },
+        client_id=membership.client_id or agent.client_id,
+        branch_id=membership.branch_id,
+    )
+    db.commit()
+    return _serialize_membership(membership, agent=agent)
+
+
+@router.post(
+    "/admin/agents/{agent_id}/disable",
+    response_model=ConsoleAgent,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def disable_agent_access(
+    agent_id: UUID,
+    request: Request,
+    body: ConsoleAgentLifecycleActionRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleAgent:
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage provisioning",
+    )
+    reason = _normalize_access_reason(body.reason, required=True)
+
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Agent not found")
+    _require_client_access(context, agent.client_id)
+    if not agent.is_active:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Agent is already disabled")
+
+    agent.is_active = False
+    agent.updated_at = datetime.now(timezone.utc)
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="agent_disabled",
+        entity_type="agent",
+        entity_id=agent.id,
+        payload={"reason": reason},
+        client_id=agent.client_id,
+        branch_id=agent.branch_id,
+    )
+    db.commit()
+    return _serialize_agent(agent)
+
+
+@router.post(
+    "/admin/agents/{agent_id}/enable",
+    response_model=ConsoleAgent,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def enable_agent_access(
+    agent_id: UUID,
+    request: Request,
+    body: ConsoleAgentLifecycleActionRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleAgent:
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage provisioning",
+    )
+    reason = _normalize_access_reason(body.reason, required=True)
+
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Agent not found")
+    _require_client_access(context, agent.client_id)
+    if agent.is_active:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Agent is already active")
+
+    agent.is_active = True
+    agent.updated_at = datetime.now(timezone.utc)
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="agent_enabled",
+        entity_type="agent",
+        entity_id=agent.id,
+        payload={"reason": reason},
+        client_id=agent.client_id,
+        branch_id=agent.branch_id,
+    )
+    db.commit()
+    return _serialize_agent(agent)
+
+
+@router.post(
+    "/admin/agents/{agent_id}/oidc/rebind",
+    response_model=ConsoleAgentOidcRebindResponse,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def rebind_agent_oidc_identity(
+    agent_id: UUID,
+    request: Request,
+    body: ConsoleAgentOidcRebindRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleAgentOidcRebindResponse:
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage provisioning",
+    )
+
+    reason = _normalize_access_reason(body.reason, required=True)
+    oidc_subject = _normalize_required_text(body.oidc_subject, "oidc_subject")
+    _ensure_unique_oidc_subject(db, oidc_subject, exclude_agent_id=agent_id)
+
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Agent not found")
+    _require_client_access(context, agent.client_id)
+
+    now = datetime.now(timezone.utc)
+    oidc_identity = (
+        db.query(AgentIdentity)
+        .filter(AgentIdentity.agent_id == agent.id, AgentIdentity.channel == "oidc")
+        .order_by(AgentIdentity.created_at.asc())
+        .first()
+    )
+    previous_subject = oidc_identity.external_id if oidc_identity else None
+    if oidc_identity:
+        metadata = dict(oidc_identity.identity_metadata or {})
+        metadata.update(
+            {
+                "rebound_from": previous_subject,
+                "rebound_by": str(context.agent.id),
+                "rebind_reason": reason,
+            }
+        )
+        oidc_identity.external_id = oidc_subject
+        oidc_identity.identity_metadata = metadata
+        oidc_identity.updated_at = now
+    else:
+        oidc_identity = AgentIdentity(
+            id=uuid4(),
+            agent_id=agent.id,
+            channel="oidc",
+            external_id=oidc_subject,
+            username=agent.name,
+            identity_metadata={
+                "linked_from": "admin_api_rebind",
+                "rebind_reason": reason,
+                "rebound_by": str(context.agent.id),
+            },
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(oidc_identity)
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="agent_oidc_rebound",
+        entity_type="agent",
+        entity_id=agent.id,
+        payload={
+            "reason": reason,
+            "previous_oidc_subject": previous_subject,
+            "next_oidc_subject": oidc_subject,
+        },
+        client_id=agent.client_id,
+        branch_id=agent.branch_id,
+    )
+    db.commit()
+    return ConsoleAgentOidcRebindResponse(
+        agent_id=agent.id,
+        oidc_subject=oidc_subject,
+        previous_oidc_subject=previous_subject,
     )
 
 

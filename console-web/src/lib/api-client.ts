@@ -522,6 +522,7 @@ export type ListCompaniesParams = operations["listAdminCompanies"]["parameters"]
 export type ListClientsParams = operations["listAdminClients"]["parameters"]["query"];
 export type ListBranchesParams = operations["listAdminBranches"]["parameters"]["query"];
 export type ListIntegrationsParams = operations["listAdminIntegrations"]["parameters"]["query"];
+export type ListMembershipsParams = operations["listAdminMemberships"]["parameters"]["query"];
 export type ListReferencePacksParams = operations["listAdminReferencePacks"]["parameters"]["query"];
 export type ListOpsJobsParams = operations["listOpsJobs"]["parameters"]["query"];
 
@@ -635,6 +636,8 @@ export const adminApi = {
         apiClient.get<components["schemas"]["BranchListResponse"]>("/admin/branches", { params }),
     listIntegrations: (params?: ListIntegrationsParams) =>
         apiClient.get<components["schemas"]["IntegrationsListResponse"]>("/admin/integrations", { params }),
+    listMemberships: (params?: ListMembershipsParams) =>
+        apiClient.get<components["schemas"]["MembershipListResponse"]>("/admin/memberships", { params }),
     createCompany: (data: components["schemas"]["CompanyCreateRequest"]) =>
         apiClient.post<components["schemas"]["CompanyCreateResponse"]>("/admin/companies", data),
     patchCompany: (companyId: string, data: components["schemas"]["CompanyUpdateRequest"]) =>
@@ -653,6 +656,16 @@ export const adminApi = {
         apiClient.patch<components["schemas"]["Branch"]>(`/admin/branches/${branchId}`, data),
     createAgent: (data: components["schemas"]["AgentCreateRequest"]) =>
         apiClient.post<components["schemas"]["AgentCreateResponse"]>("/admin/agents", data),
+    disableAgent: (agentId: string, data: components["schemas"]["AgentLifecycleActionRequest"]) =>
+        apiClient.post<components["schemas"]["Agent"]>(`/admin/agents/${agentId}/disable`, data),
+    enableAgent: (agentId: string, data: components["schemas"]["AgentLifecycleActionRequest"]) =>
+        apiClient.post<components["schemas"]["Agent"]>(`/admin/agents/${agentId}/enable`, data),
+    rebindAgentOidc: (agentId: string, data: components["schemas"]["AgentOidcRebindRequest"]) =>
+        apiClient.post<components["schemas"]["AgentOidcRebindResponse"]>(`/admin/agents/${agentId}/oidc/rebind`, data),
+    createMembership: (data: components["schemas"]["MembershipCreateRequest"]) =>
+        apiClient.post<components["schemas"]["AgentMembership"]>("/admin/memberships", data),
+    patchMembership: (membershipId: string, data: components["schemas"]["MembershipUpdateRequest"]) =>
+        apiClient.patch<components["schemas"]["AgentMembership"]>(`/admin/memberships/${membershipId}`, data),
     getCapabilities: (params: { branch_id?: string; clientId?: string }) =>
         apiClient.get<components["schemas"]["CapabilitiesResponse"]>("/admin/capabilities", {
             params: params.branch_id ? { branch_id: params.branch_id } : undefined,
