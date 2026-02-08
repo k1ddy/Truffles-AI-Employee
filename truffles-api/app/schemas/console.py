@@ -57,6 +57,20 @@ class ConsoleClient(BaseModel):
     status: Optional[str] = None
     company_id: Optional[UUID] = None
     company_name: Optional[str] = None
+    lifecycle_state: Optional[
+        Literal["lead", "contracting", "onboarding", "go_live_ready", "active", "paused", "archived"]
+    ] = None
+    payment_status: Optional[Literal["pending", "confirmed", "rejected", "unknown"]] = None
+    commercial_state: Optional[
+        Literal["contract_missing", "payment_pending", "payment_confirmed", "payment_rejected"]
+    ] = None
+    service_state: Optional[Literal["ok", "degraded", "attention"]] = None
+    owner_name: Optional[str] = None
+    next_action: Optional[str] = None
+    total_branches: Optional[int] = None
+    active_branches: Optional[int] = None
+    degraded_branches: Optional[int] = None
+    go_live_ready_branches: Optional[int] = None
 
 
 class ConsoleBranch(BaseModel):
@@ -81,10 +95,27 @@ class ConsoleCompanyListResponse(BaseModel):
     has_more: bool
 
 
+class ConsoleFleetSummary(BaseModel):
+    total_companies: int
+    total_clients: int
+    active_clients: int
+    onboarding_clients: int
+    archived_clients: int
+    paused_clients: int
+    go_live_ready_clients: int
+    degraded_clients: int
+    payment_pending_clients: int
+    payment_confirmed_clients: int
+    lifecycle_counts: dict[str, int]
+    payment_counts: dict[str, int]
+    service_counts: dict[str, int]
+
+
 class ConsoleClientListResponse(BaseModel):
     items: list[ConsoleClient]
     cursor: Optional[str] = None
     has_more: bool
+    summary: Optional[ConsoleFleetSummary] = None
 
 
 class ConsoleBranchListResponse(BaseModel):
