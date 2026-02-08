@@ -1370,6 +1370,30 @@ paths:
             enum: [active, archived, all]
             default: active
           description: Tenant lifecycle filter (`active` by default).
+        - name: include_fleet
+          in: query
+          schema:
+            type: string
+            enum: ["true", "false"]
+          description: Include fleet/commercial derived fields and response summary.
+        - name: fleet_lifecycle
+          in: query
+          schema:
+            type: string
+            enum: [lead, contracting, onboarding, go_live_ready, active, paused, archived, all]
+          description: Filter by derived fleet lifecycle state.
+        - name: payment_status
+          in: query
+          schema:
+            type: string
+            enum: [pending, confirmed, rejected, unknown, all]
+          description: Filter by latest onboarding contract payment status.
+        - name: service_state
+          in: query
+          schema:
+            type: string
+            enum: [ok, degraded, attention, all]
+          description: Filter by derived service health state.
       responses:
         "200":
           description: Client list
@@ -2296,6 +2320,40 @@ components:
         company_name:
           type: string
           nullable: true
+        lifecycle_state:
+          type: string
+          enum: [lead, contracting, onboarding, go_live_ready, active, paused, archived]
+          nullable: true
+        payment_status:
+          type: string
+          enum: [pending, confirmed, rejected, unknown]
+          nullable: true
+        commercial_state:
+          type: string
+          enum: [contract_missing, payment_pending, payment_confirmed, payment_rejected]
+          nullable: true
+        service_state:
+          type: string
+          enum: [ok, degraded, attention]
+          nullable: true
+        owner_name:
+          type: string
+          nullable: true
+        next_action:
+          type: string
+          nullable: true
+        total_branches:
+          type: integer
+          nullable: true
+        active_branches:
+          type: integer
+          nullable: true
+        degraded_branches:
+          type: integer
+          nullable: true
+        go_live_ready_branches:
+          type: integer
+          nullable: true
 
     ClientCreateRequest:
       type: object
@@ -2349,6 +2407,61 @@ components:
           nullable: true
         has_more:
           type: boolean
+        summary:
+          $ref: "#/components/schemas/FleetSummary"
+          nullable: true
+
+    FleetSummary:
+      type: object
+      required:
+        [
+          total_companies,
+          total_clients,
+          active_clients,
+          onboarding_clients,
+          archived_clients,
+          paused_clients,
+          go_live_ready_clients,
+          degraded_clients,
+          payment_pending_clients,
+          payment_confirmed_clients,
+          lifecycle_counts,
+          payment_counts,
+          service_counts,
+        ]
+      properties:
+        total_companies:
+          type: integer
+        total_clients:
+          type: integer
+        active_clients:
+          type: integer
+        onboarding_clients:
+          type: integer
+        archived_clients:
+          type: integer
+        paused_clients:
+          type: integer
+        go_live_ready_clients:
+          type: integer
+        degraded_clients:
+          type: integer
+        payment_pending_clients:
+          type: integer
+        payment_confirmed_clients:
+          type: integer
+        lifecycle_counts:
+          type: object
+          additionalProperties:
+            type: integer
+        payment_counts:
+          type: object
+          additionalProperties:
+            type: integer
+        service_counts:
+          type: object
+          additionalProperties:
+            type: integer
 
     Branch:
       type: object

@@ -2,6 +2,7 @@ import json
 import os
 import re
 import secrets
+from dataclasses import dataclass
 from datetime import date as dt_date
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
@@ -78,6 +79,7 @@ from app.schemas.console import (
     ConsoleConfirmationCreateRequest,
     ConsoleConfirmationResponse,
     ConsoleErrorResponse,
+    ConsoleFleetSummary,
     ConsoleHealthResponse,
     ConsoleIntegrationsListResponse,
     ConsoleKnowledgeCurrentResponse,
@@ -914,6 +916,31 @@ _INTEGRATION_ALERT_ISSUES = {
 }
 _INTEGRATION_DRIFT_STATE: dict[str, str] = {}
 _INTEGRATION_DRIFT_LOCK = Lock()
+_FLEET_LIFECYCLE_STATES = {
+    "lead",
+    "contracting",
+    "onboarding",
+    "go_live_ready",
+    "active",
+    "paused",
+    "archived",
+}
+_FLEET_PAYMENT_STATES = {"pending", "confirmed", "rejected", "unknown"}
+_FLEET_SERVICE_STATES = {"ok", "degraded", "attention"}
+
+
+@dataclass
+class _FleetClientDetails:
+    lifecycle_state: str
+    payment_status: str
+    commercial_state: str
+    service_state: str
+    owner_name: Optional[str]
+    next_action: str
+    total_branches: int
+    active_branches: int
+    degraded_branches: int
+    go_live_ready_branches: int
 
 
 def _parse_tenant_lifecycle_param(value: Optional[str]) -> str:
@@ -934,8 +961,329 @@ def _normalize_client_lifecycle_reason(reason: str) -> str:
     return value
 
 
+def _parse_fleet_lifecycle_param(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized == "all":
+        return None
+    if normalized not in _FLEET_LIFECYCLE_STATES:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid fleet_lifecycle")
+    return normalized
+
+
+def _parse_fleet_payment_param(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized == "all":
+        return None
+    if normalized not in _FLEET_PAYMENT_STATES:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid payment_status")
+    return normalized
+
+
+def _parse_fleet_service_param(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized == "all":
+        return None
+    if normalized not in _FLEET_SERVICE_STATES:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid service_state")
+    return normalized
+
+
 def _is_client_active_status(status: Optional[str]) -> bool:
     return (status or "").strip().lower() == _CLIENT_STATUS_ACTIVE
+
+
+def _normalize_fleet_payment_status(value: Optional[str]) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in {"pending", "confirmed", "rejected"}:
+        return normalized
+    return "unknown"
+
+
+def _resolve_fleet_commercial_state(payment_status: str) -> str:
+    if payment_status == "confirmed":
+        return "payment_confirmed"
+    if payment_status == "pending":
+        return "payment_pending"
+    if payment_status == "rejected":
+        return "payment_rejected"
+    return "contract_missing"
+
+
+def _resolve_fleet_service_state(
+    *,
+    client_active: bool,
+    active_branches: int,
+    degraded_branches: int,
+    go_live_ready_branches: int,
+) -> str:
+    if not client_active:
+        return "attention"
+    if active_branches <= 0:
+        return "attention"
+    if degraded_branches > 0:
+        return "degraded"
+    if go_live_ready_branches < active_branches:
+        return "attention"
+    return "ok"
+
+
+def _resolve_fleet_lifecycle_override(client: Client, company: Optional[Company]) -> Optional[str]:
+    candidates: list[Optional[str]] = []
+    if company and isinstance(company.billing_info, dict):
+        candidates.append(company.billing_info.get("lifecycle_state"))
+        candidates.append(company.billing_info.get("service_lifecycle_state"))
+    if isinstance(client.config, dict):
+        candidates.append(client.config.get("lifecycle_state"))
+        candidates.append(client.config.get("service_lifecycle_state"))
+    for raw in candidates:
+        normalized = (raw or "").strip().lower() if isinstance(raw, str) else ""
+        if normalized in _FLEET_LIFECYCLE_STATES:
+            return normalized
+    return None
+
+
+def _resolve_fleet_lifecycle_state(
+    *,
+    client: Client,
+    company: Optional[Company],
+    payment_status: str,
+    active_branches: int,
+    go_live_ready_branches: int,
+) -> str:
+    override = _resolve_fleet_lifecycle_override(client, company)
+    if override:
+        return override
+    if not _is_client_active_status(client.status):
+        return "archived"
+    if payment_status == "rejected":
+        return "paused"
+    if active_branches <= 0:
+        if payment_status == "confirmed":
+            return "onboarding"
+        return "contracting"
+    if go_live_ready_branches < active_branches:
+        return "onboarding"
+    if payment_status != "confirmed":
+        return "go_live_ready"
+    return "active"
+
+
+def _resolve_fleet_next_action(
+    *,
+    lifecycle_state: str,
+    service_state: str,
+    payment_status: str,
+) -> str:
+    if lifecycle_state == "lead":
+        return "qualify_and_collect_contract"
+    if lifecycle_state == "contracting":
+        return "collect_signed_contract_and_payment"
+    if lifecycle_state == "onboarding":
+        return "complete_onboarding_steps"
+    if lifecycle_state == "go_live_ready":
+        if payment_status != "confirmed":
+            return "confirm_payment_and_approve_go_live"
+        return "approve_go_live"
+    if lifecycle_state == "paused":
+        return "resolve_payment_or_service_blocker"
+    if lifecycle_state == "archived":
+        return "archived_no_action"
+    if service_state == "degraded":
+        return "run_integration_recovery"
+    if service_state == "attention":
+        return "resolve_attention_items"
+    return "monitor_sla_and_quality"
+
+
+def _build_fleet_client_details_map(
+    db: Session,
+    *,
+    clients: list[Client],
+    companies_by_id: dict[UUID, Company],
+) -> dict[UUID, _FleetClientDetails]:
+    if not clients:
+        return {}
+
+    client_ids = [client.id for client in clients]
+
+    branch_stats: dict[UUID, dict[str, int]] = {
+        client_id: {
+            "total_branches": 0,
+            "active_branches": 0,
+            "degraded_branches": 0,
+            "go_live_ready_branches": 0,
+        }
+        for client_id in client_ids
+    }
+    branches = db.query(Branch).filter(Branch.client_id.in_(client_ids)).all()
+    for branch in branches:
+        stats = branch_stats.setdefault(
+            branch.client_id,
+            {
+                "total_branches": 0,
+                "active_branches": 0,
+                "degraded_branches": 0,
+                "go_live_ready_branches": 0,
+            },
+        )
+        stats["total_branches"] += 1
+        if branch.is_active:
+            stats["active_branches"] += 1
+            if (branch.onboarding_state or "").strip().lower() == "go_no_go":
+                stats["go_live_ready_branches"] += 1
+        if (branch.integration_state or "").strip().lower() == "degraded":
+            stats["degraded_branches"] += 1
+
+    owner_by_client: dict[UUID, Optional[str]] = {client_id: None for client_id in client_ids}
+    owners = (
+        db.query(Agent)
+        .filter(
+            Agent.client_id.in_(client_ids),
+            Agent.is_active.is_(True),
+            Agent.role.in_(["owner", "admin"]),
+        )
+        .order_by(
+            case((Agent.role == "owner", 0), else_=1),
+            Agent.created_at.asc(),
+        )
+        .all()
+    )
+    for agent in owners:
+        if owner_by_client.get(agent.client_id):
+            continue
+        owner_by_client[agent.client_id] = (agent.name or "").strip() or None
+
+    payment_by_client: dict[UUID, str] = {client_id: "unknown" for client_id in client_ids}
+    contracts = (
+        db.query(ClientOnboardingContract)
+        .filter(
+            ClientOnboardingContract.client_id.in_(client_ids),
+            ClientOnboardingContract.status == "active",
+        )
+        .order_by(
+            ClientOnboardingContract.updated_at.desc(),
+            ClientOnboardingContract.created_at.desc(),
+        )
+        .all()
+    )
+    for contract in contracts:
+        if payment_by_client.get(contract.client_id) != "unknown":
+            continue
+        payment_by_client[contract.client_id] = _normalize_fleet_payment_status(contract.payment_status)
+
+    details: dict[UUID, _FleetClientDetails] = {}
+    for client in clients:
+        company = companies_by_id.get(client.company_id) if client.company_id else None
+        stats = branch_stats.get(
+            client.id,
+            {
+                "total_branches": 0,
+                "active_branches": 0,
+                "degraded_branches": 0,
+                "go_live_ready_branches": 0,
+            },
+        )
+        payment_status = payment_by_client.get(client.id, "unknown")
+        commercial_state = _resolve_fleet_commercial_state(payment_status)
+        service_state = _resolve_fleet_service_state(
+            client_active=_is_client_active_status(client.status),
+            active_branches=stats["active_branches"],
+            degraded_branches=stats["degraded_branches"],
+            go_live_ready_branches=stats["go_live_ready_branches"],
+        )
+        lifecycle_state = _resolve_fleet_lifecycle_state(
+            client=client,
+            company=company,
+            payment_status=payment_status,
+            active_branches=stats["active_branches"],
+            go_live_ready_branches=stats["go_live_ready_branches"],
+        )
+        next_action = _resolve_fleet_next_action(
+            lifecycle_state=lifecycle_state,
+            service_state=service_state,
+            payment_status=payment_status,
+        )
+        details[client.id] = _FleetClientDetails(
+            lifecycle_state=lifecycle_state,
+            payment_status=payment_status,
+            commercial_state=commercial_state,
+            service_state=service_state,
+            owner_name=owner_by_client.get(client.id),
+            next_action=next_action,
+            total_branches=stats["total_branches"],
+            active_branches=stats["active_branches"],
+            degraded_branches=stats["degraded_branches"],
+            go_live_ready_branches=stats["go_live_ready_branches"],
+        )
+    return details
+
+
+def _fleet_client_matches_filters(
+    details: _FleetClientDetails,
+    *,
+    fleet_lifecycle: Optional[str],
+    payment_status: Optional[str],
+    service_state: Optional[str],
+) -> bool:
+    if fleet_lifecycle and details.lifecycle_state != fleet_lifecycle:
+        return False
+    if payment_status and details.payment_status != payment_status:
+        return False
+    if service_state and details.service_state != service_state:
+        return False
+    return True
+
+
+def _build_fleet_summary(
+    *,
+    clients: list[Client],
+    details_map: dict[UUID, _FleetClientDetails],
+) -> ConsoleFleetSummary:
+    lifecycle_order = [
+        "lead",
+        "contracting",
+        "onboarding",
+        "go_live_ready",
+        "active",
+        "paused",
+        "archived",
+    ]
+    payment_order = ["pending", "confirmed", "rejected", "unknown"]
+    service_order = ["ok", "degraded", "attention"]
+    lifecycle_counts = {state: 0 for state in lifecycle_order}
+    payment_counts = {state: 0 for state in payment_order}
+    service_counts = {state: 0 for state in service_order}
+    company_ids = {client.company_id for client in clients if client.company_id}
+
+    for client in clients:
+        details = details_map.get(client.id)
+        if not details:
+            continue
+        lifecycle_counts[details.lifecycle_state] += 1
+        payment_counts[details.payment_status] += 1
+        service_counts[details.service_state] += 1
+
+    return ConsoleFleetSummary(
+        total_companies=len(company_ids),
+        total_clients=len(clients),
+        active_clients=lifecycle_counts["active"],
+        onboarding_clients=lifecycle_counts["onboarding"],
+        archived_clients=lifecycle_counts["archived"],
+        paused_clients=lifecycle_counts["paused"],
+        go_live_ready_clients=lifecycle_counts["go_live_ready"],
+        degraded_clients=service_counts["degraded"],
+        payment_pending_clients=payment_counts["pending"],
+        payment_confirmed_clients=payment_counts["confirmed"],
+        lifecycle_counts=lifecycle_counts,
+        payment_counts=payment_counts,
+        service_counts=service_counts,
+    )
 
 
 def _collect_client_archive_blockers(db: Session, client_id: UUID) -> dict[str, list[str]]:
@@ -5271,9 +5619,19 @@ async def list_clients(
     q: Optional[str] = None,
     company_id: Optional[str] = None,
     lifecycle: Optional[str] = None,
+    include_fleet: Optional[str] = None,
+    fleet_lifecycle: Optional[str] = None,
+    payment_status: Optional[str] = None,
+    service_state: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> ConsoleClientListResponse:
     lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
+    include_fleet_mode = _parse_bool_param("include_fleet", include_fleet, default=False)
+    fleet_lifecycle_filter = _parse_fleet_lifecycle_param(fleet_lifecycle)
+    payment_status_filter = _parse_fleet_payment_param(payment_status)
+    service_state_filter = _parse_fleet_service_param(service_state)
+    if fleet_lifecycle_filter or payment_status_filter or service_state_filter:
+        include_fleet_mode = True
     context = get_console_context(
         request,
         db,
@@ -5281,47 +5639,124 @@ async def list_clients(
         include_inactive_tenants=lifecycle_mode != "active",
     )
     _require_platform_admin(context)
-    _reject_unknown_query_params(request, {"cursor", "limit", "q", "company_id", "lifecycle"})
+    _reject_unknown_query_params(
+        request,
+        {
+            "cursor",
+            "limit",
+            "q",
+            "company_id",
+            "lifecycle",
+            "include_fleet",
+            "fleet_lifecycle",
+            "payment_status",
+            "service_state",
+        },
+    )
     _validate_limit(limit)
 
     company_uuid = _parse_uuid_param("company_id", company_id)
-    query = db.query(Client)
-    if lifecycle_mode == "active":
-        query = query.filter(Client.status == "active")
-    elif lifecycle_mode == "archived":
-        query = query.filter(Client.status != "active")
-    if company_uuid:
-        query = query.filter(Client.company_id == company_uuid)
-
     query_value = _normalize_search_query("q", q) if q else None
-    if query_value:
-        query_value_lower = query_value.lower()
-        uuid_value = _looks_like_uuid(query_value)
-        filters = []
-        if uuid_value:
-            filters.append(Client.id == uuid_value)
-        filters.append(func.lower(Client.name).like(f"%{query_value_lower}%"))
-        query = query.filter(or_(*filters))
-
     cursor_date = _parse_cursor_param(cursor)
-    if cursor_date is not None:
-        query = query.filter(Client.created_at < cursor_date)
 
-    items = (
-        query.order_by(Client.created_at.desc(), Client.id.desc())
-        .limit(limit + 1)
-        .all()
-    )
-    has_more = len(items) > limit
-    if has_more:
-        items = items[:limit]
-    next_cursor = items[-1].created_at.isoformat() if has_more and items[-1].created_at else None
+    def _build_client_query(cursor_cutoff: Optional[datetime]):
+        query = db.query(Client)
+        if lifecycle_mode == "active":
+            query = query.filter(Client.status == "active")
+        elif lifecycle_mode == "archived":
+            query = query.filter(Client.status != "active")
+        if company_uuid:
+            query = query.filter(Client.company_id == company_uuid)
+        if query_value:
+            query_value_lower = query_value.lower()
+            uuid_value = _looks_like_uuid(query_value)
+            filters = []
+            if uuid_value:
+                filters.append(Client.id == uuid_value)
+            filters.append(func.lower(Client.name).like(f"%{query_value_lower}%"))
+            query = query.filter(or_(*filters))
+        if cursor_cutoff is not None:
+            query = query.filter(Client.created_at < cursor_cutoff)
+        return query
 
-    company_ids = {client.company_id for client in items if client.company_id}
+    clients: list[Client] = []
+    has_more = False
+    if fleet_lifecycle_filter or payment_status_filter or service_state_filter:
+        scan_cursor = cursor_date
+        batch_size = max(limit * 3, 50)
+        matched_clients: list[Client] = []
+        while len(matched_clients) <= limit:
+            batch = (
+                _build_client_query(scan_cursor)
+                .order_by(Client.created_at.desc(), Client.id.desc())
+                .limit(batch_size)
+                .all()
+            )
+            if not batch:
+                break
+
+            batch_company_ids = {client.company_id for client in batch if client.company_id}
+            batch_companies_by_id: dict[UUID, Company] = {}
+            if batch_company_ids:
+                batch_companies = db.query(Company).filter(Company.id.in_(batch_company_ids)).all()
+                batch_companies_by_id = {company.id: company for company in batch_companies}
+            batch_details = _build_fleet_client_details_map(
+                db,
+                clients=batch,
+                companies_by_id=batch_companies_by_id,
+            )
+
+            for client in batch:
+                details = batch_details.get(client.id)
+                if not details:
+                    continue
+                if not _fleet_client_matches_filters(
+                    details,
+                    fleet_lifecycle=fleet_lifecycle_filter,
+                    payment_status=payment_status_filter,
+                    service_state=service_state_filter,
+                ):
+                    continue
+                matched_clients.append(client)
+                if len(matched_clients) > limit:
+                    break
+
+            if len(matched_clients) > limit:
+                break
+            if len(batch) < batch_size:
+                break
+            scan_cursor = batch[-1].created_at
+
+        has_more = len(matched_clients) > limit
+        clients = matched_clients[:limit] if has_more else matched_clients
+    else:
+        clients = (
+            _build_client_query(cursor_date)
+            .order_by(Client.created_at.desc(), Client.id.desc())
+            .limit(limit + 1)
+            .all()
+        )
+        has_more = len(clients) > limit
+        if has_more:
+            clients = clients[:limit]
+
+    next_cursor = clients[-1].created_at.isoformat() if has_more and clients and clients[-1].created_at else None
+
+    company_ids = {client.company_id for client in clients if client.company_id}
     companies_by_id: dict[UUID, Company] = {}
     if company_ids:
         companies = db.query(Company).filter(Company.id.in_(company_ids)).all()
         companies_by_id = {company.id: company for company in companies}
+
+    fleet_details_map: dict[UUID, _FleetClientDetails] = {}
+    if include_fleet_mode:
+        fleet_details_map = _build_fleet_client_details_map(
+            db,
+            clients=clients,
+            companies_by_id=companies_by_id,
+        )
+
+    summary = _build_fleet_summary(clients=clients, details_map=fleet_details_map) if include_fleet_mode else None
 
     return ConsoleClientListResponse(
         items=[
@@ -5329,15 +5764,29 @@ async def list_clients(
                 id=client.id,
                 slug=client.name,
                 name=client.name,
+                status=client.status,
                 company_id=client.company_id,
                 company_name=companies_by_id.get(client.company_id).name
                 if client.company_id and client.company_id in companies_by_id
                 else None,
+                lifecycle_state=fleet_details_map[client.id].lifecycle_state if client.id in fleet_details_map else None,
+                payment_status=fleet_details_map[client.id].payment_status if client.id in fleet_details_map else None,
+                commercial_state=fleet_details_map[client.id].commercial_state if client.id in fleet_details_map else None,
+                service_state=fleet_details_map[client.id].service_state if client.id in fleet_details_map else None,
+                owner_name=fleet_details_map[client.id].owner_name if client.id in fleet_details_map else None,
+                next_action=fleet_details_map[client.id].next_action if client.id in fleet_details_map else None,
+                total_branches=fleet_details_map[client.id].total_branches if client.id in fleet_details_map else None,
+                active_branches=fleet_details_map[client.id].active_branches if client.id in fleet_details_map else None,
+                degraded_branches=fleet_details_map[client.id].degraded_branches if client.id in fleet_details_map else None,
+                go_live_ready_branches=fleet_details_map[client.id].go_live_ready_branches
+                if client.id in fleet_details_map
+                else None,
             )
-            for client in items
+            for client in clients
         ],
         cursor=next_cursor,
         has_more=has_more,
+        summary=summary,
     )
 
 

@@ -1251,6 +1251,20 @@ export interface components {
             /** Format: uuid */
             company_id?: string | null;
             company_name?: string | null;
+            /** @enum {string|null} */
+            lifecycle_state?: "lead" | "contracting" | "onboarding" | "go_live_ready" | "active" | "paused" | "archived" | null;
+            /** @enum {string|null} */
+            payment_status?: "pending" | "confirmed" | "rejected" | "unknown" | null;
+            /** @enum {string|null} */
+            commercial_state?: "contract_missing" | "payment_pending" | "payment_confirmed" | "payment_rejected" | null;
+            /** @enum {string|null} */
+            service_state?: "ok" | "degraded" | "attention" | null;
+            owner_name?: string | null;
+            next_action?: string | null;
+            total_branches?: number | null;
+            active_branches?: number | null;
+            degraded_branches?: number | null;
+            go_live_ready_branches?: number | null;
         };
         ClientCreateRequest: {
             slug: string;
@@ -1274,6 +1288,28 @@ export interface components {
             items: components["schemas"]["Client"][];
             cursor?: string | null;
             has_more: boolean;
+            summary?: components["schemas"]["FleetSummary"];
+        };
+        FleetSummary: {
+            total_companies: number;
+            total_clients: number;
+            active_clients: number;
+            onboarding_clients: number;
+            archived_clients: number;
+            paused_clients: number;
+            go_live_ready_clients: number;
+            degraded_clients: number;
+            payment_pending_clients: number;
+            payment_confirmed_clients: number;
+            lifecycle_counts: {
+                [key: string]: number;
+            };
+            payment_counts: {
+                [key: string]: number;
+            };
+            service_counts: {
+                [key: string]: number;
+            };
         };
         Branch: {
             /** Format: uuid */
@@ -3829,6 +3865,14 @@ export interface operations {
                 company_id?: string;
                 /** @description Tenant lifecycle filter (`active` by default). */
                 lifecycle?: "active" | "archived" | "all";
+                /** @description Include fleet/commercial derived fields and response summary. */
+                include_fleet?: "true" | "false";
+                /** @description Filter by derived fleet lifecycle state. */
+                fleet_lifecycle?: "lead" | "contracting" | "onboarding" | "go_live_ready" | "active" | "paused" | "archived" | "all";
+                /** @description Filter by latest onboarding contract payment status. */
+                payment_status?: "pending" | "confirmed" | "rejected" | "unknown" | "all";
+                /** @description Filter by derived service health state. */
+                service_state?: "ok" | "degraded" | "attention" | "all";
             };
             header?: never;
             path?: never;

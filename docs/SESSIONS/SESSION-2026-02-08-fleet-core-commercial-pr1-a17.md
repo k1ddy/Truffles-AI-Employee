@@ -1,0 +1,24 @@
+# SESSION 2026-02-08-fleet-core-commercial-pr1-a17 — Session 2026-02-08-fleet-core-commercial-pr1-a17
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-08-fleet-core-commercial-pr1-a17.md
+- branch: feat/2026-02-08-fleet-core-commercial-pr1-a17
+- worktree: /home/zhan/worktrees/2026-02-08-fleet-core-commercial-pr1-a17
+- base_ref: origin/main
+- scope: PR-1 fleet core and commercial state in Console Admin (`/admin/clients`) + Tenants UI sync.
+- done:
+  - Added fleet/commercial fields and summary schema to Console API response models.
+  - Implemented fleet derivation helpers and `/admin/clients` filters: `include_fleet`, `fleet_lifecycle`, `payment_status`, `service_state`.
+  - Added tenant list tests for fleet parsing/filtering/enrichment.
+  - Updated OpenAPI contract and regenerated frontend API types.
+  - Updated Tenants UI to request fleet data, show portfolio summary, and filter by lifecycle/payment/service.
+  - Ran backend tests, OpenAPI drift check, frontend lint and production build.
+- next:
+  - Create commit and open PR for review.
+- evidence:
+  - `pytest truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_integrations_registry.py -q`
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check`
+  - `cd console-web && npm run lint`
+  - `cd console-web && npm run build`
+- last_updated: 2026-02-08

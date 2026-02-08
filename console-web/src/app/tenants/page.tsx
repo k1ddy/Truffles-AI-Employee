@@ -65,6 +65,9 @@ type BranchEditorState = {
 };
 
 type TenantLifecycleMode = "active" | "archived" | "all";
+type FleetLifecycleFilter = "all" | "lead" | "contracting" | "onboarding" | "go_live_ready" | "active" | "paused" | "archived";
+type FleetPaymentFilter = "all" | "pending" | "confirmed" | "rejected" | "unknown";
+type FleetServiceFilter = "all" | "ok" | "degraded" | "attention";
 
 function stringifyOptionalJson(value: unknown): string {
     if (!value || typeof value !== "object") {
@@ -97,6 +100,9 @@ export default function TenantsPage() {
     const [branchQuery, setBranchQuery] = useState("");
     const [companyQuery, setCompanyQuery] = useState("");
     const [tenantLifecycle, setTenantLifecycle] = useState<TenantLifecycleMode>("active");
+    const [fleetLifecycleFilter, setFleetLifecycleFilter] = useState<FleetLifecycleFilter>("all");
+    const [fleetPaymentFilter, setFleetPaymentFilter] = useState<FleetPaymentFilter>("all");
+    const [fleetServiceFilter, setFleetServiceFilter] = useState<FleetServiceFilter>("all");
     const [companyEditor, setCompanyEditor] = useState<CompanyEditorState | null>(null);
     const [clientEditor, setClientEditor] = useState<ClientEditorState | null>(null);
     const [branchEditor, setBranchEditor] = useState<BranchEditorState | null>(null);
@@ -153,10 +159,24 @@ export default function TenantsPage() {
         components["schemas"]["ClientListResponse"],
         Error,
         InfiniteData<components["schemas"]["ClientListResponse"], string | undefined>,
-        ["tenants-clients", string | undefined, TenantLifecycleMode],
+        [
+            "tenants-clients",
+            string | undefined,
+            TenantLifecycleMode,
+            FleetLifecycleFilter,
+            FleetPaymentFilter,
+            FleetServiceFilter,
+        ],
         string | undefined
     >({
-        queryKey: ["tenants-clients", clientQueryValue, tenantLifecycle],
+        queryKey: [
+            "tenants-clients",
+            clientQueryValue,
+            tenantLifecycle,
+            fleetLifecycleFilter,
+            fleetPaymentFilter,
+            fleetServiceFilter,
+        ],
         queryFn: async ({ pageParam }) => {
             const cursor = typeof pageParam === "string" ? pageParam : undefined;
             const response = await adminApi.listClients({
@@ -164,6 +184,10 @@ export default function TenantsPage() {
                 limit: 20,
                 q: clientQueryValue,
                 lifecycle: tenantLifecycle,
+                include_fleet: "true",
+                fleet_lifecycle: fleetLifecycleFilter === "all" ? undefined : fleetLifecycleFilter,
+                payment_status: fleetPaymentFilter === "all" ? undefined : fleetPaymentFilter,
+                service_state: fleetServiceFilter === "all" ? undefined : fleetServiceFilter,
             });
             return response.data;
         },
@@ -203,6 +227,10 @@ export default function TenantsPage() {
     );
     const clients = useMemo(
         () => clientsQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
+        [clientsQuery.data],
+    );
+    const clientsSummary = useMemo(
+        () => clientsQuery.data?.pages[0]?.summary ?? null,
         [clientsQuery.data],
     );
     const branches = useMemo(
@@ -377,7 +405,13 @@ export default function TenantsPage() {
         }
     };
 
-    const isClientArchived = (status?: string | null) => (status ?? "").trim().toLowerCase() !== "active";
+    const isClientArchived = (client: components["schemas"]["Client"]) => {
+        const lifecycleValue = (client.lifecycle_state ?? "").trim().toLowerCase();
+        if (lifecycleValue) {
+            return lifecycleValue === "archived";
+        }
+        return (client.status ?? "").trim().toLowerCase() !== "active";
+    };
 
     const askClientLifecycleReason = (mode: "archive" | "restore"): string | null => {
         const promptText = mode === "archive"
@@ -701,13 +735,55 @@ export default function TenantsPage() {
                             <p className="text-sm text-muted-foreground">
                                 {clientsQuery.isLoading ? "—" : `${clients.length} всего`}
                             </p>
+                            {clientsSummary ? (
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                    portfolio: clients {clientsSummary.total_clients} · active {clientsSummary.active_clients} · onboarding {clientsSummary.onboarding_clients} · paused {clientsSummary.paused_clients} · archived {clientsSummary.archived_clients} · degraded {clientsSummary.degraded_clients}
+                                </div>
+                            ) : null}
                         </div>
-                        <input
-                            className="w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                            placeholder="Поиск по клиентам"
-                            value={clientQuery}
-                            onChange={(event) => setClientQuery(event.target.value)}
-                        />
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                            <input
+                                className="w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                placeholder="Поиск по клиентам"
+                                value={clientQuery}
+                                onChange={(event) => setClientQuery(event.target.value)}
+                            />
+                            <select
+                                className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
+                                value={fleetLifecycleFilter}
+                                onChange={(event) => setFleetLifecycleFilter(event.target.value as FleetLifecycleFilter)}
+                            >
+                                <option value="all">Lifecycle: all</option>
+                                <option value="lead">lead</option>
+                                <option value="contracting">contracting</option>
+                                <option value="onboarding">onboarding</option>
+                                <option value="go_live_ready">go_live_ready</option>
+                                <option value="active">active</option>
+                                <option value="paused">paused</option>
+                                <option value="archived">archived</option>
+                            </select>
+                            <select
+                                className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
+                                value={fleetPaymentFilter}
+                                onChange={(event) => setFleetPaymentFilter(event.target.value as FleetPaymentFilter)}
+                            >
+                                <option value="all">Payment: all</option>
+                                <option value="pending">pending</option>
+                                <option value="confirmed">confirmed</option>
+                                <option value="rejected">rejected</option>
+                                <option value="unknown">unknown</option>
+                            </select>
+                            <select
+                                className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
+                                value={fleetServiceFilter}
+                                onChange={(event) => setFleetServiceFilter(event.target.value as FleetServiceFilter)}
+                            >
+                                <option value="all">Service: all</option>
+                                <option value="ok">ok</option>
+                                <option value="degraded">degraded</option>
+                                <option value="attention">attention</option>
+                            </select>
+                        </div>
                     </div>
                     <div className="space-y-3">
                         {clientsQuery.isLoading ? (
@@ -719,7 +795,7 @@ export default function TenantsPage() {
                         ) : (
                             clients.map((client) => {
                                 const isEditing = clientEditor?.id === client.id;
-                                const isArchived = isClientArchived(client.status);
+                                const isArchived = isClientArchived(client);
                                 const lifecyclePending = clientLifecyclePendingId === client.id;
                                 return (
                                     <div
@@ -735,6 +811,15 @@ export default function TenantsPage() {
                                             {client.status ? (
                                                 <div className="text-xs text-muted-foreground">status: {client.status}</div>
                                             ) : null}
+                                            <div className="text-xs text-muted-foreground">
+                                                lifecycle: {client.lifecycle_state ?? "—"} · payment: {client.payment_status ?? "—"} · service: {client.service_state ?? "—"}
+                                            </div>
+                                            <div className="text-xs text-muted-foreground">
+                                                owner: {client.owner_name ?? "—"} · next: {client.next_action ?? "—"}
+                                            </div>
+                                            <div className="text-xs text-muted-foreground">
+                                                branches: active {client.active_branches ?? 0}/{client.total_branches ?? 0} · degraded {client.degraded_branches ?? 0} · go_live_ready {client.go_live_ready_branches ?? 0}
+                                            </div>
                                         </div>
                                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                             <span>{client.id === selectedClientId ? "Выбран" : ""}</span>
