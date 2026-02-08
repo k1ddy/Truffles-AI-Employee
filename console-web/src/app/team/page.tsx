@@ -7,7 +7,7 @@ import Link from "next/link";
 import toast from "react-hot-toast";
 
 import api from "@/lib/api";
-import { agentsApi, authApi, canAccessConsole, type ConsoleRole } from "@/lib/api-client";
+import { adminApi, agentsApi, authApi, canAccessConsole, type ConsoleRole } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import type { components } from "@/types/api.generated";
 import AccessDenied from "@/components/AccessDenied";
@@ -107,6 +107,8 @@ function UsersPanel({
         canAccessConsole(role, "settings", "read") || canAccessConsole(role, "provisioning", "read");
     const [linkTokens, setLinkTokens] = useState<Record<string, TelegramLinkResponse>>({});
     const [linkTarget, setLinkTarget] = useState<string | null>(null);
+    const [accessTarget, setAccessTarget] = useState<string | null>(null);
+    const [oidcTarget, setOidcTarget] = useState<string | null>(null);
 
     const agentsQuery = useQuery({
         queryKey: ["agents"],
@@ -139,6 +141,77 @@ function UsersPanel({
             queryClient.invalidateQueries({ queryKey: ["agents"] });
         },
     });
+
+    const accessMutation = useMutation({
+        mutationFn: async (payload: { agentId: string; enable: boolean; reason: string }) => {
+            if (payload.enable) {
+                return (await adminApi.enableAgent(payload.agentId, { reason: payload.reason })).data;
+            }
+            return (await adminApi.disableAgent(payload.agentId, { reason: payload.reason })).data;
+        },
+        onMutate: ({ agentId }) => {
+            setAccessTarget(agentId);
+        },
+        onSuccess: (_data, payload) => {
+            toast.success(payload.enable ? "Доступ восстановлен" : "Доступ отключен");
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+        onSettled: () => {
+            setAccessTarget(null);
+            queryClient.invalidateQueries({ queryKey: ["agents"] });
+        },
+    });
+
+    const oidcMutation = useMutation({
+        mutationFn: async (payload: { agentId: string; oidcSubject: string; reason: string }) =>
+            (await adminApi.rebindAgentOidc(payload.agentId, {
+                oidc_subject: payload.oidcSubject,
+                reason: payload.reason,
+            })).data,
+        onMutate: ({ agentId }) => {
+            setOidcTarget(agentId);
+        },
+        onSuccess: () => {
+            toast.success("OIDC привязка обновлена");
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+        onSettled: () => {
+            setOidcTarget(null);
+            queryClient.invalidateQueries({ queryKey: ["agents"] });
+        },
+    });
+
+    const handleToggleAccess = (agentId: string, isActive: boolean) => {
+        const reason = window.prompt(isActive ? "Причина отключения доступа" : "Причина включения доступа");
+        if (!reason || !reason.trim()) {
+            return;
+        }
+        accessMutation.mutate({
+            agentId,
+            enable: !isActive,
+            reason: reason.trim(),
+        });
+    };
+
+    const handleRebindOidc = (agentId: string) => {
+        const oidcSubject = window.prompt("Новый oidc_subject");
+        if (!oidcSubject || !oidcSubject.trim()) {
+            return;
+        }
+        const reason = window.prompt("Причина изменения OIDC привязки");
+        if (!reason || !reason.trim()) {
+            return;
+        }
+        oidcMutation.mutate({
+            agentId,
+            oidcSubject: oidcSubject.trim(),
+            reason: reason.trim(),
+        });
+    };
 
     return (
         <div className="space-y-6">
@@ -253,6 +326,30 @@ function UsersPanel({
                                                 {new Date(identity.linked_at).toLocaleDateString("ru-RU")}
                                             </span>
                                         )}
+                                    </div>
+                                )}
+                                {canManage && agent.id && (
+                                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onClick={() => handleToggleAccess(agent.id as string, Boolean(agent.is_active))}
+                                            disabled={accessTarget === agent.id}
+                                        >
+                                            {accessTarget === agent.id
+                                                ? "Сохранение..."
+                                                : agent.is_active
+                                                    ? "Отключить доступ"
+                                                    : "Включить доступ"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onClick={() => handleRebindOidc(agent.id as string)}
+                                            disabled={oidcTarget === agent.id}
+                                        >
+                                            {oidcTarget === agent.id ? "Сохранение..." : "OIDC rebind"}
+                                        </button>
                                     </div>
                                 )}
                                 {linkData && (

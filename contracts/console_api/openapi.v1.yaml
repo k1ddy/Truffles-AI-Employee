@@ -1723,6 +1723,239 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /admin/memberships:
+    get:
+      operationId: listAdminMemberships
+      tags: [admin]
+      summary: List memberships
+      parameters:
+        - name: agent_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: scope
+          in: query
+          schema:
+            type: string
+            enum: [company, client, branch]
+        - name: company_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: client_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: branch_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: include_inactive
+          in: query
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        "200":
+          description: Membership list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    post:
+      operationId: createAdminMembership
+      tags: [admin]
+      summary: Create membership
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MembershipCreateRequest"
+      responses:
+        "200":
+          description: Membership created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentMembership"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/memberships/{membership_id}:
+    patch:
+      operationId: updateAdminMembership
+      tags: [admin]
+      summary: Update membership
+      parameters:
+        - name: membership_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MembershipUpdateRequest"
+      responses:
+        "200":
+          description: Membership updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentMembership"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/agents/{agent_id}/disable:
+    post:
+      operationId: disableAdminAgent
+      tags: [admin]
+      summary: Disable agent access
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentLifecycleActionRequest"
+      responses:
+        "200":
+          description: Agent disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/agents/{agent_id}/enable:
+    post:
+      operationId: enableAdminAgent
+      tags: [admin]
+      summary: Enable agent access
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentLifecycleActionRequest"
+      responses:
+        "200":
+          description: Agent enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/agents/{agent_id}/oidc/rebind:
+    post:
+      operationId: rebindAdminAgentOidc
+      tags: [admin]
+      summary: Rebind OIDC identity for agent
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentOidcRebindRequest"
+      responses:
+        "200":
+          description: OIDC identity rebound
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentOidcRebindResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /admin/capabilities:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
@@ -2512,6 +2745,23 @@ components:
           format: date-time
           nullable: true
 
+    BranchBootstrapAccountTemplate:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [platform_admin, owner, admin, manager, support, specialist, viewer]
+        name:
+          type: string
+          nullable: true
+        oidc_subject:
+          type: string
+          nullable: true
+        is_active:
+          type: boolean
+          nullable: true
+
     BranchCreateRequest:
       type: object
       required: [client_id, slug, name]
@@ -2549,16 +2799,20 @@ components:
         is_active:
           type: boolean
           nullable: true
-        confirmation_id:
-          type: string
-          format: uuid
-          nullable: true
+        bootstrap_accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/BranchBootstrapAccountTemplate"
 
     BranchCreateResponse:
       type: object
       properties:
         branch:
           $ref: "#/components/schemas/Branch"
+        created_agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
 
     BranchUpdateRequest:
       type: object
@@ -3043,6 +3297,148 @@ components:
       properties:
         agent:
           $ref: "#/components/schemas/Agent"
+
+    AgentLifecycleActionRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+
+    AgentOidcRebindRequest:
+      type: object
+      required: [oidc_subject, reason]
+      properties:
+        oidc_subject:
+          type: string
+        reason:
+          type: string
+
+    AgentOidcRebindResponse:
+      type: object
+      required: [agent_id, oidc_subject]
+      properties:
+        agent_id:
+          type: string
+          format: uuid
+        oidc_subject:
+          type: string
+        previous_oidc_subject:
+          type: string
+          nullable: true
+
+    AgentMembership:
+      type: object
+      required: [id, agent_id, scope, role, is_active]
+      properties:
+        id:
+          type: string
+          format: uuid
+        agent_id:
+          type: string
+          format: uuid
+        agent_name:
+          type: string
+          nullable: true
+        agent_client_id:
+          type: string
+          format: uuid
+          nullable: true
+        scope:
+          type: string
+          enum: [company, client, branch]
+        company_id:
+          type: string
+          format: uuid
+          nullable: true
+        client_id:
+          type: string
+          format: uuid
+          nullable: true
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        role:
+          type: string
+          enum: [platform_admin, owner, admin, manager, support, specialist, viewer]
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    MembershipListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentMembership"
+
+    MembershipCreateRequest:
+      type: object
+      required: [agent_id, scope, role]
+      properties:
+        agent_id:
+          type: string
+          format: uuid
+        scope:
+          type: string
+          enum: [company, client, branch]
+        role:
+          type: string
+          enum: [platform_admin, owner, admin, manager, support, specialist, viewer]
+        company_id:
+          type: string
+          format: uuid
+          nullable: true
+        client_id:
+          type: string
+          format: uuid
+          nullable: true
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        is_active:
+          type: boolean
+          nullable: true
+
+    MembershipUpdateRequest:
+      type: object
+      properties:
+        scope:
+          type: string
+          enum: [company, client, branch]
+          nullable: true
+        role:
+          type: string
+          enum: [platform_admin, owner, admin, manager, support, specialist, viewer]
+          nullable: true
+        company_id:
+          type: string
+          format: uuid
+          nullable: true
+        client_id:
+          type: string
+          format: uuid
+          nullable: true
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        is_active:
+          type: boolean
+          nullable: true
+        reason:
+          type: string
+          nullable: true
 
     # ── Messages ──
     Message:
