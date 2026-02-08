@@ -1,0 +1,26 @@
+# SESSION 2026-02-08-console-contract-gate-hardening-a17 — Session 2026-02-08-console-contract-gate-hardening-a17
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-08-console-contract-gate-hardening-a17.md
+- branch: feat/2026-02-08-console-contract-gate-hardening-a17
+- worktree: /home/zhan/worktrees/2026-02-08-console-contract-gate-hardening-a17
+- base_ref: origin/main
+- scope: CI hardening for console contract checks: split pre-deploy OpenAPI validation from post-deploy live Schemathesis smoke to prevent main deadlock on undeployed endpoints.
+- done:
+  - Session created.
+  - Added Task Package for console contract gate hardening and registered session artifacts.
+  - Updated `.github/workflows/ci.yml`: replaced `console-contract` with `console-contract-predeploy` (OpenAPI static validation only).
+  - Added post-deploy `console-contract-live` job gated by `needs.deploy.outputs.deployed == 'true'` for Schemathesis GET-only smoke against prod.
+  - Updated `build-push` gate to depend on `console-contract-predeploy` instead of pre-deploy live smoke.
+  - Ran local checks: YAML parse, `py_compile`, migration governance strict check, session check.
+- next:
+  - Commit changes.
+  - Push branch and open PR.
+  - Wait CI and merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-08-console-contract-gate-hardening-a17.md
+  - /tmp/ci_console_contract_gate_hardening_yaml_parse_20260208_a17.txt
+  - /tmp/ci_console_contract_gate_hardening_migration_governance_20260208_a17.txt
+  - /tmp/ci_console_contract_gate_hardening_session_check_20260208_a17.txt
+- last_updated: 2026-02-08
