@@ -221,20 +221,22 @@ def test_preflight_rejects_unknown_instance_id_hybrid():
         ),
     )
 
-    response, preflight_payload = _run_preflight(
-        payload,
-        db,
-        provided_secret=None,
-        enforce_secret=False,
-        conversation_id=None,
-        resolve_trace_conversation=lambda **_: None,
-        record_early_trace=lambda *args, **kwargs: False,
-    )
+    with patch("app.routers.webhook.http.report_integration_incident") as incident_mock:
+        response, preflight_payload = _run_preflight(
+            payload,
+            db,
+            provided_secret=None,
+            enforce_secret=False,
+            conversation_id=None,
+            resolve_trace_conversation=lambda **_: None,
+            record_early_trace=lambda *args, **kwargs: False,
+        )
 
     assert response is not None
     assert response.success is False
     assert response.message == "Unknown instanceId"
     assert preflight_payload == {}
+    incident_mock.assert_called_once()
 
 
 def test_preflight_resolves_branch_instance_uid_alias():

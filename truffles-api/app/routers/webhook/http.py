@@ -23,6 +23,11 @@ from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services import reasoning_core
 from app.services.alert_service import alert_warning
 from app.services.chatflow_service import verify_signed_media_path
+from app.services.integration_guardrails_service import (
+    REASON_INVALID_WEBHOOK_SECRET,
+    REASON_UNKNOWN_INSTANCE_ID,
+    report_integration_incident,
+)
 from app.services.tenant_context_contract import validate_tenant_context_contract
 
 from . import _legacy as legacy
@@ -72,6 +77,14 @@ def _run_preflight(
         digits = re.sub(r"\D", "", value)
         return digits or None
 
+    def _normalize_uuid(value: object) -> str | None:
+        if value is None:
+            return None
+        try:
+            return str(UUID(str(value)))
+        except (TypeError, ValueError, AttributeError):
+            return None
+
     client = db.query(Client).filter(Client.name == payload.client_slug).first()
     if not client:
         trace_conversation = resolve_trace_conversation(
@@ -95,6 +108,49 @@ def _run_preflight(
     incoming_tenant_context = payload.tenant_context
     metadata = body.metadata
     message_id = metadata.messageId if metadata else None
+    missing_secret_warned = False
+
+    def _raise_invalid_secret(*, branch: Branch | None, instance_id: str | None, branch_mode: str | None):
+        report_integration_incident(
+            db,
+            client=client,
+            branch=branch,
+            reason=REASON_INVALID_WEBHOOK_SECRET,
+            source="webhook_preflight",
+            context={
+                "message_id": message_id,
+                "remote_jid": metadata.remoteJid if metadata else None,
+                "instance_id": instance_id,
+                "branch_mode": branch_mode,
+            },
+        )
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
+
+    if enforce_secret:
+        # Enforce client-level secret before payload validation to avoid bypass via malformed bodies.
+        client_expected_secret = _resolve_expected_webhook_secret(
+            settings=settings,
+            branch=None,
+        )
+        if client_expected_secret and (
+            not provided_secret or provided_secret != client_expected_secret
+        ):
+            _raise_invalid_secret(
+                branch=None,
+                instance_id=metadata.instanceId if metadata else None,
+                branch_mode=None,
+            )
+        elif not provided_secret:
+            alert_warning(
+                "Webhook secret missing",
+                {
+                    "client_slug": payload.client_slug,
+                    "branch_id": None,
+                },
+            )
+            missing_secret_warned = True
+
     if not metadata or not metadata.remoteJid:
         trace_conversation = resolve_trace_conversation(
             trace_client=client,
@@ -277,6 +333,7 @@ def _run_preflight(
                     trace_message_id=message_id,
                     trace_remote_jid=remote_jid,
                 )
+                should_commit = False
                 if record_early_trace(
                     trace_conversation,
                     stage="preflight",
@@ -288,6 +345,21 @@ def _run_preflight(
                         "instance_match_mode": instance_match_mode,
                     },
                 ):
+                    should_commit = True
+                report_integration_incident(
+                    db,
+                    client=client,
+                    reason=REASON_UNKNOWN_INSTANCE_ID,
+                    source="webhook_preflight",
+                    context={
+                        "instance_id": instance_id,
+                        "instance_match_mode": instance_match_mode,
+                        "message_id": message_id,
+                        "remote_jid": remote_jid,
+                    },
+                )
+                should_commit = True
+                if should_commit:
                     db.commit()
                 return WebhookResponse(success=False, message="Unknown instanceId"), {}
 
@@ -362,19 +434,25 @@ def _run_preflight(
         if source_value:
             tenant_source = source_value
 
+    company_id = _normalize_uuid(getattr(client, "company_id", None))
+    client_id = _normalize_uuid(getattr(client, "id", None))
+    branch_id = _normalize_uuid(getattr(resolved_branch, "id", None)) if resolved_branch else None
     effective_tenant_context = {
-        "company_id": str(getattr(client, "company_id", None)) if getattr(client, "company_id", None) else None,
-        "client_id": str(client.id),
+        "company_id": company_id,
+        "client_id": client_id,
         "client_slug": client.name,
         "source": tenant_source,
         "instance_id": effective_instance_id or None,
-        "branch_id": str(resolved_branch.id) if resolved_branch else None,
+        "branch_id": branch_id,
         "branch_slug": getattr(resolved_branch, "slug", None) if resolved_branch else None,
     }
     effective_tenant_context = {
         key: value for key, value in effective_tenant_context.items() if value is not None
     }
-    _, effective_tenant_error = validate_tenant_context_contract(effective_tenant_context)
+    _, effective_tenant_error = validate_tenant_context_contract(
+        effective_tenant_context,
+        require_client_id=client_id is not None,
+    )
     if effective_tenant_error:
         return _reject_tenant_context(
             "tenant_context_contract_invalid",
@@ -389,8 +467,12 @@ def _run_preflight(
         )
         if expected_secret:
             if not provided_secret or provided_secret != expected_secret:
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
-        elif not provided_secret:
+                _raise_invalid_secret(
+                    branch=resolved_branch,
+                    instance_id=instance_id,
+                    branch_mode=branch_mode,
+                )
+        elif not provided_secret and not missing_secret_warned:
             alert_warning(
                 "Webhook secret missing",
                 {
@@ -482,6 +564,19 @@ async def handle_webhook_direct(client_slug: str, request: Request, db: Session 
     )
     if expected_secret:
         if not provided_secret or provided_secret != expected_secret:
+            report_integration_incident(
+                db,
+                client=client,
+                branch=resolved_branch,
+                reason=REASON_INVALID_WEBHOOK_SECRET,
+                source="webhook_direct",
+                context={
+                    "instance_id": instance_id,
+                    "message_id": metadata.messageId if metadata else None,
+                    "remote_jid": metadata.remoteJid if metadata else None,
+                },
+            )
+            db.commit()
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
     elif not provided_secret:
         alert_warning("Webhook secret missing", {"client_slug": parsed.client_slug})

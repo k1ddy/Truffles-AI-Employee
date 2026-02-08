@@ -1,3 +1,4 @@
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -42,6 +43,36 @@ def _normalize_slot_value(value: object) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
+
+
+def _is_env_enabled(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _simulation_allowlist() -> set[str]:
+    raw = os.environ.get("SIMULATION_ALLOWLIST_JIDS") or os.environ.get("OUTBOUND_ALLOWLIST_JIDS") or ""
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+def _is_simulation_allowed(metadata) -> bool:
+    if _is_env_enabled(os.environ.get("TEST_MODE"), default=False):
+        return True
+    if metadata is None:
+        return False
+    remote_jid = getattr(metadata, "remoteJid", None)
+    if not isinstance(remote_jid, str) or not remote_jid.strip():
+        return False
+    return remote_jid.strip() in _simulation_allowlist()
+
+
+def _clear_simulation_context(context: dict) -> dict:
+    updated = dict(context)
+    updated.pop(SIMULATION_CONTEXT_KEY, None)
+    for key in ("simulation_mode", "simulation_id", "simulation_llm", "simulation_time"):
+        updated.pop(key, None)
+    return updated
 
 
 def _extract_decision_meta(message: Message | None) -> dict:
@@ -176,10 +207,25 @@ def _get_simulation_context(value) -> dict | None:
 
 
 def apply_simulation_context(conversation: Conversation, metadata) -> dict | None:
+    context = conversation.context if isinstance(conversation.context, dict) else {}
     sim_meta = _extract_simulation_meta(metadata)
     if not sim_meta:
+        if context.get(SIMULATION_CONTEXT_KEY) and not _is_simulation_allowed(metadata):
+            conversation.context = _clear_simulation_context(context)
         return None
-    context = conversation.context if isinstance(conversation.context, dict) else {}
+    if not _is_simulation_allowed(metadata):
+        if context.get(SIMULATION_CONTEXT_KEY):
+            conversation.context = _clear_simulation_context(context)
+        logger.warning(
+            "Simulation metadata ignored for non-test traffic",
+            extra={
+                "context": {
+                    "conversation_id": str(conversation.id),
+                    "remote_jid": getattr(metadata, "remoteJid", None),
+                }
+            },
+        )
+        return None
     updated = dict(context)
     sim_context = dict(updated.get(SIMULATION_CONTEXT_KEY) or {})
     if sim_meta.get("id") and not sim_context.get("id"):

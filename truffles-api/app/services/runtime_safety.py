@@ -36,6 +36,7 @@ class RuntimeSafetySnapshot:
     outbox_worker_enabled: bool
     provider_gateway_outbound_enabled: bool
     provider_gateway_status_callback_set: bool
+    integration_watchdog_enabled: bool
     outbound_allowlist_count: int
     database_host: str
     database_is_local: bool
@@ -57,6 +58,7 @@ class RuntimeSafetySnapshot:
             "outbox_worker_enabled": self.outbox_worker_enabled,
             "provider_gateway_outbound_enabled": self.provider_gateway_outbound_enabled,
             "provider_gateway_status_callback_set": self.provider_gateway_status_callback_set,
+            "integration_watchdog_enabled": self.integration_watchdog_enabled,
             "outbound_allowlist_count": self.outbound_allowlist_count,
             "database_host": self.database_host,
             "database_is_local": self.database_is_local,
@@ -92,6 +94,10 @@ def build_runtime_safety_snapshot(
         default=False,
     )
     callback_url = (source_env.get("PROVIDER_GATEWAY_STATUS_CALLBACK_URL") or "").strip()
+    integration_watchdog_enabled = _is_env_enabled(
+        source_env.get("INTEGRATION_WATCHDOG_ENABLED"),
+        default=True,
+    )
     allowlist = _parse_allowlist(source_env.get("OUTBOUND_ALLOWLIST_JIDS"))
 
     resolved_database_url = database_url if database_url is not None else source_env.get("DATABASE_URL")
@@ -116,6 +122,7 @@ def build_runtime_safety_snapshot(
         outbox_worker_enabled=outbox_worker_enabled,
         provider_gateway_outbound_enabled=provider_gateway_outbound_enabled,
         provider_gateway_status_callback_set=bool(callback_url),
+        integration_watchdog_enabled=integration_watchdog_enabled,
         outbound_allowlist_count=len(allowlist),
         database_host=database_host,
         database_is_local=database_is_local,

@@ -699,12 +699,14 @@ class TestWebhookAuth:
         db = _build_db("test", "secret")
         client = self._client_with_db(db)
         try:
-            response = client.post(
-                "/webhook",
-                json={"client_slug": "test", "body": {"message": "hi"}},
-                headers={"X-Webhook-Secret": "wrong"},
-            )
+            with patch("app.routers.webhook.http.report_integration_incident") as incident_mock:
+                response = client.post(
+                    "/webhook",
+                    json={"client_slug": "test", "body": {"message": "hi"}},
+                    headers={"X-Webhook-Secret": "wrong"},
+                )
             assert response.status_code == 401
+            incident_mock.assert_called_once()
         finally:
             app.dependency_overrides.clear()
 
