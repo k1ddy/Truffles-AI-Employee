@@ -60,6 +60,7 @@ export const ErrorCodes = {
     NOT_ASSIGNED: "NOT_ASSIGNED",
     CASE_NOT_ACTIVE: "CASE_NOT_ACTIVE",
     ONBOARDING_STEP_REQUIRED: "ONBOARDING_STEP_REQUIRED",
+    GO_LIVE_GATE_REQUIRED: "GO_LIVE_GATE_REQUIRED",
     CONFIRMATION_REQUIRED: "CONFIRMATION_REQUIRED",
     VALIDATION_ERROR: "VALIDATION_ERROR",
     MESSAGE_TOO_LONG: "MESSAGE_TOO_LONG",
@@ -242,6 +243,11 @@ const errorConfigs: Record<ErrorCode, ErrorConfig> = {
         retryable: false,
     },
     ONBOARDING_STEP_REQUIRED: {
+        http_status: 409,
+        ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
+        retryable: false,
+    },
+    GO_LIVE_GATE_REQUIRED: {
         http_status: 409,
         ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
         retryable: false,
@@ -525,6 +531,8 @@ export type ListIntegrationsParams = operations["listAdminIntegrations"]["parame
 export type ListMembershipsParams = operations["listAdminMemberships"]["parameters"]["query"];
 export type ListReferencePacksParams = operations["listAdminReferencePacks"]["parameters"]["query"];
 export type ListOpsJobsParams = operations["listOpsJobs"]["parameters"]["query"];
+export type BranchGoLiveDecisionRequest = { reason: string };
+export type BranchGoLiveWaiverRequest = { reason: string; ttl_hours: number };
 
 // ═══════════════════════════════════════════════════════════════════
 // API METHODS (typed)
@@ -654,6 +662,12 @@ export const adminApi = {
         apiClient.post<components["schemas"]["BranchCreateResponse"]>("/admin/branches", data),
     patchBranch: (branchId: string, data: components["schemas"]["BranchUpdateRequest"]) =>
         apiClient.patch<components["schemas"]["Branch"]>(`/admin/branches/${branchId}`, data),
+    approveBranchGoLive: (branchId: string, data: BranchGoLiveDecisionRequest) =>
+        apiClient.post<components["schemas"]["Branch"]>(`/admin/branches/${branchId}/go-live/approve`, data),
+    rejectBranchGoLive: (branchId: string, data: BranchGoLiveDecisionRequest) =>
+        apiClient.post<components["schemas"]["Branch"]>(`/admin/branches/${branchId}/go-live/reject`, data),
+    waiveBranchGoLive: (branchId: string, data: BranchGoLiveWaiverRequest) =>
+        apiClient.post<components["schemas"]["Branch"]>(`/admin/branches/${branchId}/go-live/waive`, data),
     createAgent: (data: components["schemas"]["AgentCreateRequest"]) =>
         apiClient.post<components["schemas"]["AgentCreateResponse"]>("/admin/agents", data),
     disableAgent: (agentId: string, data: components["schemas"]["AgentLifecycleActionRequest"]) =>
