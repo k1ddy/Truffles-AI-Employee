@@ -475,6 +475,24 @@ k6 run ops/k6/console_smoke.js
 - **long/asr:** label `run-long` на PR или `workflow_dispatch` с `run_long=true`.
 - **ci-livecheck:** только на `main` и только если `deploy` сработал; на `workflow_dispatch` нужно `run_livecheck=true`.
 
+### Quality validity gates (`ops/diagnose.py llm-quality`)
+- **infra_valid** = пройден preflight/infra-контур (включая webhook_secret/branch/env/judge prerequisites).
+- **semantic_valid** = нет threshold/regression breach при валидном сравнении.
+- Любой run с `infra_valid=false` считается `INVALID`: его нельзя использовать для сравнения качества и для обновления baseline.
+- Обновление canonical baseline (`ops/results/booking_quality.json`) допускается только при `infra_valid=true`, `semantic_valid=true`, `judge.enabled=true` (`judge_mode=sample|all`).
+- Strict replay (`--scenarios-file`) без judge допускается только как debug (`--allow-judge-off`) и не считается каноническим quality-evidence.
+
+### Validation order (local-first)
+- Для core/поведенческих правок порядок проверки фиксированный: `local realism` -> `local deterministic` -> `CI deterministic`.
+- `local realism` = реальные LLM‑диалоги (10–15 ходов) + chaos перебивки + tool hooks + booking confirm path.
+- Если нет `OPENAI_API_KEY`/judge key для required local realism run, статус задачи = `BLOCKED`.
+- CI не является источником финальной поведенческой валидации; CI подтверждает воспроизводимость и ловит базовый drift.
+
+### CI scope (what belongs in CI)
+- В CI держим только простые, быстрые и детерминированные проверки, не требующие внешнего LLM.
+- Примеры CI-набора: lint, unit, schema/contracts, deterministic replay, smoke на trace/meta contract.
+- Сложные LLM+tools+chaos прогоны выполняются локально перед PR и прикладываются как evidence.
+
 ### CI livecheck параллелизм
 - **Матрица групп:** `ci-livecheck` запускается в 4 параллельных группах (`pool-a/b/c/d`), каждая гоняет свой набор suite‑ов.
 - **Требование к allowlist:** желательно минимум 4 JID в `OUTBOUND_ALLOWLIST_JIDS`; если меньше — фиксируется `ALLOWLIST_TOO_SHORT` и включается fallback.

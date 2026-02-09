@@ -62,13 +62,20 @@ TESTING CONTRACT (summary)
 - CI usage + skip rules: `TECH.md` → "CI / GitHub Actions (как запускать, зачем и когда)".
 - Container pytest: use `scripts/test_api_container.sh` (or `truffles-api/docker-compose.test.yml` overrides); do NOT run pytest inside prod `truffles-api` container.
 - New feature requires at least one test (Playwright/Schemathesis/k6/unit) or an explicit waiver in the Task Package.
+- Core behavior changes require local-first realism checks before CI conclusions:
+  - full critical pytest suites,
+  - `ops/diagnose.py llm-quality` with real LLM + tool hooks + chaos dialogs,
+  - evidence from `decision_meta/decision_trace` + tool outcomes (not text-only).
 - CI livecheck is allowed only with safety gates (TEST_MODE=1 + allowlist); evidence is `livecheck-evidence.md`.
 - Live-check uses JID pool (comma list). One suite -> one JID. Instance->instance simulation is valid only if inbound is recorded in DB with decision_meta/trace; **CA‑13** may use simulated inbound when allowlist is unavailable (mark as `simulated` in `STATE.md`).
 - Definitions for JID/instance_id/instance->instance are fixed in `SPECS/SYSTEM_REFERENCE.md`.
 - Before any outbound/live-check run, validate runtime safety markers:
   - `curl -s http://localhost:8000/admin/health | jq '.safety'`
   - `danger_flags` must be empty; otherwise stop and fix env.
-- Do NOT assert on raw response text for LLM; assert via decision_meta/trace + policy/intent gates.
+- If `OPENAI_API_KEY`/judge key is missing for required LLM quality run, status is `BLOCKED` (no downgrade to simplified acceptance).
+- For core quality suites, do NOT use raw response text as pass/fail oracle; assert via decision_meta/trace + action/intent/slot/tool_action gates.
+- Raw-text checks are optional smoke checks only and cannot override contract/meta/trace failures.
+- Start `llm-quality` only after preflight is valid (`infra_valid=true`); otherwise run is INVALID and cannot update/compare baseline.
 - Coverage must include anchors + variations + noise (typos/topic switch), ASR-like inputs, and multi-turn dialogs (up to 10).
 
 ---
