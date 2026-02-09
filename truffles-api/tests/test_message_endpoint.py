@@ -6177,8 +6177,11 @@ def test_llm_policy_core_collect_sets_expected_reply_type():
     assert conversation.context.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_SERVICE
-    assert meta.get("llm_policy_core", {}).get("validated") is True
-    assert meta.get("llm_policy_core", {}).get("payload", {}).get("tool_action") == "info"
+    llm_policy_meta = meta.get("llm_policy_core", {})
+    assert llm_policy_meta.get("validated") is True
+    assert llm_policy_meta.get("payload", {}).get("tool_action") == "info"
+    assert llm_policy_meta.get("payload", {}).get("next_question") == "service"
+    assert llm_policy_meta.get("payload", {}).get("open_questions") == ["service"]
 
 
 def test_llm_policy_core_allows_plan_with_expected_reply(monkeypatch):
