@@ -58,13 +58,13 @@ from app.schemas.console import (
     ConsoleAuditEvent,
     ConsoleAuditListResponse,
     ConsoleBranch,
+    ConsoleBranchBootstrapAccountTemplate,
     ConsoleBranchChangeDraftRequest,
     ConsoleBranchChangeListResponse,
     ConsoleBranchChangePublishRequest,
     ConsoleBranchChangeRecord,
     ConsoleBranchChangeResponse,
     ConsoleBranchChangeRollbackRequest,
-    ConsoleBranchBootstrapAccountTemplate,
     ConsoleBranchCreateRequest,
     ConsoleBranchCreateResponse,
     ConsoleBranchGoLiveDecisionRequest,
@@ -178,6 +178,7 @@ from app.services.console_idempotency import (
     start_idempotency,
 )
 from app.services.escalation_service import resolve_telegram_routing
+from app.services.integration_guardrails_service import run_integration_watchdog_scoped
 from app.services.knowledge_registry_service import (
     apply_pack_index_to_client_config,
     get_current_published,
@@ -199,7 +200,6 @@ from app.services.manager_message_service import (
     notify_client_manager_status,
     process_console_media_upload,
 )
-from app.services.integration_guardrails_service import run_integration_watchdog_scoped
 from app.services.metrics_daily_service import (
     get_metrics_daily_backfill_max_days,
     get_metrics_daily_default_date,
