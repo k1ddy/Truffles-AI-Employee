@@ -59,6 +59,15 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 
 **Запрещено “добывать evidence руками”** (чистить БД/trace ради красивой картинки).
 
+### 1.1 Canon + Quality Gates (обязательно)
+- **Canon Sync Gate:** `/home/zhan/AGENTS.md` и `truffles-main/AGENTS.md` не должны расходиться по каноническим правилам (формула, quality contract, stop-the-line, fitness). Расхождение = GAP, запуск сессии/CI блокируется до синхронизации.
+- **Quality Validity Gate:** quality-run считается валидным только при `infra_valid=true` и `semantic_valid=true`.
+- **Hard Preflight Gate:** при невалидном preflight (`webhook_secret`/branch/env/judge key) run = `INVALID`; сравнение метрик и baseline для такого run запрещены.
+- **Baseline Integrity Gate:** canonical baseline обновляется только если `infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`.
+- **Anti Test-Fitting Gate:** запрещено добавлять/усиливать `must_include` как основной oracle без эквивалентных контрактных проверок в `decision_meta/decision_trace`.
+- **Demo-Neutral Gate:** demo-pack (`demo_salon`) используется только как канарейка; runtime-core остаётся pack-agnostic.
+- **Lexicon/Regex Delta Gate:** расширение словарей/regex допустимо только вместе с изменением резолвера и контрактных тестов.
+
 ---
 
 ## 2) Роли и власть
@@ -96,6 +105,7 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - Код/доки без проверок = не результат.
 - “Кажется работает” = GAP.
 - Новая фича = минимум один тест (Playwright/Schemathesis/k6/unit) или явный waiver в Task Package.
+- Для core/поведенческих изменений smoke/простые тесты недостаточны: обязателен local-first realism-контур (LLM + tools + chaos) до любых CI-выводов.
 
 ---
 
@@ -172,24 +182,36 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - подгонять поведение под тесты через хардкоды (EVAL = доказательство, не цель).
 - “тихо” менять политику/обещания (REQUIREMENTS) без явного решения.
 
-### 6.1 Anti-drift тесты (обязательно для новых агентов)
-- Не гоняй pytest внутри прод‑контейнера `truffles-api` с прод‑`.env` — это даёт ложные фейлы/прохождения.
-- Для контейнерных тестов используй **test‑compose** + чистое окружение:
-  - `scripts/test_api_container.sh` (предпочтительно).
-  - или `docker compose -p truffles-api-test -f truffles-api/docker-compose.yml -f truffles-api/docker-compose.test.yml ...`
-- `ops/diagnose.py` — это live‑check/trace, **не** замена pytest. Используй после тестов, когда нужно проверить живой поток.
-- Быстрый старт booking confirm: `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` + `scripts/booking_confirm_verify.sh`.
-- Booking LLM quality (state-aware): `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` → `ops/diagnose.py llm-quality`.
-- Генератор booking‑диалогов (10–15 шагов, перебивки/медиа): `scripts/booking_dialog_scenarios.py` — использовать для 5–10 прогонов перед диагнозом/фиксом; скрипт будет дорабатываться.
+### 6.1 Local-first validation law (обязательно)
+- Любая правка core‑поведения сначала проходит локальный реалистичный контур; без этого PR/приёмка = BLOCKED.
+- Порядок неизменный: `local realism` -> `local deterministic` -> `CI deterministic smoke`.
+- CI не заменяет локальную проверку поведения; CI подтверждает воспроизводимость и ловит базовые регрессии.
+- Если нет `OPENAI_API_KEY` (или явного `--judge-api-key`) для LLM quality, статус проверки = `BLOCKED`, а не “упрощённый pass”.
+- Judge key: по умолчанию judge использует `OPENAI_API_KEY`; отдельный ключ задаётся `--judge-api-key`.
 
-### 6.2 Booking quality anti-drift loop (обязательно для bugfix)
+### 6.2 Локальный обязательный контур (core behavior)
+- Не гоняй pytest внутри прод‑контейнера `truffles-api` с прод‑`.env`.
+- Для контейнерных тестов используй `scripts/test_api_container.sh` (предпочтительно) или `docker compose ...docker-compose.test.yml`.
+- Перед quality-прогоном обязателен preflight (`infra_valid=true`), затем semantic-контур.
+- Минимальный обязательный набор для core‑правок:
+  - `pytest -q truffles-api/tests/test_message_endpoint.py`
+  - `pytest -q truffles-api/tests/test_booking_chaos_dialogs.py`
+  - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py`
+  - `pytest -q truffles-api/tests/test_demo_salon_eval.py`
+  - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode all --fail-on-thresholds --run-id booking-lock-<id>`
+- Для booking/e2e обязателен evidence не только по метрикам:
+  - `decision_trace` c `booking_commit`/`booking_interrupt`,
+  - `decision_meta` последнего inbound,
+  - `appointment_id`/status и сохранность `specialist`.
+
+### 6.3 Booking quality anti-drift loop (обязательно для bugfix)
 **Ценность тестирования (зачем):**
 - Мы тестируем не “чтобы получить красивые цифры”, а чтобы ловить реальные регрессии в core‑поведении.
 - Сравниваем только сопоставимые прогоны, иначе метрики шумят и решения становятся случайными.
 - Цель цикла: быстрый и доказуемый ответ на вопрос “правка улучшила поведение или нет”.
 
 **Что делаем (как):**
-1) **Lock-run (один раз):** фиксируем baseline с неизменными параметрами; сохраняем `scenarios.json`, `summary.json`, `brief.md`.
+1) **Lock-run (один раз):** фиксируем baseline с неизменными параметрами; принимаем только валидный run (`infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`); сохраняем `scenarios.json`, `summary.json`, `brief.md`.
 2) **Replay-run (на каждую правку):** запускаем только по lock-сценариям (`--scenarios-file`) и сравниваем только с lock-summary (`--baseline-summary`), с fail-fast (`--max-failures`) для скорости; обязательно `--reset-before-dialog`, чтобы не тянуть state/trace из прошлых прогонов.
 3) **Handoff:** в session/STATE кладём `summary.json` + `brief.md` + top-failures + replay command.
 
@@ -198,18 +220,20 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 - Нельзя делать replay без `--reset-before-dialog` (иначе ложный дрейф из старых conversation/trace).
 - Нельзя обновлять baseline маленькими случайными прогонами.
 - Нельзя начинать новый фикс без `brief.md` от предыдущего прогона.
+- Нельзя использовать `INVALID` run (`infra_valid=false`) для сравнения и baseline.
 - Если реплей хуже baseline — stop-the-line, сначала root cause, потом новый фикс.
 
 **Командный шаблон:**
-- lock: `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --seed 42 --run-id booking-lock-42`
-- replay: `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json --count 10 --tool-hooks auto --reset-before-dialog --max-failures 20`
+- lock: `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --seed 42 --judge-mode all --fail-on-thresholds --run-id booking-lock-42`
+- replay: `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression --max-failures 20`
 
 **Локальные тесты:**
-- локально можно запускать для скорости,
-- **но** “принято” считается только после CI и/или согласованного live-check.
+- локально запускаются в первую очередь и определяют качество поведения.
+- CI и live-check идут после локального realism-контура и не могут его заменить.
 
 **Гигиена проверки:**
-- DoD принимается только после CI-run (или локальной сборки образа) + рестарта контейнеров и проверки через `docker exec`.
+- DoD для core‑поведения принимается только после локального полного контура + evidence (trace/meta/tool outcomes).
+- После этого CI-run используется как подтверждение воспроизводимости и anti-drift.
 - Не принимать DoD, если проверка делалась через `docker cp` или запуск контейнера с `-v` (исключения — только если это явно прописано в Task Package).
 
 
@@ -289,6 +313,7 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 12) **No orchestration in entrypoints** (роутеры тонкие).
 13) **Stage order snapshot** (порядок стадий меняется только сознательно).
 14) **PR Task Package gate** (PR к core без Task Package не мержится).
+15) **Local-first realism gate** (core‑поведение без локального LLM+tools+chaos evidence не принимается).
 
 ---
 
@@ -322,7 +347,7 @@ LLM принимает решение (FACT/COLLECT/HANDOFF) и формулир
 ### 11.2 Что проверяет Brain при приёмке (3 пункта)
 1) **Гейты/безопасность** не нарушены (LAW/OOD/booking).
 2) **Данные**: decision_meta/trace пишутся и валидны.
-3) **Проверки**: есть tests + live-check + evidence.
+3) **Проверки**: есть локальный realism-контур (LLM+tools+chaos) + deterministic тесты + evidence; CI/live-check подтверждают, но не подменяют локальную проверку.
 
 ---
 

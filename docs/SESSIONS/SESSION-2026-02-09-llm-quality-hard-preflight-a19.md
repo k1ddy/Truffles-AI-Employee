@@ -8,6 +8,7 @@
 - base_ref: origin/main
 - scope: `ops/diagnose.py llm-quality` hard preflight + quality status gating + canonical baseline policy + regressions.
 - done:
+  - Synced AGENTS canon + local-first testing law across AGENTS/TECH/SYSTEM_REFERENCE/SESSION_START_PROMPT.
   - Added hard preflight for webhook secret branch/client match with immediate `INVALID RUN` on mismatch.
   - Added quality status split (`infra_valid`, `semantic_valid`) and blocked regression comparison on infra failure.
   - Enforced canonical baseline compare policy (judge must be on); non-canonical baseline now blocks regression compare.
@@ -20,6 +21,7 @@
   - Extended runtime lexicon (`duration_keywords`) with `продолжительность*` variants to catch duration questions that previously fell into booking prompt loop.
   - Added regressions for duration/freeform expected-reply interrupt and question-mark fallback behavior.
 - next:
+  - Open PR with doc-only canon sync and local-first guidance.
   - Open PR and attach evidence from /tmp + summary paths
   - Package evidence and open PR.
 - evidence:

@@ -509,6 +509,11 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 **Livecheck‑harness:** любые изменения в `.github/workflows/ci.yml` или `ops/diagnose.py` требуют L3 (livecheck)
 или явного waiver в Task Package с причиной.
 
+**Local-first law (обязательно):**
+- Для core/поведенческих изменений сначала выполняется локальный реалистичный контур (LLM+tools+chaos), затем CI.
+- CI остаётся детерминированным и не заменяет локальную поведенческую проверку.
+- Без локального realism-evidence правка считается непроверенной, даже если CI зелёный.
+
 ### 5.1.2 Контракт eval‑тестов (без хрупкости)
 
 **Правило:** тесты проверяют **инвариант**, а не конкретный `source`.
@@ -519,8 +524,13 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 - Для LLM: проверять `llm_used` и policy/trace, не текст ответа.
 
 **Запрещено:** “пристрелка” к одному `source`, если канон допускает несколько.
-**LLM‑ключи:** CI‑eval не должен зависеть от `OPENAI_API_KEY`. Нужные LLM‑проверки переносятся в L4/nightly или
-стабятся так, чтобы trace/meta фиксировали ожидаемую стадию без внешнего API.
+**LLM‑ключи (разделение контуров):**
+- CI‑eval не должен зависеть от `OPENAI_API_KEY`. Нужные LLM‑проверки переносятся в L4/nightly или стабятся так,
+  чтобы trace/meta фиксировали ожидаемую стадию без внешнего API.
+- `ops/diagnose.py llm-quality` (strict/replay) обязан идти с валидным preflight + judge (`judge_mode=sample|all`).
+  Run без этого считается `INVALID` и не может быть baseline-evidence.
+- Если required local LLM-прогон не может быть выполнен из-за отсутствия `OPENAI_API_KEY`/judge key, статус = `BLOCKED`,
+  а не “частичный pass”.
 
 ### 5.1.2a Правильность/ошибки/false‑positive (LLM‑first)
 
@@ -542,7 +552,15 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 **Требование:** pass/fail определяются только по `decision_meta/decision_trace`; текст не сравниваем. В каждом suite
 обязательны `must_not` проверки (forbidden_action/gate/fact_source).
 
-### 5.1.2b Протокол исправлений (pattern‑based, без словарей)
+### 5.1.2b Quality status contract (`infra_valid` vs `semantic_valid`)
+
+- `infra_valid` отвечает за preflight/доступность среды (webhook_secret/branch/env/judge prerequisites + trace/meta infra checks).
+- `semantic_valid` отвечает за корректность решения (threshold/regression/инварианты) только при валидной infra.
+- Если `infra_valid=false`, run помечается `INVALID`; метрики такого run не сравниваются и не участвуют в baseline.
+- Baseline обновляется только при `infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`.
+- Replay без judge допускается только как debug (`--allow-judge-off`) и не считается каноническим quality-run.
+
+### 5.1.2c Протокол исправлений (pattern‑based, без словарей)
 
 1) Кластеризуем failures по `fail_code` + `action` + `intent` + `expected_reply_type` + `policy_gate`.
 2) Сверяемся с каноном: если правило не определено — **сначала** обновляем канон.
@@ -550,6 +568,7 @@ python3 ops/diagnose.py livecheck --suite ca01-core --seed 42 --min-wait 5 --max
 4) Обновляем evaluator (инвариант/allowlist) так, чтобы дефект не вернулся.
 5) Короткий chaos‑срез (50–150) → ночной прогон (1000–1500 logic + 100–150 LLM).
 6) Evidence + запись в `STATE.md` (Brain/Top Architect).
+7) Любые новые `must_include` в core-eval допустимы только вместе с эквивалентными проверками `decision_meta/decision_trace`.
 
 **LLM‑роль в тестах (экономия ручного труда):**
 - **LLM‑Generator:** генерирует RU/KZ/mixed/ASR‑варианты (фикс‑seed; сохранённый prompt).
@@ -1097,6 +1116,7 @@ chatflow_service → WhatsApp
 **Принцип:** лексиконы — fallback; основной разбор смысла через semantic resolver и LLM‑router (см. `STRATEGY/REQUIREMENTS.md`).
 **Правило:** бизнес‑лексиконы запрещены в коде; все доменные списки живут в packs/pack‑index. Кодовые списки допустимы только для safety/system‑gates.
 **Правило:** не расширять словари ради прохождения eval; сначала правим packs/контракты, затем корректируем тесты.
+**Lexicon/Regex Delta Gate:** любое расширение code-словарей/regex требует одновременного изменения резолвера и контрактных тестов; иначе изменение считается test-fitting.
 `demo_salon` — канареечный pack, логика должна быть pack‑agnostic.
 **Rules‑as‑data (packs):**
 - `truffles-api/app/knowledge/demo_salon/SALON_TRUTH.yaml`  
