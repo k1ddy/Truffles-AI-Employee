@@ -51,7 +51,9 @@ type BranchEditorState = {
     telegramChatId: string;
     knowledgeTag: string;
     isActive: boolean;
+    changeReason: string;
     confirmReason: string;
+    rollbackReason: string;
     original: {
         name: string;
         slug: string;
@@ -63,6 +65,8 @@ type BranchEditorState = {
         isActive: boolean;
     };
 };
+
+type BranchChangeRecord = components["schemas"]["BranchChangeRecord"];
 
 type TenantLifecycleMode = "active" | "archived" | "all";
 type FleetLifecycleFilter = "all" | "lead" | "contracting" | "onboarding" | "go_live_ready" | "active" | "paused" | "archived";
@@ -103,6 +107,87 @@ function attentionLevelClass(level?: FleetAttentionLevel): string {
     return "bg-blue-100 text-blue-700";
 }
 
+function buildBranchChangePatch(editor: BranchEditorState): {
+    patch: components["schemas"]["BranchChangePatch"];
+    hasChanges: boolean;
+    error?: string;
+} {
+    const name = editor.name.trim();
+    const slug = editor.slug.trim();
+    if (!name || !slug) {
+        return {
+            patch: {},
+            hasChanges: false,
+            error: "Заполните название и slug филиала",
+        };
+    }
+    const patch: components["schemas"]["BranchChangePatch"] = {};
+    if (name !== editor.original.name) {
+        patch.name = name;
+    }
+    if (slug !== editor.original.slug) {
+        patch.slug = slug;
+    }
+    const timezone = editor.timezone.trim();
+    if (timezone !== editor.original.timezone) {
+        patch.timezone = timezone || null;
+    }
+    const phone = editor.phone.trim();
+    if (phone !== editor.original.phone) {
+        patch.phone = phone || null;
+    }
+    const instanceId = editor.instanceId.trim();
+    if (instanceId !== editor.original.instanceId) {
+        patch.instance_id = instanceId || null;
+    }
+    const telegramChatId = editor.telegramChatId.trim();
+    if (telegramChatId !== editor.original.telegramChatId) {
+        patch.telegram_chat_id = telegramChatId || null;
+    }
+    const knowledgeTag = editor.knowledgeTag.trim();
+    if (knowledgeTag !== editor.original.knowledgeTag) {
+        patch.knowledge_tag = knowledgeTag || null;
+    }
+    if (editor.isActive !== editor.original.isActive) {
+        patch.is_active = editor.isActive;
+    }
+    if (editor.isActive && !editor.instanceId.trim()) {
+        return {
+            patch: {},
+            hasChanges: false,
+            error: "instance_id обязателен для активного филиала",
+        };
+    }
+    return { patch, hasChanges: Object.keys(patch).length > 0 };
+}
+
+function applyBranchSnapshotToEditor(
+    editor: BranchEditorState,
+    branch?: components["schemas"]["Branch"] | null,
+): BranchEditorState {
+    if (!branch) {
+        return editor;
+    }
+    const next = {
+        name: branch.name ?? "",
+        slug: branch.slug ?? "",
+        timezone: branch.timezone ?? "",
+        phone: branch.phone ?? "",
+        instanceId: branch.instance_id ?? "",
+        telegramChatId: branch.telegram_chat_id ?? "",
+        knowledgeTag: branch.knowledge_tag ?? "",
+        isActive: branch.is_active ?? false,
+    };
+    return {
+        ...editor,
+        ...next,
+        changeReason: "",
+        confirmReason: "",
+        rollbackReason: "",
+        original: next,
+    };
+}
+
 export default function TenantsPage() {
     const { data: session } = useSession();
     const queryClient = useQueryClient();
@@ -120,6 +205,9 @@ export default function TenantsPage() {
     const [savingCompany, setSavingCompany] = useState(false);
     const [savingClient, setSavingClient] = useState(false);
     const [savingBranch, setSavingBranch] = useState(false);
+    const [publishingBranchChange, setPublishingBranchChange] = useState(false);
+    const [rollingBackBranchChange, setRollingBackBranchChange] = useState(false);
+    const [branchChangePreview, setBranchChangePreview] = useState<components["schemas"]["BranchChangeResponse"] | null>(null);
     const [clientLifecyclePendingId, setClientLifecyclePendingId] = useState<string | null>(null);
 
     const { data: meData, isLoading: meLoading } = useQuery({
@@ -244,6 +332,20 @@ export default function TenantsPage() {
         },
         enabled: tenantsEnabled && tenantLifecycle === "active",
     });
+    const branchChangesQuery = useQuery({
+        queryKey: ["tenants-branch-changes", branchEditor?.id],
+        queryFn: async () => {
+            if (!branchEditor?.id) {
+                return null;
+            }
+            const response = await adminApi.listBranchChanges({
+                branch_id: branchEditor.id,
+                limit: 10,
+            });
+            return response.data;
+        },
+        enabled: tenantsEnabled && !!branchEditor?.id,
+    });
 
     const companies = useMemo(
         () => companiesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
@@ -261,6 +363,42 @@ export default function TenantsPage() {
         () => branchesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
         [branchesQuery.data],
     );
+    const latestPublishedBranchChange = useMemo(() => {
+        const items = branchChangesQuery.data?.items ?? [];
+        return (
+            (items.find((item) => item.status === "published") as BranchChangeRecord | undefined) ?? null
+        );
+    }, [branchChangesQuery.data]);
+    const previewChange = branchChangePreview?.change as BranchChangeRecord | undefined;
+    const previewDiffEntries = useMemo(() => {
+        const diff = previewChange?.diff_payload;
+        if (!diff || typeof diff !== "object") {
+            return [] as Array<{ field: string; before: string; after: string }>;
+        }
+        return Object.entries(diff as Record<string, unknown>).map(([field, rawValue]) => {
+            const value = rawValue && typeof rawValue === "object"
+                ? (rawValue as Record<string, unknown>)
+                : {};
+            return {
+                field,
+                before: JSON.stringify(value.before ?? null),
+                after: JSON.stringify(value.after ?? null),
+            };
+        });
+    }, [previewChange]);
+    const previewValidationErrors = useMemo(() => {
+        const payload = previewChange?.validation_payload;
+        if (!payload || typeof payload !== "object") {
+            return [] as string[];
+        }
+        const errors = (payload as Record<string, unknown>).errors;
+        if (!Array.isArray(errors)) {
+            return [] as string[];
+        }
+        return errors
+            .map((item) => (typeof item === "string" ? item : ""))
+            .filter((item) => item.length > 0);
+    }, [previewChange]);
     const fleetAttention = useMemo(
         () => fleetAttentionQuery.data ?? null,
         [fleetAttentionQuery.data],
@@ -301,6 +439,7 @@ export default function TenantsPage() {
             toast.error("Не удалось открыть компанию без ID");
             return;
         }
+        setBranchChangePreview(null);
         setClientEditor(null);
         setBranchEditor(null);
         const billingInfo = stringifyOptionalJson(company.billing_info);
@@ -318,6 +457,7 @@ export default function TenantsPage() {
             toast.error("Не удалось открыть клиента без ID");
             return;
         }
+        setBranchChangePreview(null);
         setCompanyEditor(null);
         setBranchEditor(null);
         setClientEditor({
@@ -334,6 +474,7 @@ export default function TenantsPage() {
             toast.error("Не удалось открыть филиал без ID");
             return;
         }
+        setBranchChangePreview(null);
         setCompanyEditor(null);
         setClientEditor(null);
         setBranchEditor({
@@ -346,7 +487,9 @@ export default function TenantsPage() {
             telegramChatId: branch.telegram_chat_id ?? "",
             knowledgeTag: branch.knowledge_tag ?? "",
             isActive: branch.is_active ?? false,
+            changeReason: "",
             confirmReason: "",
+            rollbackReason: "",
             original: {
                 name: branch.name ?? "",
                 slug: branch.slug ?? "",
@@ -505,79 +648,148 @@ export default function TenantsPage() {
         return removedInstance || deactivated;
     };
 
-    const handleSaveBranch = async () => {
+    const createBranchDeactivateConfirmation = async (branchId: string, reason: string) => {
+        const confirmation = await confirmationsApi.create({
+            action: "branch_deactivate",
+            target_type: "branch",
+            target_id: branchId,
+            reason,
+        });
+        return confirmation.data.confirmation_id;
+    };
+
+    const handlePreviewBranchChange = async () => {
         if (!branchEditor) {
             return;
         }
-        const name = branchEditor.name.trim();
-        const slug = branchEditor.slug.trim();
-        if (!name || !slug) {
-            toast.error("Заполните название и slug филиала");
+        const reason = branchEditor.changeReason.trim();
+        if (!reason) {
+            toast.error("Укажите причину изменения");
             return;
         }
-        if (branchEditor.isActive && !branchEditor.instanceId.trim()) {
-            toast.error("instance_id обязателен для активного филиала");
+        const { patch, hasChanges, error } = buildBranchChangePatch(branchEditor);
+        if (error) {
+            toast.error(error);
             return;
         }
-        const payload: components["schemas"]["BranchUpdateRequest"] & { confirmation_id?: string } = {};
-        if (name !== branchEditor.original.name) {
-            payload.name = name;
-        }
-        if (slug !== branchEditor.original.slug) {
-            payload.slug = slug;
-        }
-        const timezone = branchEditor.timezone.trim();
-        if (timezone !== branchEditor.original.timezone) {
-            payload.timezone = timezone || null;
-        }
-        const phone = branchEditor.phone.trim();
-        if (phone !== branchEditor.original.phone) {
-            payload.phone = phone || null;
-        }
-        const instanceId = branchEditor.instanceId.trim();
-        if (instanceId !== branchEditor.original.instanceId) {
-            payload.instance_id = instanceId || null;
-        }
-        const telegramChatId = branchEditor.telegramChatId.trim();
-        if (telegramChatId !== branchEditor.original.telegramChatId) {
-            payload.telegram_chat_id = telegramChatId || null;
-        }
-        const knowledgeTag = branchEditor.knowledgeTag.trim();
-        if (knowledgeTag !== branchEditor.original.knowledgeTag) {
-            payload.knowledge_tag = knowledgeTag || null;
-        }
-        if (branchEditor.isActive !== branchEditor.original.isActive) {
-            payload.is_active = branchEditor.isActive;
-        }
-        if (Object.keys(payload).length === 0) {
+        if (!hasChanges) {
             toast("Нет изменений");
-            return;
-        }
-        const confirmationNeeded = requiresBranchConfirmation(branchEditor);
-        if (confirmationNeeded && !branchEditor.confirmReason.trim()) {
-            toast.error("Укажите причину для подтверждения");
             return;
         }
         setSavingBranch(true);
         try {
-            if (confirmationNeeded) {
-                const confirmation = await confirmationsApi.create({
-                    action: "branch_deactivate",
-                    target_type: "branch",
-                    target_id: branchEditor.id,
-                    reason: branchEditor.confirmReason.trim(),
-                });
-                payload.confirmation_id = confirmation.data.confirmation_id;
+            const draftResponse = await adminApi.draftBranchChange({
+                branch_id: branchEditor.id,
+                reason,
+                patch,
+            });
+            const draftChangeId = draftResponse.data.change?.id;
+            if (!draftChangeId) {
+                toast.error("Не удалось создать draft");
+                return;
             }
-            await adminApi.patchBranch(branchEditor.id, payload);
-            toast.success("Филиал обновлён");
-            setBranchEditor(null);
+            const validateResponse = await adminApi.validateBranchChange(draftChangeId);
+            setBranchChangePreview(validateResponse.data);
+            const status = validateResponse.data.change?.status;
+            if (status === "validated") {
+                toast.success("Draft валидирован. Можно публиковать.");
+            } else {
+                toast.error("Draft не прошёл валидацию. Проверьте ошибки.");
+            }
+            await branchChangesQuery.refetch();
+        } catch (error) {
+            handleError(error);
+        } finally {
+            setSavingBranch(false);
+        }
+    };
+
+    const handlePublishBranchChange = async () => {
+        if (!branchEditor) {
+            return;
+        }
+        const changeId = branchChangePreview?.change?.id;
+        if (!changeId) {
+            toast.error("Сначала выполните draft+validate");
+            return;
+        }
+        setPublishingBranchChange(true);
+        try {
+            let confirmationId: string | undefined;
+            if (requiresBranchConfirmation(branchEditor)) {
+                const confirmationReason = branchEditor.confirmReason.trim() || branchEditor.changeReason.trim();
+                if (!confirmationReason) {
+                    toast.error("Укажите причину подтверждения");
+                    return;
+                }
+                confirmationId = await createBranchDeactivateConfirmation(branchEditor.id, confirmationReason);
+            }
+            const publishResponse = await adminApi.publishBranchChange(changeId, {
+                confirmation_id: confirmationId,
+            });
+            setBranchChangePreview(publishResponse.data);
+            setBranchEditor((prev) => (prev ? applyBranchSnapshotToEditor(prev, publishResponse.data.branch) : prev));
+            toast.success("Изменение опубликовано");
+            await branchChangesQuery.refetch();
             refreshTenants();
             refreshContext();
         } catch (error) {
             handleError(error);
         } finally {
-            setSavingBranch(false);
+            setPublishingBranchChange(false);
+        }
+    };
+
+    const handleRollbackBranchChange = async () => {
+        if (!branchEditor) {
+            return;
+        }
+        const targetChange = branchChangePreview?.change?.status === "published"
+            ? branchChangePreview.change
+            : latestPublishedBranchChange;
+        const changeId = targetChange?.id;
+        if (!changeId) {
+            toast.error("Нет опубликованного изменения для rollback");
+            return;
+        }
+        const reason = branchEditor.rollbackReason.trim();
+        if (!reason) {
+            toast.error("Укажите причину rollback");
+            return;
+        }
+
+        setRollingBackBranchChange(true);
+        try {
+            const runRollback = async (confirmationId?: string) =>
+                adminApi.rollbackBranchChange(changeId, {
+                    reason,
+                    confirmation_id: confirmationId,
+                });
+
+            let rollbackResponse;
+            try {
+                rollbackResponse = await runRollback();
+            } catch (error: unknown) {
+                const apiCode = (error as { response?: { data?: { error?: { code?: string } } } })
+                    ?.response?.data?.error?.code;
+                if (apiCode !== "CONFIRMATION_REQUIRED") {
+                    throw error;
+                }
+                const confirmationReason = branchEditor.confirmReason.trim() || reason;
+                const confirmationId = await createBranchDeactivateConfirmation(branchEditor.id, confirmationReason);
+                rollbackResponse = await runRollback(confirmationId);
+            }
+
+            setBranchChangePreview(rollbackResponse.data);
+            setBranchEditor((prev) => (prev ? applyBranchSnapshotToEditor(prev, rollbackResponse.data.branch) : prev));
+            toast.success("Rollback выполнен");
+            await branchChangesQuery.refetch();
+            refreshTenants();
+            refreshContext();
+        } catch (error) {
+            handleError(error);
+        } finally {
+            setRollingBackBranchChange(false);
         }
     };
 
@@ -1212,6 +1424,21 @@ export default function TenantsPage() {
                                                         />
                                                         Активен
                                                     </label>
+                                                    <label className="text-xs text-muted-foreground">
+                                                        Причина изменения (audit)
+                                                        <input
+                                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                            value={branchEditor.changeReason}
+                                                            onChange={(event) =>
+                                                                setBranchEditor((prev) =>
+                                                                    prev
+                                                                        ? { ...prev, changeReason: event.target.value }
+                                                                        : prev
+                                                                )
+                                                            }
+                                                            disabled={!canWriteTenants || savingBranch || publishingBranchChange || rollingBackBranchChange}
+                                                        />
+                                                    </label>
                                                     {confirmationNeeded ? (
                                                         <label className="text-xs text-muted-foreground">
                                                             Причина подтверждения
@@ -1225,25 +1452,108 @@ export default function TenantsPage() {
                                                                             : prev
                                                                     )
                                                                 }
-                                                                disabled={!canWriteTenants || savingBranch}
+                                                                disabled={!canWriteTenants || savingBranch || publishingBranchChange || rollingBackBranchChange}
                                                             />
                                                         </label>
                                                     ) : null}
                                                     <div className="flex items-center gap-2">
                                                         <button
                                                             className="btn-primary"
-                                                            onClick={handleSaveBranch}
-                                                            disabled={!canWriteTenants || savingBranch}
+                                                            onClick={handlePreviewBranchChange}
+                                                            disabled={!canWriteTenants || savingBranch || publishingBranchChange || rollingBackBranchChange}
                                                         >
-                                                            {savingBranch ? "Сохранение..." : "Сохранить"}
+                                                            {savingBranch ? "Подготовка..." : "Draft + Validate"}
+                                                        </button>
+                                                        <button
+                                                            className="btn-primary"
+                                                            onClick={handlePublishBranchChange}
+                                                            disabled={!canWriteTenants || savingBranch || publishingBranchChange || rollingBackBranchChange || !branchChangePreview?.change?.id}
+                                                        >
+                                                            {publishingBranchChange ? "Публикация..." : "Publish"}
                                                         </button>
                                                         <button
                                                             className="btn-ghost"
-                                                            onClick={() => setBranchEditor(null)}
-                                                            disabled={savingBranch}
+                                                            onClick={handleRollbackBranchChange}
+                                                            disabled={
+                                                                !canWriteTenants ||
+                                                                savingBranch ||
+                                                                publishingBranchChange ||
+                                                                rollingBackBranchChange ||
+                                                                !(branchChangePreview?.change?.status === "published" || latestPublishedBranchChange)
+                                                            }
+                                                        >
+                                                            {rollingBackBranchChange ? "Rollback..." : "Rollback"}
+                                                        </button>
+                                                        <button
+                                                            className="btn-ghost"
+                                                            onClick={() => {
+                                                                setBranchEditor(null);
+                                                                setBranchChangePreview(null);
+                                                            }}
+                                                            disabled={savingBranch || publishingBranchChange || rollingBackBranchChange}
                                                         >
                                                             Отмена
                                                         </button>
+                                                    </div>
+                                                    <label className="text-xs text-muted-foreground">
+                                                        Причина rollback
+                                                        <input
+                                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                            value={branchEditor.rollbackReason}
+                                                            onChange={(event) =>
+                                                                setBranchEditor((prev) =>
+                                                                    prev
+                                                                        ? { ...prev, rollbackReason: event.target.value }
+                                                                        : prev
+                                                                )
+                                                            }
+                                                            disabled={!canWriteTenants || savingBranch || publishingBranchChange || rollingBackBranchChange}
+                                                        />
+                                                    </label>
+                                                    {branchChangePreview?.change ? (
+                                                        <div className="rounded-lg border border-border/60 bg-background p-3 text-xs">
+                                                            <div className="font-medium mb-1">
+                                                                Change #{branchChangePreview.change.id}
+                                                            </div>
+                                                            <div className="text-muted-foreground mb-2">
+                                                                status: {branchChangePreview.change.status}
+                                                            </div>
+                                                            {previewValidationErrors.length > 0 ? (
+                                                                <div className="mb-2 text-red-600">
+                                                                    validation: {previewValidationErrors.join("; ")}
+                                                                </div>
+                                                            ) : null}
+                                                            {previewDiffEntries.length > 0 ? (
+                                                                <div className="space-y-1">
+                                                                    {previewDiffEntries.map((entry) => (
+                                                                        <div key={entry.field} className="grid grid-cols-3 gap-2">
+                                                                            <span className="font-medium">{entry.field}</span>
+                                                                            <span className="truncate text-muted-foreground">{entry.before}</span>
+                                                                            <span className="truncate text-foreground">{entry.after}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            ) : (
+                                                                <div className="text-muted-foreground">diff пуст</div>
+                                                            )}
+                                                        </div>
+                                                    ) : null}
+                                                    <div className="rounded-lg border border-border/60 bg-background p-3 text-xs">
+                                                        <div className="font-medium mb-2">История изменений</div>
+                                                        {branchChangesQuery.isLoading ? (
+                                                            <div className="text-muted-foreground">Загрузка...</div>
+                                                        ) : !branchChangesQuery.data?.items?.length ? (
+                                                            <div className="text-muted-foreground">Пока нет изменений</div>
+                                                        ) : (
+                                                            <div className="space-y-1">
+                                                                {branchChangesQuery.data.items.slice(0, 5).map((item) => (
+                                                                    <div key={item.id} className="flex items-center justify-between gap-2">
+                                                                        <span>{item.status}</span>
+                                                                        <span className="text-muted-foreground">{item.created_at ? new Date(item.created_at).toLocaleString("ru-RU") : "—"}</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </div>

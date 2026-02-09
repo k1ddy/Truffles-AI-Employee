@@ -82,9 +82,11 @@ jobs:
               - "truffles-api/scripts/**"
               - "truffles-api/requirements.txt"
               - "truffles-api/Dockerfile"
+              - "console-web/**"
               - "scripts/restart_api.sh"
               - "scripts/restart_workers.sh"
               - "scripts/restart_release.sh"
+              - "scripts/restart_console_web.sh"
               - "scripts/check_migration_governance.py"
               - "knowledge/**"
             livecheck_required:
@@ -769,8 +771,10 @@ jobs:
             done
             RESTART_SCRIPT="${REPO_ROOT}/scripts/restart_api.sh"
             RELEASE_SCRIPT="${REPO_ROOT}/scripts/restart_release.sh"
+            CONSOLE_RESTART_SCRIPT="${REPO_ROOT}/scripts/restart_console_web.sh"
             test -f "${RESTART_SCRIPT}"
             test -f "${RELEASE_SCRIPT}"
+            test -f "${CONSOLE_RESTART_SCRIPT}"
             grep -n 'OUTBOUND_ALLOWLIST_JIDS' "${RESTART_SCRIPT}" || true
             grep -n 'CHATFLOW_JID' "${RESTART_SCRIPT}" || true
             grep -n 'env-file' "${RESTART_SCRIPT}" || true
@@ -794,6 +798,18 @@ jobs:
             REQUIRE_GHCR=1 VERIFY_VERSION=1 \
             EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
             bash "${RELEASE_SCRIPT}"
+            EXPECTED_GIT_COMMIT=${{ github.sha }} VERIFY_CONSOLE_BUILD=1 bash "${CONSOLE_RESTART_SCRIPT}"
+            api_commit="$(curl -fsS http://localhost:8000/admin/version | python3 -c 'import json,sys; print((json.load(sys.stdin).get(\"git_commit\") or \"\").strip())')"
+            console_commit="$(docker exec truffles-console-web /bin/sh -lc 'printf \"%s\" \"${NEXT_PUBLIC_BUILD_SHA:-unknown}\"')"
+            if [ "${api_commit}" != "${{ github.sha }}" ]; then
+              echo "ERROR: deploy parity mismatch: api git_commit=${api_commit}, expected=${{ github.sha }}" >&2
+              exit 1
+            fi
+            if [ "${console_commit}" != "${{ github.sha }}" ]; then
+              echo "ERROR: deploy parity mismatch: console build sha=${console_commit}, expected=${{ github.sha }}" >&2
+              exit 1
+            fi
+            echo "Deploy parity OK: sha=${{ github.sha }}"
             for ENV_FILE in "${ENV_FILES[@]}"; do
               if [ -f "${ENV_FILE}" ]; then
                 echo "ALLOWLIST after restart in ${ENV_FILE}:"

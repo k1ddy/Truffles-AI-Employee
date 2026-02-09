@@ -28,6 +28,7 @@ from app.models import (
     ClientOnboardingContract,
     ClientSettings,
     Company,
+    ConsoleBranchChange,
     ConsoleOpsJob,
     Conversation,
     Handover,
@@ -58,6 +59,12 @@ from app.schemas.console import (
     ConsoleAuditListResponse,
     ConsoleBranch,
     ConsoleBranchBootstrapAccountTemplate,
+    ConsoleBranchChangeDraftRequest,
+    ConsoleBranchChangeListResponse,
+    ConsoleBranchChangePublishRequest,
+    ConsoleBranchChangeRecord,
+    ConsoleBranchChangeResponse,
+    ConsoleBranchChangeRollbackRequest,
     ConsoleBranchCreateRequest,
     ConsoleBranchCreateResponse,
     ConsoleBranchGoLiveDecisionRequest,
@@ -171,6 +178,7 @@ from app.services.console_idempotency import (
     start_idempotency,
 )
 from app.services.escalation_service import resolve_telegram_routing
+from app.services.integration_guardrails_service import run_integration_watchdog_scoped
 from app.services.knowledge_registry_service import (
     apply_pack_index_to_client_config,
     get_current_published,
@@ -495,6 +503,213 @@ def _serialize_branch(branch: Branch) -> ConsoleBranch:
         go_live_waiver_active=go_live_waiver_active,
         go_live_allowed=go_live_state == "approved" or go_live_waiver_active,
     )
+
+
+_BRANCH_CHANGE_MANAGED_FIELDS = (
+    "slug",
+    "name",
+    "timezone",
+    "instance_id",
+    "phone",
+    "telegram_chat_id",
+    "knowledge_tag",
+    "working_hours",
+    "booking_settings",
+    "is_active",
+)
+_BRANCH_CHANGE_MUTABLE_STATUSES = {"draft", "validated", "publish_failed"}
+
+
+def _snapshot_branch_for_change(branch: Branch) -> dict:
+    return {
+        "slug": branch.slug,
+        "name": branch.name,
+        "timezone": branch.timezone,
+        "instance_id": branch.instance_id,
+        "phone": branch.phone,
+        "telegram_chat_id": branch.telegram_chat_id,
+        "knowledge_tag": branch.knowledge_tag,
+        "working_hours": _jsonable_payload(branch.working_hours if isinstance(branch.working_hours, dict) else {}),
+        "booking_settings": _jsonable_payload(branch.booking_settings if isinstance(branch.booking_settings, dict) else {}),
+        "is_active": bool(branch.is_active),
+    }
+
+
+def _build_branch_change_diff(base_snapshot: dict, patch_payload: dict) -> dict:
+    diff: dict[str, dict[str, object]] = {}
+    for field in _BRANCH_CHANGE_MANAGED_FIELDS:
+        if field not in patch_payload:
+            continue
+        before = base_snapshot.get(field)
+        after = patch_payload.get(field)
+        if before == after:
+            continue
+        diff[field] = {
+            "before": before,
+            "after": after,
+        }
+    return diff
+
+
+def _serialize_branch_change_record(change: ConsoleBranchChange) -> ConsoleBranchChangeRecord:
+    return ConsoleBranchChangeRecord(
+        id=change.id,
+        branch_id=change.branch_id,
+        status=change.status,
+        reason=change.reason,
+        draft_payload=change.draft_payload if isinstance(change.draft_payload, dict) else {},
+        diff_payload=change.diff_payload if isinstance(change.diff_payload, dict) else {},
+        validation_payload=change.validation_payload if isinstance(change.validation_payload, dict) else None,
+        base_snapshot=change.base_snapshot if isinstance(change.base_snapshot, dict) else {},
+        published_snapshot=change.published_snapshot if isinstance(change.published_snapshot, dict) else None,
+        rollback_snapshot=change.rollback_snapshot if isinstance(change.rollback_snapshot, dict) else None,
+        publish_error=change.publish_error,
+        rollback_error=change.rollback_error,
+        created_at=change.created_at.isoformat() if change.created_at else "",
+        updated_at=change.updated_at.isoformat() if change.updated_at else None,
+        validated_at=change.validated_at.isoformat() if change.validated_at else None,
+        published_at=change.published_at.isoformat() if change.published_at else None,
+        rolled_back_at=change.rolled_back_at.isoformat() if change.rolled_back_at else None,
+    )
+
+
+def _normalize_branch_change_patch(*, db: Session, branch: Branch, patch_payload: dict) -> tuple[dict, list[str]]:
+    errors: list[str] = []
+    normalized: dict[str, object] = {}
+
+    if not isinstance(patch_payload, dict):
+        return {}, ["patch must be an object"]
+
+    if not any(field in patch_payload for field in _BRANCH_CHANGE_MANAGED_FIELDS):
+        return {}, ["patch has no supported fields"]
+
+    if "slug" in patch_payload:
+        raw_slug = patch_payload.get("slug")
+        if raw_slug is None:
+            errors.append("slug cannot be null")
+        else:
+            try:
+                slug = _normalize_slug(str(raw_slug), "branch_slug")
+            except ConsoleAPIError as exc:
+                errors.append(exc.message)
+            else:
+                _ensure_unique_branch_field(
+                    db,
+                    client_id=branch.client_id,
+                    field_name="slug",
+                    value=slug,
+                    exclude_branch_id=branch.id,
+                )
+                normalized["slug"] = slug
+
+    if "name" in patch_payload:
+        raw_name = patch_payload.get("name")
+        if raw_name is None:
+            errors.append("name cannot be null")
+        else:
+            try:
+                normalized["name"] = _normalize_required_text(str(raw_name), "name")
+            except ConsoleAPIError as exc:
+                errors.append(exc.message)
+
+    if "timezone" in patch_payload:
+        normalized["timezone"] = _normalize_optional_text(
+            patch_payload.get("timezone") if isinstance(patch_payload.get("timezone"), str) else None
+        )
+
+    if "instance_id" in patch_payload:
+        instance_id = _normalize_optional_text(
+            patch_payload.get("instance_id") if isinstance(patch_payload.get("instance_id"), str) else None
+        )
+        _ensure_unique_branch_field(
+            db,
+            client_id=branch.client_id,
+            field_name="instance_id",
+            value=instance_id,
+            exclude_branch_id=branch.id,
+        )
+        normalized["instance_id"] = instance_id
+
+    if "phone" in patch_payload:
+        phone = _normalize_optional_text(
+            patch_payload.get("phone") if isinstance(patch_payload.get("phone"), str) else None
+        )
+        _ensure_unique_branch_field(
+            db,
+            client_id=branch.client_id,
+            field_name="phone",
+            value=phone,
+            exclude_branch_id=branch.id,
+        )
+        normalized["phone"] = phone
+
+    if "telegram_chat_id" in patch_payload:
+        normalized["telegram_chat_id"] = _normalize_optional_text(
+            patch_payload.get("telegram_chat_id") if isinstance(patch_payload.get("telegram_chat_id"), str) else None
+        )
+
+    if "knowledge_tag" in patch_payload:
+        normalized["knowledge_tag"] = _normalize_optional_text(
+            patch_payload.get("knowledge_tag") if isinstance(patch_payload.get("knowledge_tag"), str) else None
+        )
+
+    if "working_hours" in patch_payload:
+        value = patch_payload.get("working_hours")
+        if value is None:
+            normalized["working_hours"] = {}
+        elif isinstance(value, dict):
+            normalized["working_hours"] = value
+        else:
+            errors.append("working_hours must be an object")
+
+    if "booking_settings" in patch_payload:
+        value = patch_payload.get("booking_settings")
+        if value is None:
+            normalized["booking_settings"] = {}
+        elif isinstance(value, dict):
+            normalized["booking_settings"] = value
+        else:
+            errors.append("booking_settings must be an object")
+
+    if "is_active" in patch_payload:
+        value = patch_payload.get("is_active")
+        if value is None:
+            errors.append("is_active cannot be null")
+        elif isinstance(value, bool):
+            normalized["is_active"] = value
+        else:
+            errors.append("is_active must be boolean")
+
+    final_instance_id = (
+        normalized.get("instance_id")
+        if "instance_id" in normalized
+        else branch.instance_id
+    )
+    final_is_active = (
+        normalized.get("is_active")
+        if "is_active" in normalized
+        else bool(branch.is_active)
+    )
+    if final_is_active and not final_instance_id:
+        errors.append("instance_id required to activate branch")
+    if final_is_active and not branch.is_active:
+        try:
+            _require_branch_go_live_gate(branch, operation="branch_activate")
+        except ConsoleAPIError as exc:
+            errors.append(exc.message)
+
+    return normalized, errors
+
+
+def _build_branch_update_request(
+    *,
+    normalized_patch: dict,
+    confirmation_id: Optional[UUID] = None,
+) -> ConsoleBranchUpdateRequest:
+    payload = dict(normalized_patch)
+    if confirmation_id:
+        payload["confirmation_id"] = confirmation_id
+    return ConsoleBranchUpdateRequest.model_validate(payload)
 
 
 def _serialize_macro(macro: ConsoleMacroModel) -> ConsoleMacroSchema:
@@ -2358,6 +2573,11 @@ _OPS_JOB_DEFINITIONS = {
         "description": "Process pending outbox messages for the selected tenant scope.",
         "supports_dry_run": True,
     },
+    "integration_reconcile": {
+        "label": "Integration Reconcile",
+        "description": "Reconcile branch integration state and drift markers for selected scope.",
+        "supports_dry_run": True,
+    },
     "heal": {
         "label": "Heal",
         "description": "Run invariant healing checks in dry-run mode (execute disabled in slice 1).",
@@ -2539,6 +2759,30 @@ def _parse_ops_job_int_param(
     if max_value is not None and value > max_value:
         raise ConsoleAPIError(400, "INVALID_PARAM", f"{name} must be <= {max_value}")
     return value
+
+
+def _parse_ops_job_uuid_list_param(
+    params: dict,
+    *,
+    name: str,
+    max_items: int = 100,
+) -> Optional[list[UUID]]:
+    raw = params.get(name)
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{name} must be an array")
+    if len(raw) > max_items:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{name} supports up to {max_items} items")
+    parsed: list[UUID] = []
+    seen: set[UUID] = set()
+    for index, value in enumerate(raw):
+        parsed_value = _parse_uuid_param(f"{name}[{index}]", str(value))
+        if parsed_value in seen:
+            continue
+        seen.add(parsed_value)
+        parsed.append(parsed_value)
+    return parsed
 
 
 def _resolve_branch_scope(context: ConsoleAuthContext) -> Optional[list[UUID]]:
@@ -2849,6 +3093,81 @@ async def _run_metrics_snapshot_job(
         "days": days,
         "results": results,
     }
+
+
+async def _run_integration_reconcile_job(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    mode: str,
+    params: dict,
+) -> dict:
+    branch_ids = _parse_ops_job_uuid_list_param(params, name="branch_ids", max_items=100)
+    limit = _parse_ops_job_int_param(params, name="limit", default=25, min_value=1, max_value=200)
+
+    allowed_branch_ids = _resolve_branch_scope(context)
+    if branch_ids and allowed_branch_ids is not None:
+        disallowed = [branch_id for branch_id in branch_ids if branch_id not in set(allowed_branch_ids)]
+        if disallowed:
+            raise ConsoleAPIError(403, "ACCESS_DENIED", "Branch scope denied")
+
+    selected_branch_ids = branch_ids
+    if selected_branch_ids is None:
+        branch_query = (
+            db.query(Branch.id)
+            .filter(
+                Branch.client_id == context.client.id,
+                Branch.is_active.is_(True),
+            )
+            .order_by(Branch.created_at.asc(), Branch.id.asc())
+            .limit(limit)
+        )
+        if allowed_branch_ids is not None:
+            if not allowed_branch_ids:
+                selected_branch_ids = []
+            else:
+                branch_query = branch_query.filter(Branch.id.in_(allowed_branch_ids))
+        if selected_branch_ids is None:
+            selected_branch_ids = [row.id for row in branch_query.all()]
+
+    result = run_integration_watchdog_scoped(
+        db,
+        client_id=context.client.id,
+        branch_ids=selected_branch_ids,
+        dry_run=(mode == "dry_run"),
+    )
+    result["scope"] = {
+        "client_id": str(context.client.id),
+        "branch_ids": [str(branch_id) for branch_id in selected_branch_ids or []],
+    }
+    return result
+
+
+def _build_ops_job_artifact(
+    *,
+    job: ConsoleOpsJob,
+    generated_at: datetime,
+) -> dict[str, str]:
+    return {
+        "artifact_id": f"{job.job_type}:{job.id}",
+        "artifact_type": f"{job.job_type}_report",
+        "job_id": str(job.id),
+        "job_type": job.job_type,
+        "mode": job.mode,
+        "generated_at": generated_at.isoformat(),
+        "api_path": f"/console/v1/ops/jobs/{job.id}",
+    }
+
+
+def _attach_ops_job_artifact(
+    *,
+    job: ConsoleOpsJob,
+    payload: object,
+    generated_at: datetime,
+) -> dict:
+    wrapped = _jsonable_payload(payload)
+    wrapped["artifact"] = _build_ops_job_artifact(job=job, generated_at=generated_at)
+    return wrapped
 
 
 @router.get(
@@ -4712,9 +5031,17 @@ async def run_ops_job(
     db.flush()
 
     error_code: Optional[str] = None
+    generated_at = datetime.now(timezone.utc)
     try:
         if body.job_type == "outbox_process":
             result_payload = await _run_outbox_process_job(
+                db,
+                context=context,
+                mode=body.mode,
+                params=params,
+            )
+        elif body.job_type == "integration_reconcile":
+            result_payload = await _run_integration_reconcile_job(
                 db,
                 context=context,
                 mode=body.mode,
@@ -4738,29 +5065,37 @@ async def run_ops_job(
             raise ConsoleAPIError(400, "INVALID_PARAM", "Unknown job_type")
         job.status = "success"
         job.error_message = None
-        job.result_payload = _jsonable_payload(result_payload)
+        job.result_payload = _attach_ops_job_artifact(
+            job=job,
+            payload=result_payload,
+            generated_at=generated_at,
+        )
     except ConsoleAPIError as exc:
         error_code = exc.code
         job.status = "failed"
         job.error_message = exc.message
-        job.result_payload = _jsonable_payload(
-            {
+        job.result_payload = _attach_ops_job_artifact(
+            job=job,
+            payload={
                 "error": {
                     "code": exc.code,
                     "message": exc.message,
                 }
-            }
+            },
+            generated_at=generated_at,
         )
     except Exception as exc:
         job.status = "failed"
         job.error_message = str(exc)[:500]
-        job.result_payload = _jsonable_payload(
-            {
+        job.result_payload = _attach_ops_job_artifact(
+            job=job,
+            payload={
                 "error": {
                     "code": "RUNTIME_ERROR",
                     "message": str(exc),
                 }
-            }
+            },
+            generated_at=generated_at,
         )
     job.finished_at = datetime.now(timezone.utc)
 
@@ -7564,6 +7899,459 @@ async def update_branch(
         db.commit()
 
     return _serialize_branch(branch)
+
+
+def _get_branch_change_for_context(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    change_id: UUID,
+) -> ConsoleBranchChange:
+    query = db.query(ConsoleBranchChange).filter(
+        ConsoleBranchChange.id == change_id,
+        ConsoleBranchChange.client_id == context.client.id,
+    )
+    allowed_branch_ids = _resolve_branch_scope(context)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Branch change not found")
+        query = query.filter(ConsoleBranchChange.branch_id.in_(allowed_branch_ids))
+    change = query.first()
+    if not change:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch change not found")
+    return change
+
+
+@router.get(
+    "/admin/branch-changes",
+    response_model=ConsoleBranchChangeListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_branch_changes(
+    request: Request,
+    branch_id: Optional[UUID] = None,
+    status: Optional[str] = None,
+    cursor: Optional[str] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+) -> ConsoleBranchChangeListResponse:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin/support can access provisioning",
+    )
+    _reject_unknown_query_params(request, {"branch_id", "status", "cursor", "limit"})
+    _validate_limit(limit)
+
+    query = db.query(ConsoleBranchChange).filter(ConsoleBranchChange.client_id == context.client.id)
+    if branch_id:
+        query = query.filter(ConsoleBranchChange.branch_id == branch_id)
+
+    allowed_branch_ids = _resolve_branch_scope(context)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            return ConsoleBranchChangeListResponse(items=[], cursor=None, has_more=False)
+        query = query.filter(ConsoleBranchChange.branch_id.in_(allowed_branch_ids))
+
+    if status:
+        normalized_status = status.strip().lower()
+        allowed_statuses = {"draft", "validated", "publish_failed", "published", "rolled_back"}
+        if normalized_status not in allowed_statuses:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
+        query = query.filter(ConsoleBranchChange.status == normalized_status)
+
+    cursor_date = _parse_cursor_param(cursor)
+    if cursor_date is not None:
+        query = query.filter(ConsoleBranchChange.created_at < cursor_date)
+
+    rows = (
+        query.order_by(ConsoleBranchChange.created_at.desc(), ConsoleBranchChange.id.desc())
+        .limit(limit + 1)
+        .all()
+    )
+    has_more = len(rows) > limit
+    items_rows = rows[:limit]
+    next_cursor = items_rows[-1].created_at.isoformat() if has_more and items_rows else None
+    return ConsoleBranchChangeListResponse(
+        items=[_serialize_branch_change_record(row) for row in items_rows],
+        cursor=next_cursor,
+        has_more=has_more,
+    )
+
+
+@router.get(
+    "/admin/branch-changes/{change_id}",
+    response_model=ConsoleBranchChangeResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def get_branch_change(
+    change_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleBranchChangeResponse:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin/support can access provisioning",
+    )
+    change = _get_branch_change_for_context(db, context=context, change_id=change_id)
+    branch = db.query(Branch).filter(Branch.id == change.branch_id).first()
+    return ConsoleBranchChangeResponse(
+        change=_serialize_branch_change_record(change),
+        branch=_serialize_branch(branch) if branch else None,
+    )
+
+
+@router.post(
+    "/admin/branch-changes/draft",
+    response_model=ConsoleBranchChangeResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def draft_branch_change(
+    body: ConsoleBranchChangeDraftRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleBranchChangeResponse:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage provisioning",
+    )
+
+    branch = db.query(Branch).filter(Branch.id == body.branch_id).first()
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    _require_client_access(context, branch.client_id)
+
+    reason = _normalize_access_reason(body.reason, required=True)
+    patch_payload = body.patch.model_dump(exclude_unset=True)
+    try:
+        normalized_patch, errors = _normalize_branch_change_patch(db=db, branch=branch, patch_payload=patch_payload)
+    except ConsoleAPIError as exc:
+        normalized_patch, errors = {}, [exc.message]
+    base_snapshot = _snapshot_branch_for_change(branch)
+    diff_payload = _build_branch_change_diff(base_snapshot, normalized_patch)
+    if not diff_payload:
+        errors.append("No effective branch changes detected")
+
+    now = datetime.now(timezone.utc)
+    change = ConsoleBranchChange(
+        client_id=branch.client_id,
+        branch_id=branch.id,
+        actor_agent_id=context.agent.id,
+        status="draft",
+        reason=reason,
+        draft_payload=_jsonable_payload(normalized_patch),
+        diff_payload=_jsonable_payload(diff_payload),
+        validation_payload={
+            "ok": len(errors) == 0,
+            "errors": errors,
+        },
+        base_snapshot=_jsonable_payload(base_snapshot),
+        base_branch_updated_at=branch.updated_at,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(change)
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="branch_change_drafted",
+        entity_type="branch_change",
+        entity_id=change.id,
+        payload={
+            "branch_id": str(branch.id),
+            "status": change.status,
+            "errors": errors,
+        },
+        client_id=branch.client_id,
+        branch_id=branch.id,
+    )
+    db.commit()
+    db.refresh(change)
+
+    return ConsoleBranchChangeResponse(
+        change=_serialize_branch_change_record(change),
+        branch=_serialize_branch(branch),
+    )
+
+
+@router.post(
+    "/admin/branch-changes/{change_id}/validate",
+    response_model=ConsoleBranchChangeResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def validate_branch_change(
+    change_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleBranchChangeResponse:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage provisioning",
+    )
+    change = _get_branch_change_for_context(db, context=context, change_id=change_id)
+    if change.status not in _BRANCH_CHANGE_MUTABLE_STATUSES:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Branch change is not mutable")
+
+    branch = db.query(Branch).filter(Branch.id == change.branch_id).first()
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    _require_client_access(context, branch.client_id)
+
+    errors: list[str] = []
+    try:
+        normalized_patch, errors = _normalize_branch_change_patch(
+            db=db,
+            branch=branch,
+            patch_payload=change.draft_payload if isinstance(change.draft_payload, dict) else {},
+        )
+    except ConsoleAPIError as exc:
+        normalized_patch, errors = {}, [exc.message]
+
+    base_snapshot = _snapshot_branch_for_change(branch)
+    diff_payload = _build_branch_change_diff(base_snapshot, normalized_patch)
+    if not diff_payload:
+        errors.append("No effective branch changes detected")
+
+    now = datetime.now(timezone.utc)
+    change.draft_payload = _jsonable_payload(normalized_patch)
+    change.diff_payload = _jsonable_payload(diff_payload)
+    change.base_snapshot = _jsonable_payload(base_snapshot)
+    change.base_branch_updated_at = branch.updated_at
+    change.validation_payload = {
+        "ok": len(errors) == 0,
+        "errors": errors,
+    }
+    change.status = "validated" if not errors else "draft"
+    change.validated_at = now if not errors else None
+    change.updated_at = now
+    db.commit()
+    db.refresh(change)
+    return ConsoleBranchChangeResponse(
+        change=_serialize_branch_change_record(change),
+        branch=_serialize_branch(branch),
+    )
+
+
+@router.post(
+    "/admin/branch-changes/{change_id}/publish",
+    response_model=ConsoleBranchChangeResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}, 409: {"model": ConsoleErrorResponse}},
+)
+async def publish_branch_change(
+    change_id: UUID,
+    body: ConsoleBranchChangePublishRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleBranchChangeResponse:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage provisioning",
+    )
+    change = _get_branch_change_for_context(db, context=context, change_id=change_id)
+    if change.status not in {"validated", "publish_failed"}:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Branch change must be validated before publish")
+
+    branch = db.query(Branch).filter(Branch.id == change.branch_id).first()
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    _require_client_access(context, branch.client_id)
+
+    if change.base_branch_updated_at and branch.updated_at and change.base_branch_updated_at != branch.updated_at:
+        raise ConsoleAPIError(
+            409,
+            "CHANGE_CONFLICT",
+            "Branch changed since draft creation; revalidate before publish",
+        )
+
+    errors: list[str] = []
+    try:
+        normalized_patch, errors = _normalize_branch_change_patch(
+            db=db,
+            branch=branch,
+            patch_payload=change.draft_payload if isinstance(change.draft_payload, dict) else {},
+        )
+    except ConsoleAPIError as exc:
+        normalized_patch, errors = {}, [exc.message]
+    diff_payload = _build_branch_change_diff(_snapshot_branch_for_change(branch), normalized_patch)
+    if not diff_payload:
+        errors.append("No effective branch changes detected")
+
+    now = datetime.now(timezone.utc)
+    if errors:
+        message = "; ".join(errors)
+        change.status = "publish_failed"
+        change.publish_error = message
+        change.validation_payload = {"ok": False, "errors": errors}
+        change.updated_at = now
+        db.commit()
+        raise ConsoleAPIError(409, "CHANGE_VALIDATION_FAILED", message, {"errors": errors})
+
+    update_request = _build_branch_update_request(
+        normalized_patch=normalized_patch,
+        confirmation_id=body.confirmation_id,
+    )
+    try:
+        await update_branch(
+            branch_id=branch.id,
+            request=request,
+            body=update_request,
+            db=db,
+        )
+    except ConsoleAPIError as exc:
+        change.status = "publish_failed"
+        change.publish_error = exc.message
+        change.updated_at = now
+        db.commit()
+        raise
+
+    refreshed_branch = db.query(Branch).filter(Branch.id == branch.id).first()
+    change.status = "published"
+    change.publish_error = None
+    change.published_snapshot = _jsonable_payload(_snapshot_branch_for_change(refreshed_branch)) if refreshed_branch else None
+    change.published_at = now
+    change.published_by = context.agent.id
+    change.updated_at = now
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="branch_change_published",
+        entity_type="branch_change",
+        entity_id=change.id,
+        payload={
+            "branch_id": str(branch.id),
+            "diff": diff_payload,
+        },
+        client_id=branch.client_id,
+        branch_id=branch.id,
+    )
+    db.commit()
+    db.refresh(change)
+    return ConsoleBranchChangeResponse(
+        change=_serialize_branch_change_record(change),
+        branch=_serialize_branch(refreshed_branch) if refreshed_branch else None,
+    )
+
+
+@router.post(
+    "/admin/branch-changes/{change_id}/rollback",
+    response_model=ConsoleBranchChangeResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}, 409: {"model": ConsoleErrorResponse}},
+)
+async def rollback_branch_change(
+    change_id: UUID,
+    body: ConsoleBranchChangeRollbackRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleBranchChangeResponse:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage provisioning",
+    )
+    change = _get_branch_change_for_context(db, context=context, change_id=change_id)
+    if change.status != "published":
+        raise ConsoleAPIError(409, "INVALID_STATE", "Only published change can be rolled back")
+
+    branch = db.query(Branch).filter(Branch.id == change.branch_id).first()
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    _require_client_access(context, branch.client_id)
+    rollback_reason = _normalize_access_reason(body.reason, required=True)
+
+    base_snapshot = change.base_snapshot if isinstance(change.base_snapshot, dict) else {}
+    current_snapshot = _snapshot_branch_for_change(branch)
+    rollback_patch = {
+        field: base_snapshot.get(field)
+        for field in _BRANCH_CHANGE_MANAGED_FIELDS
+        if field in base_snapshot and current_snapshot.get(field) != base_snapshot.get(field)
+    }
+
+    now = datetime.now(timezone.utc)
+    if not rollback_patch:
+        change.status = "rolled_back"
+        change.rollback_error = None
+        change.rollback_snapshot = _jsonable_payload(current_snapshot)
+        change.rolled_back_at = now
+        change.rolled_back_by = context.agent.id
+        change.updated_at = now
+        db.commit()
+        db.refresh(change)
+        return ConsoleBranchChangeResponse(
+            change=_serialize_branch_change_record(change),
+            branch=_serialize_branch(branch),
+        )
+
+    errors: list[str] = []
+    try:
+        normalized_patch, errors = _normalize_branch_change_patch(db=db, branch=branch, patch_payload=rollback_patch)
+    except ConsoleAPIError as exc:
+        normalized_patch, errors = {}, [exc.message]
+    if errors:
+        message = "; ".join(errors)
+        change.rollback_error = message
+        change.updated_at = now
+        db.commit()
+        raise ConsoleAPIError(409, "CHANGE_VALIDATION_FAILED", message, {"errors": errors})
+
+    rollback_request = _build_branch_update_request(
+        normalized_patch=normalized_patch,
+        confirmation_id=body.confirmation_id,
+    )
+    try:
+        await update_branch(
+            branch_id=branch.id,
+            request=request,
+            body=rollback_request,
+            db=db,
+        )
+    except ConsoleAPIError as exc:
+        change.rollback_error = exc.message
+        change.updated_at = now
+        db.commit()
+        raise
+
+    refreshed_branch = db.query(Branch).filter(Branch.id == branch.id).first()
+    change.status = "rolled_back"
+    change.rollback_error = None
+    change.rollback_snapshot = _jsonable_payload(_snapshot_branch_for_change(refreshed_branch)) if refreshed_branch else None
+    change.rolled_back_at = now
+    change.rolled_back_by = context.agent.id
+    change.updated_at = now
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="branch_change_rolled_back",
+        entity_type="branch_change",
+        entity_id=change.id,
+        payload={
+            "branch_id": str(branch.id),
+            "reason": rollback_reason,
+        },
+        client_id=branch.client_id,
+        branch_id=branch.id,
+    )
+    db.commit()
+    db.refresh(change)
+    return ConsoleBranchChangeResponse(
+        change=_serialize_branch_change_record(change),
+        branch=_serialize_branch(refreshed_branch) if refreshed_branch else None,
+    )
 
 
 @router.post(
