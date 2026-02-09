@@ -29,6 +29,8 @@ concurrency:
 
 permissions:
   contents: read
+  checks: read
+  pull-requests: read
   packages: write
   deployments: write
 
@@ -42,6 +44,8 @@ jobs:
       console_contracts: ${{ steps.manual.outputs.console_contracts || steps.filter.outputs.console_contracts }}
       deploy_required: ${{ steps.manual.outputs.deploy_required || steps.filter.outputs.deploy_required }}
       livecheck_required: ${{ steps.manual.outputs.livecheck_required || steps.filter.outputs.livecheck_required }}
+      core_eval_skip_on_merge: ${{ steps.core_eval_gate.outputs.core_eval_skip_on_merge }}
+      core_eval_skip_reason: ${{ steps.core_eval_gate.outputs.core_eval_skip_reason }}
     steps:
       - uses: actions/checkout@v4
 
@@ -112,6 +116,88 @@ jobs:
               - "truffles-api/app/services/console_auth.py"
               - "truffles-api/scripts/generate_openapi.py"
               - ".github/workflows/**"
+
+      - name: Merge gate for core-eval rerun
+        id: core_eval_gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import urllib.error
+          import urllib.request
+
+          event_name = os.getenv("GITHUB_EVENT_NAME", "")
+          ref = os.getenv("GITHUB_REF", "")
+          repo = os.getenv("GITHUB_REPOSITORY", "")
+          token = os.getenv("GITHUB_TOKEN", "")
+          output_path = os.environ["GITHUB_OUTPUT"]
+
+          skip = "false"
+          reason = "not_main_push"
+          pr_number = ""
+          pr_head_sha = ""
+
+          def api_get(path: str) -> dict:
+              req = urllib.request.Request(
+                  f"https://api.github.com{path}",
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=20) as resp:
+                  return json.load(resp)
+
+          if event_name == "push" and ref == "refs/heads/main":
+              reason = "not_merge_commit"
+              commit_message = subprocess.check_output(
+                  ["git", "show", "-s", "--format=%B", "HEAD"],
+                  text=True,
+              ).strip()
+              first_line = commit_message.splitlines()[0] if commit_message else ""
+              match = re.search(r"Merge pull request #(\d+)", commit_message)
+              if not match:
+                  match = re.search(r"\(#(\d+)\)$", first_line)
+              if match:
+                  pr_number = match.group(1)
+                  reason = "pr_merge_detected"
+                  try:
+                      pr_payload = api_get(f"/repos/{repo}/pulls/{pr_number}")
+                      pr_head_sha = (pr_payload.get("head") or {}).get("sha") or ""
+                      if not pr_head_sha:
+                          reason = "pr_head_missing"
+                      else:
+                          checks_payload = api_get(f"/repos/{repo}/commits/{pr_head_sha}/check-runs")
+                          core_eval_runs = [
+                              check_run
+                              for check_run in checks_payload.get("check_runs", [])
+                              if check_run.get("name") == "core-eval"
+                          ]
+                          if not core_eval_runs:
+                              reason = "pr_core_eval_missing"
+                          else:
+                              core_eval_runs.sort(key=lambda item: item.get("completed_at") or "")
+                              conclusion = core_eval_runs[-1].get("conclusion") or "unknown"
+                              if conclusion == "success":
+                                  skip = "true"
+                                  reason = "pr_core_eval_success"
+                              else:
+                                  reason = f"pr_core_eval_{conclusion}"
+                  except urllib.error.HTTPError as err:
+                      reason = f"api_http_{err.code}"
+                  except Exception:
+                      reason = "api_error"
+
+          print(f"core-eval merge gate: skip={skip}, reason={reason}, pr={pr_number}, sha={pr_head_sha}")
+          with open(output_path, "a", encoding="utf-8") as out:
+              out.write(f"core_eval_skip_on_merge={skip}\\n")
+              out.write(f"core_eval_skip_reason={reason}\\n")
+          PY
 
   lint:
     runs-on: ubuntu-latest
@@ -422,7 +508,7 @@ jobs:
 
   core-eval:
     needs: [lint, unit-tests, changes]
-    if: needs.changes.outputs.l1 == 'true'
+    if: needs.changes.outputs.l1 == 'true' && needs.changes.outputs.core_eval_skip_on_merge != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
