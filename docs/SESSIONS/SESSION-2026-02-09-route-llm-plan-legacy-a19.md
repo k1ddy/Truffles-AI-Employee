@@ -1,0 +1,21 @@
+# SESSION 2026-02-09-route-llm-plan-legacy-a19 — Session 2026-02-09-route-llm-plan-legacy-a19
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-09-route-llm-plan-legacy-a19.md
+- branch: feat/2026-02-09-route-llm-plan-legacy-a19
+- worktree: /home/zhan/worktrees/2026-02-09-route-llm-plan-legacy-a19
+- base_ref: origin/main
+- scope: Retire legacy `route_llm_plan` runtime behavior and lock runtime planner wiring to `route_dialogue_controller` + `route_llm_policy_core`.
+- done:
+  - Session created.
+  - Updated `truffles-api/app/services/intent_service.py`: `route_llm_plan` now fail-closed legacy-retired stub with explicit `legacy_retired_use_policy_core`.
+  - Added `truffles-api/tests/test_planner_wiring.py` to guard runtime planner wiring and ensure `route_llm_plan` is not imported/called by webhook decision runtime.
+  - Ran checks: `python3 -m py_compile truffles-api/app/services/intent_service.py truffles-api/app/routers/webhook/decision.py`; `pytest -q truffles-api/tests/test_llm_policy_core.py`; `pytest -q truffles-api/tests/test_message_endpoint.py -k \"llm_policy_core_collect_sets_expected_reply_type or llm_policy_core_allows_plan_with_expected_reply or llm_policy_core_degraded_booking_guard_uses_safe_collect\"`; `pytest -q truffles-api/tests/test_planner_wiring.py`.
+- next:
+  - Prepare commit, push branch, open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-09-route-llm-plan-legacy-a19.md
+  - truffles-api/app/services/intent_service.py
+  - truffles-api/tests/test_planner_wiring.py
+- last_updated: 2026-02-09
