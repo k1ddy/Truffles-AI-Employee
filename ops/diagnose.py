@@ -11,6 +11,7 @@ import argparse
 import http.client
 import base64
 import glob
+import hashlib
 import json
 import math
 import os
@@ -789,12 +790,14 @@ LLM_QUALITY_THRESHOLDS = {
     "info_answer_rate": 0.7,
     "hard_fail_rate": 0.0,
     "unknown_state_rate": 0.02,
+    "degraded_fallback_rate": 0.2,
     "booking_slot_progress_rate": 0.25,
     "handoff_correct_rate": 0.9,
 }
 LLM_QUALITY_THRESHOLD_DIRECTIONS = {
     "hard_fail_rate": "max",
     "unknown_state_rate": "max",
+    "degraded_fallback_rate": "max",
 }
 LLM_QUALITY_REGRESSION_KEYS = (
     "reply_rate",
@@ -803,6 +806,7 @@ LLM_QUALITY_REGRESSION_KEYS = (
     "info_answer_rate",
     "hard_fail_rate",
     "unknown_state_rate",
+    "degraded_fallback_rate",
     "booking_slot_progress_rate",
     "handoff_correct_rate",
 )
@@ -3395,6 +3399,89 @@ def _llm_quality_call_judge(
     content = body["choices"][0]["message"]["content"]
     return _llm_quality_parse_llm_json(content)
 
+
+def _llm_quality_secret_fingerprint(secret):
+    cleaned = _clean_webhook_secret(secret)
+    if not cleaned:
+        return None
+    digest = hashlib.sha256(cleaned.encode("utf-8")).hexdigest()
+    return f"sha256:{digest[:10]}"
+
+
+def _llm_quality_resolve_expected_webhook_secret(client_meta):
+    if not isinstance(client_meta, dict):
+        return None, None
+    branch_secret = _clean_webhook_secret(client_meta.get("branch_webhook_secret"))
+    if branch_secret:
+        return branch_secret, "branch"
+    client_secret = _clean_webhook_secret(client_meta.get("client_webhook_secret"))
+    if client_secret:
+        return client_secret, "client"
+    return None, None
+
+
+def _llm_quality_webhook_secret_preflight(
+    *,
+    provided_secret,
+    expected_secret,
+    expected_source,
+    secret_source,
+):
+    expected_clean = _clean_webhook_secret(expected_secret)
+    provided_clean = _clean_webhook_secret(provided_secret)
+    reasons = []
+    if not expected_clean:
+        reasons.append("expected_secret_missing")
+    if not provided_clean:
+        reasons.append("provided_secret_missing")
+    elif expected_clean and provided_clean != expected_clean:
+        reasons.append("secret_mismatch")
+    return {
+        "valid": not reasons,
+        "reasons": reasons,
+        "expected_source": expected_source,
+        "provided_source": secret_source,
+        "expected_fingerprint": _llm_quality_secret_fingerprint(expected_clean),
+        "provided_fingerprint": _llm_quality_secret_fingerprint(provided_clean),
+    }
+
+
+def _llm_quality_is_judge_mode_enabled(mode):
+    if not isinstance(mode, str):
+        return False
+    return mode.strip().casefold() in {"sample", "all"}
+
+
+def _llm_quality_baseline_is_canonical(payload):
+    config = (payload or {}).get("config") if isinstance(payload, dict) else None
+    mode = config.get("judge_mode") if isinstance(config, dict) else None
+    if _llm_quality_is_judge_mode_enabled(mode):
+        return True, None
+    if isinstance(mode, str) and mode.strip():
+        return False, f"judge_mode_{mode.strip().casefold()}"
+    return False, "judge_mode_missing"
+
+
+def _llm_quality_build_infra_status(stats, secret_preflight):
+    reasons = []
+    if isinstance(secret_preflight, dict) and not secret_preflight.get("valid", False):
+        preflight_reasons = secret_preflight.get("reasons") or []
+        if preflight_reasons:
+            for reason in preflight_reasons:
+                reasons.append(f"webhook_secret_preflight:{reason}")
+        else:
+            reasons.append("webhook_secret_preflight:unknown")
+    if (stats or {}).get("webhook_errors", 0):
+        reasons.append("webhook_errors")
+    if (stats or {}).get("infra_errors", 0):
+        reasons.append("infra_errors")
+    if (stats or {}).get("decision_meta_errors", 0):
+        reasons.append("decision_meta_errors")
+    if (stats or {}).get("decision_trace_errors", 0):
+        reasons.append("decision_trace_errors")
+    return {"valid": not reasons, "reasons": reasons}
+
+
 def _llm_quality_compute_delta(current, baseline):
     if isinstance(current, (int, float)) and isinstance(baseline, (int, float)):
         return round(current - baseline, 6)
@@ -3414,6 +3501,7 @@ def _llm_quality_check_thresholds(metrics):
         "info_answer_rate": rates.get("info_answer_rate"),
         "hard_fail_rate": rates.get("hard_fail_rate"),
         "unknown_state_rate": rates.get("unknown_state_rate"),
+        "degraded_fallback_rate": rates.get("degraded_fallback_rate"),
         "booking_slot_progress_rate": rates.get("booking_slot_progress_rate"),
         "handoff_correct_rate": rates.get("handoff_correct_rate"),
     }
@@ -4393,15 +4481,26 @@ def _normalize_datetime_input(value, date_hint):
         base = f"{base}:00"
     return base
 
-def _resolve_webhook_secret(client_slug, explicit):
-    if explicit:
-        return explicit
-    for env_name in ("WEBHOOK_SECRET", "TRUFFLES_WEBHOOK_SECRET"):
-        env_value = os.environ.get(env_name)
-        if env_value:
-            return env_value
-    if not client_slug:
+def _clean_webhook_secret(value):
+    if not value:
         return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
+def _resolve_webhook_secret_with_source(client_slug, explicit, *, expected_secret=None):
+    explicit_secret = _clean_webhook_secret(explicit)
+    if explicit_secret:
+        return explicit_secret, "explicit"
+    for env_name in ("WEBHOOK_SECRET", "TRUFFLES_WEBHOOK_SECRET"):
+        env_value = _clean_webhook_secret(os.environ.get(env_name))
+        if env_value:
+            return env_value, f"env:{env_name}"
+    expected_clean = _clean_webhook_secret(expected_secret)
+    if expected_clean:
+        return expected_clean, "runtime_expected"
+    if not client_slug:
+        return None, None
     db_user = _resolve_db_user_simple()
     safe_slug = _escape_sql_literal(client_slug)
     query = (
@@ -4428,8 +4527,18 @@ def _resolve_webhook_secret(client_slug, explicit):
         ]
     )
     if result.returncode != 0:
-        return None
-    return result.stdout.strip() or None
+        return None, None
+    resolved = _clean_webhook_secret(result.stdout.strip())
+    if resolved:
+        return resolved, "client_settings"
+    return None, None
+
+
+def _resolve_webhook_secret(client_slug, explicit, *, expected_secret=None):
+    secret, _source = _resolve_webhook_secret_with_source(
+        client_slug, explicit, expected_secret=expected_secret
+    )
+    return secret
 
 def _run_psql_query(db_user, query):
     result = run_command(
@@ -4475,8 +4584,8 @@ def _fetch_client_meta(db_user, client_slug, *, branch_slug=None):
         safe_branch = _escape_sql_literal(branch_slug)
         branch_filter = f"AND b.slug = '{safe_branch}' "
     query = (
-        "SELECT c.id, c.config->>'instance_id', b.id, b.instance_id, "
-        "cs.telegram_chat_id, cs.owner_telegram_id "
+        "SELECT c.id, c.config->>'instance_id', b.id, b.instance_id, b.slug, "
+        "b.webhook_secret, cs.webhook_secret, cs.telegram_chat_id, cs.owner_telegram_id "
         "FROM clients c "
         "LEFT JOIN branches b ON b.client_id = c.id AND b.is_active = TRUE "
         f"{branch_filter}"
@@ -4496,8 +4605,11 @@ def _fetch_client_meta(db_user, client_slug, *, branch_slug=None):
         "client_instance_id": parts[1] if len(parts) > 1 and parts[1] else None,
         "branch_id": parts[2] if len(parts) > 2 else None,
         "branch_instance_id": parts[3] if len(parts) > 3 and parts[3] else None,
-        "telegram_chat_id": parts[4] if len(parts) > 4 and parts[4] else None,
-        "owner_telegram_id": parts[5] if len(parts) > 5 and parts[5] else None,
+        "branch_slug": parts[4] if len(parts) > 4 and parts[4] else None,
+        "branch_webhook_secret": _clean_webhook_secret(parts[5] if len(parts) > 5 else None),
+        "client_webhook_secret": _clean_webhook_secret(parts[6] if len(parts) > 6 else None),
+        "telegram_chat_id": parts[7] if len(parts) > 7 and parts[7] else None,
+        "owner_telegram_id": parts[8] if len(parts) > 8 and parts[8] else None,
     }, None
 
 def _fetch_client_by_branch_phone(db_user, phone):
@@ -5874,7 +5986,48 @@ def _run_llm_quality(args):
         or (client_meta or {}).get("branch_instance_id")
         or (client_meta or {}).get("client_instance_id")
     )
-    webhook_secret = _resolve_webhook_secret(client_slug, args.webhook_secret)
+    expected_webhook_secret, expected_secret_source = _llm_quality_resolve_expected_webhook_secret(
+        client_meta
+    )
+    webhook_secret, webhook_secret_source = _resolve_webhook_secret_with_source(
+        client_slug,
+        args.webhook_secret,
+        expected_secret=expected_webhook_secret,
+    )
+    secret_preflight = _llm_quality_webhook_secret_preflight(
+        provided_secret=webhook_secret,
+        expected_secret=expected_webhook_secret,
+        expected_source=expected_secret_source,
+        secret_source=webhook_secret_source,
+    )
+    requested_branch_slug = (
+        args.branch_slug.strip() if isinstance(args.branch_slug, str) and args.branch_slug.strip() else None
+    )
+    if requested_branch_slug and not (client_meta or {}).get("branch_id"):
+        secret_preflight["valid"] = False
+        reasons = list(secret_preflight.get("reasons") or [])
+        if "branch_not_resolved" not in reasons:
+            reasons.append("branch_not_resolved")
+        secret_preflight["reasons"] = reasons
+    preflight_payload = {
+        "stage": "llm_quality_webhook_secret_preflight",
+        "valid": secret_preflight["valid"],
+        "reasons": secret_preflight["reasons"],
+        "client_slug": client_slug,
+        "requested_branch_slug": requested_branch_slug,
+        "branch_slug": (client_meta or {}).get("branch_slug"),
+        "branch_id": (client_meta or {}).get("branch_id"),
+        "expected_source": secret_preflight["expected_source"],
+        "provided_source": secret_preflight["provided_source"],
+        "expected_fingerprint": secret_preflight["expected_fingerprint"],
+        "provided_fingerprint": secret_preflight["provided_fingerprint"],
+    }
+    print(json.dumps(preflight_payload, ensure_ascii=False))
+    if not secret_preflight["valid"]:
+        raise SystemExit(
+            "llm-quality: INVALID RUN - webhook_secret preflight failed "
+            f"({','.join(secret_preflight.get('reasons') or ['unknown'])})"
+        )
 
     admin_token = args.admin_token or os.environ.get("ALERTS_ADMIN_TOKEN")
     if not admin_token and container_name:
@@ -5929,6 +6082,11 @@ def _run_llm_quality(args):
     if judge_enabled and not judge_api_key:
         judge_enabled = False
         judge_skip_reason = "missing_api_key"
+    if args.update_baseline and not judge_enabled:
+        raise SystemExit(
+            "llm-quality: cannot update canonical baseline with judge disabled "
+            f"(reason={judge_skip_reason or 'judge_disabled'})"
+        )
     judge_required = bool(args.scenarios_file and not args.allow_judge_off)
     if judge_required and not judge_enabled:
         raise SystemExit(
@@ -6025,6 +6183,8 @@ def _run_llm_quality(args):
         "decision_meta_errors": 0,
         "decision_trace_errors": 0,
         "info_mismatch": 0,
+        "policy_core_turns": 0,
+        "policy_core_degraded_turns": 0,
     }
     state_stats = {}
     info_stats = {
@@ -6632,6 +6792,13 @@ def _run_llm_quality(args):
                     coverage_stats["expected_reply_type"][expected_reply_type_value] = (
                         coverage_stats["expected_reply_type"].get(expected_reply_type_value, 0) + 1
                     )
+                policy_core_mode = (
+                    (meta or {}).get("policy_core_mode") if isinstance(meta, dict) else None
+                )
+                if policy_core_mode in {"policy_core", "degraded_fallback"}:
+                    stats["policy_core_turns"] += 1
+                    if policy_core_mode == "degraded_fallback":
+                        stats["policy_core_degraded_turns"] += 1
                 action_value = (meta or {}).get("action") if isinstance(meta, dict) else None
                 if action_value:
                     coverage_stats["actions"][action_value] = (
@@ -7187,6 +7354,8 @@ def _run_llm_quality(args):
             "decision_meta_errors": stats["decision_meta_errors"],
             "decision_trace_errors": stats["decision_trace_errors"],
             "info_mismatch": stats["info_mismatch"],
+            "policy_core_turns": stats["policy_core_turns"],
+            "policy_core_degraded_turns": stats["policy_core_degraded_turns"],
         },
         "state": {
             "counts": state_counts,
@@ -7243,12 +7412,19 @@ def _run_llm_quality(args):
         metrics["rates"]["handoff_correct_rate"] = round(
             manager_stats["actions_ok"] / max(manager_stats["actions_total"], 1), 4
         )
+    if stats["policy_core_turns"]:
+        metrics["rates"]["degraded_fallback_rate"] = round(
+            stats["policy_core_degraded_turns"] / max(stats["policy_core_turns"], 1),
+            4,
+        )
 
     baseline_path = os.path.join(_llm_quality_repo_root(), "ops", "results", "booking_quality.json")
     baseline_source = baseline_path
     baseline_payload = None
     baseline_metrics = None
     baseline_updated_at = None
+    baseline_canonical = None
+    baseline_canonical_reason = None
     baseline_history = []
     if args.baseline_summary:
         baseline_source = os.path.abspath(os.path.expanduser(args.baseline_summary))
@@ -7261,6 +7437,9 @@ def _run_llm_quality(args):
             baseline_updated_at = (baseline_payload or {}).get("finished_at") or (
                 baseline_payload or {}
             ).get("updated_at")
+            baseline_canonical, baseline_canonical_reason = _llm_quality_baseline_is_canonical(
+                baseline_payload
+            )
             if baseline_metrics is None:
                 raise SystemExit(
                     f"llm-quality: baseline-summary has no metrics ({baseline_source})"
@@ -7275,15 +7454,42 @@ def _run_llm_quality(args):
                 baseline_payload = json.load(handle)
             baseline_metrics = (baseline_payload or {}).get("metrics")
             baseline_updated_at = (baseline_payload or {}).get("updated_at")
+            baseline_canonical, baseline_canonical_reason = _llm_quality_baseline_is_canonical(
+                baseline_payload
+            )
             baseline_history = (baseline_payload or {}).get("history") or []
         except Exception:
             baseline_metrics = None
+            baseline_canonical = None
+            baseline_canonical_reason = None
 
-    delta = _llm_quality_compute_delta(metrics, baseline_metrics) if baseline_metrics else None
     threshold_results, threshold_breaches = _llm_quality_check_thresholds(metrics)
-    regression_results, regression_breaches = _llm_quality_check_regression(
-        metrics, baseline_metrics, args.regression_tolerance
-    )
+    infra_status = _llm_quality_build_infra_status(stats, secret_preflight)
+    comparison_block_reasons = []
+    if not infra_status["valid"]:
+        comparison_block_reasons.append("infra_invalid")
+    if baseline_metrics is not None and baseline_canonical is False:
+        comparison_block_reasons.append(
+            f"baseline_non_canonical:{baseline_canonical_reason or 'unknown'}"
+        )
+    comparison_blocked = bool(comparison_block_reasons)
+    delta = None
+    regression_results = {}
+    regression_breaches = []
+    if not comparison_blocked and baseline_metrics:
+        delta = _llm_quality_compute_delta(metrics, baseline_metrics)
+        regression_results, regression_breaches = _llm_quality_check_regression(
+            metrics, baseline_metrics, args.regression_tolerance
+        )
+    semantic_reasons = []
+    if threshold_breaches:
+        semantic_reasons.append("threshold_breach")
+    if comparison_blocked:
+        for reason in comparison_block_reasons:
+            semantic_reasons.append(f"comparison_blocked:{reason}")
+    elif regression_breaches:
+        semantic_reasons.append("regression_breach")
+    semantic_status = {"valid": not semantic_reasons, "reasons": semantic_reasons}
     top_failures = _llm_quality_top_failure_reasons(failure_counts, limit=3)
     safe_config = {
         "mode": args.mode,
@@ -7331,12 +7537,25 @@ def _run_llm_quality(args):
         "metrics": metrics,
         "baseline_metrics": baseline_metrics,
         "baseline_source": baseline_source,
+        "baseline_canonical": baseline_canonical,
+        "baseline_canonical_reason": baseline_canonical_reason,
         "delta": delta,
         "failure_counts": failure_counts,
         "top_failures": top_failures,
         "failures": failures,
         "coverage": coverage_stats,
         "judge": judge_stats,
+        "webhook_secret_preflight": secret_preflight,
+        "infra_valid": infra_status["valid"],
+        "semantic_valid": semantic_status["valid"],
+        "quality_status": {
+            "infra_valid": infra_status["valid"],
+            "infra_reasons": infra_status["reasons"],
+            "semantic_valid": semantic_status["valid"],
+            "semantic_reasons": semantic_status["reasons"],
+            "comparison_blocked": comparison_blocked,
+            "comparison_block_reasons": comparison_block_reasons,
+        },
         "scenario_source": scenario_source,
         "replay_command": replay_command,
         "stop_reason": stop_reason,
@@ -7360,6 +7579,10 @@ def _run_llm_quality(args):
             "tolerance": args.regression_tolerance,
             "baseline_source": baseline_source,
             "baseline_updated_at": baseline_updated_at,
+            "baseline_canonical": baseline_canonical,
+            "baseline_canonical_reason": baseline_canonical_reason,
+            "blocked": comparison_blocked,
+            "block_reasons": comparison_block_reasons,
             "results": regression_results,
             "breaches": regression_breaches,
         },
@@ -7378,6 +7601,8 @@ def _run_llm_quality(args):
         "failure_counts": failure_counts,
         "taxonomy": taxonomy_counts,
         "judge": judge_stats.get("counts"),
+        "infra_valid": infra_status["valid"],
+        "semantic_valid": semantic_status["valid"],
     }
     if args.update_baseline or args.append_history:
         os.makedirs(os.path.dirname(baseline_path), exist_ok=True)
@@ -7412,10 +7637,16 @@ def _run_llm_quality(args):
         raise SystemExit(
             f"llm-quality: threshold breaches ({', '.join(threshold_breaches)})"
         )
-    if args.fail_on_regression and regression_breaches:
-        raise SystemExit(
-            f"llm-quality: regression breaches ({', '.join(regression_breaches)})"
-        )
+    if args.fail_on_regression:
+        if comparison_blocked:
+            raise SystemExit(
+                "llm-quality: regression comparison blocked "
+                f"({', '.join(comparison_block_reasons)})"
+            )
+        if regression_breaches:
+            raise SystemExit(
+                f"llm-quality: regression breaches ({', '.join(regression_breaches)})"
+            )
 
 def _run_webhook_fuzz(args):
     if args.count < 1:

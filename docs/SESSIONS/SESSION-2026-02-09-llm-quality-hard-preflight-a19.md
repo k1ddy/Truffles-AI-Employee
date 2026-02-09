@@ -1,0 +1,28 @@
+# SESSION 2026-02-09-llm-quality-hard-preflight-a19 — Session 2026-02-09-llm-quality-hard-preflight-a19
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-09-llm-quality-hard-preflight-a19.md
+- branch: feat/2026-02-09-llm-quality-hard-preflight-a19
+- worktree: /home/zhan/worktrees/2026-02-09-llm-quality-hard-preflight-a19
+- base_ref: origin/main
+- scope: `ops/diagnose.py llm-quality` hard preflight + quality status gating + canonical baseline policy + regressions.
+- done:
+  - Added hard preflight for webhook secret branch/client match with immediate `INVALID RUN` on mismatch.
+  - Added quality status split (`infra_valid`, `semantic_valid`) and blocked regression comparison on infra failure.
+  - Enforced canonical baseline compare policy (judge must be on); non-canonical baseline now blocks regression compare.
+  - Added `degraded_fallback_rate` threshold gate and regression tracking.
+  - Added regressions for new quality gates and collect-policy contract (`next_question/open_questions/expected_reply_type`).
+- next:
+  - Open PR and attach evidence from /tmp + summary paths
+  - Package evidence and open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-09-llm-quality-hard-preflight-a19.md
+  - `python3 -m py_compile ops/diagnose.py`
+  - `pytest -q truffles-api/tests/test_booking_quality_status_gate.py`
+  - `pytest -q truffles-api/tests/test_booking_quality_progress_gate.py truffles-api/tests/test_booking_quality_response_guard.py`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "llm_policy_core_collect_sets_expected_reply_type or llm_policy_core_allows_plan_with_expected_reply or llm_policy_core_degraded_booking_guard_uses_safe_collect"`
+  - `python3 ops/diagnose.py llm-quality ... --webhook-secret invalid-secret-qa` -> `INVALID RUN (secret_mismatch)`
+  - `python3 ops/diagnose.py llm-quality ... --branch-slug branch_b` -> `INVALID RUN (branch_not_resolved)`
+  - `python3 ops/diagnose.py llm-quality ... --fail-on-regression` -> `regression comparison blocked (baseline_non_canonical:judge_mode_off)`
+- last_updated: 2026-02-09
