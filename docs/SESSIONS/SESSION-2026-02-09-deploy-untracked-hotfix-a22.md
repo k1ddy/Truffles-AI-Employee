@@ -6,16 +6,21 @@
 - branch: feat/2026-02-09-deploy-untracked-hotfix-a22
 - worktree: /home/zhan/worktrees/2026-02-09-deploy-untracked-hotfix-a22
 - base_ref: origin/main
-- scope: Hotfix deploy sync to handle untracked file conflicts before fast-forward pull on host.
+- scope: Hotfix deploy sync for untracked conflicts + CI anti-repeat gate for `core-eval` on merge.
 - done:
   - Reproduced failure from run `21825629877` (`deploy` -> `Deploy to VPS`).
   - Added pre-pull guard for tracked dirty state.
   - Added auto-move of conflicting untracked paths into `.deploy-untracked-backup/<timestamp>`.
   - Validated workflow YAML syntax locally.
+- in_progress:
+  - Verified why `build-push` and `deploy` were skipped on merge run `21827059129` (`changes.deploy_required=false` from path filter).
+  - Added `core-eval` merge gate draft in `.github/workflows/ci.yml` to skip duplicate run when PR head already has `core-eval=success`.
 - next:
-  - Push hotfix branch and open PR to main.
+  - Re-run `scripts/session_check.sh`.
+  - Push branch update and update/open PR to main.
 - evidence:
   - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21825629877
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21827059129
   - deploy log: `untracked working tree files would be overwritten by merge`
   - docs/TASK_PACKAGES/TP-2026-02-09-deploy-untracked-hotfix-a22.md
   - `python3 - <<'PY' ... yaml.safe_load('.github/workflows/ci.yml')`
