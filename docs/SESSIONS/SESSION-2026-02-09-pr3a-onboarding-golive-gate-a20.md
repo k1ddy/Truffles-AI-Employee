@@ -1,0 +1,26 @@
+# SESSION 2026-02-09-pr3a-onboarding-golive-gate-a20 — Session 2026-02-09-pr3a-onboarding-golive-gate-a20
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-09-pr3a-onboarding-golive-gate-a20.md
+- branch: feat/2026-02-09-pr3a-onboarding-golive-gate-a20
+- worktree: /home/zhan/worktrees/2026-02-09-pr3a-onboarding-golive-gate-a20
+- base_ref: origin/main
+- scope: PR-3A hard go-live gate (approve/reject/waive with TTL) + activation enforcement in Console Plane.
+- done:
+  - Session created.
+  - Added branch go-live gate schema/model fields and SQL migration `028_add_branch_go_live_gate.sql`.
+  - Added backend actions: approve/reject/waive go-live and fail-closed activation checks.
+  - Wired Console UI controls in Provisioning Wizard and API client methods.
+  - Updated OpenAPI contract for go-live actions and branch go-live fields.
+  - Ran targeted checks (`pytest` suites + `next lint` + `session_check`).
+- next:
+  - Prepare commit and open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-09-pr3a-onboarding-golive-gate-a20.md
+  - `pytest tests/test_console_access_admin_pr2.py -q` -> 26 passed
+  - `pytest tests/test_console_onboarding_state.py -q` -> 10 passed
+  - `pytest tests/test_console_tenants_list.py -q` -> 18 passed
+  - `npm --prefix console-web run lint` -> clean
+  - `SESSION_AGENT=a20 scripts/session_check.sh` -> Session OK
+- last_updated: 2026-02-09
