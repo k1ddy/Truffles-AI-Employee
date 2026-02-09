@@ -1402,12 +1402,22 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const missingRequirements = readinessItems.filter((item) => item.required && !item.ok);
     const goNoGoMissing = stepStateById.go_no_go?.missing ?? [];
     const goNoGoReady = missingRequirements.length === 0 && goNoGoMissing.length === 0;
-    const branchGoLiveState = ((branchData as Record<string, unknown> | null)?.go_live_state ?? "pending") as
-        "pending" | "approved" | "rejected";
-    const branchGoLiveReason = (branchData as Record<string, unknown> | null)?.go_live_reason;
+    const branchGoLiveStateRaw = (branchData as Record<string, unknown> | null)?.go_live_state;
+    const branchGoLiveState: "pending" | "approved" | "rejected" = (
+        branchGoLiveStateRaw === "pending" || branchGoLiveStateRaw === "approved" || branchGoLiveStateRaw === "rejected"
+    )
+        ? branchGoLiveStateRaw
+        : "pending";
+    const branchGoLiveReasonRaw = (branchData as Record<string, unknown> | null)?.go_live_reason;
+    const branchGoLiveReason = typeof branchGoLiveReasonRaw === "string" && branchGoLiveReasonRaw.trim().length > 0
+        ? branchGoLiveReasonRaw
+        : null;
     const branchGoLiveAllowed = Boolean((branchData as Record<string, unknown> | null)?.go_live_allowed);
     const branchGoLiveWaiverActive = Boolean((branchData as Record<string, unknown> | null)?.go_live_waiver_active);
-    const branchGoLiveWaiverUntil = (branchData as Record<string, unknown> | null)?.go_live_waiver_until;
+    const branchGoLiveWaiverUntilRaw = (branchData as Record<string, unknown> | null)?.go_live_waiver_until;
+    const branchGoLiveWaiverUntil = typeof branchGoLiveWaiverUntilRaw === "string" && branchGoLiveWaiverUntilRaw.length > 0
+        ? branchGoLiveWaiverUntilRaw
+        : null;
     const autopilotPhone = autopilotForm.phone.trim();
     const autopilotInstanceId = autopilotForm.instanceId.trim();
     const autopilotCompanyRef = companyId.trim() || autopilotForm.companyName.trim();
