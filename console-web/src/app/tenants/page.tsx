@@ -68,6 +68,7 @@ type TenantLifecycleMode = "active" | "archived" | "all";
 type FleetLifecycleFilter = "all" | "lead" | "contracting" | "onboarding" | "go_live_ready" | "active" | "paused" | "archived";
 type FleetPaymentFilter = "all" | "pending" | "confirmed" | "rejected" | "unknown";
 type FleetServiceFilter = "all" | "ok" | "degraded" | "attention";
+type FleetAttentionLevel = "high" | "medium" | "low";
 
 function stringifyOptionalJson(value: unknown): string {
     if (!value || typeof value !== "object") {
@@ -90,6 +91,16 @@ function parseOptionalJson(value: string, label: string): { value?: Record<strin
     } catch {
         return { error: `${label}: некорректный JSON` };
     }
+}
+
+function attentionLevelClass(level?: FleetAttentionLevel): string {
+    if (level === "high") {
+        return "bg-red-100 text-red-700";
+    }
+    if (level === "medium") {
+        return "bg-amber-100 text-amber-700";
+    }
+    return "bg-blue-100 text-blue-700";
 }
 
 export default function TenantsPage() {
@@ -221,6 +232,18 @@ export default function TenantsPage() {
             lastPage.has_more ? lastPage.cursor ?? undefined : undefined,
         enabled: tenantsEnabled,
     });
+    const fleetAttentionQuery = useQuery({
+        queryKey: ["tenants-fleet-attention", tenantLifecycle],
+        queryFn: async () => {
+            const response = await adminApi.listFleetAttention({
+                limit: 12,
+                stale_after_minutes: 60,
+                include_low: "false",
+            });
+            return response.data;
+        },
+        enabled: tenantsEnabled && tenantLifecycle === "active",
+    });
 
     const companies = useMemo(
         () => companiesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
@@ -238,6 +261,10 @@ export default function TenantsPage() {
         () => branchesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
         [branchesQuery.data],
     );
+    const fleetAttention = useMemo(
+        () => fleetAttentionQuery.data ?? null,
+        [fleetAttentionQuery.data],
+    );
 
     const refreshContext = () => {
         queryClient.invalidateQueries({ queryKey: ["console-me"] });
@@ -247,6 +274,7 @@ export default function TenantsPage() {
         queryClient.invalidateQueries({ queryKey: ["tenants-companies"] });
         queryClient.invalidateQueries({ queryKey: ["tenants-clients"] });
         queryClient.invalidateQueries({ queryKey: ["tenants-branches"] });
+        queryClient.invalidateQueries({ queryKey: ["tenants-fleet-attention"] });
     };
 
     const setCompanyContext = (companyId?: string | null) => {
@@ -606,6 +634,78 @@ export default function TenantsPage() {
             </div>
 
             <div className="grid gap-6">
+                {tenantLifecycle === "active" ? (
+                    <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-fleet-attention">
+                        <div className="flex items-start justify-between gap-4 mb-4">
+                            <div>
+                                <h2 className="text-lg font-semibold">Risk & Attention</h2>
+                                <p className="text-sm text-muted-foreground">
+                                    Операционные риски по активным клиентам (top by score)
+                                </p>
+                            </div>
+                            <button
+                                className="btn-ghost"
+                                onClick={() => fleetAttentionQuery.refetch()}
+                                disabled={fleetAttentionQuery.isFetching}
+                            >
+                                {fleetAttentionQuery.isFetching ? "Обновление..." : "Обновить"}
+                            </button>
+                        </div>
+
+                        {fleetAttention ? (
+                            <div className="mb-3 text-xs text-muted-foreground" data-testid="tenants-fleet-attention-summary">
+                                active clients {fleetAttention.summary.active_clients_total} · with attention {fleetAttention.summary.clients_with_attention} ·
+                                high {fleetAttention.summary.high_risk_clients} · medium {fleetAttention.summary.medium_risk_clients} ·
+                                outbox_failed_24h {fleetAttention.summary.outbox_failed_24h_total} · pending_handovers {fleetAttention.summary.pending_handovers_total}
+                            </div>
+                        ) : null}
+
+                        <div className="space-y-3">
+                            {fleetAttentionQuery.isLoading ? (
+                                <div className="text-sm text-muted-foreground">Загрузка risk cockpit...</div>
+                            ) : fleetAttentionQuery.isError ? (
+                                <div className="text-sm text-muted-foreground">Не удалось загрузить risk cockpit.</div>
+                            ) : !fleetAttention?.items?.length ? (
+                                <div className="text-sm text-muted-foreground">Клиенты с medium/high риском не найдены.</div>
+                            ) : (
+                                fleetAttention.items.map((item) => (
+                                    <div
+                                        key={item.client_id}
+                                        className="rounded-lg border border-border/60 px-4 py-3"
+                                        data-testid="tenants-fleet-attention-row"
+                                    >
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div className="font-medium">
+                                                {item.client_name ?? item.client_slug}
+                                            </div>
+                                            <div className="flex items-center gap-2 text-xs">
+                                                <span
+                                                    className={`inline-flex rounded-full px-2 py-0.5 font-semibold ${attentionLevelClass(item.attention_level as FleetAttentionLevel)}`}
+                                                >
+                                                    {item.attention_level}
+                                                </span>
+                                                <span className="text-muted-foreground">score {item.attention_score}</span>
+                                            </div>
+                                        </div>
+                                        <div className="mt-1 text-xs text-muted-foreground">
+                                            lifecycle {item.lifecycle_state} · service {item.service_state} · owner {item.owner_name ?? "—"} · next {item.next_action}
+                                        </div>
+                                        <div className="mt-1 text-xs text-muted-foreground">
+                                            branches active {item.active_branches}/{item.total_branches} · stale {item.stale_branches} · integration_error {item.integration_error_branches} · outbox_failed_24h {item.outbox_failed_24h} · pending_handovers {item.pending_handovers}
+                                        </div>
+                                        <div className="mt-1 text-xs text-muted-foreground">
+                                            reasons: {item.reasons?.join(", ") || "—"}
+                                        </div>
+                                        <div className="mt-1 text-xs text-muted-foreground">
+                                            actions: {item.suggested_actions?.join(", ") || "—"}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </section>
+                ) : null}
+
                 <section className="bg-card border border-border/60 rounded-lg p-5">
                     <div className="flex items-center justify-between gap-4 mb-4">
                         <div>

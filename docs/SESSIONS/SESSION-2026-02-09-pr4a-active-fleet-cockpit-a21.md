@@ -1,0 +1,26 @@
+# SESSION 2026-02-09-pr4a-active-fleet-cockpit-a21 — Session 2026-02-09-pr4a-active-fleet-cockpit-a21
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-09-pr4a-active-fleet-cockpit-a21.md
+- branch: feat/2026-02-09-pr4a-active-fleet-cockpit-a21
+- worktree: /home/zhan/worktrees/2026-02-09-pr4a-active-fleet-cockpit-a21
+- base_ref: origin/main
+- scope: PR-4A Active Fleet Cockpit (backend fleet attention API + Tenants UI panel + contracts/types/tests)
+- done:
+  - Implemented PR-4A Active Fleet Cockpit slice with backend endpoint, contracts, tests, and Tenants UI panel.
+  - Added `GET /console/v1/admin/fleet/attention` for platform-admin active fleet risk view.
+  - Added backend schemas and scoring aggregation (integration drift/stale inbound/outbox failed/pending handovers).
+  - Added backend tests for fleet attention profile and endpoint behavior/guards.
+  - Synced Console OpenAPI + regenerated frontend API types.
+  - Added `Tenants` page `Risk & Attention` panel with summary, top clients, reasons and suggested actions.
+- next:
+  - Open PR and run CI.
+  - Open PR and run CI.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-09-pr4a-active-fleet-cockpit-a21.md
+  - PYTEST_ARGS='/app/tests/test_console_fleet_attention.py /app/tests/test_console_tenants_list.py /app/tests/test_console_integrations_registry.py' scripts/test_api_container.sh
+  - python3 truffles-api/scripts/generate_openapi.py --check
+  - /home/zhan/truffles-main/console-web/node_modules/.bin/openapi-typescript contracts/console_api/openapi.v1.yaml -o console-web/src/types/api.generated.ts
+  - cd console-web && npm run lint
+- last_updated: 2026-02-09

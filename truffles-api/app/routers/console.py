@@ -86,6 +86,9 @@ from app.schemas.console import (
     ConsoleConfirmationCreateRequest,
     ConsoleConfirmationResponse,
     ConsoleErrorResponse,
+    ConsoleFleetAttentionItem,
+    ConsoleFleetAttentionResponse,
+    ConsoleFleetAttentionSummary,
     ConsoleFleetSummary,
     ConsoleHealthResponse,
     ConsoleIntegrationsListResponse,
@@ -954,6 +957,10 @@ _FLEET_LIFECYCLE_ORDER = [
 ]
 _FLEET_PAYMENT_ORDER = ["pending", "confirmed", "rejected", "unknown"]
 _FLEET_SERVICE_ORDER = ["ok", "degraded", "attention"]
+_FLEET_ATTENTION_OUTBOX_WINDOW_HOURS = 24
+_FLEET_ATTENTION_HANDOVER_PENDING_STATUSES = {"pending", "active"}
+_FLEET_ATTENTION_HIGH_THRESHOLD = 70
+_FLEET_ATTENTION_MEDIUM_THRESHOLD = 35
 
 
 @dataclass
@@ -1918,11 +1925,14 @@ def _extract_instance_id_from_metadata(metadata: Optional[dict]) -> Optional[str
     return None
 
 
-def _load_latest_branch_inbound_observations(
+def _load_latest_branch_inbound_observations_for_clients(
     db: Session,
     *,
-    client_id: UUID,
+    client_ids: list[UUID],
 ) -> dict[UUID, tuple[datetime, Optional[str]]]:
+    if not client_ids:
+        return {}
+
     ranked = (
         db.query(
             Conversation.branch_id.label("branch_id"),
@@ -1937,7 +1947,7 @@ def _load_latest_branch_inbound_observations(
         )
         .join(Message, Message.conversation_id == Conversation.id)
         .filter(
-            Conversation.client_id == client_id,
+            Conversation.client_id.in_(client_ids),
             Conversation.branch_id.isnot(None),
             Message.role == "user",
         )
@@ -1961,6 +1971,17 @@ def _load_latest_branch_inbound_observations(
         instance_id = _extract_instance_id_from_metadata(row.metadata)
         observations[branch_id] = (created_at, instance_id)
     return observations
+
+
+def _load_latest_branch_inbound_observations(
+    db: Session,
+    *,
+    client_id: UUID,
+) -> dict[UUID, tuple[datetime, Optional[str]]]:
+    return _load_latest_branch_inbound_observations_for_clients(
+        db,
+        client_ids=[client_id],
+    )
 
 
 def _build_branch_integration_status(
@@ -2119,6 +2140,115 @@ def _emit_integration_drift_signals(
 
     if has_updates:
         db.commit()
+
+
+def _resolve_fleet_attention_profile(
+    *,
+    service_state: str,
+    stale_branches: int,
+    integration_error_branches: int,
+    integration_warn_branches: int,
+    outbox_failed_24h: int,
+    pending_handovers: int,
+) -> tuple[int, str, list[str], list[str]]:
+    score = 0
+    reasons: list[str] = []
+    suggested_actions: list[str] = []
+
+    if integration_error_branches > 0:
+        score += min(60, integration_error_branches * 25)
+        reasons.append("integration_error")
+        suggested_actions.append("open_integrations_registry_and_fix_bindings")
+
+    if stale_branches > 0:
+        score += min(30, stale_branches * 10)
+        reasons.append("stale_inbound")
+        suggested_actions.append("check_webhook_and_inbound_flow")
+
+    if integration_warn_branches > 0:
+        score += min(20, integration_warn_branches * 8)
+        reasons.append("integration_warn")
+        suggested_actions.append("review_integration_warnings")
+
+    if outbox_failed_24h > 0:
+        score += min(40, outbox_failed_24h * 5)
+        reasons.append("outbox_failed")
+        suggested_actions.append("run_outbox_process_job_and_review_errors")
+
+    if pending_handovers > 0:
+        score += min(30, pending_handovers * 8)
+        reasons.append("pending_handovers")
+        suggested_actions.append("review_escalation_queue")
+
+    if service_state == "degraded":
+        score += 15
+        reasons.append("service_state_degraded")
+        suggested_actions.append("execute_integration_recovery_runbook")
+    elif service_state == "attention":
+        score += 10
+        reasons.append("service_state_attention")
+        suggested_actions.append("resolve_attention_items")
+
+    score = min(score, 100)
+
+    if score >= _FLEET_ATTENTION_HIGH_THRESHOLD:
+        level = "high"
+    elif score >= _FLEET_ATTENTION_MEDIUM_THRESHOLD:
+        level = "medium"
+    else:
+        level = "low"
+
+    # Keep payload deterministic and compact.
+    reasons = sorted(set(reasons))
+    suggested_actions = sorted(set(suggested_actions))
+    return score, level, reasons, suggested_actions
+
+
+def _query_outbox_failed_24h_map(
+    db: Session,
+    *,
+    client_ids: list[UUID],
+    now: datetime,
+) -> dict[UUID, int]:
+    if not client_ids:
+        return {}
+    cutoff = now - timedelta(hours=_FLEET_ATTENTION_OUTBOX_WINDOW_HOURS)
+    rows = (
+        db.query(
+            OutboxMessage.client_id,
+            func.count(OutboxMessage.id),
+        )
+        .filter(
+            OutboxMessage.client_id.in_(client_ids),
+            OutboxMessage.status == "FAILED",
+            OutboxMessage.created_at >= cutoff,
+        )
+        .group_by(OutboxMessage.client_id)
+        .all()
+    )
+    return {row[0]: int(row[1] or 0) for row in rows if row[0]}
+
+
+def _query_pending_handovers_map(
+    db: Session,
+    *,
+    client_ids: list[UUID],
+) -> dict[UUID, int]:
+    if not client_ids:
+        return {}
+    rows = (
+        db.query(
+            Handover.client_id,
+            func.count(Handover.id),
+        )
+        .filter(
+            Handover.client_id.in_(client_ids),
+            Handover.status.in_(_FLEET_ATTENTION_HANDOVER_PENDING_STATUSES),
+        )
+        .group_by(Handover.client_id)
+        .all()
+    )
+    return {row[0]: int(row[1] or 0) for row in rows if row[0]}
 
 
 def _parse_date_param(name: str, value: Optional[str]) -> Optional[dt_date]:
@@ -6513,6 +6643,216 @@ async def list_integrations(
     return ConsoleIntegrationsListResponse(
         stale_after_minutes=stale_after_minutes,
         items=items,
+    )
+
+
+@router.get(
+    "/admin/fleet/attention",
+    response_model=ConsoleFleetAttentionResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_fleet_attention(
+    request: Request,
+    limit: int = 20,
+    stale_after_minutes: int = Query(
+        _INTEGRATION_DEFAULT_STALE_MINUTES,
+        ge=_INTEGRATION_MIN_STALE_MINUTES,
+        le=_INTEGRATION_MAX_STALE_MINUTES,
+    ),
+    include_low: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleFleetAttentionResponse:
+    _reject_unknown_query_params(request, {"limit", "stale_after_minutes", "include_low"})
+    _validate_limit(limit)
+    if not isinstance(stale_after_minutes, int):
+        stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
+    include_low_mode = _parse_bool_param("include_low", include_low, default=False)
+
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=False,
+    )
+    _require_platform_admin(context)
+
+    active_clients = [
+        client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
+    ]
+    if not active_clients:
+        return ConsoleFleetAttentionResponse(
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            stale_after_minutes=stale_after_minutes,
+            summary=ConsoleFleetAttentionSummary(
+                active_clients_total=0,
+                clients_with_attention=0,
+                high_risk_clients=0,
+                medium_risk_clients=0,
+                low_risk_clients=0,
+                stale_branches_total=0,
+                integration_error_branches_total=0,
+                integration_warn_branches_total=0,
+                outbox_failed_24h_total=0,
+                pending_handovers_total=0,
+            ),
+            items=[],
+        )
+
+    companies_by_id = {company.id: company for company in (context.companies or [])}
+    fleet_details_map = _build_fleet_client_details_map(
+        db,
+        clients=active_clients,
+        companies_by_id=companies_by_id,
+    )
+
+    client_ids = [client.id for client in active_clients]
+    branches = db.query(Branch).filter(Branch.client_id.in_(client_ids)).all()
+    branches_by_client: dict[UUID, list[Branch]] = {client.id: [] for client in active_clients}
+    for branch in branches:
+        branches_by_client.setdefault(branch.client_id, []).append(branch)
+
+    token_rows = (
+        db.query(
+            ClientSettings.client_id,
+            ClientSettings.telegram_bot_token,
+        )
+        .filter(ClientSettings.client_id.in_(client_ids))
+        .all()
+    )
+    telegram_token_map: dict[UUID, bool] = {}
+    for client_id, token in token_rows:
+        telegram_token_map[client_id] = bool(_normalize_optional_text(token))
+
+    inbound_observations = _load_latest_branch_inbound_observations_for_clients(
+        db,
+        client_ids=client_ids,
+    )
+
+    now = datetime.now(timezone.utc)
+    outbox_failed_map = _query_outbox_failed_24h_map(db, client_ids=client_ids, now=now)
+    pending_handovers_map = _query_pending_handovers_map(db, client_ids=client_ids)
+
+    summary = ConsoleFleetAttentionSummary(
+        active_clients_total=len(active_clients),
+        clients_with_attention=0,
+        high_risk_clients=0,
+        medium_risk_clients=0,
+        low_risk_clients=0,
+        stale_branches_total=0,
+        integration_error_branches_total=0,
+        integration_warn_branches_total=0,
+        outbox_failed_24h_total=0,
+        pending_handovers_total=0,
+    )
+
+    items: list[ConsoleFleetAttentionItem] = []
+    for client in active_clients:
+        details = fleet_details_map.get(client.id)
+        if not details:
+            continue
+
+        stale_branches = 0
+        integration_error_branches = 0
+        integration_warn_branches = 0
+
+        for branch in branches_by_client.get(client.id, []):
+            if not branch.is_active:
+                continue
+            observed = inbound_observations.get(branch.id)
+            last_inbound_at: Optional[datetime] = None
+            last_inbound_instance_id: Optional[str] = None
+            if observed:
+                last_inbound_at, last_inbound_instance_id = observed
+
+            status = _build_branch_integration_status(
+                client_slug=client.name,
+                branch=branch,
+                has_telegram_bot_token=telegram_token_map.get(client.id, False),
+                stale_after_minutes=stale_after_minutes,
+                last_inbound_at=last_inbound_at,
+                last_inbound_instance_id=last_inbound_instance_id,
+                now=now,
+            )
+            if status.whatsapp_status == "no_recent_inbound":
+                stale_branches += 1
+            if status.status == "error":
+                integration_error_branches += 1
+            elif status.status == "warn":
+                integration_warn_branches += 1
+
+        outbox_failed_24h = outbox_failed_map.get(client.id, 0)
+        pending_handovers = pending_handovers_map.get(client.id, 0)
+        score, level, reasons, suggested_actions = _resolve_fleet_attention_profile(
+            service_state=details.service_state,
+            stale_branches=stale_branches,
+            integration_error_branches=integration_error_branches,
+            integration_warn_branches=integration_warn_branches,
+            outbox_failed_24h=outbox_failed_24h,
+            pending_handovers=pending_handovers,
+        )
+
+        if score > 0:
+            summary.clients_with_attention += 1
+            if level == "high":
+                summary.high_risk_clients += 1
+            elif level == "medium":
+                summary.medium_risk_clients += 1
+            else:
+                summary.low_risk_clients += 1
+        summary.stale_branches_total += stale_branches
+        summary.integration_error_branches_total += integration_error_branches
+        summary.integration_warn_branches_total += integration_warn_branches
+        summary.outbox_failed_24h_total += outbox_failed_24h
+        summary.pending_handovers_total += pending_handovers
+
+        if not include_low_mode and level == "low":
+            continue
+
+        company = companies_by_id.get(client.company_id) if client.company_id else None
+        items.append(
+            ConsoleFleetAttentionItem(
+                client_id=client.id,
+                client_slug=client.name,
+                client_name=client.name,
+                company_id=client.company_id,
+                company_name=company.name if company else None,
+                lifecycle_state=details.lifecycle_state,
+                payment_status=details.payment_status,
+                commercial_state=details.commercial_state,
+                service_state=details.service_state,
+                owner_name=details.owner_name,
+                next_action=details.next_action,
+                total_branches=details.total_branches,
+                active_branches=details.active_branches,
+                degraded_branches=details.degraded_branches,
+                go_live_ready_branches=details.go_live_ready_branches,
+                stale_branches=stale_branches,
+                integration_error_branches=integration_error_branches,
+                integration_warn_branches=integration_warn_branches,
+                outbox_failed_24h=outbox_failed_24h,
+                pending_handovers=pending_handovers,
+                attention_score=score,
+                attention_level=level,
+                reasons=reasons,
+                suggested_actions=suggested_actions,
+            )
+        )
+
+    items.sort(
+        key=lambda item: (
+            item.attention_score,
+            item.integration_error_branches,
+            item.outbox_failed_24h,
+            item.pending_handovers,
+        ),
+        reverse=True,
+    )
+
+    return ConsoleFleetAttentionResponse(
+        generated_at=now.isoformat(),
+        stale_after_minutes=stale_after_minutes,
+        summary=summary,
+        items=items[:limit],
     )
 
 

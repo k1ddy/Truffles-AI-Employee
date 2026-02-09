@@ -133,6 +133,56 @@ class ConsoleFleetSummary(BaseModel):
     service_counts: dict[str, int]
 
 
+ConsoleFleetAttentionLevel = Literal["high", "medium", "low"]
+
+
+class ConsoleFleetAttentionItem(BaseModel):
+    client_id: UUID
+    client_slug: str
+    client_name: Optional[str] = None
+    company_id: Optional[UUID] = None
+    company_name: Optional[str] = None
+    lifecycle_state: Literal["lead", "contracting", "onboarding", "go_live_ready", "active", "paused", "archived"]
+    payment_status: Literal["pending", "confirmed", "rejected", "unknown"]
+    commercial_state: Literal["contract_missing", "payment_pending", "payment_confirmed", "payment_rejected"]
+    service_state: Literal["ok", "degraded", "attention"]
+    owner_name: Optional[str] = None
+    next_action: str
+    total_branches: int = 0
+    active_branches: int = 0
+    degraded_branches: int = 0
+    go_live_ready_branches: int = 0
+    stale_branches: int = 0
+    integration_error_branches: int = 0
+    integration_warn_branches: int = 0
+    outbox_failed_24h: int = 0
+    pending_handovers: int = 0
+    attention_score: int
+    attention_level: ConsoleFleetAttentionLevel
+    reasons: list[str] = []
+    suggested_actions: list[str] = []
+
+
+class ConsoleFleetAttentionSummary(BaseModel):
+    active_clients_total: int
+    clients_with_attention: int
+    high_risk_clients: int
+    medium_risk_clients: int
+    low_risk_clients: int
+    stale_branches_total: int
+    integration_error_branches_total: int
+    integration_warn_branches_total: int
+    outbox_failed_24h_total: int
+    pending_handovers_total: int
+
+
+class ConsoleFleetAttentionResponse(BaseModel):
+    generated_at: str
+    stale_after_minutes: int
+    summary: ConsoleFleetAttentionSummary
+    items: list[ConsoleFleetAttentionItem]
+
+
 class ConsoleClientListResponse(BaseModel):
     items: list[ConsoleClient]
     cursor: Optional[str] = None
