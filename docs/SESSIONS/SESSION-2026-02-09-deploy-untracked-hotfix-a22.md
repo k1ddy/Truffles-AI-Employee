@@ -1,0 +1,22 @@
+# SESSION 2026-02-09-deploy-untracked-hotfix-a22 — Deploy Untracked Conflict Hotfix
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-09-deploy-untracked-hotfix-a22.md
+- branch: feat/2026-02-09-deploy-untracked-hotfix-a22
+- worktree: /home/zhan/worktrees/2026-02-09-deploy-untracked-hotfix-a22
+- base_ref: origin/main
+- scope: Hotfix deploy sync to handle untracked file conflicts before fast-forward pull on host.
+- done:
+  - Reproduced failure from run `21825629877` (`deploy` -> `Deploy to VPS`).
+  - Added pre-pull guard for tracked dirty state.
+  - Added auto-move of conflicting untracked paths into `.deploy-untracked-backup/<timestamp>`.
+  - Validated workflow YAML syntax locally.
+- next:
+  - Push hotfix branch and open PR to main.
+- evidence:
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21825629877
+  - deploy log: `untracked working tree files would be overwritten by merge`
+  - docs/TASK_PACKAGES/TP-2026-02-09-deploy-untracked-hotfix-a22.md
+  - `python3 - <<'PY' ... yaml.safe_load('.github/workflows/ci.yml')`
+- last_updated: 2026-02-09
