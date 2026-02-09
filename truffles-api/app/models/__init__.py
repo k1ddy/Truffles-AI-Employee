@@ -11,6 +11,7 @@ from app.models.client_onboarding_contract import ClientOnboardingContract
 from app.models.client_settings import ClientSettings
 from app.models.company import Company
 from app.models.console_confirmation import ConsoleConfirmation
+from app.models.console_branch_change import ConsoleBranchChange
 from app.models.console_idempotency import ConsoleIdempotencyKey
 from app.models.console_macro import ConsoleMacro
 from app.models.console_ops_job import ConsoleOpsJob
@@ -46,6 +47,7 @@ __all__ = [
     "InboxEvent",
     "ClientSettings",
     "ConsoleConfirmation",
+    "ConsoleBranchChange",
     "ConsoleIdempotencyKey",
     "ConsoleMacro",
     "ConsoleOpsJob",

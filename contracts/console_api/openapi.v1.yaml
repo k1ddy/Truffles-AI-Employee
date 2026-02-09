@@ -1774,6 +1774,218 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /admin/branch-changes:
+    get:
+      operationId: listAdminBranchChanges
+      tags: [admin]
+      summary: List branch changes
+      parameters:
+        - name: branch_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [draft, validated, publish_failed, published, rolled_back]
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        "200":
+          description: Branch changes list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchChangeListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/branch-changes/draft:
+    post:
+      operationId: draftAdminBranchChange
+      tags: [admin]
+      summary: Create branch change draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchChangeDraftRequest"
+      responses:
+        "200":
+          description: Branch change drafted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchChangeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/branch-changes/{change_id}:
+    get:
+      operationId: getAdminBranchChange
+      tags: [admin]
+      summary: Get branch change details
+      parameters:
+        - name: change_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Branch change details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchChangeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/branch-changes/{change_id}/validate:
+    post:
+      operationId: validateAdminBranchChange
+      tags: [admin]
+      summary: Validate branch change draft
+      parameters:
+        - name: change_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Branch change validated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchChangeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/branch-changes/{change_id}/publish:
+    post:
+      operationId: publishAdminBranchChange
+      tags: [admin]
+      summary: Publish validated branch change
+      parameters:
+        - name: change_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchChangePublishRequest"
+      responses:
+        "200":
+          description: Branch change published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchChangeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/branch-changes/{change_id}/rollback:
+    post:
+      operationId: rollbackAdminBranchChange
+      tags: [admin]
+      summary: Roll back published branch change
+      parameters:
+        - name: change_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchChangeRollbackRequest"
+      responses:
+        "200":
+          description: Branch change rolled back
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BranchChangeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /admin/integrations:
     get:
       operationId: listAdminIntegrations
@@ -3180,6 +3392,164 @@ components:
         is_active:
           type: boolean
           nullable: true
+        confirmation_id:
+          type: string
+          format: uuid
+          nullable: true
+
+    BranchChangePatch:
+      type: object
+      properties:
+        slug:
+          type: string
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        timezone:
+          type: string
+          nullable: true
+        instance_id:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        telegram_chat_id:
+          type: string
+          nullable: true
+        knowledge_tag:
+          type: string
+          nullable: true
+        working_hours:
+          type: object
+          additionalProperties: true
+          nullable: true
+        booking_settings:
+          type: object
+          additionalProperties: true
+          nullable: true
+        is_active:
+          type: boolean
+          nullable: true
+
+    BranchChangeDraftRequest:
+      type: object
+      required: [branch_id, reason, patch]
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+        patch:
+          $ref: "#/components/schemas/BranchChangePatch"
+
+    BranchChangePublishRequest:
+      type: object
+      properties:
+        confirmation_id:
+          type: string
+          format: uuid
+          nullable: true
+
+    BranchChangeRollbackRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+        confirmation_id:
+          type: string
+          format: uuid
+          nullable: true
+
+    BranchChangeRecord:
+      type: object
+      required: [id, branch_id, status, reason, draft_payload, diff_payload, base_snapshot, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [draft, validated, publish_failed, published, rolled_back]
+        reason:
+          type: string
+        draft_payload:
+          type: object
+          additionalProperties: true
+        diff_payload:
+          type: object
+          additionalProperties: true
+        validation_payload:
+          type: object
+          additionalProperties: true
+          nullable: true
+        base_snapshot:
+          type: object
+          additionalProperties: true
+        published_snapshot:
+          type: object
+          additionalProperties: true
+          nullable: true
+        rollback_snapshot:
+          type: object
+          additionalProperties: true
+          nullable: true
+        publish_error:
+          type: string
+          nullable: true
+        rollback_error:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        validated_at:
+          type: string
+          format: date-time
+          nullable: true
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        rolled_back_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    BranchChangeResponse:
+      type: object
+      required: [change]
+      properties:
+        change:
+          $ref: "#/components/schemas/BranchChangeRecord"
+        branch:
+          allOf:
+            - $ref: "#/components/schemas/Branch"
+          nullable: true
+
+    BranchChangeListResponse:
+      type: object
+      required: [items, has_more]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BranchChangeRecord"
+        cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
 
     BranchGoLiveDecisionRequest:
       type: object
@@ -4164,7 +4534,7 @@ components:
       properties:
         job_type:
           type: string
-          enum: [outbox_process, heal, metrics_snapshot]
+          enum: [outbox_process, integration_reconcile, heal, metrics_snapshot]
         label:
           type: string
         description:
@@ -4187,7 +4557,7 @@ components:
       properties:
         job_type:
           type: string
-          enum: [outbox_process, heal, metrics_snapshot]
+          enum: [outbox_process, integration_reconcile, heal, metrics_snapshot]
         mode:
           type: string
           enum: [dry_run, execute]
@@ -4206,7 +4576,7 @@ components:
           format: uuid
         job_type:
           type: string
-          enum: [outbox_process, heal, metrics_snapshot]
+          enum: [outbox_process, integration_reconcile, heal, metrics_snapshot]
         mode:
           type: string
           enum: [dry_run, execute]

@@ -302,6 +302,34 @@ class ConsoleBranchUpdateRequest(BaseModel):
     confirmation_id: Optional[UUID] = None
 
 
+class ConsoleBranchChangePatch(BaseModel):
+    slug: Optional[str] = None
+    name: Optional[str] = None
+    timezone: Optional[str] = None
+    instance_id: Optional[str] = None
+    phone: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    knowledge_tag: Optional[str] = None
+    working_hours: Optional[dict] = None
+    booking_settings: Optional[dict] = None
+    is_active: Optional[bool] = None
+
+
+class ConsoleBranchChangeDraftRequest(BaseModel):
+    branch_id: UUID
+    reason: str
+    patch: ConsoleBranchChangePatch
+
+
+class ConsoleBranchChangePublishRequest(BaseModel):
+    confirmation_id: Optional[UUID] = None
+
+
+class ConsoleBranchChangeRollbackRequest(BaseModel):
+    reason: str
+    confirmation_id: Optional[UUID] = None
+
+
 class ConsoleBranchGoLiveDecisionRequest(BaseModel):
     reason: str
 
@@ -583,7 +611,7 @@ class ConsoleOutboxRetryResponse(BaseModel):
     skipped: int
 
 
-ConsoleOpsJobType = Literal["outbox_process", "heal", "metrics_snapshot"]
+ConsoleOpsJobType = Literal["outbox_process", "integration_reconcile", "heal", "metrics_snapshot"]
 ConsoleOpsJobMode = Literal["dry_run", "execute"]
 ConsoleOpsJobStatus = Literal["success", "failed"]
 
@@ -623,6 +651,40 @@ class ConsoleOpsJobRunResponse(BaseModel):
 
 class ConsoleOpsJobListResponse(BaseModel):
     items: list[ConsoleOpsJobRecord]
+    cursor: Optional[str] = None
+    has_more: bool
+
+
+ConsoleBranchChangeStatus = Literal["draft", "validated", "publish_failed", "published", "rolled_back"]
+
+
+class ConsoleBranchChangeRecord(BaseModel):
+    id: UUID
+    branch_id: UUID
+    status: ConsoleBranchChangeStatus
+    reason: str
+    draft_payload: dict
+    diff_payload: dict
+    validation_payload: Optional[dict] = None
+    base_snapshot: dict
+    published_snapshot: Optional[dict] = None
+    rollback_snapshot: Optional[dict] = None
+    publish_error: Optional[str] = None
+    rollback_error: Optional[str] = None
+    created_at: str
+    updated_at: Optional[str] = None
+    validated_at: Optional[str] = None
+    published_at: Optional[str] = None
+    rolled_back_at: Optional[str] = None
+
+
+class ConsoleBranchChangeResponse(BaseModel):
+    change: ConsoleBranchChangeRecord
+    branch: Optional[ConsoleBranch] = None
+
+
+class ConsoleBranchChangeListResponse(BaseModel):
+    items: list[ConsoleBranchChangeRecord]
     cursor: Optional[str] = None
     has_more: bool
 

@@ -1052,6 +1052,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/branch-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List branch changes */
+        get: operations["listAdminBranchChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/branch-changes/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create branch change draft */
+        post: operations["draftAdminBranchChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/branch-changes/{change_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get branch change details */
+        get: operations["getAdminBranchChange"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/branch-changes/{change_id}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate branch change draft */
+        post: operations["validateAdminBranchChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/branch-changes/{change_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish validated branch change */
+        post: operations["publishAdminBranchChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/branch-changes/{change_id}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Roll back published branch change */
+        post: operations["rollbackAdminBranchChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/integrations": {
         parameters: {
             query?: never;
@@ -1613,6 +1715,87 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             is_active?: boolean | null;
+            /** Format: uuid */
+            confirmation_id?: string | null;
+        };
+        BranchChangePatch: {
+            slug?: string | null;
+            name?: string | null;
+            timezone?: string | null;
+            instance_id?: string | null;
+            phone?: string | null;
+            telegram_chat_id?: string | null;
+            knowledge_tag?: string | null;
+            working_hours?: {
+                [key: string]: unknown;
+            } | null;
+            booking_settings?: {
+                [key: string]: unknown;
+            } | null;
+            is_active?: boolean | null;
+        };
+        BranchChangeDraftRequest: {
+            /** Format: uuid */
+            branch_id: string;
+            reason: string;
+            patch: components["schemas"]["BranchChangePatch"];
+        };
+        BranchChangePublishRequest: {
+            /** Format: uuid */
+            confirmation_id?: string | null;
+        };
+        BranchChangeRollbackRequest: {
+            reason: string;
+            /** Format: uuid */
+            confirmation_id?: string | null;
+        };
+        BranchChangeRecord: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            branch_id: string;
+            /** @enum {string} */
+            status: "draft" | "validated" | "publish_failed" | "published" | "rolled_back";
+            reason: string;
+            draft_payload: {
+                [key: string]: unknown;
+            };
+            diff_payload: {
+                [key: string]: unknown;
+            };
+            validation_payload?: {
+                [key: string]: unknown;
+            } | null;
+            base_snapshot: {
+                [key: string]: unknown;
+            };
+            published_snapshot?: {
+                [key: string]: unknown;
+            } | null;
+            rollback_snapshot?: {
+                [key: string]: unknown;
+            } | null;
+            publish_error?: string | null;
+            rollback_error?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at?: string | null;
+            /** Format: date-time */
+            validated_at?: string | null;
+            /** Format: date-time */
+            published_at?: string | null;
+            /** Format: date-time */
+            rolled_back_at?: string | null;
+        };
+        BranchChangeResponse: {
+            change: components["schemas"]["BranchChangeRecord"];
+            branch?: components["schemas"]["Branch"] | null;
+        };
+        BranchChangeListResponse: {
+            items: components["schemas"]["BranchChangeRecord"][];
+            cursor?: string | null;
+            has_more: boolean;
         };
         BranchGoLiveDecisionRequest: {
             reason: string;
@@ -2045,7 +2228,7 @@ export interface components {
         };
         OpsJobDefinition: {
             /** @enum {string} */
-            job_type: "outbox_process" | "heal" | "metrics_snapshot";
+            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot";
             label: string;
             description: string;
             supports_dry_run: boolean;
@@ -2055,7 +2238,7 @@ export interface components {
         };
         OpsJobRunRequest: {
             /** @enum {string} */
-            job_type: "outbox_process" | "heal" | "metrics_snapshot";
+            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot";
             /**
              * @default dry_run
              * @enum {string}
@@ -2069,7 +2252,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            job_type: "outbox_process" | "heal" | "metrics_snapshot";
+            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot";
             /** @enum {string} */
             mode: "dry_run" | "execute";
             /** @enum {string} */
@@ -4527,6 +4710,182 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listAdminBranchChanges: {
+        parameters: {
+            query?: {
+                branch_id?: string;
+                status?: "draft" | "validated" | "publish_failed" | "published" | "rolled_back";
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Branch changes list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BranchChangeListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    draftAdminBranchChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BranchChangeDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Branch change drafted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BranchChangeResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    getAdminBranchChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Branch change details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BranchChangeResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    validateAdminBranchChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Branch change validated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BranchChangeResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    publishAdminBranchChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BranchChangePublishRequest"];
+            };
+        };
+        responses: {
+            /** @description Branch change published */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BranchChangeResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    rollbackAdminBranchChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BranchChangeRollbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Branch change rolled back */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BranchChangeResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
         };
     };

@@ -192,6 +192,8 @@ export default function OpsPage() {
     const [outboxStatus, setOutboxStatus] = useState<OutboxStatusFilter>("failed");
     const [jobType, setJobType] = useState<OpsJobType>("outbox_process");
     const [outboxProcessLimit, setOutboxProcessLimit] = useState<number>(10);
+    const [integrationReconcileLimit, setIntegrationReconcileLimit] = useState<number>(25);
+    const [integrationReconcileBranchIds, setIntegrationReconcileBranchIds] = useState<string>("");
     const [metricsSnapshotDays, setMetricsSnapshotDays] = useState<number>(1);
     const [metricsSnapshotDate, setMetricsSnapshotDate] = useState<string>("");
 
@@ -376,6 +378,16 @@ export default function OpsPage() {
         const params: Record<string, unknown> = {};
         if (jobType === "outbox_process") {
             params.limit = Math.max(1, outboxProcessLimit);
+        }
+        if (jobType === "integration_reconcile") {
+            params.limit = Math.max(1, integrationReconcileLimit);
+            const branchIds = integrationReconcileBranchIds
+                .split(/[\s,]+/)
+                .map((item) => item.trim())
+                .filter((item) => item.length > 0);
+            if (branchIds.length > 0) {
+                params.branch_ids = branchIds;
+            }
         }
         if (jobType === "metrics_snapshot") {
             params.days = Math.max(1, metricsSnapshotDays);
@@ -734,6 +746,33 @@ export default function OpsPage() {
                                     />
                                 </>
                             )}
+                            {jobType === "integration_reconcile" && (
+                                <div className="grid gap-2">
+                                    <div>
+                                        <label className="block text-xs text-muted-foreground mb-1">Limit</label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={200}
+                                            className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm"
+                                            value={integrationReconcileLimit}
+                                            onChange={(event) => setIntegrationReconcileLimit(Number(event.target.value))}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-muted-foreground mb-1">
+                                            Branch IDs (optional, comma or newline separated)
+                                        </label>
+                                        <textarea
+                                            className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-xs font-mono"
+                                            rows={3}
+                                            value={integrationReconcileBranchIds}
+                                            onChange={(event) => setIntegrationReconcileBranchIds(event.target.value)}
+                                            placeholder="uuid-1, uuid-2"
+                                        />
+                                    </div>
+                                </div>
+                            )}
                             {jobType === "metrics_snapshot" && (
                                 <div className="grid gap-2">
                                     <div>
@@ -824,6 +863,20 @@ export default function OpsPage() {
                                                 <span className="text-xs text-muted-foreground">
                                                     {job.error_message || formatJsonPreview(job.result_payload)}
                                                 </span>
+                                                {(() => {
+                                                    const artifactRaw = job.result_payload && typeof job.result_payload === "object"
+                                                        ? job.result_payload["artifact"]
+                                                        : undefined;
+                                                    if (!artifactRaw || typeof artifactRaw !== "object") {
+                                                        return null;
+                                                    }
+                                                    const artifact = artifactRaw as Record<string, unknown>;
+                                                    return (
+                                                        <div className="mt-1 text-[11px] text-muted-foreground">
+                                                            artifact: {String(artifact.artifact_id || "—")}
+                                                        </div>
+                                                    );
+                                                })()}
                                             </td>
                                         </tr>
                                     ))}

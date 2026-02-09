@@ -108,3 +108,31 @@ async def test_run_ops_job_records_failed_status_on_console_error(monkeypatch):
     assert response.job.result_payload["error"]["code"] == "INVALID_PARAM"
     db.commit.assert_called_once()
 
+
+@pytest.mark.asyncio
+async def test_run_ops_job_integration_reconcile_success(monkeypatch):
+    request = SimpleNamespace(query_params={})
+    db = _build_db_with_job_identity()
+    context = _build_context()
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "_require_ops_access", lambda _context, action="read": None)
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+
+    async def _fake_runner(_db, *, context, mode, params):
+        assert mode == "dry_run"
+        assert params == {"limit": 5}
+        assert context.client.id
+        return {"mode": "dry_run", "checked": 2}
+
+    monkeypatch.setattr(console_router, "_run_integration_reconcile_job", _fake_runner)
+
+    response = await console_router.run_ops_job(
+        body=ConsoleOpsJobRunRequest(job_type="integration_reconcile", mode="dry_run", params={"limit": 5}),
+        request=request,
+        db=db,
+    )
+
+    assert response.job.status == "success"
+    assert response.job.result_payload["checked"] == 2
+    assert response.job.result_payload["artifact"]["artifact_type"] == "integration_reconcile_report"
+    db.commit.assert_called_once()

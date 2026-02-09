@@ -339,7 +339,13 @@ def _evaluate_branch_watchdog_reason(
     return None, context, remediated
 
 
-def run_integration_watchdog(db: Session) -> dict:
+def run_integration_watchdog_scoped(
+    db: Session,
+    *,
+    client_id: UUID | None = None,
+    branch_ids: list[UUID] | None = None,
+    dry_run: bool = False,
+) -> dict:
     now = datetime.now(timezone.utc)
     stale_after_minutes = _parse_int_env("INTEGRATION_WATCHDOG_STALE_MINUTES", 120)
     reply_timeout_minutes = _parse_int_env("INTEGRATION_WATCHDOG_REPLY_TIMEOUT_MINUTES", 10)
@@ -349,21 +355,38 @@ def run_integration_watchdog(db: Session) -> dict:
         "no",
         "off",
     }
+    auto_remediate_secret = auto_remediate_secret and not dry_run
 
-    branches = (
-        db.query(Branch)
-        .filter(Branch.is_active.is_(True))
-        .order_by(Branch.created_at.asc(), Branch.id.asc())
-        .all()
-    )
+    query = db.query(Branch).filter(Branch.is_active.is_(True))
+    if client_id is not None:
+        query = query.filter(Branch.client_id == client_id)
+    if branch_ids is not None:
+        if not branch_ids:
+            return {
+                "mode": "dry_run" if dry_run else "execute",
+                "checked": 0,
+                "degraded": 0,
+                "recovered": 0,
+                "remediated": 0,
+                "stale_after_minutes": stale_after_minutes,
+                "reply_timeout_minutes": reply_timeout_minutes,
+                "checked_at": now.isoformat(),
+                "items": [],
+            }
+        query = query.filter(Branch.id.in_(branch_ids))
+
+    branches = query.order_by(Branch.created_at.asc(), Branch.id.asc()).all()
 
     degraded = 0
     recovered = 0
     remediated = 0
     checked = 0
+    items: list[dict[str, object]] = []
 
     for branch in branches:
         checked += 1
+        previous_state = _normalize_state(getattr(branch, "integration_state", None))
+        previous_reason = _clean_text(getattr(branch, "integration_reason", None))
         reason, context, was_remediated = _evaluate_branch_watchdog_reason(
             db,
             branch=branch,
@@ -372,6 +395,29 @@ def run_integration_watchdog(db: Session) -> dict:
             reply_timeout_minutes=reply_timeout_minutes,
             auto_remediate_secret=auto_remediate_secret,
         )
+        next_state = INTEGRATION_STATE_DEGRADED if reason else INTEGRATION_STATE_OK
+        next_reason = reason if reason else None
+        would_change = previous_state != next_state or previous_reason != next_reason
+
+        if dry_run:
+            if would_change:
+                if next_state == INTEGRATION_STATE_DEGRADED:
+                    degraded += 1
+                else:
+                    recovered += 1
+            items.append(
+                {
+                    "branch_id": str(branch.id),
+                    "branch_slug": branch.slug,
+                    "previous_state": previous_state,
+                    "next_state": next_state,
+                    "previous_reason": previous_reason,
+                    "next_reason": next_reason,
+                    "would_change": would_change,
+                    "context": context,
+                }
+            )
+            continue
 
         if was_remediated:
             remediated += 1
@@ -390,6 +436,7 @@ def run_integration_watchdog(db: Session) -> dict:
                 branch_id=branch.id,
             )
 
+        changed = False
         if reason:
             changed = degrade_branch_integration(
                 db,
@@ -401,22 +448,35 @@ def run_integration_watchdog(db: Session) -> dict:
             )
             if changed:
                 degraded += 1
-            continue
+        else:
+            changed = recover_branch_integration(
+                db,
+                branch=branch,
+                source="integration_watchdog",
+                context=context,
+                checked_at=now,
+            )
+            if changed:
+                recovered += 1
 
-        changed = recover_branch_integration(
-            db,
-            branch=branch,
-            source="integration_watchdog",
-            context=context,
-            checked_at=now,
+        items.append(
+            {
+                "branch_id": str(branch.id),
+                "branch_slug": branch.slug,
+                "previous_state": previous_state,
+                "next_state": next_state,
+                "previous_reason": previous_reason,
+                "next_reason": next_reason,
+                "changed": changed,
+                "context": context,
+            }
         )
-        if changed:
-            recovered += 1
 
-    if checked or degraded or recovered or remediated:
+    if not dry_run and (checked or degraded or recovered or remediated):
         db.commit()
 
     result = {
+        "mode": "dry_run" if dry_run else "execute",
         "checked": checked,
         "degraded": degraded,
         "recovered": recovered,
@@ -424,9 +484,14 @@ def run_integration_watchdog(db: Session) -> dict:
         "stale_after_minutes": stale_after_minutes,
         "reply_timeout_minutes": reply_timeout_minutes,
         "checked_at": now.isoformat(),
+        "items": items,
     }
     logger.info("Integration watchdog run", extra={"context": result})
     return result
+
+
+def run_integration_watchdog(db: Session) -> dict:
+    return run_integration_watchdog_scoped(db, dry_run=False)
 
 
 __all__ = [
@@ -443,4 +508,5 @@ __all__ = [
     "recover_branch_integration",
     "report_integration_incident",
     "run_integration_watchdog",
+    "run_integration_watchdog_scoped",
 ]

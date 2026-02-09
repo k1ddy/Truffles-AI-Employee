@@ -1,0 +1,25 @@
+# SESSION 2026-02-09-unified-pr4bc-cicd-a22 — Session 2026-02-09-unified-pr4bc-cicd-a22
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-09-unified-pr4bc-cicd-a22.md
+- branch: feat/2026-02-09-unified-pr4bc-cicd-a22
+- worktree: /home/zhan/worktrees/2026-02-09-unified-pr4bc-cicd-a22
+- base_ref: origin/main
+- scope: Unified PR для CI/CD anti-repeat, ops job integration_reconcile и branch change-management (draft/validate/publish/rollback).
+- done:
+  - CI/CD deploy parity gate: API SHA + console SHA must match merged SHA.
+  - Mandatory console-web deploy in pipeline path filters and SSH deploy script.
+  - Added ops job `integration_reconcile` with scoped dry-run/execute + artifact payload.
+  - Added branch change management backend: model, migration, schemas, endpoints.
+  - Updated OpenAPI + regenerated TS API types.
+  - Added UI support in Ops page and Tenants page for new workflows.
+  - Added regression tests for ops job and branch change guards.
+- next:
+  - Push branch and open single PR with CI evidence.
+  - После merge: проверить build SHA в Settings и `/admin/version`.
+- evidence:
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check`
+  - `cd truffles-api && pytest -q tests/test_console_*`
+  - `cd console-web && npm run build`
+- last_updated: 2026-02-09

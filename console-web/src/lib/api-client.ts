@@ -532,6 +532,7 @@ export type ListIntegrationsParams = operations["listAdminIntegrations"]["parame
 export type ListMembershipsParams = operations["listAdminMemberships"]["parameters"]["query"];
 export type ListReferencePacksParams = operations["listAdminReferencePacks"]["parameters"]["query"];
 export type ListOpsJobsParams = operations["listOpsJobs"]["parameters"]["query"];
+export type ListBranchChangesParams = operations["listAdminBranchChanges"]["parameters"]["query"];
 export type BranchGoLiveDecisionRequest = { reason: string };
 export type BranchGoLiveWaiverRequest = { reason: string; ttl_hours: number };
 
@@ -665,6 +666,18 @@ export const adminApi = {
         apiClient.post<components["schemas"]["BranchCreateResponse"]>("/admin/branches", data),
     patchBranch: (branchId: string, data: components["schemas"]["BranchUpdateRequest"]) =>
         apiClient.patch<components["schemas"]["Branch"]>(`/admin/branches/${branchId}`, data),
+    listBranchChanges: (params?: ListBranchChangesParams) =>
+        apiClient.get<components["schemas"]["BranchChangeListResponse"]>("/admin/branch-changes", { params }),
+    getBranchChange: (changeId: string) =>
+        apiClient.get<components["schemas"]["BranchChangeResponse"]>(`/admin/branch-changes/${changeId}`),
+    draftBranchChange: (data: components["schemas"]["BranchChangeDraftRequest"]) =>
+        apiClient.post<components["schemas"]["BranchChangeResponse"]>("/admin/branch-changes/draft", data),
+    validateBranchChange: (changeId: string) =>
+        apiClient.post<components["schemas"]["BranchChangeResponse"]>(`/admin/branch-changes/${changeId}/validate`),
+    publishBranchChange: (changeId: string, data: components["schemas"]["BranchChangePublishRequest"]) =>
+        apiClient.post<components["schemas"]["BranchChangeResponse"]>(`/admin/branch-changes/${changeId}/publish`, data),
+    rollbackBranchChange: (changeId: string, data: components["schemas"]["BranchChangeRollbackRequest"]) =>
+        apiClient.post<components["schemas"]["BranchChangeResponse"]>(`/admin/branch-changes/${changeId}/rollback`, data),
     approveBranchGoLive: (branchId: string, data: BranchGoLiveDecisionRequest) =>
         apiClient.post<components["schemas"]["Branch"]>(`/admin/branches/${branchId}/go-live/approve`, data),
     rejectBranchGoLive: (branchId: string, data: BranchGoLiveDecisionRequest) =>
