@@ -15,6 +15,7 @@
   - Updated OpenAPI + regenerated TS API types.
   - Added UI support in Ops page and Tenants page for new workflows.
   - Added regression tests for ops job and branch change guards.
+  - Deploy hardening: auto-move untracked files that conflict with `origin/main` before `git pull --ff-only` on host.
 - next:
   - Push branch and open single PR with CI evidence.
   - После merge: проверить build SHA в Settings и `/admin/version`.

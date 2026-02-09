@@ -698,6 +698,30 @@ jobs:
             fi
             git -C "${REPO_ROOT}" fetch origin
             git -C "${REPO_ROOT}" checkout main
+            if [ -n "$(git -C "${REPO_ROOT}" status --porcelain --untracked-files=no)" ]; then
+              echo "ERROR: tracked changes exist in ${REPO_ROOT}; cannot fast-forward safely" >&2
+              git -C "${REPO_ROOT}" status --short >&2 || true
+              exit 1
+            fi
+            mapfile -t CONFLICTING_UNTRACKED < <(
+              git -C "${REPO_ROOT}" ls-files --others --exclude-standard | while read -r rel_path; do
+                if git -C "${REPO_ROOT}" cat-file -e "origin/main:${rel_path}" 2>/dev/null; then
+                  printf '%s\n' "${rel_path}"
+                fi
+              done
+            )
+            if [ "${#CONFLICTING_UNTRACKED[@]}" -gt 0 ]; then
+              BACKUP_DIR="${REPO_ROOT}/.deploy-untracked-backup/$(date -u +%Y%m%dT%H%M%SZ)"
+              mkdir -p "${BACKUP_DIR}"
+              echo "Found ${#CONFLICTING_UNTRACKED[@]} conflicting untracked paths; moving to ${BACKUP_DIR}"
+              for rel_path in "${CONFLICTING_UNTRACKED[@]}"; do
+                src_path="${REPO_ROOT}/${rel_path}"
+                dst_path="${BACKUP_DIR}/${rel_path}"
+                mkdir -p "$(dirname "${dst_path}")"
+                mv "${src_path}" "${dst_path}"
+                echo "moved: ${rel_path}"
+              done
+            fi
             git -C "${REPO_ROOT}" pull --ff-only origin main
             echo "Host repo HEAD after sync: $(git -C "${REPO_ROOT}" rev-parse HEAD)"
 
