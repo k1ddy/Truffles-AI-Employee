@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -10,6 +11,9 @@ from app.schemas.console import (
     ConsoleAgentCreateRequest,
     ConsoleBranchBootstrapAccountTemplate,
     ConsoleBranchCreateRequest,
+    ConsoleBranchGoLiveDecisionRequest,
+    ConsoleBranchGoLiveWaiverRequest,
+    ConsoleBranchUpdateRequest,
 )
 from app.services.console_errors import ConsoleAPIError
 
@@ -322,3 +326,209 @@ def test_agent_lifecycle_guard_blocks_last_privileged_agent(monkeypatch):
         )
 
     assert exc_info.value.code == "INVALID_STATE"
+
+
+def test_require_branch_go_live_gate_blocks_pending_state():
+    branch = SimpleNamespace(
+        go_live_state="pending",
+        go_live_reason="missing approvals",
+        go_live_waiver_until=None,
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._require_branch_go_live_gate(branch, operation="branch_activate")
+
+    assert exc_info.value.code == "GO_LIVE_GATE_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_update_branch_blocks_activation_without_go_live_approval(monkeypatch):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        slug="branch-a",
+        name="Branch A",
+        instance_id="inst-1",
+        phone="+77001112233",
+        telegram_chat_id=None,
+        knowledge_tag=None,
+        timezone="Asia/Almaty",
+        working_hours={},
+        booking_settings={},
+        is_active=False,
+        onboarding_state="booking",
+        onboarding_updated_at=None,
+        go_live_state="pending",
+        go_live_reason=None,
+        go_live_reviewed_at=None,
+        go_live_reviewed_by=None,
+        go_live_waiver_until=None,
+        go_live_waiver_reason=None,
+        go_live_waiver_by=None,
+        updated_at=None,
+    )
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = branch
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=branch.client_id, company_id=uuid4())],
+            client_id=branch.client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.update_branch(
+            branch_id=branch.id,
+            request=Mock(),
+            body=ConsoleBranchUpdateRequest(is_active=True),
+            db=db,
+        )
+
+    assert exc_info.value.code == "GO_LIVE_GATE_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_approve_branch_go_live_sets_state_and_clears_waiver(monkeypatch):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        go_live_state="pending",
+        go_live_reason=None,
+        go_live_reviewed_at=None,
+        go_live_reviewed_by=None,
+        go_live_waiver_until=datetime.now(timezone.utc) + timedelta(hours=2),
+        go_live_waiver_reason="old waiver",
+        go_live_waiver_by=uuid4(),
+        updated_at=None,
+        slug="branch-a",
+        name="Branch A",
+        is_active=False,
+        instance_id="inst-1",
+        telegram_chat_id=None,
+        phone="+77001112233",
+        knowledge_tag=None,
+        timezone="Asia/Almaty",
+        working_hours={},
+        booking_settings={},
+        onboarding_state="booking",
+        onboarding_updated_at=None,
+    )
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = branch
+
+    actor_id = uuid4()
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: SimpleNamespace(
+            agent=SimpleNamespace(id=actor_id, name="Actor", role="platform_admin"),
+            role="platform_admin",
+            client=SimpleNamespace(id=branch.client_id, company_id=uuid4()),
+            accessible_clients=[SimpleNamespace(id=branch.client_id, company_id=uuid4())],
+            branches=[],
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "build_onboarding_inputs", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(console_router, "missing_prerequisites", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+
+    response = await console_router.approve_branch_go_live(
+        branch_id=branch.id,
+        request=Mock(),
+        body=ConsoleBranchGoLiveDecisionRequest(reason="checklist passed"),
+        db=db,
+    )
+
+    assert response.go_live_state == "approved"
+    assert response.go_live_allowed is True
+    assert branch.go_live_state == "approved"
+    assert branch.go_live_waiver_until is None
+    assert branch.go_live_waiver_reason is None
+    assert branch.go_live_waiver_by is None
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_approve_branch_go_live_requires_prerequisites(monkeypatch):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        go_live_state="pending",
+        go_live_reason=None,
+        go_live_reviewed_at=None,
+        go_live_reviewed_by=None,
+        go_live_waiver_until=None,
+        go_live_waiver_reason=None,
+        go_live_waiver_by=None,
+        updated_at=None,
+    )
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = branch
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=branch.client_id, company_id=uuid4())],
+            client_id=branch.client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "build_onboarding_inputs", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(console_router, "missing_prerequisites", lambda *_args, **_kwargs: ["payment_confirmed"])
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.approve_branch_go_live(
+            branch_id=branch.id,
+            request=Mock(),
+            body=ConsoleBranchGoLiveDecisionRequest(reason="force"),
+            db=db,
+        )
+
+    assert exc_info.value.code == "GO_LIVE_GATE_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_waive_branch_go_live_validates_ttl(monkeypatch):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        go_live_state="pending",
+        go_live_reason=None,
+        go_live_reviewed_at=None,
+        go_live_reviewed_by=None,
+        go_live_waiver_until=None,
+        go_live_waiver_reason=None,
+        go_live_waiver_by=None,
+        updated_at=None,
+    )
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = branch
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=branch.client_id, company_id=uuid4())],
+            client_id=branch.client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.waive_branch_go_live(
+            branch_id=branch.id,
+            request=Mock(),
+            body=ConsoleBranchGoLiveWaiverRequest(reason="temporary", ttl_hours=0),
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"

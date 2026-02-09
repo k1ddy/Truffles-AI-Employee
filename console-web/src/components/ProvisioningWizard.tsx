@@ -5,7 +5,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import toast from "react-hot-toast";
 import type { components } from "@/types/api.generated";
-import { adminApi, authApi, canAccessConsole, onboardingApi, type ConsoleRole, type ConsoleSection } from "@/lib/api-client";
+import {
+    adminApi,
+    authApi,
+    canAccessConsole,
+    onboardingApi,
+    type BranchGoLiveDecisionRequest,
+    type BranchGoLiveWaiverRequest,
+    type ConsoleRole,
+    type ConsoleSection,
+} from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 
 type SessionData = ReturnType<typeof useSession>["data"];
@@ -558,6 +567,8 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     });
     const [autopilotServices, setAutopilotServices] = useState<OnboardingPurchasedService[]>(["whatsapp"]);
     const [autopilotResult, setAutopilotResult] = useState<OnboardingAutopilotResponse | null>(null);
+    const [goLiveDecisionReason, setGoLiveDecisionReason] = useState("");
+    const [goLiveWaiverHours, setGoLiveWaiverHours] = useState("24");
 
     useEffect(() => {
         if (!clientId && meData?.client?.id) {
@@ -1015,6 +1026,72 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         },
     });
 
+    const approveGoLiveMutation = useMutation({
+        mutationFn: async (payload: BranchGoLiveDecisionRequest) => {
+            if (!branchData?.id) {
+                throw new Error("BRANCH_REQUIRED");
+            }
+            const response = await adminApi.approveBranchGoLive(branchData.id, payload);
+            return response.data;
+        },
+        onSuccess: (data) => {
+            setBranchData(data as ProvisioningBranch);
+            refetchOnboarding();
+            toast.success("Go-live одобрен");
+        },
+        onError: (error) => {
+            if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
+                toast.error("Сначала создайте филиал");
+                return;
+            }
+            handleError(error);
+        },
+    });
+
+    const rejectGoLiveMutation = useMutation({
+        mutationFn: async (payload: BranchGoLiveDecisionRequest) => {
+            if (!branchData?.id) {
+                throw new Error("BRANCH_REQUIRED");
+            }
+            const response = await adminApi.rejectBranchGoLive(branchData.id, payload);
+            return response.data;
+        },
+        onSuccess: (data) => {
+            setBranchData(data as ProvisioningBranch);
+            refetchOnboarding();
+            toast.success("Go-live отклонен");
+        },
+        onError: (error) => {
+            if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
+                toast.error("Сначала создайте филиал");
+                return;
+            }
+            handleError(error);
+        },
+    });
+
+    const waiveGoLiveMutation = useMutation({
+        mutationFn: async (payload: BranchGoLiveWaiverRequest) => {
+            if (!branchData?.id) {
+                throw new Error("BRANCH_REQUIRED");
+            }
+            const response = await adminApi.waiveBranchGoLive(branchData.id, payload);
+            return response.data;
+        },
+        onSuccess: (data) => {
+            setBranchData(data as ProvisioningBranch);
+            refetchOnboarding();
+            toast.success("Go-live waiver сохранен");
+        },
+        onError: (error) => {
+            if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
+                toast.error("Сначала создайте филиал");
+                return;
+            }
+            handleError(error);
+        },
+    });
+
     const createAgentMutation = useMutation({
         mutationFn: async (payload: components["schemas"]["AgentCreateRequest"]) => {
             const response = await adminApi.createAgent(payload);
@@ -1325,6 +1402,12 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const missingRequirements = readinessItems.filter((item) => item.required && !item.ok);
     const goNoGoMissing = stepStateById.go_no_go?.missing ?? [];
     const goNoGoReady = missingRequirements.length === 0 && goNoGoMissing.length === 0;
+    const branchGoLiveState = ((branchData as Record<string, unknown> | null)?.go_live_state ?? "pending") as
+        "pending" | "approved" | "rejected";
+    const branchGoLiveReason = (branchData as Record<string, unknown> | null)?.go_live_reason;
+    const branchGoLiveAllowed = Boolean((branchData as Record<string, unknown> | null)?.go_live_allowed);
+    const branchGoLiveWaiverActive = Boolean((branchData as Record<string, unknown> | null)?.go_live_waiver_active);
+    const branchGoLiveWaiverUntil = (branchData as Record<string, unknown> | null)?.go_live_waiver_until;
     const autopilotPhone = autopilotForm.phone.trim();
     const autopilotInstanceId = autopilotForm.instanceId.trim();
     const autopilotCompanyRef = companyId.trim() || autopilotForm.companyName.trim();
@@ -1364,6 +1447,71 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         ));
     };
 
+    const handleApproveGoLive = () => {
+        const reason = goLiveDecisionReason.trim();
+        if (!branchData?.id) {
+            toast.error("Сначала создайте филиал");
+            return;
+        }
+        if (!reason) {
+            toast.error("Укажите reason для approve");
+            return;
+        }
+        approveGoLiveMutation.mutate(
+            { reason },
+            {
+                onSuccess: () => {
+                    setGoLiveDecisionReason("");
+                },
+            },
+        );
+    };
+
+    const handleRejectGoLive = () => {
+        const reason = goLiveDecisionReason.trim();
+        if (!branchData?.id) {
+            toast.error("Сначала создайте филиал");
+            return;
+        }
+        if (!reason) {
+            toast.error("Укажите reason для reject");
+            return;
+        }
+        rejectGoLiveMutation.mutate(
+            { reason },
+            {
+                onSuccess: () => {
+                    setGoLiveDecisionReason("");
+                },
+            },
+        );
+    };
+
+    const handleWaiveGoLive = () => {
+        const reason = goLiveDecisionReason.trim();
+        const ttlHours = Number.parseInt(goLiveWaiverHours, 10);
+        if (!branchData?.id) {
+            toast.error("Сначала создайте филиал");
+            return;
+        }
+        if (!reason) {
+            toast.error("Укажите reason для waiver");
+            return;
+        }
+        if (!Number.isFinite(ttlHours) || ttlHours <= 0) {
+            toast.error("ttl_hours должен быть положительным числом");
+            return;
+        }
+        waiveGoLiveMutation.mutate(
+            { reason, ttl_hours: ttlHours },
+            {
+                onSuccess: () => {
+                    setGoLiveDecisionReason("");
+                },
+            },
+        );
+    };
+
     const handleRunAutopilot = () => {
         if (autopilotMissingInputs.length > 0) {
             toast.error(`Не хватает данных: ${autopilotMissingInputs.join(", ")}`);
@@ -1384,7 +1532,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             domain_slug: autopilotForm.domainSlug.trim() || undefined,
             purchased_services: autopilotServices.length ? autopilotServices : undefined,
             client_data_text: autopilotClientDataText || undefined,
-            activate_branch: true,
+            activate_branch: false,
             auto_create_reference_pack: true,
             auto_publish_knowledge: false,
         };
@@ -3117,6 +3265,75 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                         </div>
                                     </div>
                                 )}
+                                <div className="rounded-lg border border-border/60 bg-muted/10 p-3 space-y-2">
+                                    <h5 className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                                        Go-Live Gate
+                                    </h5>
+                                    <p className="text-xs">
+                                        status: <span className="font-mono">{branchGoLiveState}</span> · allowed:{" "}
+                                        <span className={branchGoLiveAllowed ? "text-green-700" : "text-destructive"}>
+                                            {branchGoLiveAllowed ? "yes" : "no"}
+                                        </span>
+                                    </p>
+                                    {branchGoLiveReason && (
+                                        <p className="text-xs text-muted-foreground">
+                                            reason: <span className="font-mono">{String(branchGoLiveReason)}</span>
+                                        </p>
+                                    )}
+                                    {branchGoLiveWaiverUntil && (
+                                        <p className="text-xs text-muted-foreground">
+                                            waiver_until: <span className="font-mono">{String(branchGoLiveWaiverUntil)}</span>
+                                            {" · "}
+                                            {branchGoLiveWaiverActive ? "active" : "expired"}
+                                        </p>
+                                    )}
+                                    <textarea
+                                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs"
+                                        rows={2}
+                                        value={goLiveDecisionReason}
+                                        onChange={(event) => setGoLiveDecisionReason(event.target.value)}
+                                        placeholder="reason for approve / reject / waiver"
+                                        disabled={!canEdit}
+                                    />
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={720}
+                                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs"
+                                            value={goLiveWaiverHours}
+                                            onChange={(event) => setGoLiveWaiverHours(event.target.value)}
+                                            placeholder="waiver ttl_hours"
+                                            disabled={!canEdit}
+                                        />
+                                        <button
+                                            type="button"
+                                            className="btn-ghost"
+                                            onClick={handleWaiveGoLive}
+                                            disabled={!canEdit || waiveGoLiveMutation.isPending}
+                                        >
+                                            {waiveGoLiveMutation.isPending ? "Waiving..." : "Waive TTL"}
+                                        </button>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        <button
+                                            type="button"
+                                            className="btn-primary"
+                                            onClick={handleApproveGoLive}
+                                            disabled={!canEdit || approveGoLiveMutation.isPending}
+                                        >
+                                            {approveGoLiveMutation.isPending ? "Approving..." : "Approve Go-Live"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="btn-ghost"
+                                            onClick={handleRejectGoLive}
+                                            disabled={!canEdit || rejectGoLiveMutation.isPending}
+                                        >
+                                            {rejectGoLiveMutation.isPending ? "Rejecting..." : "Reject Go-Live"}
+                                        </button>
+                                    </div>
+                                </div>
                                 {bookingEnabled && (
                                     <label className="flex items-center gap-2 text-sm">
                                         <input

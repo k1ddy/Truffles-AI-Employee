@@ -54,6 +54,7 @@ ConsoleAgentRole = Literal[
     "viewer",
 ]
 ConsoleMembershipScope = Literal["company", "client", "branch"]
+ConsoleGoLiveState = Literal["pending", "approved", "rejected"]
 
 
 class ConsoleCompany(BaseModel):
@@ -99,6 +100,15 @@ class ConsoleBranch(BaseModel):
     booking_settings: Optional[dict] = None
     onboarding_state: Optional[str] = None
     onboarding_updated_at: Optional[str] = None
+    go_live_state: ConsoleGoLiveState = "pending"
+    go_live_reason: Optional[str] = None
+    go_live_reviewed_at: Optional[str] = None
+    go_live_reviewed_by: Optional[UUID] = None
+    go_live_waiver_until: Optional[str] = None
+    go_live_waiver_reason: Optional[str] = None
+    go_live_waiver_by: Optional[UUID] = None
+    go_live_waiver_active: bool = False
+    go_live_allowed: bool = False
 
 
 class ConsoleCompanyListResponse(BaseModel):
@@ -240,6 +250,15 @@ class ConsoleBranchUpdateRequest(BaseModel):
     booking_settings: Optional[dict] = None
     is_active: Optional[bool] = None
     confirmation_id: Optional[UUID] = None
+
+
+class ConsoleBranchGoLiveDecisionRequest(BaseModel):
+    reason: str
+
+
+class ConsoleBranchGoLiveWaiverRequest(BaseModel):
+    reason: str
+    ttl_hours: int
 
 
 OnboardingStepId = Literal[
@@ -769,7 +788,7 @@ class ConsoleOnboardingAutopilotRequest(BaseModel):
     purchased_services: Optional[list[OnboardingPurchasedService]] = None
     client_data_text: Optional[str] = None
     client_data_json: Optional[dict] = None
-    activate_branch: Optional[bool] = True
+    activate_branch: Optional[bool] = False
     auto_create_reference_pack: Optional[bool] = True
     auto_publish_knowledge: Optional[bool] = False
 

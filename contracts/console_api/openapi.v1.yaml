@@ -1664,6 +1664,116 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /admin/branches/{branch_id}/go-live/approve:
+    post:
+      operationId: approveAdminBranchGoLive
+      tags: [admin]
+      summary: Approve branch go-live
+      parameters:
+        - name: branch_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchGoLiveDecisionRequest"
+      responses:
+        "200":
+          description: Go-live approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/branches/{branch_id}/go-live/reject:
+    post:
+      operationId: rejectAdminBranchGoLive
+      tags: [admin]
+      summary: Reject branch go-live
+      parameters:
+        - name: branch_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchGoLiveDecisionRequest"
+      responses:
+        "200":
+          description: Go-live rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/branches/{branch_id}/go-live/waive:
+    post:
+      operationId: waiveAdminBranchGoLive
+      tags: [admin]
+      summary: Create temporary go-live waiver
+      parameters:
+        - name: branch_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchGoLiveWaiverRequest"
+      responses:
+        "200":
+          description: Go-live waiver applied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branch"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /admin/integrations:
     get:
       operationId: listAdminIntegrations
@@ -2744,6 +2854,38 @@ components:
           type: string
           format: date-time
           nullable: true
+        go_live_state:
+          type: string
+          enum: [pending, approved, rejected]
+          default: pending
+        go_live_reason:
+          type: string
+          nullable: true
+        go_live_reviewed_at:
+          type: string
+          format: date-time
+          nullable: true
+        go_live_reviewed_by:
+          type: string
+          format: uuid
+          nullable: true
+        go_live_waiver_until:
+          type: string
+          format: date-time
+          nullable: true
+        go_live_waiver_reason:
+          type: string
+          nullable: true
+        go_live_waiver_by:
+          type: string
+          format: uuid
+          nullable: true
+        go_live_waiver_active:
+          type: boolean
+          default: false
+        go_live_allowed:
+          type: boolean
+          default: false
 
     BranchBootstrapAccountTemplate:
       type: object
@@ -2849,6 +2991,24 @@ components:
         is_active:
           type: boolean
           nullable: true
+
+    BranchGoLiveDecisionRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+
+    BranchGoLiveWaiverRequest:
+      type: object
+      required: [reason, ttl_hours]
+      properties:
+        reason:
+          type: string
+        ttl_hours:
+          type: integer
+          minimum: 1
+          maximum: 720
 
     BranchListResponse:
       type: object
@@ -4518,6 +4678,7 @@ components:
         activate_branch:
           type: boolean
           nullable: true
+          default: false
         auto_create_reference_pack:
           type: boolean
           nullable: true
