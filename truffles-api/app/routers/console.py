@@ -60,6 +60,8 @@ from app.schemas.console import (
     ConsoleBranchBootstrapAccountTemplate,
     ConsoleBranchCreateRequest,
     ConsoleBranchCreateResponse,
+    ConsoleBranchGoLiveDecisionRequest,
+    ConsoleBranchGoLiveWaiverRequest,
     ConsoleBranchIntegrationStatus,
     ConsoleBranchListResponse,
     ConsoleBranchUpdateRequest,
@@ -235,21 +237,7 @@ def _build_me_response(context: ConsoleAuthContext) -> ConsoleMeResponse:
         )
         for company in context.companies
     ]
-    branches = [
-        ConsoleBranch(
-            id=branch.id,
-            slug=branch.slug,
-            name=branch.name,
-            is_active=branch.is_active,
-            instance_id=branch.instance_id,
-            telegram_chat_id=branch.telegram_chat_id,
-            onboarding_state=branch.onboarding_state,
-            onboarding_updated_at=branch.onboarding_updated_at.isoformat()
-            if branch.onboarding_updated_at
-            else None,
-        )
-        for branch in context.branches
-    ]
+    branches = [_serialize_branch(branch) for branch in context.branches]
     clients = [
         {
             "id": client.id,
@@ -474,6 +462,10 @@ def _ensure_unique_branch_field(
 
 
 def _serialize_branch(branch: Branch) -> ConsoleBranch:
+    go_live_state = _normalize_branch_go_live_state(getattr(branch, "go_live_state", None))
+    go_live_reviewed_at = _coerce_utc(getattr(branch, "go_live_reviewed_at", None))
+    go_live_waiver_until = _coerce_utc(getattr(branch, "go_live_waiver_until", None))
+    go_live_waiver_active = _is_branch_go_live_waiver_active(branch)
     return ConsoleBranch(
         id=branch.id,
         slug=branch.slug,
@@ -490,6 +482,15 @@ def _serialize_branch(branch: Branch) -> ConsoleBranch:
         onboarding_updated_at=branch.onboarding_updated_at.isoformat()
         if branch.onboarding_updated_at
         else None,
+        go_live_state=go_live_state,
+        go_live_reason=getattr(branch, "go_live_reason", None),
+        go_live_reviewed_at=go_live_reviewed_at.isoformat() if go_live_reviewed_at else None,
+        go_live_reviewed_by=getattr(branch, "go_live_reviewed_by", None),
+        go_live_waiver_until=go_live_waiver_until.isoformat() if go_live_waiver_until else None,
+        go_live_waiver_reason=getattr(branch, "go_live_waiver_reason", None),
+        go_live_waiver_by=getattr(branch, "go_live_waiver_by", None),
+        go_live_waiver_active=go_live_waiver_active,
+        go_live_allowed=go_live_state == "approved" or go_live_waiver_active,
     )
 
 
@@ -915,6 +916,10 @@ _ACCESS_REASON_MAX_LEN = 500
 _PRIVILEGED_ACCESS_ROLES = {"platform_admin", "owner", "admin"}
 _CLIENT_ARCHIVE_SAMPLE_LIMIT = 20
 _BRANCH_BOOTSTRAP_ACCOUNTS_MAX = 20
+_BRANCH_GO_LIVE_STATES = {"pending", "approved", "rejected"}
+_BRANCH_GO_LIVE_DEFAULT_STATE = "pending"
+_GO_LIVE_WAIVER_MIN_HOURS = 1
+_GO_LIVE_WAIVER_MAX_HOURS = 24 * 30
 _INTEGRATION_DEFAULT_STALE_MINUTES = 60
 _INTEGRATION_MIN_STALE_MINUTES = 5
 _INTEGRATION_MAX_STALE_MINUTES = 24 * 60
@@ -1005,6 +1010,75 @@ def _normalize_access_reason(
     if value and len(value) > _ACCESS_REASON_MAX_LEN:
         raise ConsoleAPIError(400, "INVALID_PARAM", "reason too long")
     return value or None
+
+
+def _normalize_branch_go_live_state(value: Optional[str]) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in _BRANCH_GO_LIVE_STATES:
+        return normalized
+    return _BRANCH_GO_LIVE_DEFAULT_STATE
+
+
+def _normalize_go_live_waiver_ttl_hours(value: int) -> int:
+    if value < _GO_LIVE_WAIVER_MIN_HOURS or value > _GO_LIVE_WAIVER_MAX_HOURS:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"ttl_hours must be between {_GO_LIVE_WAIVER_MIN_HOURS} and {_GO_LIVE_WAIVER_MAX_HOURS}",
+        )
+    return value
+
+
+def _coerce_utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _is_branch_go_live_waiver_active(
+    branch: Branch,
+    *,
+    now: Optional[datetime] = None,
+) -> bool:
+    waiver_until = _coerce_utc(getattr(branch, "go_live_waiver_until", None))
+    if waiver_until is None:
+        return False
+    current = now or datetime.now(timezone.utc)
+    return waiver_until > current
+
+
+def _is_branch_go_live_allowed(
+    branch: Branch,
+    *,
+    now: Optional[datetime] = None,
+) -> bool:
+    go_live_state = _normalize_branch_go_live_state(getattr(branch, "go_live_state", None))
+    if go_live_state == "approved":
+        return True
+    return _is_branch_go_live_waiver_active(branch, now=now)
+
+
+def _require_branch_go_live_gate(branch: Branch, *, operation: str) -> None:
+    now = datetime.now(timezone.utc)
+    go_live_state = _normalize_branch_go_live_state(getattr(branch, "go_live_state", None))
+    waiver_active = _is_branch_go_live_waiver_active(branch, now=now)
+    if go_live_state == "approved" or waiver_active:
+        return
+    waiver_until = _coerce_utc(getattr(branch, "go_live_waiver_until", None))
+    raise ConsoleAPIError(
+        409,
+        "GO_LIVE_GATE_REQUIRED",
+        "Go-live approval required before branch activation",
+        {
+            "operation": operation,
+            "go_live_state": go_live_state,
+            "go_live_reason": getattr(branch, "go_live_reason", None),
+            "go_live_waiver_active": waiver_active,
+            "go_live_waiver_until": waiver_until.isoformat() if waiver_until else None,
+        },
+    )
 
 
 def _accessible_client_ids(context: ConsoleAuthContext) -> set[UUID]:
@@ -4702,17 +4776,7 @@ async def get_settings(
         )
     
     return ConsoleSettingsResponse(
-        branches=[
-            ConsoleBranch(
-                id=b.id,
-                slug=b.slug,
-                name=b.name,
-                is_active=b.is_active,
-                instance_id=b.instance_id,
-                telegram_chat_id=b.telegram_chat_id,
-            )
-            for b in branches
-        ],
+        branches=[_serialize_branch(branch) for branch in branches],
         agents=[
             ConsoleAgentInfo(
                 id=a.id,
@@ -6925,6 +6989,7 @@ async def create_branch(
         is_active=is_active,
         onboarding_state=OnboardingStep.BRANCH_DRAFT.value,
         onboarding_updated_at=now,
+        go_live_state=_BRANCH_GO_LIVE_DEFAULT_STATE,
         created_at=now,
         updated_at=now,
     )
@@ -6958,6 +7023,8 @@ async def create_branch(
         )
     if created_agents:
         ensure_onboarding_step(db, branch, OnboardingStep.TEAM)
+    if branch.is_active:
+        _require_branch_go_live_gate(branch, operation="branch_activate")
 
     record_audit_event(
         db,
@@ -7097,6 +7164,8 @@ async def update_branch(
 
     if is_active and not instance_id:
         raise ConsoleAPIError(400, "INVALID_PARAM", "instance_id required to activate branch")
+    if is_active and not branch.is_active:
+        _require_branch_go_live_gate(branch, operation="branch_activate")
 
     requires_confirmation = False
     if "is_active" in fields_set and is_active is False and branch.is_active:
@@ -7154,6 +7223,182 @@ async def update_branch(
             )
         db.commit()
 
+    return _serialize_branch(branch)
+
+
+@router.post(
+    "/admin/branches/{branch_id}/go-live/approve",
+    response_model=ConsoleBranch,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}, 409: {"model": ConsoleErrorResponse}},
+)
+async def approve_branch_go_live(
+    branch_id: UUID,
+    request: Request,
+    body: ConsoleBranchGoLiveDecisionRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleBranch:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage go-live gate",
+    )
+
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    _require_client_access(context, branch.client_id)
+
+    reason = _normalize_access_reason(body.reason, required=True)
+    inputs = build_onboarding_inputs(db, branch)
+    missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
+    if missing:
+        raise ConsoleAPIError(
+            409,
+            "GO_LIVE_GATE_REQUIRED",
+            "Go-live prerequisites missing",
+            {
+                "operation": "branch_go_live_approve",
+                "go_live_state": _normalize_branch_go_live_state(branch.go_live_state),
+                "required_step": OnboardingStep.GO_NO_GO.value,
+                "missing": missing,
+            },
+        )
+
+    now = datetime.now(timezone.utc)
+    previous_state = _normalize_branch_go_live_state(branch.go_live_state)
+    branch.go_live_state = "approved"
+    branch.go_live_reason = reason
+    branch.go_live_reviewed_at = now
+    branch.go_live_reviewed_by = context.agent.id
+    branch.go_live_waiver_until = None
+    branch.go_live_waiver_reason = None
+    branch.go_live_waiver_by = None
+    branch.updated_at = now
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="branch_go_live_approved",
+        entity_type="branch",
+        entity_id=branch.id,
+        payload={
+            "previous_state": previous_state,
+            "next_state": "approved",
+            "reason": reason,
+        },
+        client_id=branch.client_id,
+        branch_id=branch.id,
+    )
+    db.commit()
+    return _serialize_branch(branch)
+
+
+@router.post(
+    "/admin/branches/{branch_id}/go-live/reject",
+    response_model=ConsoleBranch,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def reject_branch_go_live(
+    branch_id: UUID,
+    request: Request,
+    body: ConsoleBranchGoLiveDecisionRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleBranch:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage go-live gate",
+    )
+
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    _require_client_access(context, branch.client_id)
+
+    reason = _normalize_access_reason(body.reason, required=True)
+    now = datetime.now(timezone.utc)
+    previous_state = _normalize_branch_go_live_state(branch.go_live_state)
+    branch.go_live_state = "rejected"
+    branch.go_live_reason = reason
+    branch.go_live_reviewed_at = now
+    branch.go_live_reviewed_by = context.agent.id
+    branch.go_live_waiver_until = None
+    branch.go_live_waiver_reason = None
+    branch.go_live_waiver_by = None
+    branch.updated_at = now
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="branch_go_live_rejected",
+        entity_type="branch",
+        entity_id=branch.id,
+        payload={
+            "previous_state": previous_state,
+            "next_state": "rejected",
+            "reason": reason,
+        },
+        client_id=branch.client_id,
+        branch_id=branch.id,
+    )
+    db.commit()
+    return _serialize_branch(branch)
+
+
+@router.post(
+    "/admin/branches/{branch_id}/go-live/waive",
+    response_model=ConsoleBranch,
+    responses={403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def waive_branch_go_live(
+    branch_id: UUID,
+    request: Request,
+    body: ConsoleBranchGoLiveWaiverRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleBranch:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "write",
+        message="Only owner/admin can manage go-live gate",
+    )
+
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    _require_client_access(context, branch.client_id)
+
+    reason = _normalize_access_reason(body.reason, required=True)
+    ttl_hours = _normalize_go_live_waiver_ttl_hours(body.ttl_hours)
+
+    now = datetime.now(timezone.utc)
+    waiver_until = now + timedelta(hours=ttl_hours)
+    branch.go_live_waiver_until = waiver_until
+    branch.go_live_waiver_reason = reason
+    branch.go_live_waiver_by = context.agent.id
+    branch.updated_at = now
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="branch_go_live_waived",
+        entity_type="branch",
+        entity_id=branch.id,
+        payload={
+            "go_live_state": _normalize_branch_go_live_state(branch.go_live_state),
+            "reason": reason,
+            "ttl_hours": ttl_hours,
+            "waiver_until": waiver_until.isoformat(),
+        },
+        client_id=branch.client_id,
+        branch_id=branch.id,
+    )
+    db.commit()
     return _serialize_branch(branch)
 
 
@@ -8623,9 +8868,10 @@ async def run_onboarding_autopilot(
             timezone=_normalize_optional_text(body.timezone) or _AUTOPILOT_DEFAULT_TIMEZONE,
             working_hours={},
             booking_settings={},
-            is_active=bool(body.activate_branch if body.activate_branch is not None else True),
+            is_active=bool(body.activate_branch if body.activate_branch is not None else False),
             onboarding_state=OnboardingStep.BRANCH_DRAFT.value,
             onboarding_updated_at=now,
+            go_live_state=_BRANCH_GO_LIVE_DEFAULT_STATE,
             created_at=now,
             updated_at=now,
         )
@@ -8655,11 +8901,14 @@ async def run_onboarding_autopilot(
         if not branch.onboarding_state:
             branch.onboarding_state = OnboardingStep.BRANCH_DRAFT.value
             branch.onboarding_updated_at = now
+        branch.go_live_state = _normalize_branch_go_live_state(getattr(branch, "go_live_state", None))
         branch.updated_at = now
         actions.append("branch_updated")
 
     if branch.is_active and not branch.instance_id:
         raise ConsoleAPIError(400, "INVALID_PARAM", "instance_id required to activate branch")
+    if branch.is_active:
+        _require_branch_go_live_gate(branch, operation="branch_activate")
 
     if not branch.knowledge_tag:
         knowledge_seed = _normalize_optional_text(body.client_slug) or client.name

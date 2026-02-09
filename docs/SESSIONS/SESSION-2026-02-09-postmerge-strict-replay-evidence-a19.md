@@ -1,0 +1,37 @@
+# SESSION 2026-02-09-postmerge-strict-replay-evidence-a19 — Session 2026-02-09-postmerge-strict-replay-evidence-a19
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-09-postmerge-strict-replay-evidence-a19.md
+- branch: feat/2026-02-09-postmerge-strict-replay-evidence-a19
+- worktree: /home/zhan/worktrees/2026-02-09-postmerge-strict-replay-evidence-a19
+- base_ref: origin/main
+- scope: Run post-merge strict replay (frozen seed=1337, count=10) with judge hard-gate, compare baseline vs post-merge metrics, and record evidence in STATE.
+- done:
+  - Session created.
+  - Verified merge state (`main` includes PR #590) and prepared frozen replay inputs:
+    - scenarios: `/tmp/booking_quality/20260207-stress-main-seed-1337-gen/scenarios.json`
+    - baseline summary: `/tmp/booking_quality/20260208-strict-main-seed-1337-replay-final2/summary.json`
+  - Confirmed strict replay gate behavior:
+    - runs with `judge-mode=off` are invalid for strict evidence;
+    - run with wrong webhook secret produced `401 Invalid webhook secret` and invalid evidence (captured as infra/misconfig).
+  - Ran valid strict replay with `judge-mode=all` and explicit branch webhook secret:
+    - output dir: `/tmp/booking_quality/20260209-postmerge-main-seed-1337-replay-count10-validsecret`
+    - stop reason: `max_failures_reached:20`
+    - turns: `44`
+    - strict failed: `20`
+    - judge: `enabled=true`, `mode=all`
+  - Built comparison artifacts baseline vs post-merge:
+    - `/tmp/booking_quality/20260209-postmerge-main-seed-1337-replay-count10-validsecret/metrics_compare.json`
+    - `/tmp/booking_quality/20260209-postmerge-main-seed-1337-replay-count10-validsecret/metrics_compare.md`
+- next:
+  - Update STATE.md with evidence summary and reproducible command notes.
+  - Commit, push, open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-09-postmerge-strict-replay-evidence-a19.md
+  - /tmp/booking_quality/20260209-postmerge-main-seed-1337-replay-count10-validsecret/summary.json
+  - /tmp/booking_quality/20260209-postmerge-main-seed-1337-replay-count10-validsecret/responses.jsonl
+  - /tmp/booking_quality/20260209-postmerge-main-seed-1337-replay-count10-validsecret/brief.md
+  - /tmp/booking_quality/20260209-postmerge-main-seed-1337-replay-count10-validsecret/run.log
+  - /tmp/booking_quality/20260209-postmerge-main-seed-1337-replay-count10-validsecret/metrics_compare.json
+- last_updated: 2026-02-09
