@@ -1001,6 +1001,57 @@ export interface paths {
         patch: operations["patchAdminBranch"];
         trace?: never;
     };
+    "/admin/branches/{branch_id}/go-live/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve branch go-live */
+        post: operations["approveAdminBranchGoLive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/branches/{branch_id}/go-live/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject branch go-live */
+        post: operations["rejectAdminBranchGoLive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/branches/{branch_id}/go-live/waive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create temporary go-live waiver */
+        post: operations["waiveAdminBranchGoLive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/integrations": {
         parameters: {
             query?: never;
@@ -1010,6 +1061,23 @@ export interface paths {
         };
         /** List branch integration status and drift signals */
         get: operations["listAdminIntegrations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/fleet/attention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List active fleet risk and attention items */
+        get: operations["listFleetAttention"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1397,6 +1465,69 @@ export interface components {
                 [key: string]: number;
             };
         };
+        FleetAttentionItem: {
+            /** Format: uuid */
+            client_id: string;
+            client_slug: string;
+            client_name?: string | null;
+            /** Format: uuid */
+            company_id?: string | null;
+            company_name?: string | null;
+            /** @enum {string} */
+            lifecycle_state: "lead" | "contracting" | "onboarding" | "go_live_ready" | "active" | "paused" | "archived";
+            /** @enum {string} */
+            payment_status: "pending" | "confirmed" | "rejected" | "unknown";
+            /** @enum {string} */
+            commercial_state: "contract_missing" | "payment_pending" | "payment_confirmed" | "payment_rejected";
+            /** @enum {string} */
+            service_state: "ok" | "degraded" | "attention";
+            owner_name?: string | null;
+            next_action: string;
+            /** @default 0 */
+            total_branches: number;
+            /** @default 0 */
+            active_branches: number;
+            /** @default 0 */
+            degraded_branches: number;
+            /** @default 0 */
+            go_live_ready_branches: number;
+            /** @default 0 */
+            stale_branches: number;
+            /** @default 0 */
+            integration_error_branches: number;
+            /** @default 0 */
+            integration_warn_branches: number;
+            /** @default 0 */
+            outbox_failed_24h: number;
+            /** @default 0 */
+            pending_handovers: number;
+            attention_score: number;
+            /** @enum {string} */
+            attention_level: "high" | "medium" | "low";
+            /** @default [] */
+            reasons: string[];
+            /** @default [] */
+            suggested_actions: string[];
+        };
+        FleetAttentionSummary: {
+            active_clients_total: number;
+            clients_with_attention: number;
+            high_risk_clients: number;
+            medium_risk_clients: number;
+            low_risk_clients: number;
+            stale_branches_total: number;
+            integration_error_branches_total: number;
+            integration_warn_branches_total: number;
+            outbox_failed_24h_total: number;
+            pending_handovers_total: number;
+        };
+        FleetAttentionResponse: {
+            /** Format: date-time */
+            generated_at: string;
+            stale_after_minutes: number;
+            summary: components["schemas"]["FleetAttentionSummary"];
+            items: components["schemas"]["FleetAttentionItem"][];
+        };
         Branch: {
             /** Format: uuid */
             id?: string;
@@ -1417,6 +1548,25 @@ export interface components {
             onboarding_state?: string | null;
             /** Format: date-time */
             onboarding_updated_at?: string | null;
+            /**
+             * @default pending
+             * @enum {string}
+             */
+            go_live_state: "pending" | "approved" | "rejected";
+            go_live_reason?: string | null;
+            /** Format: date-time */
+            go_live_reviewed_at?: string | null;
+            /** Format: uuid */
+            go_live_reviewed_by?: string | null;
+            /** Format: date-time */
+            go_live_waiver_until?: string | null;
+            go_live_waiver_reason?: string | null;
+            /** Format: uuid */
+            go_live_waiver_by?: string | null;
+            /** @default false */
+            go_live_waiver_active: boolean;
+            /** @default false */
+            go_live_allowed: boolean;
         };
         BranchBootstrapAccountTemplate: {
             /** @enum {string} */
@@ -1463,6 +1613,13 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             is_active?: boolean | null;
+        };
+        BranchGoLiveDecisionRequest: {
+            reason: string;
+        };
+        BranchGoLiveWaiverRequest: {
+            reason: string;
+            ttl_hours: number;
         };
         BranchListResponse: {
             items: components["schemas"]["Branch"][];
@@ -2201,7 +2358,8 @@ export interface components {
             client_data_json?: {
                 [key: string]: unknown;
             } | null;
-            activate_branch?: boolean | null;
+            /** @default false */
+            activate_branch: boolean | null;
             auto_create_reference_pack?: boolean | null;
             auto_publish_knowledge?: boolean | null;
         };
@@ -4278,6 +4436,100 @@ export interface operations {
             422: components["responses"]["ValidationError"];
         };
     };
+    approveAdminBranchGoLive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BranchGoLiveDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Go-live approved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    rejectAdminBranchGoLive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BranchGoLiveDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Go-live rejected */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    waiveAdminBranchGoLive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BranchGoLiveWaiverRequest"];
+            };
+        };
+        responses: {
+            /** @description Go-live waiver applied */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
     listAdminIntegrations: {
         parameters: {
             query?: {
@@ -4297,6 +4549,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IntegrationsListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listFleetAttention: {
+        parameters: {
+            query?: {
+                /** @description Maximum number of top risk clients in response. */
+                limit?: number;
+                /** @description Mark branch inbound as stale after this many minutes. */
+                stale_after_minutes?: number;
+                /** @description Include low-risk clients (`true`/`false`). */
+                include_low?: "true" | "false" | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Fleet attention response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetAttentionResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

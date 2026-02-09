@@ -527,6 +527,7 @@ export type ListLearningCandidatesParams = operations["listLearningCandidates"][
 export type ListCompaniesParams = operations["listAdminCompanies"]["parameters"]["query"];
 export type ListClientsParams = operations["listAdminClients"]["parameters"]["query"];
 export type ListBranchesParams = operations["listAdminBranches"]["parameters"]["query"];
+export type ListFleetAttentionParams = operations["listFleetAttention"]["parameters"]["query"];
 export type ListIntegrationsParams = operations["listAdminIntegrations"]["parameters"]["query"];
 export type ListMembershipsParams = operations["listAdminMemberships"]["parameters"]["query"];
 export type ListReferencePacksParams = operations["listAdminReferencePacks"]["parameters"]["query"];
@@ -642,6 +643,8 @@ export const adminApi = {
         apiClient.get<components["schemas"]["ClientListResponse"]>("/admin/clients", { params }),
     listBranches: (params?: ListBranchesParams) =>
         apiClient.get<components["schemas"]["BranchListResponse"]>("/admin/branches", { params }),
+    listFleetAttention: (params?: ListFleetAttentionParams) =>
+        apiClient.get<components["schemas"]["FleetAttentionResponse"]>("/admin/fleet/attention", { params }),
     listIntegrations: (params?: ListIntegrationsParams) =>
         apiClient.get<components["schemas"]["IntegrationsListResponse"]>("/admin/integrations", { params }),
     listMemberships: (params?: ListMembershipsParams) =>

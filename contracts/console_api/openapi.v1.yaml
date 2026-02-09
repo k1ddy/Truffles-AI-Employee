@@ -1804,6 +1804,52 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /admin/fleet/attention:
+    get:
+      operationId: listFleetAttention
+      tags: [admin]
+      summary: List active fleet risk and attention items
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+          description: Maximum number of top risk clients in response.
+        - name: stale_after_minutes
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 5
+            maximum: 1440
+            default: 60
+          description: Mark branch inbound as stale after this many minutes.
+        - name: include_low
+          in: query
+          required: false
+          schema:
+            type: string
+            nullable: true
+            enum: ["true", "false"]
+          description: Include low-risk clients (`true`/`false`).
+      responses:
+        "200":
+          description: Fleet attention response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FleetAttentionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /admin/agents:
     post:
       operationId: createAdminAgent
@@ -2811,6 +2857,149 @@ components:
           type: object
           additionalProperties:
             type: integer
+
+    FleetAttentionItem:
+      type: object
+      required:
+        [
+          client_id,
+          client_slug,
+          lifecycle_state,
+          payment_status,
+          commercial_state,
+          service_state,
+          next_action,
+          attention_score,
+          attention_level,
+        ]
+      properties:
+        client_id:
+          type: string
+          format: uuid
+        client_slug:
+          type: string
+        client_name:
+          type: string
+          nullable: true
+        company_id:
+          type: string
+          format: uuid
+          nullable: true
+        company_name:
+          type: string
+          nullable: true
+        lifecycle_state:
+          type: string
+          enum: [lead, contracting, onboarding, go_live_ready, active, paused, archived]
+        payment_status:
+          type: string
+          enum: [pending, confirmed, rejected, unknown]
+        commercial_state:
+          type: string
+          enum: [contract_missing, payment_pending, payment_confirmed, payment_rejected]
+        service_state:
+          type: string
+          enum: [ok, degraded, attention]
+        owner_name:
+          type: string
+          nullable: true
+        next_action:
+          type: string
+        total_branches:
+          type: integer
+          default: 0
+        active_branches:
+          type: integer
+          default: 0
+        degraded_branches:
+          type: integer
+          default: 0
+        go_live_ready_branches:
+          type: integer
+          default: 0
+        stale_branches:
+          type: integer
+          default: 0
+        integration_error_branches:
+          type: integer
+          default: 0
+        integration_warn_branches:
+          type: integer
+          default: 0
+        outbox_failed_24h:
+          type: integer
+          default: 0
+        pending_handovers:
+          type: integer
+          default: 0
+        attention_score:
+          type: integer
+        attention_level:
+          type: string
+          enum: [high, medium, low]
+        reasons:
+          type: array
+          items:
+            type: string
+          default: []
+        suggested_actions:
+          type: array
+          items:
+            type: string
+          default: []
+
+    FleetAttentionSummary:
+      type: object
+      required:
+        [
+          active_clients_total,
+          clients_with_attention,
+          high_risk_clients,
+          medium_risk_clients,
+          low_risk_clients,
+          stale_branches_total,
+          integration_error_branches_total,
+          integration_warn_branches_total,
+          outbox_failed_24h_total,
+          pending_handovers_total,
+        ]
+      properties:
+        active_clients_total:
+          type: integer
+        clients_with_attention:
+          type: integer
+        high_risk_clients:
+          type: integer
+        medium_risk_clients:
+          type: integer
+        low_risk_clients:
+          type: integer
+        stale_branches_total:
+          type: integer
+        integration_error_branches_total:
+          type: integer
+        integration_warn_branches_total:
+          type: integer
+        outbox_failed_24h_total:
+          type: integer
+        pending_handovers_total:
+          type: integer
+
+    FleetAttentionResponse:
+      type: object
+      required: [generated_at, stale_after_minutes, summary, items]
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        stale_after_minutes:
+          type: integer
+        summary:
+          $ref: "#/components/schemas/FleetAttentionSummary"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FleetAttentionItem"
 
     Branch:
       type: object
