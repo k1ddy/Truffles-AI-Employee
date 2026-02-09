@@ -334,3 +334,4 @@
 | 2026-02-09-route-llm-plan-legacy-a19 | done | feat/2026-02-09-route-llm-plan-legacy-a19 | /home/zhan/worktrees/2026-02-09-route-llm-plan-legacy-a19 | docs/TASK_PACKAGES/TP-2026-02-09-route-llm-plan-legacy-a19.md | 2026-02-09 |
 | 2026-02-09-postmerge-strict-replay-evidence-a19 | done | feat/2026-02-09-postmerge-strict-replay-evidence-a19 | /home/zhan/worktrees/2026-02-09-postmerge-strict-replay-evidence-a19 | docs/TASK_PACKAGES/TP-2026-02-09-postmerge-strict-replay-evidence-a19.md | 2026-02-09 |
 | 2026-02-09-pr3a-onboarding-golive-gate-a20 | done | feat/2026-02-09-pr3a-onboarding-golive-gate-a20 | /home/zhan/worktrees/2026-02-09-pr3a-onboarding-golive-gate-a20 | docs/TASK_PACKAGES/TP-2026-02-09-pr3a-onboarding-golive-gate-a20.md | 2026-02-09 |
+| 2026-02-09-console-build-hotfix-a20 | active | fix/2026-02-09-console-build-hotfix-a20 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-09-console-build-hotfix-a20.md | 2026-02-09 |
