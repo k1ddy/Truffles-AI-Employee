@@ -940,147 +940,26 @@ def route_llm_plan(
     client_config: dict | None = None,
     timing_context: dict | None = None,
 ) -> dict:
-    result: dict[str, Any] = {
+    logger.warning(
+        "route_llm_plan is retired; use route_llm_policy_core",
+        extra={
+            "context": {
+                "expected_reply_type": expected_reply_type,
+                "current_goal": current_goal,
+                "client_slug": client_slug,
+            }
+        },
+    )
+    if isinstance(timing_context, dict):
+        _log_timing("plan_llm_ms", 0.0, timing_context=timing_context, extra={"retired": True})
+    return {
         "ok": False,
         "payload": None,
-        "error": None,
+        "error": "legacy_retired_use_policy_core",
         "raw": None,
         "attempted": False,
         "elapsed_ms": 0.0,
     }
-    normalized = (message or "").strip()
-    if not normalized:
-        result["error"] = "empty_message"
-        return result
-    prompt = _load_plan_prompt()
-    if not prompt:
-        result["error"] = "prompt_missing"
-        return result
-    if not os.environ.get("OPENAI_API_KEY"):
-        result["error"] = "no_api_key"
-        return result
-    if not _should_attempt_llm(
-        timing_context,
-        timeout_seconds=PLAN_TIMEOUT_SECONDS,
-        stage="plan_llm",
-    ):
-        result["error"] = "deadline_exceeded"
-        return result
-
-    budget_meta = consume_llm_budget(
-        client_slug=client_slug or "unknown",
-        client_config=client_config,
-        scope="plan",
-    )
-    _append_llm_budget_event(timing_context, budget_meta)
-    if not budget_meta.get("allowed", True):
-        result["error"] = "budget_exceeded"
-        return result
-
-    plan_input: dict[str, Any] = {
-        "task": "llm_plan",
-        "message": message,
-        "expected_reply_type": expected_reply_type,
-        "current_goal": current_goal,
-        "slot_state": slot_state or {},
-        "allowed": {
-            "tool_actions": [
-                "info",
-                "consult",
-                "booking",
-                "handoff",
-                "collect",
-                "calendar.list_slots",
-                "calendar.book_slot",
-                "calendar.get_booking",
-                "calendar.reschedule",
-                "calendar.cancel",
-                "catalog.service_query",
-                "catalog.location",
-                "catalog.portfolio",
-            ],
-            "info_refs": list(info_refs or []),
-            "consult_refs": list(consult_refs or []),
-        },
-    }
-
-    llm = get_llm_provider()
-    temperature = 0.0
-    model_name = PLAN_MODEL.strip().lower()
-    if model_name.startswith("gpt-5"):
-        temperature = 1.0
-
-    messages = [
-        {"role": "system", "content": prompt},
-        {"role": "user", "content": json.dumps(plan_input, ensure_ascii=False)},
-    ]
-    llm_start = time.monotonic()
-    response = None
-    error = None
-    try:
-        response = llm.generate(
-            messages=messages,
-            max_tokens=PLAN_MAX_TOKENS,
-            model=PLAN_MODEL,
-            timeout_seconds=PLAN_TIMEOUT_SECONDS,
-            temperature=temperature,
-        )
-    except httpx.TimeoutException:
-        error = "timeout"
-    except Exception as exc:
-        logger.warning(f"LLM plan failed: {exc}")
-        error = "error"
-
-    elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
-    result["attempted"] = True
-    result["elapsed_ms"] = elapsed_ms
-    _log_timing(
-        "plan_llm_ms",
-        elapsed_ms,
-        timing_context=timing_context,
-        extra={
-            "model_name": PLAN_MODEL,
-            "model_tier": "fast",
-            "timeout": error == "timeout",
-            "timeout_seconds": PLAN_TIMEOUT_SECONDS,
-            "max_tokens": PLAN_MAX_TOKENS,
-            "temperature": temperature,
-        },
-    )
-    record_llm_time(client_slug, "plan_llm_ms", elapsed_ms)
-
-    if error is not None:
-        result["error"] = error
-        return result
-
-    content = (response.content or "").strip() if response else ""
-    result["raw"] = content
-    if not content:
-        result["error"] = "empty_response"
-        return result
-
-    payload = None
-    try:
-        payload = json.loads(content)
-    except Exception:
-        match = re.search(r"\{.*\}", content, re.DOTALL)
-        if match:
-            try:
-                payload = json.loads(match.group(0))
-            except Exception:
-                payload = None
-    if not isinstance(payload, dict):
-        result["error"] = "invalid_json"
-        return result
-
-    contract, schema_error = validate_llm_plan_output(payload)
-    if schema_error:
-        result["error"] = "invalid_schema"
-        return result
-
-    result["ok"] = True
-    result["payload"] = contract.model_dump()
-    return result
 
 
 def route_llm_policy_core(
