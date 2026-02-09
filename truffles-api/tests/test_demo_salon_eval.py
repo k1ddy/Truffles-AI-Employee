@@ -1311,6 +1311,7 @@ def test_booking_flow_info_interrupt_sections_location_hours_parking_promo():
     cases = [
         ("CA05_BOOKING_INTERRUPT_LOCATION", "где находится ваш салон?", "location"),
         ("CA05_BOOKING_INTERRUPT_HOURS", "как вы работаете?", "hours"),
+        ("CA05_BOOKING_INTERRUPT_DURATION", "Какова продолжительность сеанса?", "service_duration"),
         ("CA05_BOOKING_INTERRUPT_PARKING", "есть ли у вас парковка?", "parking"),
         ("CA05_BOOKING_INTERRUPT_PROMO", "у вас есть акции или скидки?", "promotions"),
     ]

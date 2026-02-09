@@ -134,6 +134,16 @@ def test_expected_reply_info_block_detects_booking_interrupt_info_turns():
         message_text="У вас есть какие-то акции или скидки?",
         client_slug="demo_salon",
     )
+    assert decision_router._should_block_expected_reply_by_info(
+        expected_reply_type=legacy.EXPECTED_REPLY_TIME,
+        message_text="Какова продолжительность сеанса?",
+        client_slug="demo_salon",
+    )
+    assert decision_router._should_block_expected_reply_by_info(
+        expected_reply_type=legacy.EXPECTED_REPLY_TIME,
+        message_text="How long does the session take?",
+        client_slug="demo_salon",
+    )
     assert not decision_router._should_block_expected_reply_by_info(
         expected_reply_type=legacy.EXPECTED_REPLY_TIME,
         message_text="Можно на 18:30?",

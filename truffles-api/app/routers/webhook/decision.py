@@ -568,6 +568,16 @@ def _should_block_expected_reply_by_info(
         or legacy._has_price_signal(normalized_message, message_text)
         or legacy._has_duration_signal(normalized_message, message_text)
     )
+    if not blocked and expected_reply_type in {
+        legacy.EXPECTED_REPLY_TIME,
+        legacy.EXPECTED_REPLY_NAME,
+    }:
+        tokens = normalized_message.split()
+        question_like = "?" in message_text
+        if not question_like and tokens:
+            question_like = any(tokens[0].startswith(prefix) for prefix in legacy.QUESTION_WORD_PREFIXES)
+        if question_like:
+            blocked = True
     if (
         blocked
         and expected_reply_type == legacy.EXPECTED_REPLY_TIME
@@ -6560,6 +6570,49 @@ async def _handle_webhook_payload(
     context = intent_decomp_state.context
     context_manager = intent_decomp_state.context_manager
     current_goal = intent_decomp_state.current_goal
+    if (
+        not expected_reply_blocked_by_info
+        and expected_reply_type
+        in {
+            EXPECTED_REPLY_SERVICE,
+            EXPECTED_REPLY_TIME,
+            EXPECTED_REPLY_NAME,
+        }
+        and info_class_intents
+    ):
+        info_reply_intents = sorted(
+            {
+                intent.strip()
+                for intent in info_class_intents
+                if isinstance(intent, str) and intent.strip()
+            }
+        )
+        info_blocked_by_intents = bool(info_reply_intents)
+        if info_blocked_by_intents and expected_reply_type == EXPECTED_REPLY_TIME and message_text:
+            if _extract_datetime(message_text):
+                info_blocked_by_intents = False
+        if info_blocked_by_intents:
+            expected_reply_blocked_by_info = True
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "question_contract",
+                    "decision": "expected_reply_info_block",
+                    "state": conversation.state,
+                    "source": "info_class",
+                    "expected_reply_type": expected_reply_type,
+                    "info_intents": info_reply_intents,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "expected_reply_blocked_by_info": True,
+                        "expected_reply_blocked_by_info_source": "info_class",
+                        "expected_reply_info_intents": info_reply_intents,
+                    },
+                )
     intent_queue_followup = None
     intent_queue_intents: list[str] = []
 

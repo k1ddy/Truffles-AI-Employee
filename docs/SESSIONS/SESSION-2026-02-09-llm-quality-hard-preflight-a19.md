@@ -13,6 +13,12 @@
   - Enforced canonical baseline compare policy (judge must be on); non-canonical baseline now blocks regression compare.
   - Added `degraded_fallback_rate` threshold gate and regression tracking.
   - Added regressions for new quality gates and collect-policy contract (`next_question/open_questions/expected_reply_type`).
+  - Canonical baseline refreshed with judge-on run (`judge_mode=sample`) via `ops/diagnose.py llm-quality --update-baseline`.
+  - Root cause for `branch_b` preflight failure validated in DB: `branch_b` is inactive and has no webhook secret.
+  - Fixed wrong consultant routing in booking expected-reply turns: question-like time/name turns now block expected-reply fast-path and go through safe info interrupt.
+  - Added post-intent-decomposition expected-reply guard: detected info intents now force `expected_reply_blocked_by_info` with trace/meta for deterministic observability.
+  - Extended runtime lexicon (`duration_keywords`) with `продолжительность*` variants to catch duration questions that previously fell into booking prompt loop.
+  - Added regressions for duration/freeform expected-reply interrupt and question-mark fallback behavior.
 - next:
   - Open PR and attach evidence from /tmp + summary paths
   - Package evidence and open PR.
@@ -25,4 +31,10 @@
   - `python3 ops/diagnose.py llm-quality ... --webhook-secret invalid-secret-qa` -> `INVALID RUN (secret_mismatch)`
   - `python3 ops/diagnose.py llm-quality ... --branch-slug branch_b` -> `INVALID RUN (branch_not_resolved)`
   - `python3 ops/diagnose.py llm-quality ... --fail-on-regression` -> `regression comparison blocked (baseline_non_canonical:judge_mode_off)`
+  - `python3 ops/diagnose.py llm-quality --mode llm --count 3 ... --judge-mode sample --judge-api-key ... --update-baseline` -> summary `/tmp/booking_quality/20260209-041408/summary.json`
+  - SQL check: `demo_salon/branch_b` => `is_active=false`, `webhook_secret_length=0`.
+  - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_booking_info_interrupt_contract.py truffles-api/tests/test_demo_salon_eval.py`
+  - `pytest -q truffles-api/tests/test_booking_info_interrupt_contract.py`
+  - `pytest -q truffles-api/tests/test_demo_salon_eval.py -k "booking_flow_info_interrupt_sections_location_hours_parking_promo"`
+  - `pytest -q truffles-api/tests/test_message_endpoint.py -k "llm_policy_core_collect_sets_expected_reply_type or llm_policy_core_allows_plan_with_expected_reply or llm_policy_core_degraded_booking_guard_uses_safe_collect"`
 - last_updated: 2026-02-09
