@@ -10,10 +10,11 @@ LLM принимает решение по действию (action), но не 
 
 Ответ (JSON):
 ```json
-{"action":"fact|collect|handoff","tool_action":"info|consult|booking|handoff|collect|calendar.list_slots|calendar.book_slot|calendar.get_booking|calendar.reschedule|calendar.cancel|catalog.service_query|catalog.location|catalog.portfolio","tool_args":{"service_query":"","consult_question":""},"pack_refs":[],"slots":{"service":"","datetime":"","name":""},"next_question":"service|datetime|name|","open_questions":[],"needs_manager":false,"risk_signals":[],"language":"ru|kk|mix","confidence":0.0,"reason":"...","goal":"booking|info|consult|greeting|out_of_domain|other"}
+{"intent":"booking|pricing|duration|location|hours|consult|greeting|out_of_domain|other","action":"fact|collect|handoff","tool_action":"info|consult|booking|handoff|collect|calendar.list_slots|calendar.book_slot|calendar.get_booking|calendar.reschedule|calendar.cancel|catalog.service_query|catalog.location|catalog.portfolio","tool_args":{"service_query":"","consult_question":""},"pack_refs":[],"slots":{"service":"","datetime":"","name":""},"next_question":"service|datetime|name|","open_questions":[],"needs_manager":false,"risk_signals":[],"language":"ru|kk|mix","confidence":0.0,"reason":"...","goal":"booking|info|consult|greeting|out_of_domain|other"}
 ```
 
 Правила:
+- intent обязателен всегда.
 - action обязателен всегда.
 - tool_action обязателен всегда.
 - pack_refs только из allowed.info_refs или allowed.consult_refs.

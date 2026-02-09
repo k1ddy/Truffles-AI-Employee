@@ -213,7 +213,7 @@ For info pricing/duration, include tool_args.service_query (or slot_state.servic
 If missing required args, set outcome=collect and list open_questions accordingly.
 """
 POLICY_CORE_PROMPT_FALLBACK = """# LLM Policy Core Prompt
-Return JSON only (no markdown). Required fields: action, tool_action, confidence.
+Return JSON only (no markdown). Required fields: intent, action, tool_action, slots, confidence.
 Optional fields: tool_args, pack_refs, slots, next_question, open_questions, needs_manager,
 risk_signals, language, reason, goal.
 Use tool_action and pack_refs only from the allowed lists provided in the input.

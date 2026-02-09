@@ -3,8 +3,9 @@
   "title": "llm_policy_core_output.v1",
   "type": "object",
   "additionalProperties": true,
-  "required": ["action", "confidence"],
+  "required": ["intent", "action", "tool_action", "slots", "confidence"],
   "properties": {
+    "intent": {"type": "string"},
     "action": {"type": "string"},
     "tool_action": {"type": "string"},
     "tool_args": {"type": "object"},

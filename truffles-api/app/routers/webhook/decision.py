@@ -304,8 +304,10 @@ from app.services.integration_guardrails_service import (
     report_integration_incident,
 )
 from app.services.intent_service import (
+    ANSWER_INTERPRETER_TIMEOUT_SECONDS,
     CONTROLLER_TIMEOUT_SECONDS,
     POLICY_CORE_CONFIDENCE_THRESHOLD,
+    POLICY_CORE_TIMEOUT_SECONDS,
     DomainIntent,
     Intent,
     classify_domain_with_scores,
@@ -1078,6 +1080,13 @@ def _run_intent_decomposition(
         and os.environ.get("OPENAI_API_KEY")
     ):
         controller_reserve_ms = max(float(CONTROLLER_TIMEOUT_SECONDS) * 1000, 0.0)
+        controller_reserve_ms += max(float(POLICY_CORE_TIMEOUT_SECONDS) * 1000, 0.0)
+        if expected_reply_type in {
+            legacy.EXPECTED_REPLY_SERVICE,
+            legacy.EXPECTED_REPLY_TIME,
+            legacy.EXPECTED_REPLY_NAME,
+        }:
+            controller_reserve_ms += max(float(ANSWER_INTERPRETER_TIMEOUT_SECONDS) * 1000, 0.0)
 
     if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
         intent_decomp_payload = legacy.detect_multi_intent(
@@ -6576,6 +6585,7 @@ async def _handle_webhook_payload(
     llm_policy_core_meta = None
     policy_result = None
     policy_payload = None
+    policy_intent = None
     policy_action = None
     policy_tool_action = None
     policy_confidence = None
@@ -6593,13 +6603,16 @@ async def _handle_webhook_payload(
     policy_risk_signals: list[str] = []
     resolved_policy_refs: list[str] = []
     consult_refs_error = None
-
-    if (
+    policy_core_runtime_active = bool(
         LLM_POLICY_CORE_ENABLED
         and routing["allow_bot_reply"]
         and not bypass_domain_flows
         and message_text
-    ):
+    )
+    policy_core_mode = "degraded_fallback"
+    policy_core_degrade_reason = "envelope_missing"
+
+    if policy_core_runtime_active:
         policy_slot_state: dict[str, str] = {}
         if isinstance(booking, dict):
             for slot_key in BOOKING_SLOT_ORDER:
@@ -6622,6 +6635,9 @@ async def _handle_webhook_payload(
         policy_payload = policy_result.get("payload") if isinstance(policy_result, dict) else None
 
         if isinstance(policy_payload, dict):
+            raw_intent = policy_payload.get("intent")
+            if isinstance(raw_intent, str):
+                policy_intent = raw_intent.strip().casefold()
             raw_action = policy_payload.get("action")
             if isinstance(raw_action, str):
                 policy_action = raw_action.strip().casefold()
@@ -6663,7 +6679,9 @@ async def _handle_webhook_payload(
                 policy_needs_manager = raw_needs_manager
             policy_risk_signals = _normalize_plan_refs(policy_payload.get("risk_signals"))
 
-            if policy_confidence is None or policy_confidence < POLICY_CORE_CONFIDENCE_THRESHOLD:
+            if not policy_intent:
+                policy_validation_error = "intent_invalid"
+            elif policy_confidence is None or policy_confidence < POLICY_CORE_CONFIDENCE_THRESHOLD:
                 policy_validation_error = "low_confidence"
             elif policy_action not in LLM_POLICY_CORE_ALLOWED_ACTIONS:
                 policy_validation_error = "action_invalid"
@@ -6732,6 +6750,7 @@ async def _handle_webhook_payload(
             "elapsed_ms": policy_result.get("elapsed_ms") if isinstance(policy_result, dict) else 0.0,
             "payload": policy_payload,
             "raw": policy_result.get("raw") if isinstance(policy_result, dict) else None,
+            "intent": policy_intent,
             "validated": policy_valid,
             "validation_error": policy_validation_error,
         }
@@ -6743,6 +6762,7 @@ async def _handle_webhook_payload(
             conversation,
             {
                 "stage": "llm_policy_core",
+                "intent": policy_intent,
                 "decision": policy_action,
                 "attempted": llm_policy_core_meta["attempted"],
                 "ok": llm_policy_core_meta["ok"],
@@ -6756,6 +6776,40 @@ async def _handle_webhook_payload(
                 "next_question": policy_next_question,
                 "needs_manager": policy_needs_manager,
                 "risk_signals": policy_risk_signals,
+            },
+        )
+    elif LLM_POLICY_CORE_ENABLED and routing["allow_bot_reply"] and message_text:
+        policy_core_degrade_reason = "guard_not_eligible"
+
+    if policy_core_runtime_active:
+        if policy_valid and policy_tool_action:
+            policy_core_mode = "policy_core"
+            policy_core_degrade_reason = None
+        else:
+            if llm_policy_core_meta and llm_policy_core_meta.get("validation_error"):
+                policy_core_degrade_reason = f"policy_validation:{llm_policy_core_meta.get('validation_error')}"
+            elif llm_policy_core_meta and llm_policy_core_meta.get("error"):
+                policy_core_degrade_reason = f"policy_error:{llm_policy_core_meta.get('error')}"
+            elif isinstance(timing_context, dict) and timing_context.get("llm_degradation_reason"):
+                policy_core_degrade_reason = f"llm_degraded:{timing_context.get('llm_degradation_reason')}"
+            else:
+                policy_core_degrade_reason = "envelope_missing"
+        if saved_message:
+            _update_message_decision_metadata(
+                saved_message,
+                {
+                    "policy_core_mode": policy_core_mode,
+                    "policy_core_degrade_reason": policy_core_degrade_reason,
+                },
+            )
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "policy_core_mode",
+                "decision": policy_core_mode,
+                "reason": policy_core_degrade_reason,
+                "validated": policy_valid,
+                "tool_action": policy_tool_action,
             },
         )
 
@@ -6822,6 +6876,213 @@ async def _handle_webhook_payload(
                 saved_message, {"llm_policy_core_guard": "minimum_data_safe_mode"}
             )
         return safe_mode_response
+
+    policy_core_attempted = bool(
+        isinstance(llm_policy_core_meta, dict) and llm_policy_core_meta.get("attempted")
+    )
+    degraded_policy_core_critical = bool(
+        policy_core_runtime_active
+        and policy_core_mode == "degraded_fallback"
+        and policy_core_attempted
+        and (
+            conversation.state in {ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value}
+            or (
+                booking_wants_flow
+                and message_text
+                and _is_booking_request(message_text, client_slug=payload.client_slug)
+                and not (intent_decomp_set & INFO_INTENTS)
+                and not consult_intent
+            )
+        )
+    )
+    if degraded_policy_core_critical:
+        if message_text and (
+            is_human_request_message(message_text)
+            or is_frustration_message(message_text)
+        ):
+            handover_message = message_text or "Клиент запросил менеджера."
+            _, reused, telegram_sent = _reuse_active_handover(
+                db=db,
+                conversation=conversation,
+                user=user,
+                message=handover_message,
+                source="policy_core_degraded",
+                intent="policy_core_guard",
+            )
+            if reused:
+                bot_response = MSG_ESCALATED
+                result_message = (
+                    f"Policy core degraded handoff reused, telegram={'sent' if telegram_sent else 'failed'}"
+                )
+            elif conversation.state == ConversationState.BOT_ACTIVE.value and routing.get(
+                "allow_handover_create", False
+            ):
+                _record_escalation_metric("intent")
+                result = escalate_to_pending(
+                    db=db,
+                    conversation=conversation,
+                    user_message=handover_message,
+                    trigger_type="intent",
+                    trigger_value="policy_core_guard",
+                )
+                if result.ok:
+                    handover = result.value
+                    telegram_sent = send_telegram_notification(
+                        db=db,
+                        handover=handover,
+                        conversation=conversation,
+                        user=user,
+                        message=handover_message,
+                    )
+                    bot_response = MSG_ESCALATED
+                    result_message = (
+                        f"Policy core degraded handoff, telegram={'sent' if telegram_sent else 'failed'}"
+                    )
+                else:
+                    bot_response = MSG_AI_ERROR
+                    result_message = "Policy core degraded handoff failed"
+            else:
+                bot_response = MSG_ESCALATED
+                result_message = "Policy core degraded handoff skipped (already pending)"
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_core_guard",
+                    "decision": "handoff_safe",
+                    "state": conversation.state,
+                    "mode": policy_core_mode,
+                    "reason": policy_core_degrade_reason,
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="escalate",
+                intent="policy_core_guard",
+                source="llm_policy_core",
+                fast_intent=False,
+            )
+            bot_response, sent = _send_and_save(bot_response)
+            if not sent:
+                result_message = f"{result_message}; response_send=failed"
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+
+        if conversation.state in {ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value}:
+            if conversation.state == ConversationState.PENDING.value:
+                bot_response = MSG_PENDING_WAIT
+                result_message = "Policy core degraded pending hold response sent"
+                bot_response, sent = _send_and_save(bot_response)
+                if not sent:
+                    result_message = "Policy core degraded pending hold response failed"
+            else:
+                bot_response = None
+                result_message = "Policy core degraded manager-active hold"
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_core_guard",
+                    "decision": "pending_hold",
+                    "state": conversation.state,
+                    "mode": policy_core_mode,
+                    "reason": policy_core_degrade_reason,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "pending_action": "policy_core_degraded_hold",
+                        "pending_guard": "policy_core_degraded",
+                    },
+                )
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+
+        collect_slot = _expected_reply_slot_key(expected_reply_type)
+        if not collect_slot and isinstance(booking, dict):
+            for slot_key in BOOKING_SLOT_ORDER:
+                value = booking.get(slot_key)
+                if not (isinstance(value, str) and value.strip()):
+                    collect_slot = slot_key
+                    break
+
+        collect_prompt = MSG_FACT_GUARD_CLARIFY
+        collect_action = "reply"
+        collect_intent = "policy_core_guard"
+        if collect_slot == "service":
+            collect_prompt = MSG_BOOKING_ASK_SERVICE
+            collect_action = "booking_prompt"
+            collect_intent = "booking"
+        elif collect_slot == "datetime":
+            collect_prompt = MSG_BOOKING_ASK_DATETIME
+            collect_action = "booking_prompt"
+            collect_intent = "booking"
+        elif collect_slot == "name":
+            collect_prompt = MSG_BOOKING_ASK_NAME
+            collect_action = "booking_prompt"
+            collect_intent = "booking"
+
+        context = _get_conversation_context(conversation)
+        if collect_slot:
+            booking_state = dict(booking) if isinstance(booking, dict) else {}
+            if not booking_state.get("active"):
+                booking_state["active"] = True
+                booking_state["started_at"] = now.isoformat()
+            booking_state["last_question"] = collect_slot
+            context = _set_booking_context(context, booking_state)
+            expected_reply_slot = _expected_reply_for_booking_question(collect_slot)
+            if expected_reply_slot:
+                context = _set_expected_reply_context(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    context=context,
+                    expected_reply_type=expected_reply_slot,
+                    reason="policy_core_degraded_collect",
+                    now=now,
+                )
+            _set_conversation_context(conversation, context)
+
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "policy_core_guard",
+                "decision": "degraded_collect",
+                "state": conversation.state,
+                "mode": policy_core_mode,
+                "reason": policy_core_degrade_reason,
+                "missing_slot": collect_slot,
+            },
+        )
+        _record_message_decision_meta(
+            saved_message,
+            action=collect_action,
+            intent=collect_intent,
+            source="llm_policy_core",
+            fast_intent=False,
+        )
+        bot_response, sent = _send_and_save(collect_prompt)
+        result_message = (
+            "Policy core degraded collect response sent"
+            if sent
+            else "Policy core degraded collect response failed"
+        )
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
 
     _record_llm_budget_trace = functools.partial(
         _record_llm_budget_trace_helper,
