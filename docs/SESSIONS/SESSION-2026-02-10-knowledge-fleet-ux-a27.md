@@ -12,10 +12,13 @@
   - Добавлен Branch Knowledge Readiness с safe apply через branch-change flow.
   - Добавлен Structured Draft Builder для hours/services.
   - Добавлен specialists snapshot и navigation в Team.
+  - Добавлен CI-gate фикс: `.github/workflows/ci.yml` включен в `deploy_required`.
+  - Fleet attention в Knowledge переведен в on-demand режим с inline retry вместо Bad Gateway toast.
+  - Открыт PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/617
 - next:
-  - Открыть PR.
+  - Дождаться зеленого CI и merge.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-10-knowledge-fleet-ux-a27.md
   - npm --prefix console-web run lint
   - npm --prefix console-web run build
-- last_updated: 2026-02-10
+- last_updated: 2026-02-11
