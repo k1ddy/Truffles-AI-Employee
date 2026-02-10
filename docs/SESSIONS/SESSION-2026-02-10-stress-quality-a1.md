@@ -10,8 +10,21 @@
 - done:
   - Session created.
   - Task Package added and aligned to STATE NOW GAP.
+  - Consolidated divergent uncommitted changes from `/home/zhan/truffles-main` and this worktree into one branch without loss.
+  - Hardened `ops/diagnose.py` trace/meta polling (`decision_meta_not_ready`, `trace_stale`, stale-trace filtering).
+  - Hardened policy-core booking behavior in `decision.py`:
+    - collect plan with full booking slots now normalizes to `calendar.book_slot`;
+    - `catalog.service_query` during active booking now returns booking datetime prompt;
+    - booking context persists before expected-reply updates in tool branch.
+  - Added booking specialist fallback (`none_available`) and tenant-context sync contract fix (`source=system`, `producer=calendar_sync`).
+  - Opened PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/616
+  - Local validation:
+    - `pytest -q tests/test_message_endpoint.py tests/test_booking_appointments.py tests/test_calendar_provider_sync.py`
+    - result: `156 passed, 2 warnings`.
 - next:
-  - Run session_check and publish PR with test + quality evidence.
+  - Fix PR CI `session-gate` by keeping session log/index updates in branch history.
+  - Continue complex LLM-dialog + booking-confirm realism runs with evidence (trace/meta/appointment artifacts) before merge.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-10-stress-quality-hardening.md
-- last_updated: 2026-02-10
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/616
+- last_updated: 2026-02-11

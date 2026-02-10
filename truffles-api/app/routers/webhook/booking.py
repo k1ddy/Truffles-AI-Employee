@@ -921,8 +921,18 @@ def _parse_booking_datetime(value: str | None, *, tz_name: str | None, now: date
         except ValueError:
             parsed = None
     if parsed is None:
-        settings = {"PREFER_DATES_FROM": "future", "RELATIVE_BASE": now}
-        parsed = dateparser.parse(raw, languages=["ru"], settings=settings)
+        timezone_name = tz_name or "UTC"
+        settings = {
+            "PREFER_DATES_FROM": "future",
+            "RELATIVE_BASE": now,
+            "TIMEZONE": timezone_name,
+            "TO_TIMEZONE": timezone_name,
+            "RETURN_AS_TIMEZONE_AWARE": True,
+        }
+        try:
+            parsed = dateparser.parse(raw, languages=["ru"], settings=settings)
+        except Exception:
+            parsed = None
     if not parsed:
         return None
     if parsed.tzinfo is None:

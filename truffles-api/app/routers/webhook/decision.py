@@ -3194,6 +3194,38 @@ def _plan_outcome_matches_action(outcome: str | None, tool_action: str | None) -
     return False
 
 
+def _normalize_policy_action_from_tool_action(
+    action: str | None,
+    tool_action: str | None,
+) -> tuple[str | None, bool]:
+    if action in LLM_POLICY_CORE_ALLOWED_ACTIONS:
+        return action, False
+    if not tool_action:
+        return action, False
+
+    if tool_action == "handoff":
+        return "handoff", True
+    if tool_action in {
+        "info",
+        "consult",
+        "calendar.get_booking",
+        "catalog.service_query",
+        "catalog.location",
+        "catalog.portfolio",
+    }:
+        return "fact", True
+    if tool_action in {
+        "collect",
+        "booking",
+        "calendar.list_slots",
+        "calendar.book_slot",
+        "calendar.reschedule",
+        "calendar.cancel",
+    }:
+        return "collect", True
+    return action, False
+
+
 def _validate_plan_slot_value(
     slot_key: str,
     value: str,
@@ -3224,6 +3256,28 @@ def _select_plan_collect_slot(
     if goal and goal.strip().casefold() == "booking":
         return "service"
     return None
+
+
+def _merge_booking_plan_slots(
+    *,
+    booking_state: dict[str, Any] | None,
+    plan_slots: dict[str, str],
+) -> dict[str, str]:
+    merged: dict[str, str] = {}
+    if isinstance(booking_state, dict):
+        for slot_key in BOOKING_SLOT_ORDER:
+            value = booking_state.get(slot_key)
+            if isinstance(value, str) and value.strip():
+                merged[slot_key] = value.strip()
+    for slot_key in BOOKING_SLOT_ORDER:
+        value = plan_slots.get(slot_key)
+        if isinstance(value, str) and value.strip():
+            merged[slot_key] = value.strip()
+    return merged
+
+
+def _plan_has_complete_booking_slots(slot_state: dict[str, str]) -> bool:
+    return all(isinstance(slot_state.get(slot_key), str) and slot_state.get(slot_key).strip() for slot_key in BOOKING_SLOT_ORDER)
 
 
 def _collect_plan_consult_refs(client_slug: str | None) -> tuple[list[str], str | None]:
@@ -6228,8 +6282,58 @@ async def _handle_webhook_payload(
                 style_request = True
 
         if conversation.state == ConversationState.BOT_ACTIVE.value:
+            booking_media_context = _get_conversation_context(conversation)
+            booking_media_state = _get_booking_context(booking_media_context)
+            booking_media_active = bool(booking_media_state.get("active"))
+            booking_media_expected_reply = expected_reply_type in {
+                EXPECTED_REPLY_SERVICE,
+                EXPECTED_REPLY_TIME,
+                EXPECTED_REPLY_NAME,
+            }
             if media_text_placeholder and _is_voice_note(media_info) and asr_failed:
                 media_response = MSG_MEDIA_TRANSCRIPT_FAILED
+            elif (
+                style_request
+                and media_info.media_type == "photo"
+                and booking_media_active
+                and booking_media_expected_reply
+            ):
+                booking_prompt = None
+                if expected_reply_type == EXPECTED_REPLY_SERVICE:
+                    booking_prompt = MSG_BOOKING_ASK_SERVICE
+                elif expected_reply_type == EXPECTED_REPLY_TIME:
+                    booking_prompt = MSG_BOOKING_ASK_DATETIME
+                elif expected_reply_type == EXPECTED_REPLY_NAME:
+                    booking_prompt = MSG_BOOKING_ASK_NAME
+                media_response = _combine_sidecar(MSG_MEDIA_RECEIVED, booking_prompt)
+                if booking_prompt:
+                    context = _get_conversation_context(conversation)
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=expected_reply_type,
+                        reason="booking_prompt_media_ack",
+                        now=now,
+                    )
+                    _set_conversation_context(conversation, context)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "media",
+                        "decision": "booking_media_ack",
+                        "state": conversation.state,
+                        "expected_reply_type": expected_reply_type,
+                        "booking_active": True,
+                    },
+                )
+                _record_message_decision_meta(
+                    saved_message,
+                    action="booking_prompt" if booking_prompt else "reply",
+                    intent="booking" if booking_prompt else "media",
+                    source="media",
+                    fast_intent=False,
+                )
             elif style_request and media_info.media_type == "photo":
                 handover_text = message_text.strip()
                 if media_text_placeholder:
@@ -6687,6 +6791,7 @@ async def _handle_webhook_payload(
     consult_refs_error = None
     policy_low_confidence_ok = False
     policy_pack_refs_dropped = False
+    policy_action_normalized = False
     policy_core_runtime_active = bool(
         LLM_POLICY_CORE_ENABLED
         and routing["allow_bot_reply"]
@@ -6771,7 +6876,15 @@ async def _handle_webhook_payload(
                 else:
                     policy_validation_error = "low_confidence"
             elif policy_action not in LLM_POLICY_CORE_ALLOWED_ACTIONS:
-                policy_validation_error = "action_invalid"
+                normalized_action, was_normalized = _normalize_policy_action_from_tool_action(
+                    policy_action,
+                    policy_tool_action,
+                )
+                if normalized_action in LLM_POLICY_CORE_ALLOWED_ACTIONS:
+                    policy_action = normalized_action
+                    policy_action_normalized = was_normalized
+                else:
+                    policy_validation_error = "action_invalid"
             elif not policy_tool_action or policy_tool_action not in LLM_POLICY_CORE_ALLOWED_TOOL_ACTIONS:
                 policy_validation_error = "tool_action_invalid"
             elif not _plan_outcome_matches_action(policy_action, policy_tool_action):
@@ -6807,9 +6920,10 @@ async def _handle_webhook_payload(
                     policy_pack_refs_dropped = True
 
             if policy_validation_error is None and policy_action == "handoff":
+                # If LLM explicitly selected handoff, manager escalation is implied.
                 if not policy_needs_manager:
-                    policy_validation_error = "needs_manager_required"
-                elif message_text and not (
+                    policy_needs_manager = True
+                if message_text and not (
                     is_human_request_message(message_text)
                     or is_frustration_message(message_text)
                 ):
@@ -6819,14 +6933,42 @@ async def _handle_webhook_payload(
                 if policy_next_question:
                     policy_collect_slot = policy_next_question
                 else:
-                    policy_collect_slot = _select_plan_collect_slot(
-                        open_questions=policy_open_questions,
-                        pack_refs=policy_pack_refs,
-                        tool_action=policy_tool_action,
-                        goal=policy_goal,
-                    )
+                    policy_collect_slot = _expected_reply_slot_key(expected_reply_type)
+                    if not policy_collect_slot:
+                        policy_collect_slot = _select_plan_collect_slot(
+                            open_questions=policy_open_questions,
+                            pack_refs=policy_pack_refs,
+                            tool_action=policy_tool_action,
+                            goal=policy_goal,
+                        )
                 if not policy_collect_slot:
-                    policy_validation_error = "collect_slot_missing"
+                    merged_policy_slots = _merge_booking_plan_slots(
+                        booking_state=booking if isinstance(booking, dict) else None,
+                        plan_slots=policy_slot_state_validated,
+                    )
+                    if (
+                        policy_tool_action in {"collect", "booking", "calendar.book_slot"}
+                        and _plan_has_complete_booking_slots(merged_policy_slots)
+                    ):
+                        # Convert complete collect plans to booking tool call instead of stalling.
+                        policy_action = "fact"
+                        policy_tool_action = "calendar.book_slot"
+                        policy_slot_state_validated = merged_policy_slots
+                        if (
+                            "start_at" not in policy_tool_args
+                            and isinstance(merged_policy_slots.get("datetime"), str)
+                            and merged_policy_slots.get("datetime").strip()
+                        ):
+                            policy_tool_args["start_at"] = merged_policy_slots["datetime"]
+                        if (
+                            "customer_name" not in policy_tool_args
+                            and isinstance(merged_policy_slots.get("name"), str)
+                            and merged_policy_slots.get("name").strip()
+                        ):
+                            policy_tool_args["customer_name"] = merged_policy_slots["name"]
+                        policy_collect_slot = None
+                    else:
+                        policy_validation_error = "collect_slot_missing"
 
             if policy_validation_error is None:
                 policy_valid = True
@@ -6847,6 +6989,7 @@ async def _handle_webhook_payload(
             "validation_error": policy_validation_error,
             "low_confidence_ok": policy_low_confidence_ok,
             "pack_refs_dropped": policy_pack_refs_dropped,
+            "action_normalized": policy_action_normalized,
         }
         if saved_message:
             _update_message_decision_metadata(
@@ -6865,6 +7008,7 @@ async def _handle_webhook_payload(
                 "validation_error": policy_validation_error,
                 "low_confidence_ok": policy_low_confidence_ok,
                 "pack_refs_dropped": policy_pack_refs_dropped,
+                "action_normalized": policy_action_normalized,
                 "confidence": policy_confidence,
                 "tool_action": policy_tool_action,
                 "pack_refs": policy_pack_refs or resolved_policy_refs,
@@ -7787,6 +7931,60 @@ async def _handle_webhook_payload(
                 user_phone=getattr(user, "phone", None) if user else None,
             )
             if tool_result.handled:
+                if (
+                    booking_wants_flow
+                    and policy_tool_action == "catalog.service_query"
+                    and isinstance(policy_service_query, str)
+                    and policy_service_query.strip()
+                    and expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME}
+                    and not info_class_intents
+                ):
+                    booking_state = dict(booking) if isinstance(booking, dict) else {}
+                    if not booking_state.get("active"):
+                        booking_state["active"] = True
+                        booking_state["started_at"] = now.isoformat()
+                    booking_state["service"] = policy_service_query.strip()
+                    context = _get_conversation_context(conversation)
+                    context = _set_booking_context(context, booking_state)
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=EXPECTED_REPLY_TIME,
+                        reason="booking_prompt",
+                        now=now,
+                    )
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "booking",
+                            "decision": "prompt",
+                            "state": conversation.state,
+                            "missing_slot": "datetime",
+                            "source": "llm_policy_core_service_reply",
+                        },
+                    )
+                    _record_message_decision_meta(
+                        saved_message,
+                        action="booking_prompt",
+                        intent="booking",
+                        source="llm_policy_core",
+                        fast_intent=False,
+                    )
+                    bot_response = MSG_BOOKING_ASK_DATETIME
+                    bot_response, sent = _send_and_save(bot_response)
+                    result_message = (
+                        "LLM policy core service reply normalized to booking prompt"
+                        if sent
+                        else "LLM policy core service reply normalization failed"
+                    )
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
                 info_sections = list(info_sections_hint)
                 slot_snapshot = {
                     key: value
@@ -7833,6 +8031,7 @@ async def _handle_webhook_payload(
                         if not booking_state.get(key):
                             booking_state[key] = value
                     context = _set_booking_context(context, booking_state)
+                    _set_conversation_context(conversation, context)
                 trace_payload = dict(tool_result.trace)
                 trace_payload.setdefault("tool_action", policy_tool_action)
                 trace_payload.setdefault("tool_args", policy_tool_args)
