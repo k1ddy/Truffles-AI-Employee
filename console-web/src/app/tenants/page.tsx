@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { InfiniteData, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import type { components } from "@/types/api.generated";
 import AccessDenied from "@/components/AccessDenied";
@@ -190,6 +191,7 @@ function applyBranchSnapshotToEditor(
 
 export default function TenantsPage() {
     const { data: session } = useSession();
+    const router = useRouter();
     const queryClient = useQueryClient();
     const { handleError } = useErrorHandler();
     const [clientQuery, setClientQuery] = useState("");
@@ -226,6 +228,26 @@ export default function TenantsPage() {
     const selectedClientId = meData?.client?.id ?? null;
     const selectedCompanyId = meData?.selected_company_id ?? meData?.client?.company_id ?? null;
     const selectedBranchId = meData?.selected_branch_id ?? null;
+    const knownCompanies = useMemo(
+        () => meData?.companies ?? [],
+        [meData?.companies],
+    );
+    const knownBranches = useMemo(
+        () => meData?.branches ?? [],
+        [meData?.branches],
+    );
+    const selectedCompanyName = useMemo(() => {
+        if (!selectedCompanyId) {
+            return null;
+        }
+        return knownCompanies.find((company) => company.id === selectedCompanyId)?.name ?? null;
+    }, [knownCompanies, selectedCompanyId]);
+    const selectedBranchName = useMemo(() => {
+        if (!selectedBranchId) {
+            return null;
+        }
+        return knownBranches.find((branch) => branch.id === selectedBranchId)?.name ?? null;
+    }, [knownBranches, selectedBranchId]);
 
     const tenantsEnabled = Boolean(session && canReadTenants);
     const companyQueryValue = companyQuery.trim() || undefined;
@@ -261,6 +283,7 @@ export default function TenantsPage() {
         [
             "tenants-clients",
             string | undefined,
+            string | null,
             TenantLifecycleMode,
             FleetLifecycleFilter,
             FleetPaymentFilter,
@@ -271,6 +294,7 @@ export default function TenantsPage() {
         queryKey: [
             "tenants-clients",
             clientQueryValue,
+            selectedCompanyId,
             tenantLifecycle,
             fleetLifecycleFilter,
             fleetPaymentFilter,
@@ -282,6 +306,7 @@ export default function TenantsPage() {
                 cursor,
                 limit: 20,
                 q: clientQueryValue,
+                company_id: selectedCompanyId ?? undefined,
                 lifecycle: tenantLifecycle,
                 include_fleet: "true",
                 include_summary: cursor ? undefined : "true",
@@ -301,16 +326,17 @@ export default function TenantsPage() {
         components["schemas"]["BranchListResponse"],
         Error,
         InfiniteData<components["schemas"]["BranchListResponse"], string | undefined>,
-        ["tenants-branches", string | undefined, TenantLifecycleMode],
+        ["tenants-branches", string | undefined, string | null, TenantLifecycleMode],
         string | undefined
     >({
-        queryKey: ["tenants-branches", branchQueryValue, tenantLifecycle],
+        queryKey: ["tenants-branches", branchQueryValue, selectedClientId, tenantLifecycle],
         queryFn: async ({ pageParam }) => {
             const cursor = typeof pageParam === "string" ? pageParam : undefined;
             const response = await adminApi.listBranches({
                 cursor,
                 limit: 20,
                 q: branchQueryValue,
+                client_id: selectedClientId ?? undefined,
                 lifecycle: tenantLifecycle,
             });
             return response.data;
@@ -432,6 +458,14 @@ export default function TenantsPage() {
     const setBranchContext = (branchId?: string | null) => {
         setLocalStorageValue(BRANCH_ID_STORAGE_KEY, branchId ?? null);
         refreshContext();
+    };
+
+    const openClientContextTarget = (target: "/" | "/integrations" | "/ops", clientId?: string | null, companyId?: string | null) => {
+        if (!clientId) {
+            return;
+        }
+        setClientContext(clientId, companyId);
+        router.push(target);
     };
 
     const startCompanyEdit = (company: components["schemas"]["Company"]) => {
@@ -820,7 +854,7 @@ export default function TenantsPage() {
             <div className="flex flex-col gap-2 mb-6">
                 <h1 className="text-2xl font-bold" data-testid="tenants-title">Тенанты</h1>
                 <div className="text-xs text-muted-foreground">
-                    Контекст: {selectedCompanyId ?? "—"} / {meData?.client?.name ?? selectedClientId ?? "—"} / {selectedBranchId ?? "—"}
+                    Контекст: {selectedCompanyName ?? selectedCompanyId ?? "—"} / {meData?.client?.name ?? selectedClientId ?? "—"} / {selectedBranchName ?? selectedBranchId ?? "—"}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                     <span className="text-xs text-muted-foreground">Режим списка:</span>
@@ -828,19 +862,19 @@ export default function TenantsPage() {
                         className={tenantLifecycle === "active" ? "btn-primary" : "btn-ghost"}
                         onClick={() => setTenantLifecycle("active")}
                     >
-                        Active
+                        Активные
                     </button>
                     <button
                         className={tenantLifecycle === "archived" ? "btn-primary" : "btn-ghost"}
                         onClick={() => setTenantLifecycle("archived")}
                     >
-                        Archived
+                        Архив
                     </button>
                     <button
                         className={tenantLifecycle === "all" ? "btn-primary" : "btn-ghost"}
                         onClick={() => setTenantLifecycle("all")}
                     >
-                        All
+                        Все
                     </button>
                 </div>
             </div>
@@ -850,7 +884,7 @@ export default function TenantsPage() {
                     <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-fleet-attention">
                         <div className="flex items-start justify-between gap-4 mb-4">
                             <div>
-                                <h2 className="text-lg font-semibold">Risk & Attention</h2>
+                                <h2 className="text-lg font-semibold">Риски и внимание</h2>
                                 <p className="text-sm text-muted-foreground">
                                     Операционные риски по активным клиентам (top by score)
                                 </p>
@@ -866,9 +900,9 @@ export default function TenantsPage() {
 
                         {fleetAttention ? (
                             <div className="mb-3 text-xs text-muted-foreground" data-testid="tenants-fleet-attention-summary">
-                                active clients {fleetAttention.summary.active_clients_total} · with attention {fleetAttention.summary.clients_with_attention} ·
-                                high {fleetAttention.summary.high_risk_clients} · medium {fleetAttention.summary.medium_risk_clients} ·
-                                outbox_failed_24h {fleetAttention.summary.outbox_failed_24h_total} · pending_handovers {fleetAttention.summary.pending_handovers_total}
+                                активных клиентов {fleetAttention.summary.active_clients_total} · с риском {fleetAttention.summary.clients_with_attention} ·
+                                высокий {fleetAttention.summary.high_risk_clients} · средний {fleetAttention.summary.medium_risk_clients} ·
+                                ошибок outbox за 24ч {fleetAttention.summary.outbox_failed_24h_total} · pending handover {fleetAttention.summary.pending_handovers_total}
                             </div>
                         ) : null}
 
@@ -896,20 +930,40 @@ export default function TenantsPage() {
                                                 >
                                                     {item.attention_level}
                                                 </span>
-                                                <span className="text-muted-foreground">score {item.attention_score}</span>
+                                                <span className="text-muted-foreground">оценка {item.attention_score}</span>
                                             </div>
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
-                                            lifecycle {item.lifecycle_state} · service {item.service_state} · owner {item.owner_name ?? "—"} · next {item.next_action}
+                                            жизненный цикл {item.lifecycle_state} · сервис {item.service_state} · владелец {item.owner_name ?? "—"} · следующее действие {item.next_action}
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
-                                            branches active {item.active_branches}/{item.total_branches} · stale {item.stale_branches} · integration_error {item.integration_error_branches} · outbox_failed_24h {item.outbox_failed_24h} · pending_handovers {item.pending_handovers}
+                                            филиалы active {item.active_branches}/{item.total_branches} · stale {item.stale_branches} · интеграционных ошибок {item.integration_error_branches} · outbox_failed_24h {item.outbox_failed_24h} · pending_handovers {item.pending_handovers}
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
-                                            reasons: {item.reasons?.join(", ") || "—"}
+                                            причины: {item.reasons?.join(", ") || "—"}
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
-                                            actions: {item.suggested_actions?.join(", ") || "—"}
+                                            действия: {item.suggested_actions?.join(", ") || "—"}
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                            <button
+                                                className="btn-ghost"
+                                                onClick={() => setClientContext(item.client_id, item.company_id)}
+                                            >
+                                                В контекст
+                                            </button>
+                                            <button
+                                                className="btn-ghost"
+                                                onClick={() => openClientContextTarget("/integrations", item.client_id, item.company_id)}
+                                            >
+                                                Интеграции
+                                            </button>
+                                            <button
+                                                className="btn-ghost"
+                                                onClick={() => openClientContextTarget("/", item.client_id, item.company_id)}
+                                            >
+                                                Заявки
+                                            </button>
                                         </div>
                                     </div>
                                 ))
@@ -1050,7 +1104,12 @@ export default function TenantsPage() {
                             </p>
                             {clientsSummary ? (
                                 <div className="mt-1 text-xs text-muted-foreground">
-                                    portfolio: clients {clientsSummary.total_clients} · active {clientsSummary.active_clients} · onboarding {clientsSummary.onboarding_clients} · paused {clientsSummary.paused_clients} · archived {clientsSummary.archived_clients} · degraded {clientsSummary.degraded_clients}
+                                    портфель: клиентов {clientsSummary.total_clients} · active {clientsSummary.active_clients} · onboarding {clientsSummary.onboarding_clients} · paused {clientsSummary.paused_clients} · archived {clientsSummary.archived_clients} · degraded {clientsSummary.degraded_clients}
+                                </div>
+                            ) : null}
+                            {selectedCompanyId ? (
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                    фильтр по компании из контекста: {selectedCompanyId}
                                 </div>
                             ) : null}
                         </div>
@@ -1066,7 +1125,7 @@ export default function TenantsPage() {
                                 value={fleetLifecycleFilter}
                                 onChange={(event) => setFleetLifecycleFilter(event.target.value as FleetLifecycleFilter)}
                             >
-                                <option value="all">Lifecycle: all</option>
+                                <option value="all">Этап: все</option>
                                 <option value="lead">lead</option>
                                 <option value="contracting">contracting</option>
                                 <option value="onboarding">onboarding</option>
@@ -1080,7 +1139,7 @@ export default function TenantsPage() {
                                 value={fleetPaymentFilter}
                                 onChange={(event) => setFleetPaymentFilter(event.target.value as FleetPaymentFilter)}
                             >
-                                <option value="all">Payment: all</option>
+                                <option value="all">Оплата: все</option>
                                 <option value="pending">pending</option>
                                 <option value="confirmed">confirmed</option>
                                 <option value="rejected">rejected</option>
@@ -1091,7 +1150,7 @@ export default function TenantsPage() {
                                 value={fleetServiceFilter}
                                 onChange={(event) => setFleetServiceFilter(event.target.value as FleetServiceFilter)}
                             >
-                                <option value="all">Service: all</option>
+                                <option value="all">Сервис: все</option>
                                 <option value="ok">ok</option>
                                 <option value="degraded">degraded</option>
                                 <option value="attention">attention</option>
@@ -1155,8 +1214,8 @@ export default function TenantsPage() {
                                                     {lifecyclePending
                                                         ? "Выполняется..."
                                                         : isArchived
-                                                            ? "Restore"
-                                                            : "Archive"}
+                                                            ? "Восстановить"
+                                                            : "Архивировать"}
                                                 </button>
                                             ) : null}
                                             <button
@@ -1186,8 +1245,8 @@ export default function TenantsPage() {
                                                         />
                                                     </label>
                                                     <label className="text-xs text-muted-foreground">
-                                                        Company ID (optional)
-                                                        <input
+                                                        Компания
+                                                        <select
                                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                             value={clientEditor.companyId}
                                                             onChange={(event) =>
@@ -1198,7 +1257,14 @@ export default function TenantsPage() {
                                                                 )
                                                             }
                                                             disabled={!canWriteTenants || savingClient}
-                                                        />
+                                                        >
+                                                            <option value="">Без компании</option>
+                                                            {knownCompanies.map((company) => (
+                                                                <option key={company.id} value={company.id}>
+                                                                    {company.name ?? company.id}
+                                                                </option>
+                                                            ))}
+                                                        </select>
                                                     </label>
                                                     <div className="flex items-center gap-2">
                                                         <button
@@ -1244,6 +1310,11 @@ export default function TenantsPage() {
                             <p className="text-sm text-muted-foreground">
                                 {branchesQuery.isLoading ? "—" : `${branches.length} всего`}
                             </p>
+                            {selectedClientId ? (
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                    фильтр по клиенту из контекста: {selectedClientId}
+                                </div>
+                            ) : null}
                         </div>
                         <input
                             className="w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm"
