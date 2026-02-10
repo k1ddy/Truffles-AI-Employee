@@ -190,6 +190,23 @@ def _looks_like_info_query(message_text: str | None, *, client_slug: str | None 
         from . import _legacy as legacy
 
         normalized = legacy.normalize_for_matching(message_text)
+        if normalized and client_slug:
+            truth = load_yaml_truth(client_slug)
+            address = truth.get("salon", {}).get("address", {}) if isinstance(truth, dict) else {}
+            address_full = address.get("full") if isinstance(address, dict) else None
+            if isinstance(address_full, str) and address_full.strip():
+                address_tokens = [
+                    token
+                    for token in legacy.normalize_for_matching(address_full).split()
+                    if len(token) >= 4 and not token.isdigit()
+                ]
+                has_address_hint = any(token in normalized for token in address_tokens)
+                has_hours_hint = any(
+                    marker in normalized
+                    for marker in ("откры", "закры", "работ", "до ", "после ")
+                )
+                if has_address_hint and ("?" in message_text or has_hours_hint):
+                    return True
         if normalized and "запис" in normalized:
             if any(
                 token in normalized
@@ -247,6 +264,31 @@ def _build_info_intent_reply(
         )
         return reply, meta or None
     if intent == "master":
+        explicit_team_lookup = bool(
+            normalized
+            and any(
+                marker in normalized
+                for marker in (
+                    "кто делает",
+                    "какой мастер",
+                    "какой специалист",
+                    "кто из мастеров",
+                    "к кому запис",
+                )
+            )
+        )
+        # When the message asks about a concrete service ("короткая стрижка" etc.)
+        # and does not explicitly ask for team listing, prefer service/price answer.
+        if message_text and not explicit_team_lookup:
+            decision = get_pack_decision(message_text, client_slug=client_slug)
+            if (
+                decision
+                and decision.action == "reply"
+                and decision.intent in {"service_match", "price_query"}
+                and decision.response
+            ):
+                meta = decision.meta if isinstance(decision.meta, dict) else None
+                return decision.response, meta or None
         truth = load_yaml_truth(client_slug)
         team = truth.get("team") if isinstance(truth, dict) else None
         if isinstance(team, dict):
@@ -1429,6 +1471,68 @@ def _handle_truth_gate_fallback(
                     result_message = f"Truth gate escalation failed: {result.error}"
             else:
                 result_message = "Truth gate escalation skipped (already pending)"
+
+        if decision.intent == "off_topic":
+            context = legacy._get_conversation_context(conversation)
+            context_manager = legacy._get_context_manager(context)
+            class_carryover = legacy._get_class_carryover(
+                context_manager,
+                message_count=message_count,
+            )
+            carryover_sections = (
+                class_carryover.get("info_sections")
+                if isinstance(class_carryover, dict)
+                else None
+            )
+            normalized = legacy.normalize_for_matching(message_text) if message_text else ""
+            tokens = _tokenize_for_matching(normalized) if normalized else []
+            short_noisy_followup = bool(
+                llm_primary_reason == "low_confidence"
+                and conversation.state == legacy.ConversationState.BOT_ACTIVE.value
+                and current_goal == "info"
+                and isinstance(class_carryover, dict)
+                and class_carryover.get("class") == "info_bundle"
+                and isinstance(carryover_sections, list)
+                and carryover_sections
+                and 0 < len(tokens) <= legacy.SESSION_MEMORY_SHORT_TOKENS
+                and "?" not in (message_text or "")
+                and not any(ch.isdigit() for ch in (message_text or ""))
+                and not get_pack_service_hint(message_text or "", client_slug=client_slug)
+            )
+            if short_noisy_followup:
+                normalized_sections = {
+                    section.strip().casefold()
+                    for section in carryover_sections
+                    if isinstance(section, str) and section.strip()
+                }
+                include_parking = "parking" in normalized_sections
+                include_guest = "guest_policy" in normalized_sections
+                carryover_reply, carryover_meta = build_info_combined_reply(
+                    include_parking=include_parking,
+                    include_guest=include_guest,
+                    client_slug=client_slug,
+                )
+                if isinstance(carryover_reply, str) and carryover_reply.strip():
+                    meta = dict(carryover_meta) if isinstance(carryover_meta, dict) else {}
+                    if normalized_sections:
+                        meta.setdefault("info_sections", sorted(normalized_sections))
+                    meta.setdefault("fact_source", "truth")
+                    decision = PackDecision(
+                        action="reply",
+                        response=carryover_reply.strip(),
+                        intent="info_bundle",
+                        meta=meta,
+                    )
+                    bot_response = decision.response
+                    legacy._record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "truth_gate",
+                            "decision": "carryover_override",
+                            "reason": "short_noisy_followup",
+                            "info_sections": sorted(normalized_sections),
+                        },
+                    )
 
         if decision.intent == "off_topic":
             class_router_result = _build_out_of_domain_class_router_result()

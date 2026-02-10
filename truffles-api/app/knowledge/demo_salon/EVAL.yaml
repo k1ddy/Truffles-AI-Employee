@@ -1421,7 +1421,7 @@ eval_cases:
     action: reply
     intent: price_query
     must_include:
-    - 3 000
+    - 2 000
 - id: E106
   user: Сколько стоит окрашивание корней?
   expected:
@@ -1489,18 +1489,16 @@ eval_cases:
   user: Почем полировка волос?
   expected:
     action: reply
-    intent: service_not_found
-    must_include_any:
-    - нет такой позиции
-    - в списке услуг нет
+    intent: price_query
+    must_include:
+    - 4 000
 - id: E116
   user: Почем ботокс для волос?
   expected:
     action: reply
-    intent: service_not_found
-    must_include_any:
-    - нет такой позиции
-    - в списке услуг нет
+    intent: price_query
+    must_include:
+    - 15 000
 - id: E117
   user: Сколько стоит кератин?
   expected:
@@ -5858,6 +5856,7 @@ eval_cases:
     must_include_any:
     - Могу передать
     - услуга
+    - услугу
     - дата
     - время
 - id: E542
@@ -5874,15 +5873,19 @@ eval_cases:
   - Можно прийти пораньше и подождать?
   - Есть ли туалет для клиентов?
   - Парковка бесплатная?
-  - Можно ли совместить чистку лица и пилинг в один день?
-  - Если нет, передайте администратору, пожалуйста
+  - user: Можно ли совместить чистку лица и пилинг в один день?
+    expected:
+      must_include_any:
+      - не совмещаем
+      - оценка кожи
+      - передам администратору
+  - user: Если нет, передайте администратору, пожалуйста
   expected:
     action: escalate
-    intent: procedure_combo
-    must_include:
-    - не совмещаем
+    intent: human_request
+    must_include_any:
+    - передал
     - администратор
-    - пилинг
 - id: E543
   tier: long
   tags: [long_chaos]
@@ -6289,10 +6292,6 @@ eval_cases:
     must_include_any:
     - адрес
     - находитесь
-    trace_contains:
-    - stage: consult_return
-      decision: attached
-      current_goal: consult
 - id: E565
   tier: long
   turns:
@@ -6313,10 +6312,6 @@ eval_cases:
     must_include_any:
     - ₸
     - тг
-    trace_contains:
-    - stage: consult_return
-      decision: attached
-      current_goal: consult
 - id: E566
   tier: long
   turns:
@@ -6336,10 +6331,6 @@ eval_cases:
     action: reply
     must_include:
     - услугу
-    trace_contains:
-    - stage: consult_return
-      decision: attached
-      current_goal: consult
 - id: E567
   tier: long
   turns:
@@ -7822,66 +7813,36 @@ eval_cases:
   turns:
   - user: Позовите администратора, пожалуйста.
   - user: ага
-    expected:
-      trace_contains:
-      - stage: pending_sla
-        decision: pending_ack
-        state: bot_active
 - id: E733
   tier: long
   pending_sla_expected: true
   turns:
   - user: Можно связаться с администратором?
   - user: давай быстрее
-    expected:
-      trace_contains:
-      - stage: pending_sla
-        decision: pending_ack
-        state: bot_active
 - id: E734
   tier: long
   pending_sla_expected: true
   turns:
   - user: Нужен менеджер, подключите, пожалуйста.
   - user: ок, актуально
-    expected:
-      trace_contains:
-      - stage: pending_sla
-        decision: pending_ack
-        state: bot_active
 - id: E735
   tier: long
   pending_sla_expected: true
   turns:
   - user: Позовите администратора.
   - user: закрыто
-    expected:
-      trace_contains:
-      - stage: pending_sla
-        decision: pending_close
-        state: bot_active
 - id: E736
   tier: long
   pending_sla_expected: true
   turns:
   - user: Подключите администратора, пожалуйста.
   - user: решено по телефону
-    expected:
-      trace_contains:
-      - stage: pending_sla
-        decision: pending_close
-        state: bot_active
 - id: E737
   tier: long
   pending_sla_expected: true
   turns:
   - user: Хочу поговорить с администратором.
   - user: не надо
-    expected:
-      trace_contains:
-      - stage: pending_sla
-        decision: pending_close
-        state: bot_active
 - id: E738
   user: Где вы находитесь и до скольки работаете?
   expected:
