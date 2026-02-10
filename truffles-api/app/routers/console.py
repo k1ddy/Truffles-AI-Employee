@@ -7001,7 +7001,10 @@ async def list_fleet_attention(
     _validate_limit(limit)
     if not isinstance(stale_after_minutes, int):
         stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
-    include_low_mode = _parse_bool_param("include_low", include_low, default=False)
+    normalized_include_low = include_low
+    if normalized_include_low is not None and normalized_include_low.lower() == "null":
+        normalized_include_low = None
+    include_low_mode = _parse_bool_param("include_low", normalized_include_low, default=False)
 
     context = get_console_context(
         request,

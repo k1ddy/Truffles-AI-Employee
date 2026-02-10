@@ -937,7 +937,7 @@ jobs:
             EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
             bash "${RELEASE_SCRIPT}"
             REPO_ROOT="${REPO_ROOT}" EXPECTED_GIT_COMMIT=${{ github.sha }} VERIFY_CONSOLE_BUILD=1 bash "${CONSOLE_RESTART_SCRIPT}"
-            api_commit="$(curl -fsS http://localhost:8000/admin/version | python3 -c 'import json,sys; print((json.load(sys.stdin).get(\"git_commit\") or \"\").strip())')"
+            api_commit="$(curl -fsS http://localhost:8000/admin/version | python3 -c 'import json,sys; print((json.load(sys.stdin).get("git_commit") or "").strip())')"
             console_commit="$(docker exec truffles-console-web /bin/sh -lc 'printf \"%s\" \"${NEXT_PUBLIC_BUILD_SHA:-unknown}\"')"
             if [ "${api_commit}" != "${{ github.sha }}" ]; then
               echo "ERROR: deploy parity mismatch: api git_commit=${api_commit}, expected=${{ github.sha }}" >&2
