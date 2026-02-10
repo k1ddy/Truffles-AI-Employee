@@ -397,6 +397,9 @@ class ConsoleAgentCreateRequest(BaseModel):
     name: Optional[str] = None
     is_active: Optional[bool] = True
     oidc_subject: Optional[str] = None
+    sso_username: Optional[str] = None
+    sso_password: Optional[str] = None
+    sso_temp_password: Optional[bool] = True
 
 
 class ConsoleAgentCreateResponse(BaseModel):

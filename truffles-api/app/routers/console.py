@@ -8,7 +8,10 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Callable, Optional
-from urllib.parse import urlparse
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode, urlparse
+from urllib.request import Request as URLRequest
+from urllib.request import urlopen
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
@@ -439,6 +442,13 @@ def _resolve_branch_from_context(context: ConsoleAuthContext) -> Branch:
     raise ConsoleAPIError(400, "BRANCH_SELECTION_REQUIRED", "Branch selection required")
 
 
+def _has_context_privileged_branch_access(context: ConsoleAuthContext) -> bool:
+    if not _is_privileged_access_role(context.role):
+        return False
+    # Branch-scoped owner/admin must stay branch-restricted.
+    return not bool(getattr(context, "branch_restricted", False))
+
+
 def _require_branch_access(
     context: ConsoleAuthContext,
     branch_id: Optional[UUID],
@@ -447,7 +457,7 @@ def _require_branch_access(
 ) -> None:
     if branch_id is None:
         return
-    if context.role in ("platform_admin", "owner", "admin"):
+    if _has_context_privileged_branch_access(context):
         return
     allowed_branch_ids = {branch.id for branch in context.branches}
     if branch_id not in allowed_branch_ids:
@@ -1346,6 +1356,228 @@ def _ensure_unique_oidc_subject(
     if query.first():
         raise ConsoleAPIError(409, "OIDC_SUBJECT_IN_USE", "oidc_subject already linked to another agent")
     return normalized_subject
+
+
+def _extract_keycloak_realm(value: Optional[str]) -> Optional[str]:
+    normalized = _normalize_optional_text(value)
+    if not normalized:
+        return None
+    marker = "/realms/"
+    if marker not in normalized:
+        return None
+    tail = normalized.split(marker, 1)[1].strip("/")
+    if not tail:
+        return None
+    return tail.split("/", 1)[0]
+
+
+def _extract_keycloak_base_url(value: Optional[str]) -> Optional[str]:
+    normalized = _normalize_optional_text(value)
+    if not normalized:
+        return None
+    marker = "/realms/"
+    if marker in normalized:
+        return normalized.split(marker, 1)[0].rstrip("/")
+    parsed = urlparse(normalized)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return None
+
+
+def _resolve_keycloak_admin_config() -> dict[str, Optional[str]]:
+    issuer = _normalize_optional_text(os.environ.get("CONSOLE_OIDC_ISSUER") or os.environ.get("KEYCLOAK_ISSUER"))
+    token_url = _normalize_optional_text(os.environ.get("CONSOLE_KEYCLOAK_TOKEN_URL"))
+    if not token_url and issuer:
+        token_url = f"{issuer.rstrip('/')}/protocol/openid-connect/token"
+
+    realm = (
+        _normalize_optional_text(os.environ.get("CONSOLE_KEYCLOAK_REALM"))
+        or _normalize_optional_text(os.environ.get("KEYCLOAK_REALM"))
+        or _extract_keycloak_realm(issuer)
+        or _extract_keycloak_realm(token_url)
+    )
+    admin_base_url = (
+        _normalize_optional_text(os.environ.get("CONSOLE_KEYCLOAK_ADMIN_BASE_URL"))
+        or _normalize_optional_text(os.environ.get("KEYCLOAK_ADMIN_BASE_URL"))
+        or _extract_keycloak_base_url(issuer)
+        or _extract_keycloak_base_url(token_url)
+    )
+    client_id = _normalize_optional_text(os.environ.get("CONSOLE_KEYCLOAK_CLIENT_ID")) or "admin-cli"
+    client_secret = _normalize_optional_text(os.environ.get("CONSOLE_KEYCLOAK_CLIENT_SECRET"))
+    admin_username = _normalize_optional_text(
+        os.environ.get("CONSOLE_KEYCLOAK_USERNAME") or os.environ.get("KEYCLOAK_ADMIN_USERNAME")
+    )
+    admin_password = _normalize_optional_text(
+        os.environ.get("CONSOLE_KEYCLOAK_PASSWORD") or os.environ.get("KEYCLOAK_ADMIN_PASSWORD")
+    )
+
+    missing = []
+    if not token_url:
+        missing.append("CONSOLE_KEYCLOAK_TOKEN_URL")
+    if not admin_base_url:
+        missing.append("CONSOLE_KEYCLOAK_ADMIN_BASE_URL")
+    if not realm:
+        missing.append("CONSOLE_KEYCLOAK_REALM")
+    if not admin_username:
+        missing.append("CONSOLE_KEYCLOAK_USERNAME")
+    if not admin_password:
+        missing.append("CONSOLE_KEYCLOAK_PASSWORD")
+    if missing:
+        raise ConsoleAPIError(
+            503,
+            "INTEGRATION_UNAVAILABLE",
+            "SSO provisioning is not configured",
+            details={"missing": missing},
+        )
+
+    return {
+        "token_url": token_url,
+        "admin_base_url": admin_base_url,
+        "realm": realm,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "admin_username": admin_username,
+        "admin_password": admin_password,
+    }
+
+
+def _fetch_keycloak_admin_token(config: dict[str, Optional[str]]) -> str:
+    payload = {
+        "grant_type": "password",
+        "client_id": config.get("client_id") or "admin-cli",
+        "username": config.get("admin_username") or "",
+        "password": config.get("admin_password") or "",
+    }
+    client_secret = config.get("client_secret")
+    if client_secret:
+        payload["client_secret"] = client_secret
+
+    body = urlencode(payload).encode("utf-8")
+    req = URLRequest(
+        str(config["token_url"]),
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=10) as response:
+            raw = response.read()
+    except HTTPError as exc:
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO provisioning token request failed") from exc
+    except URLError as exc:
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO provisioning endpoint is unreachable") from exc
+
+    try:
+        parsed = json.loads((raw or b"{}").decode("utf-8"))
+    except Exception as exc:  # pragma: no cover - defensive parse guard
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "Invalid SSO token response") from exc
+    token = _normalize_optional_text(parsed.get("access_token"))
+    if not token:
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO token response missing access_token")
+    return token
+
+
+def _keycloak_lookup_user_id(
+    config: dict[str, Optional[str]],
+    *,
+    access_token: str,
+    username: str,
+) -> Optional[str]:
+    query_url = (
+        f"{config['admin_base_url']}/admin/realms/{config['realm']}/users"
+        f"?username={quote(username)}&exact=true"
+    )
+    req = URLRequest(
+        query_url,
+        headers={"Authorization": f"Bearer {access_token}"},
+        method="GET",
+    )
+    try:
+        with urlopen(req, timeout=10) as response:
+            raw = response.read()
+    except HTTPError as exc:
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO user lookup failed") from exc
+    except URLError as exc:
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO user lookup endpoint is unreachable") from exc
+
+    try:
+        users = json.loads((raw or b"[]").decode("utf-8"))
+    except Exception as exc:  # pragma: no cover - defensive parse guard
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "Invalid SSO lookup response") from exc
+    if not isinstance(users, list) or not users:
+        return None
+    user_id = _normalize_optional_text((users[0] or {}).get("id"))
+    return user_id
+
+
+def _provision_sso_user_and_get_subject(
+    *,
+    username: str,
+    password: str,
+    temporary_password: bool,
+) -> str:
+    normalized_username = _normalize_required_text(username, "sso_username")
+    normalized_password = (password or "").strip()
+    if len(normalized_password) < 8:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "sso_password must be at least 8 characters")
+
+    config = _resolve_keycloak_admin_config()
+    access_token = _fetch_keycloak_admin_token(config)
+
+    existing_user = _keycloak_lookup_user_id(
+        config,
+        access_token=access_token,
+        username=normalized_username,
+    )
+    if existing_user:
+        raise ConsoleAPIError(409, "INVALID_PARAM", "sso_username already exists")
+
+    create_payload = {
+        "username": normalized_username,
+        "enabled": True,
+        "credentials": [
+            {
+                "type": "password",
+                "value": normalized_password,
+                "temporary": bool(temporary_password),
+            }
+        ],
+    }
+    req = URLRequest(
+        f"{config['admin_base_url']}/admin/realms/{config['realm']}/users",
+        data=json.dumps(create_payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    created_location = None
+    try:
+        with urlopen(req, timeout=10) as response:
+            created_location = response.headers.get("Location")
+    except HTTPError as exc:
+        if exc.code == 409:
+            raise ConsoleAPIError(409, "INVALID_PARAM", "sso_username already exists") from exc
+        if exc.code == 400:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid SSO user payload") from exc
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO user provisioning failed") from exc
+    except URLError as exc:
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO user provisioning endpoint is unreachable") from exc
+
+    if created_location:
+        user_id = _normalize_optional_text(created_location.rstrip("/").split("/")[-1])
+        if user_id:
+            return user_id
+
+    resolved_user = _keycloak_lookup_user_id(
+        config,
+        access_token=access_token,
+        username=normalized_username,
+    )
+    if not resolved_user:
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO user created but subject lookup failed")
+    return resolved_user
 
 
 def _serialize_agent(agent: Agent) -> ConsoleAgent:
@@ -3441,7 +3673,7 @@ async def list_cases(
 
     # Branch filter (RBAC + Request)
     allowed_branch_ids = {b.id for b in context.branches}
-    is_privileged = context.agent.role in ("platform_admin", "owner", "admin")
+    is_privileged = _has_context_privileged_branch_access(context)
 
     if not is_privileged:
         if not allowed_branch_ids:
@@ -8689,6 +8921,27 @@ async def create_agent(
     if body.role == "platform_admin" and context.role != "platform_admin":
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Only platform admin can assign platform_admin role")
 
+    sso_username = _normalize_optional_text(body.sso_username)
+    sso_password = (body.sso_password or "").strip()
+    if body.oidc_subject and sso_username:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            "Use either oidc_subject or sso_username/sso_password, not both",
+        )
+    if sso_password and not sso_username:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "sso_username is required when sso_password is provided")
+    if sso_username and not sso_password:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "sso_password is required when sso_username is provided")
+
+    resolved_oidc_subject = body.oidc_subject
+    if sso_username and sso_password:
+        resolved_oidc_subject = _provision_sso_user_and_get_subject(
+            username=sso_username,
+            password=sso_password,
+            temporary_password=bool(body.sso_temp_password if body.sso_temp_password is not None else True),
+        )
+
     branch = None
     if body.branch_id:
         branch = (
@@ -8719,7 +8972,7 @@ async def create_agent(
         branch=branch,
         name=body.name,
         is_active=is_active,
-        oidc_subject=body.oidc_subject,
+        oidc_subject=resolved_oidc_subject,
         linked_from="admin_api",
         now=now,
     )
@@ -8733,7 +8986,8 @@ async def create_agent(
         payload={
             "role": agent.role,
             "branch_id": str(agent.branch_id) if agent.branch_id else None,
-            "oidc_linked": bool(body.oidc_subject),
+            "oidc_linked": bool(resolved_oidc_subject),
+            "sso_username": sso_username,
         },
         client_id=client.id,
         branch_id=agent.branch_id,
