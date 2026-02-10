@@ -383,9 +383,7 @@ def _merge_truth_overlay(base: dict[str, Any], overlay: dict[str, Any]) -> dict[
 def load_yaml_truth(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:
     runtime_truth = get_runtime_truth()
     if runtime_truth is not None:
-        runtime_allow_fallback = bool(
-            runtime_truth.allow_fallback or os.environ.get("PYTEST_CURRENT_TEST")
-        )
+        runtime_allow_fallback = bool(runtime_truth.allow_fallback)
         runtime_slug = runtime_truth.client_slug
         if runtime_slug and client_slug:
             normalized = _normalize_client_slug(client_slug)
@@ -394,8 +392,8 @@ def load_yaml_truth(client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> dict:
                     return {}
                 return _load_yaml_truth_cached(client_slug)
         if isinstance(runtime_truth.truth, dict):
-            # Pytest may provide partial runtime truth; merge with canonical file
-            # to keep deterministic contract checks stable.
+            # When fallback is explicitly enabled, merge partial runtime truth
+            # with canonical file to keep contract checks deterministic.
             if runtime_allow_fallback:
                 fallback_truth = _load_yaml_truth_cached(client_slug)
                 if not runtime_truth.truth:
@@ -3114,6 +3112,9 @@ def get_demo_salon_decision(
             "какой мастер",
             "какой специалист",
             "кто из мастеров",
+            "к мастеру",
+            "к конкретному мастеру",
+            "к специалисту",
             "к кому запис",
         )
     )
