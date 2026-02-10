@@ -341,3 +341,4 @@
 | 2026-02-09-deploy-untracked-hotfix-a22 | done | feat/2026-02-09-deploy-untracked-hotfix-a22 | /home/zhan/worktrees/2026-02-09-deploy-untracked-hotfix-a22 | docs/TASK_PACKAGES/TP-2026-02-09-deploy-untracked-hotfix-a22.md | 2026-02-09 |
 | 2026-02-10-ci-merge-skip-core-eval-a23 | done | feat/2026-02-10-ci-merge-skip-core-eval-a23 | /home/zhan/worktrees/2026-02-10-ci-merge-skip-core-eval-a23 | docs/TASK_PACKAGES/TP-2026-02-10-ci-merge-skip-core-eval-a23.md | 2026-02-10 (sync) |
 | 2026-02-10-deploy-parity-quote-fix-a23 | done | feat/2026-02-10-deploy-parity-quote-fix-a23 | /home/zhan/worktrees/2026-02-10-deploy-parity-quote-fix-a23 | docs/TASK_PACKAGES/TP-2026-02-10-deploy-parity-quote-fix-a23.md | 2026-02-10 |
+| 2026-02-10-main-ci-deploy-contract-fix-a23 | active | feat/2026-02-10-main-ci-deploy-contract-fix-a23 | /home/zhan/worktrees/2026-02-10-main-ci-deploy-contract-fix-a23 | docs/TASK_PACKAGES/TP-2026-02-10-deploy-parity-quote-fix-a23.md | 2026-02-10 |
