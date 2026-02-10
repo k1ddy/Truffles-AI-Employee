@@ -1,0 +1,22 @@
+# SESSION 2026-02-10-console-contract-live-flake-a26 — Console contract live flake hardening
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-10-console-contract-live-flake-a26.md
+- branch: fix/2026-02-10-console-contract-live-flake-a26
+- worktree: /home/zhan/truffles-main
+- base_ref: origin/main
+- scope: Stabilize post-deploy `console-contract-live` CI job (Schemathesis GET smoke) with deterministic auth/context handling.
+- done:
+  - Session registered for current branch.
+  - Baseline failure analyzed from run `21858724686` job `63082686753`.
+  - Added `console-contract-live` fallback selection envs: `CONSOLE_SCHEMATHESIS_CLIENT_ID`, `CONSOLE_SCHEMATHESIS_BRANCH_ID`.
+  - Hardened `/me` selection-header preflight: fail with clear message when neither `/me` nor fallback can resolve client+branch.
+  - Restricted Schemathesis smoke phases to `examples,fuzzing,stateful` and increased request timeout `10 -> 20`.
+- next:
+  - Patch `.github/workflows/ci.yml` for auth/context preflight and phase hardening.
+  - Push branch and open PR.
+- evidence:
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21858724686/job/63082686753
+  - gh run view 21858724686 --job 63082686753 --log
+- last_updated: 2026-02-10
