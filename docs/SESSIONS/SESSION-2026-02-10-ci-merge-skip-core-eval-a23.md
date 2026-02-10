@@ -16,6 +16,7 @@
 - in_progress:
   - Fixed shell error in `CI decision summary` heredoc after first CI attempt on PR #602.
   - Fixed `run_core_eval` type ambiguity by switching to numeric gate (`1/0`) and `core-eval if == '1'`.
+  - Fixed output serialization bug (`\\n` vs newline) that made `run_core_eval` absorb multiple outputs and forced `core-eval` skip.
 - next:
   - Push branch and open PR.
 - evidence:

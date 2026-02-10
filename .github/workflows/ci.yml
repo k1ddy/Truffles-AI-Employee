@@ -204,9 +204,9 @@ jobs:
               f"pr={pr_number}, sha={pr_head_sha}, l1_changed={l1_changed}"
           )
           with open(output_path, "a", encoding="utf-8") as out:
-              out.write(f"run_core_eval={run_core_eval}\\n")
-              out.write(f"core_eval_skip_on_merge={skip}\\n")
-              out.write(f"core_eval_skip_reason={reason}\\n")
+              out.write(f"run_core_eval={run_core_eval}\n")
+              out.write(f"core_eval_skip_on_merge={skip}\n")
+              out.write(f"core_eval_skip_reason={reason}\n")
           PY
 
       - name: CI decision summary
