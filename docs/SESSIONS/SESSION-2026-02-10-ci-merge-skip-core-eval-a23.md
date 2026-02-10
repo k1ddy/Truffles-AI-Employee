@@ -19,6 +19,7 @@
   - Fixed `run_core_eval` type ambiguity by switching to numeric gate (`1/0`) and `core-eval if == '1'`.
   - Fixed output serialization bug (`\\n` vs newline) that made `run_core_eval` absorb multiple outputs and forced `core-eval` skip.
   - Await CI on latest commit to confirm both: PR flow keeps `core-eval` runnable, merge flow skips duplicate `core-eval`.
+  - Fixed PR #603 session-gate failure by syncing `docs/SESSION_INDEX.md` with this session update.
 - next:
   - Push branch and open PR.
 - evidence:

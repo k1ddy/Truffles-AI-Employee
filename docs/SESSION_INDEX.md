@@ -339,4 +339,4 @@
 | 2026-02-09-console-build-hotfix-a20 | active | fix/2026-02-09-console-build-hotfix-a20 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-09-console-build-hotfix-a20.md | 2026-02-09 |
 | 2026-02-09-unified-pr4bc-cicd-a22 | done | feat/2026-02-09-unified-pr4bc-cicd-a22 | /home/zhan/worktrees/2026-02-09-unified-pr4bc-cicd-a22 | docs/TASK_PACKAGES/TP-2026-02-09-unified-pr4bc-cicd-a22.md | 2026-02-09 |
 | 2026-02-09-deploy-untracked-hotfix-a22 | done | feat/2026-02-09-deploy-untracked-hotfix-a22 | /home/zhan/worktrees/2026-02-09-deploy-untracked-hotfix-a22 | docs/TASK_PACKAGES/TP-2026-02-09-deploy-untracked-hotfix-a22.md | 2026-02-09 |
-| 2026-02-10-ci-merge-skip-core-eval-a23 | done | feat/2026-02-10-ci-merge-skip-core-eval-a23 | /home/zhan/worktrees/2026-02-10-ci-merge-skip-core-eval-a23 | docs/TASK_PACKAGES/TP-2026-02-10-ci-merge-skip-core-eval-a23.md | 2026-02-10 |
+| 2026-02-10-ci-merge-skip-core-eval-a23 | done | feat/2026-02-10-ci-merge-skip-core-eval-a23 | /home/zhan/worktrees/2026-02-10-ci-merge-skip-core-eval-a23 | docs/TASK_PACKAGES/TP-2026-02-10-ci-merge-skip-core-eval-a23.md | 2026-02-10 (sync) |
