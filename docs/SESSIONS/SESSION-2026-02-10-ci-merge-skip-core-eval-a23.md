@@ -13,10 +13,13 @@
   - Reworked CI gate to emit deterministic `run_core_eval=true|false` output and switched `core-eval` job to that output.
   - Added `CI decision summary` step to expose `deploy_required` and core-eval gate decisions in logs/summary.
   - Validated workflow YAML and merge-gate dry check against merge commit `c857608d`.
+- in_progress:
+  - Fixed shell error in `CI decision summary` heredoc after first CI attempt on PR #602.
 - next:
   - Push branch and open PR.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-10-ci-merge-skip-core-eval-a23.md
   - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21845489527
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21846233615
   - local checks: `./scripts/session_check.sh`, YAML parse, merge-gate dry check (`pr_core_eval_success` => `run_core_eval=false`)
 - last_updated: 2026-02-10

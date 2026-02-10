@@ -218,14 +218,14 @@ jobs:
           CORE_EVAL_SKIP_REASON: ${{ steps.core_eval_gate.outputs.core_eval_skip_reason || 'none' }}
         run: |
           echo "CI gate decisions: l1=$L1_CHANGED deploy_required=$DEPLOY_REQUIRED run_core_eval=$RUN_CORE_EVAL skip_on_merge=$CORE_EVAL_SKIP_ON_MERGE reason=$CORE_EVAL_SKIP_REASON"
-          {
-            echo "### CI Gate Decisions"
-            echo "- l1_changed: \`$L1_CHANGED\`"
-            echo "- deploy_required: \`$DEPLOY_REQUIRED\`"
-            echo "- run_core_eval: \`$RUN_CORE_EVAL\`"
-            echo "- core_eval_skip_on_merge: \`$CORE_EVAL_SKIP_ON_MERGE\`"
-            echo "- core_eval_skip_reason: \`$CORE_EVAL_SKIP_REASON\`"
-          } >> \"$GITHUB_STEP_SUMMARY\"
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ### CI Gate Decisions
+          - l1_changed: \`$L1_CHANGED\`
+          - deploy_required: \`$DEPLOY_REQUIRED\`
+          - run_core_eval: \`$RUN_CORE_EVAL\`
+          - core_eval_skip_on_merge: \`$CORE_EVAL_SKIP_ON_MERGE\`
+          - core_eval_skip_reason: \`$CORE_EVAL_SKIP_REASON\`
+          EOF
 
   lint:
     runs-on: ubuntu-latest
