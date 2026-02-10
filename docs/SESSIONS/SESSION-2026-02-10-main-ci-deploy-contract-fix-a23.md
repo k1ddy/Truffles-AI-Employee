@@ -1,16 +1,25 @@
 # SESSION 2026-02-10-main-ci-deploy-contract-fix-a23 — Session 2026-02-10-main-ci-deploy-contract-fix-a23
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-02-10-deploy-parity-quote-fix-a23.md
+- task_package: docs/TASK_PACKAGES/TP-2026-02-10-main-ci-deploy-contract-fix-a23.md
 - branch: feat/2026-02-10-main-ci-deploy-contract-fix-a23
 - worktree: /home/zhan/worktrees/2026-02-10-main-ci-deploy-contract-fix-a23
 - base_ref: origin/main
-- scope: <fill scope>
+- scope: Main CI hotfix for deploy parity quoting and fleet attention limit contract.
 - done:
   - Session created.
+  - Root cause confirmed in deploy job `63051317397`: console parity mismatch due quoted `console_commit` value (`""sha""`).
+  - Root cause confirmed in console-contract-live job `63051539007`: contract allowed `limit=1088`, runtime correctly rejected `limit > 100`.
+  - Fixed console SHA extraction quoting in `.github/workflows/ci.yml`.
+  - Added `minimum: 1` and `maximum: 100` for `/admin/fleet/attention` query `limit` in OpenAPI contract.
+  - Local checks passed:
+    - `python3 - <<'PY' ... yaml.safe_load ...` for CI and OpenAPI files
+    - `/tmp/venv-openapi-a23/bin/python -m openapi_spec_validator ../contracts/console_api/openapi.v1.yaml`
+    - `python3 scripts/generate_openapi.py --check`
 - next:
-  - Fill Task Package and execute plan.
+  - Push branch and open PR.
 - evidence:
-  - docs/TASK_PACKAGES/TP-2026-02-10-deploy-parity-quote-fix-a23.md
+  - docs/TASK_PACKAGES/TP-2026-02-10-main-ci-deploy-contract-fix-a23.md
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21848964722
 - last_updated: 2026-02-10
