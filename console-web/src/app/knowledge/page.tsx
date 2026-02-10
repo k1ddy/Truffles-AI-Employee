@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import axios from "axios";
 import toast from "react-hot-toast";
 import {
+    adminApi,
     authApi,
     canAccessConsole,
     confirmationsApi,
@@ -16,10 +18,33 @@ import {
 } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import AccessDenied from "@/components/AccessDenied";
+import api from "@/lib/api";
+import type { components } from "@/types/api.generated";
 
 type SessionData = ReturnType<typeof useSession>["data"];
-type BranchSummary = { id?: string; name?: string };
+type FleetAttentionItem = components["schemas"]["FleetAttentionItem"];
+type FleetClient = components["schemas"]["Client"];
+type FleetBranch = components["schemas"]["Branch"];
+type GuidedHours = {
+    days: string;
+    open: string;
+    close: string;
+};
+type GuidedService = {
+    id: string;
+    name: string;
+};
+type SpecialistSummary = {
+    id: string;
+    name: string;
+    branch_id?: string | null;
+    branch_name?: string | null;
+    services?: Array<Record<string, unknown>>;
+    is_active?: boolean;
+};
 
+const COMPANY_ID_STORAGE_KEY = "console:company_id";
+const CLIENT_ID_STORAGE_KEY = "console:client_id";
 const BRANCH_ID_STORAGE_KEY = "console:branch_id";
 
 const KNOWLEDGE_STEPS = [
@@ -89,9 +114,160 @@ function extractHistoryItems(value: unknown): KnowledgeHistoryItem[] {
     return items as KnowledgeHistoryItem[];
 }
 
+function setLocalStorageValue(key: string, value?: string | null) {
+    if (typeof window === "undefined") {
+        return;
+    }
+    if (!value) {
+        window.localStorage.removeItem(key);
+        return;
+    }
+    window.localStorage.setItem(key, value);
+}
+
+function parseOptionalJson(value: string, label: string): { value?: Record<string, unknown>; error?: string } {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return { value: {} };
+    }
+    try {
+        const parsed = JSON.parse(trimmed);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return { error: `${label}: ожидается JSON-объект` };
+        }
+        return { value: parsed as Record<string, unknown> };
+    } catch {
+        return { error: `${label}: некорректный JSON` };
+    }
+}
+
+function createDefaultPayload(): Record<string, unknown> {
+    return {
+        client_pack: {
+            salon: {
+                hours: {
+                    days: "",
+                    open: "",
+                    close: "",
+                },
+            },
+            services_catalog: {
+                services: [],
+            },
+        },
+    };
+}
+
+function ensureObject(value: unknown): Record<string, unknown> {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+        return { ...(value as Record<string, unknown>) };
+    }
+    return {};
+}
+
+function extractGuidedHours(payload: Record<string, unknown> | null): GuidedHours {
+    const root = ensureObject(payload);
+    const clientPack = ensureObject(root.client_pack);
+    const salon = ensureObject(clientPack.salon);
+    const hours = ensureObject(salon.hours);
+    return {
+        days: typeof hours.days === "string" ? hours.days : "",
+        open: typeof hours.open === "string" ? hours.open : "",
+        close: typeof hours.close === "string" ? hours.close : "",
+    };
+}
+
+function extractGuidedServices(payload: Record<string, unknown> | null): GuidedService[] {
+    const root = ensureObject(payload);
+    const clientPack = ensureObject(root.client_pack);
+    const servicesCatalog = ensureObject(clientPack.services_catalog);
+    const services = Array.isArray(servicesCatalog.services) ? servicesCatalog.services : [];
+    return services
+        .map((item, index) => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) {
+                return null;
+            }
+            const service = item as Record<string, unknown>;
+            const name = typeof service.name === "string" ? service.name.trim() : "";
+            if (!name) {
+                return null;
+            }
+            return {
+                id: `svc-${index}-${name.toLowerCase()}`,
+                name,
+            };
+        })
+        .filter((item): item is GuidedService => Boolean(item));
+}
+
+function buildStructuredDraftPayload(
+    basePayload: Record<string, unknown> | null,
+    hours: GuidedHours,
+    services: GuidedService[],
+): Record<string, unknown> {
+    const root = {
+        ...(basePayload ?? createDefaultPayload()),
+    };
+    const clientPack = ensureObject(root.client_pack);
+    const salon = ensureObject(clientPack.salon);
+    const salonHours = ensureObject(salon.hours);
+    const servicesCatalog = ensureObject(clientPack.services_catalog);
+    const currentServices = Array.isArray(servicesCatalog.services) ? servicesCatalog.services : [];
+
+    const currentByName = new Map<string, Record<string, unknown>>();
+    for (const item of currentServices) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+            continue;
+        }
+        const service = item as Record<string, unknown>;
+        const name = typeof service.name === "string" ? service.name.trim().toLowerCase() : "";
+        if (!name) {
+            continue;
+        }
+        currentByName.set(name, { ...service });
+    }
+
+    const nextServices = services
+        .map((service) => service.name.trim())
+        .filter(Boolean)
+        .map((name) => {
+            const reused = currentByName.get(name.toLowerCase());
+            if (reused) {
+                return { ...reused, name };
+            }
+            return {
+                name,
+                synonyms: [],
+                price_items: [],
+            };
+        });
+
+    const nextHours: Record<string, unknown> = {
+        ...salonHours,
+        days: hours.days.trim(),
+        open: hours.open.trim(),
+        close: hours.close.trim(),
+    };
+
+    root.client_pack = {
+        ...clientPack,
+        salon: {
+            ...salon,
+            hours: nextHours,
+        },
+        services_catalog: {
+            ...servicesCatalog,
+            services: nextServices,
+        },
+    };
+
+    return root;
+}
+
 function KnowledgeStudio({ session }: { session: SessionData }) {
     const { handleError } = useErrorHandler();
     const queryClient = useQueryClient();
+    const router = useRouter();
     const [stepIndex, setStepIndex] = useState(0);
     const [draftText, setDraftText] = useState("");
     const [ackWarnings, setAckWarnings] = useState(false);
@@ -104,6 +280,19 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const [rollbackReason, setRollbackReason] = useState("");
     const [branchId, setBranchId] = useState("");
     const [isSelectingBranch, setIsSelectingBranch] = useState(false);
+    const [fleetClientId, setFleetClientId] = useState("");
+    const [fleetCompanyId, setFleetCompanyId] = useState("");
+    const [fleetBranchId, setFleetBranchId] = useState("");
+    const [isApplyingFleetContext, setIsApplyingFleetContext] = useState(false);
+    const [branchKnowledgeTagDraft, setBranchKnowledgeTagDraft] = useState("");
+    const [branchWorkingHoursDraft, setBranchWorkingHoursDraft] = useState("{}");
+    const [branchChangeReason, setBranchChangeReason] = useState("");
+    const [guidedHours, setGuidedHours] = useState<GuidedHours>({
+        days: "",
+        open: "",
+        close: "",
+    });
+    const [guidedServices, setGuidedServices] = useState<GuidedService[]>([]);
     const [validation, setValidation] = useState<ValidationState>({
         ran: false,
         errors: [],
@@ -121,9 +310,15 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     });
 
     const role = meData?.agent?.role ?? "manager";
+    const isPlatformAdmin = role === "platform_admin";
     const canRead = canAccessConsole(role, "knowledge", "read");
     const canEdit = canAccessConsole(role, "knowledge", "write");
-    const branches: BranchSummary[] = (meData?.branches ?? []) as BranchSummary[];
+    const branches = useMemo(
+        () => (meData?.branches ?? []) as FleetBranch[],
+        [meData?.branches]
+    );
+    const selectedClientId = meData?.client?.id ?? "";
+    const selectedCompanyId = meData?.selected_company_id ?? meData?.client?.company_id ?? "";
     const selectedBranchId = meData?.selected_branch_id ?? "";
     const branchIsValid = selectedBranchId
         ? branches.some((branch) => branch.id === selectedBranchId)
@@ -160,6 +355,55 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         queryFn: async () => {
             const response = await learningApi.list({ status: "pending", limit: 25 });
             return response.data;
+        },
+        enabled: !!session && !!meData && !apiUnavailable && canRead && !branchSelectionRequired,
+        retry: false,
+    });
+
+    const fleetClientsQuery = useQuery({
+        queryKey: ["knowledge-fleet-clients"],
+        queryFn: async () => {
+            const response = await adminApi.listClients({
+                lifecycle: "active",
+                include_fleet: "true",
+                limit: 100,
+            });
+            return response.data;
+        },
+        enabled: !!session && !!meData && !apiUnavailable && canRead && isPlatformAdmin,
+        retry: false,
+    });
+
+    const fleetBranchesQuery = useQuery({
+        queryKey: ["knowledge-fleet-branches", fleetClientId],
+        queryFn: async () => {
+            const response = await adminApi.listBranches({
+                client_id: fleetClientId || undefined,
+                lifecycle: "active",
+                limit: 100,
+            });
+            return response.data;
+        },
+        enabled: !!session && !!meData && !apiUnavailable && canRead && isPlatformAdmin && !!fleetClientId,
+        retry: false,
+    });
+
+    const fleetAttentionQuery = useQuery({
+        queryKey: ["knowledge-fleet-attention"],
+        queryFn: async () => {
+            const response = await adminApi.listFleetAttention({ limit: 12 });
+            return response.data;
+        },
+        enabled: !!session && !!meData && !apiUnavailable && canRead && isPlatformAdmin,
+        retry: false,
+    });
+
+    const specialistsQuery = useQuery({
+        queryKey: ["knowledge-specialists", selectedBranchId],
+        queryFn: async () => {
+            const query = selectedBranchId ? `?branch_id=${selectedBranchId}` : "";
+            const response = await api.get(`/calendar/specialists${query}`);
+            return response.data as { items?: SpecialistSummary[] };
         },
         enabled: !!session && !!meData && !apiUnavailable && canRead && !branchSelectionRequired,
         retry: false,
@@ -229,6 +473,62 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         handleError(error);
     }, [candidatesQuery.error, apiUnavailable, handleError]);
 
+    useEffect(() => {
+        const error = fleetClientsQuery.error;
+        if (!error || apiUnavailable) {
+            return;
+        }
+        if (isApiUnavailable(error)) {
+            setApiUnavailable(true);
+            return;
+        }
+        handleError(error);
+    }, [fleetClientsQuery.error, apiUnavailable, handleError]);
+
+    useEffect(() => {
+        const error = fleetBranchesQuery.error;
+        if (!error || apiUnavailable) {
+            return;
+        }
+        if (isApiUnavailable(error)) {
+            setApiUnavailable(true);
+            return;
+        }
+        handleError(error);
+    }, [fleetBranchesQuery.error, apiUnavailable, handleError]);
+
+    useEffect(() => {
+        const error = fleetAttentionQuery.error;
+        if (!error || apiUnavailable) {
+            return;
+        }
+        if (isApiUnavailable(error)) {
+            setApiUnavailable(true);
+            return;
+        }
+        handleError(error);
+    }, [fleetAttentionQuery.error, apiUnavailable, handleError]);
+
+    useEffect(() => {
+        const error = specialistsQuery.error;
+        if (!error || apiUnavailable) {
+            return;
+        }
+        if (isApiUnavailable(error)) {
+            setApiUnavailable(true);
+            return;
+        }
+        handleError(error);
+    }, [specialistsQuery.error, apiUnavailable, handleError]);
+
+    const currentPayloadObject = useMemo(() => {
+        const payload = currentQuery.data?.payload;
+        if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+            return payload as Record<string, unknown>;
+        }
+        return null;
+    }, [currentQuery.data]);
+
     const currentText = useMemo(() => {
         if (!currentQuery.data) {
             return "";
@@ -245,6 +545,88 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         () => (candidatesQuery.data?.items ?? []) as LearningCandidate[],
         [candidatesQuery.data]
     );
+    const fleetClients = useMemo(
+        () => (fleetClientsQuery.data?.items ?? []).filter((client): client is FleetClient => Boolean(client?.id)),
+        [fleetClientsQuery.data]
+    );
+    const fleetBranches = useMemo(
+        () => (fleetBranchesQuery.data?.items ?? []).filter((branch): branch is FleetBranch => Boolean(branch?.id)),
+        [fleetBranchesQuery.data]
+    );
+    const fleetAttentionItems = useMemo(
+        () => (fleetAttentionQuery.data?.items ?? []) as FleetAttentionItem[],
+        [fleetAttentionQuery.data]
+    );
+    const specialists = useMemo(
+        () => (specialistsQuery.data?.items ?? []).filter((item): item is SpecialistSummary => Boolean(item?.id)),
+        [specialistsQuery.data]
+    );
+    const fleetSummary = fleetAttentionQuery.data?.summary;
+    const selectedBranchContext = useMemo(
+        () => branches.find((branch) => branch.id === selectedBranchId) ?? null,
+        [branches, selectedBranchId]
+    );
+
+    useEffect(() => {
+        if (!selectedBranchContext) {
+            setBranchKnowledgeTagDraft("");
+            setBranchWorkingHoursDraft("{}");
+            return;
+        }
+        setBranchKnowledgeTagDraft(selectedBranchContext.knowledge_tag ?? "");
+        const workingHours = selectedBranchContext.working_hours;
+        if (workingHours && typeof workingHours === "object" && !Array.isArray(workingHours)) {
+            setBranchWorkingHoursDraft(JSON.stringify(workingHours, null, 2));
+        } else {
+            setBranchWorkingHoursDraft("{}");
+        }
+    }, [selectedBranchContext]);
+
+    useEffect(() => {
+        setGuidedHours(extractGuidedHours(currentPayloadObject));
+        const extractedServices = extractGuidedServices(currentPayloadObject);
+        if (extractedServices.length > 0) {
+            setGuidedServices(extractedServices);
+        } else {
+            setGuidedServices([{ id: `svc-${Date.now()}`, name: "" }]);
+        }
+    }, [currentPayloadObject, selectedBranchId]);
+
+    useEffect(() => {
+        if (!isPlatformAdmin || fleetClients.length === 0) {
+            return;
+        }
+        if (fleetClientId && fleetClients.some((client) => client.id === fleetClientId)) {
+            return;
+        }
+        const preferredClientId = selectedClientId && fleetClients.some((client) => client.id === selectedClientId)
+            ? selectedClientId
+            : fleetClients[0]?.id;
+        if (!preferredClientId) {
+            return;
+        }
+        const preferredClient = fleetClients.find((client) => client.id === preferredClientId);
+        setFleetClientId(preferredClientId);
+        setFleetCompanyId(preferredClient?.company_id ?? selectedCompanyId ?? "");
+    }, [isPlatformAdmin, fleetClients, fleetClientId, selectedClientId, selectedCompanyId]);
+
+    useEffect(() => {
+        if (!fleetClientId) {
+            setFleetBranchId("");
+            return;
+        }
+        if (fleetBranches.length === 0) {
+            setFleetBranchId("");
+            return;
+        }
+        if (fleetBranchId && fleetBranches.some((branch) => branch.id === fleetBranchId)) {
+            return;
+        }
+        const preferredBranchId = selectedBranchId && fleetBranches.some((branch) => branch.id === selectedBranchId)
+            ? selectedBranchId
+            : fleetBranches[0]?.id;
+        setFleetBranchId(preferredBranchId ?? "");
+    }, [fleetClientId, fleetBranches, fleetBranchId, selectedBranchId]);
 
     const hasErrors = validation.errors.length > 0;
     const hasWarnings = validation.warnings.length > 0;
@@ -334,6 +716,64 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         },
     });
 
+    const applyBranchKnowledgePatchMutation = useMutation({
+        mutationFn: async () => {
+            if (!selectedBranchContext?.id) {
+                throw new Error("Выберите филиал");
+            }
+            const parsedWorkingHours = parseOptionalJson(branchWorkingHoursDraft, "working_hours");
+            if (parsedWorkingHours.error) {
+                throw new Error(parsedWorkingHours.error);
+            }
+            const reason = branchChangeReason.trim();
+            if (!reason) {
+                throw new Error("Укажите причину изменения");
+            }
+
+            const draftResponse = await adminApi.draftBranchChange({
+                branch_id: selectedBranchContext.id,
+                reason,
+                patch: {
+                    knowledge_tag: branchKnowledgeTagDraft.trim() || null,
+                    working_hours: parsedWorkingHours.value ?? {},
+                },
+            });
+            const draftChange = draftResponse.data.change;
+            const changeId = draftChange?.id;
+            if (!changeId) {
+                throw new Error("Не удалось создать черновик изменения");
+            }
+
+            const validateResponse = await adminApi.validateBranchChange(changeId);
+            const validatedChange = validateResponse.data.change;
+            if (validatedChange?.status !== "validated") {
+                const validationPayload = validatedChange?.validation_payload as
+                    | { errors?: string[] }
+                    | undefined;
+                const firstError = validationPayload?.errors?.[0];
+                throw new Error(firstError || "Валидация branch change не пройдена");
+            }
+
+            await adminApi.publishBranchChange(changeId, {});
+            return changeId;
+        },
+        onSuccess: async () => {
+            toast.success("Изменения знаний филиала опубликованы");
+            setBranchChangeReason("");
+            await queryClient.invalidateQueries({ queryKey: ["console-me"] });
+            await queryClient.invalidateQueries({ queryKey: ["knowledge-current"] });
+            await queryClient.invalidateQueries({ queryKey: ["knowledge-history"] });
+            if (isPlatformAdmin) {
+                await fleetBranchesQuery.refetch();
+                await fleetAttentionQuery.refetch();
+            }
+        },
+        onError: (error) => {
+            const message = error instanceof Error ? error.message : "Не удалось применить изменения";
+            toast.error(message);
+        },
+    });
+
     const stepStatus: Record<KnowledgeStepId, boolean> = {
         draft: draftText.trim().length > 0,
         validate: validation.ran && !hasErrors,
@@ -344,6 +784,365 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     };
 
     const currentStep = KNOWLEDGE_STEPS[stepIndex];
+    const selectedFleetClient = fleetClients.find((client) => client.id === fleetClientId);
+    const isFleetBusy = isApplyingFleetContext
+        || fleetClientsQuery.isFetching
+        || fleetBranchesQuery.isFetching
+        || fleetAttentionQuery.isFetching;
+
+    const applyConsoleContext = async ({
+        companyId,
+        clientId,
+        branchId: nextBranchId,
+        successMessage,
+    }: {
+        companyId?: string | null;
+        clientId?: string | null;
+        branchId?: string | null;
+        successMessage?: string;
+    }) => {
+        setIsApplyingFleetContext(true);
+        try {
+            setLocalStorageValue(COMPANY_ID_STORAGE_KEY, companyId ?? null);
+            setLocalStorageValue(CLIENT_ID_STORAGE_KEY, clientId ?? null);
+            setLocalStorageValue(BRANCH_ID_STORAGE_KEY, nextBranchId ?? null);
+            await queryClient.invalidateQueries({ queryKey: ["console-me"] });
+            await queryClient.invalidateQueries({ queryKey: ["knowledge-current"] });
+            await queryClient.invalidateQueries({ queryKey: ["knowledge-history"] });
+            await queryClient.invalidateQueries({ queryKey: ["learning-candidates"] });
+            if (successMessage) {
+                toast.success(successMessage);
+            }
+        } finally {
+            setIsApplyingFleetContext(false);
+        }
+    };
+
+    const openRouteWithFleetContext = async (
+        path: string,
+        clientId?: string,
+        companyId?: string | null,
+        branchId?: string | null,
+    ) => {
+        if (!clientId) {
+            toast.error("Выберите клиента");
+            return;
+        }
+        await applyConsoleContext({
+            companyId: companyId ?? fleetCompanyId ?? selectedFleetClient?.company_id ?? null,
+            clientId,
+            branchId: branchId ?? null,
+        });
+        router.push(path);
+    };
+
+    const selectKnowledgeBranch = async () => {
+        if (!fleetClientId || !fleetBranchId) {
+            toast.error("Выберите клиента и филиал");
+            return;
+        }
+        await applyConsoleContext({
+            companyId: fleetCompanyId || selectedFleetClient?.company_id || null,
+            clientId: fleetClientId,
+            branchId: fleetBranchId,
+            successMessage: "Контекст Knowledge обновлен",
+        });
+    };
+
+    const addGuidedService = () => {
+        setGuidedServices((prev) => [
+            ...prev,
+            { id: `svc-${Date.now()}-${prev.length}`, name: "" },
+        ]);
+    };
+
+    const updateGuidedService = (id: string, value: string) => {
+        setGuidedServices((prev) =>
+            prev.map((service) => (service.id === id ? { ...service, name: value } : service))
+        );
+    };
+
+    const removeGuidedService = (id: string) => {
+        setGuidedServices((prev) => prev.filter((service) => service.id !== id));
+    };
+
+    const applyStructuredDraft = () => {
+        const normalizedServices = guidedServices
+            .map((service) => ({
+                ...service,
+                name: service.name.trim(),
+            }))
+            .filter((service) => service.name.length > 0);
+        if (normalizedServices.length === 0) {
+            toast.error("Добавьте хотя бы одну услугу");
+            return;
+        }
+        const payload = buildStructuredDraftPayload(currentPayloadObject, guidedHours, normalizedServices);
+        setDraftText(JSON.stringify(payload, null, 2));
+        setValidation((prev) => (prev.ran ? { ...prev, ran: false } : prev));
+        toast.success("Structured draft обновлен");
+    };
+
+    const renderPlatformAdminFleetPanel = () => {
+        if (!isPlatformAdmin) {
+            return null;
+        }
+        return (
+            <div className="card-surface p-5" data-testid="knowledge-fleet-control">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <h2 className="text-lg font-semibold">Fleet Knowledge Control</h2>
+                        <p className="text-sm text-muted-foreground">
+                            Быстрый выбор клиента и филиала для управления знаниями по всей платформе.
+                        </p>
+                    </div>
+                    <button
+                        type="button"
+                        className="btn-ghost"
+                        onClick={() => {
+                            fleetAttentionQuery.refetch();
+                            fleetClientsQuery.refetch();
+                            if (fleetClientId) {
+                                fleetBranchesQuery.refetch();
+                            }
+                        }}
+                        disabled={isFleetBusy}
+                    >
+                        {isFleetBusy ? "Обновление..." : "Обновить"}
+                    </button>
+                </div>
+
+                {fleetSummary && (
+                    <div className="mt-3 text-xs text-muted-foreground">
+                        активных клиентов {fleetSummary.active_clients_total} · с риском {fleetSummary.clients_with_attention} ·
+                        высокий {fleetSummary.high_risk_clients} · средний {fleetSummary.medium_risk_clients}
+                    </div>
+                )}
+
+                <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                    <label className="text-xs text-muted-foreground">
+                        Клиент
+                        <select
+                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            value={fleetClientId}
+                            onChange={(event) => {
+                                const nextClientId = event.target.value;
+                                const nextClient = fleetClients.find((client) => client.id === nextClientId);
+                                setFleetClientId(nextClientId);
+                                setFleetCompanyId(nextClient?.company_id ?? "");
+                                setFleetBranchId("");
+                            }}
+                        >
+                            <option value="">Выберите клиента</option>
+                            {fleetClients.map((client) => (
+                                <option key={client.id} value={client.id}>
+                                    {client.name ?? client.slug ?? client.id}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <label className="text-xs text-muted-foreground">
+                        Филиал
+                        <select
+                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            value={fleetBranchId}
+                            onChange={(event) => setFleetBranchId(event.target.value)}
+                            disabled={!fleetClientId || fleetBranchesQuery.isLoading}
+                        >
+                            <option value="">Выберите филиал</option>
+                            {fleetBranches.map((branch) => (
+                                <option key={branch.id} value={branch.id}>
+                                    {branch.name ?? branch.slug ?? branch.id}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <div className="flex flex-wrap items-end gap-2">
+                        <button
+                            type="button"
+                            className="btn-primary"
+                            onClick={() => void selectKnowledgeBranch()}
+                            disabled={!fleetClientId || !fleetBranchId || isFleetBusy}
+                        >
+                            Открыть филиал
+                        </button>
+                        <button
+                            type="button"
+                            className="btn-ghost"
+                            onClick={() => void openRouteWithFleetContext("/integrations", fleetClientId, fleetCompanyId)}
+                            disabled={!fleetClientId || isFleetBusy}
+                        >
+                            Интеграции
+                        </button>
+                        <button
+                            type="button"
+                            className="btn-ghost"
+                            onClick={() => void openRouteWithFleetContext("/", fleetClientId, fleetCompanyId)}
+                            disabled={!fleetClientId || isFleetBusy}
+                        >
+                            Заявки
+                        </button>
+                    </div>
+                </div>
+
+                {fleetAttentionItems.length > 0 && (
+                    <div className="mt-4 space-y-2">
+                        {fleetAttentionItems.slice(0, 5).map((item) => (
+                            <div
+                                key={item.client_id}
+                                className="rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground"
+                            >
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <span className="font-medium text-foreground">
+                                        {item.client_name ?? item.client_slug}
+                                    </span>
+                                    <span>risk {item.attention_level} · score {item.attention_score}</span>
+                                </div>
+                                <div className="mt-1">
+                                    сервис {item.service_state} · stale {item.stale_branches} · outbox_failed_24h {item.outbox_failed_24h}
+                                </div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <button
+                                        type="button"
+                                        className="btn-ghost"
+                                        onClick={() => void applyConsoleContext({
+                                            companyId: item.company_id,
+                                            clientId: item.client_id,
+                                            branchId: null,
+                                            successMessage: "Контекст клиента обновлен",
+                                        })}
+                                        disabled={isFleetBusy}
+                                    >
+                                        В контекст клиента
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="btn-ghost"
+                                        onClick={() => void openRouteWithFleetContext("/integrations", item.client_id, item.company_id)}
+                                        disabled={isFleetBusy}
+                                    >
+                                        Интеграции
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    const renderBranchKnowledgeReadiness = () => {
+        if (!selectedBranchContext) {
+            return null;
+        }
+        const hasKnowledgeTag = Boolean((selectedBranchContext.knowledge_tag ?? "").trim());
+        const hasWorkingHours = Boolean(
+            selectedBranchContext.working_hours
+            && typeof selectedBranchContext.working_hours === "object"
+            && Object.keys(selectedBranchContext.working_hours as Record<string, unknown>).length > 0
+        );
+        const canApplyPatch = canEdit && !applyBranchKnowledgePatchMutation.isPending;
+        return (
+            <div className="card-surface p-5" data-testid="knowledge-branch-readiness">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <h2 className="text-lg font-semibold">Branch Knowledge Readiness</h2>
+                        <p className="text-sm text-muted-foreground">
+                            Быстрое управление базовыми знаниями филиала: knowledge tag и часы работы.
+                        </p>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                        {selectedBranchContext.name ?? selectedBranchContext.slug ?? selectedBranchContext.id}
+                    </div>
+                </div>
+
+                <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                    <div className="rounded-lg border border-border/60 px-3 py-2">
+                        knowledge_tag: {hasKnowledgeTag ? selectedBranchContext.knowledge_tag : "не задан"}
+                    </div>
+                    <div className="rounded-lg border border-border/60 px-3 py-2">
+                        working_hours: {hasWorkingHours ? "заданы" : "не заданы"}
+                    </div>
+                    <div className="rounded-lg border border-border/60 px-3 py-2">
+                        onboarding: {selectedBranchContext.onboarding_state ?? "—"}
+                    </div>
+                    <div className="rounded-lg border border-border/60 px-3 py-2">
+                        go_live: {selectedBranchContext.go_live_state ?? "pending"}
+                    </div>
+                </div>
+
+                {canEdit && (
+                    <div className="mt-4 grid gap-3">
+                        <label className="text-xs text-muted-foreground">
+                            knowledge_tag
+                            <input
+                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                value={branchKnowledgeTagDraft}
+                                onChange={(event) => setBranchKnowledgeTagDraft(event.target.value)}
+                                disabled={applyBranchKnowledgePatchMutation.isPending}
+                            />
+                        </label>
+                        <label className="text-xs text-muted-foreground">
+                            working_hours JSON
+                            <textarea
+                                className="mt-1 min-h-[140px] w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
+                                value={branchWorkingHoursDraft}
+                                onChange={(event) => setBranchWorkingHoursDraft(event.target.value)}
+                                disabled={applyBranchKnowledgePatchMutation.isPending}
+                            />
+                        </label>
+                        <label className="text-xs text-muted-foreground">
+                            Причина изменения (audit)
+                            <input
+                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                value={branchChangeReason}
+                                onChange={(event) => setBranchChangeReason(event.target.value)}
+                                disabled={applyBranchKnowledgePatchMutation.isPending}
+                                placeholder="Например: обновление часов после смены графика"
+                            />
+                        </label>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                className="btn-primary"
+                                onClick={() => applyBranchKnowledgePatchMutation.mutate()}
+                                disabled={!canApplyPatch}
+                            >
+                                {applyBranchKnowledgePatchMutation.isPending ? "Применение..." : "Сохранить и опубликовать"}
+                            </button>
+                            <button
+                                type="button"
+                                className="btn-ghost"
+                                onClick={() => void openRouteWithFleetContext(
+                                    "/team",
+                                    selectedClientId || fleetClientId,
+                                    selectedCompanyId || fleetCompanyId,
+                                    selectedBranchId || null,
+                                )}
+                                disabled={isFleetBusy}
+                            >
+                                Команда и мастера
+                            </button>
+                            <button
+                                type="button"
+                                className="btn-ghost"
+                                onClick={() => void openRouteWithFleetContext(
+                                    "/calendar",
+                                    selectedClientId || fleetClientId,
+                                    selectedCompanyId || fleetCompanyId,
+                                    selectedBranchId || null,
+                                )}
+                                disabled={isFleetBusy}
+                            >
+                                Календарь
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    };
 
     if (!canRead) {
         return <AccessDenied message="Эта роль не имеет доступа к знаниям." />;
@@ -351,55 +1150,57 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
 
     if (branchSelectionRequired) {
         return (
-            <div className="card-surface max-w-xl p-8" data-testid="knowledge-branch-gate">
-                <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Требуется выбор</p>
-                <h2 className="text-2xl font-semibold mt-3 mb-4">Выберите филиал</h2>
-                <p className="text-sm text-muted-foreground mb-6">
-                    Управление знаниями выполняется отдельно для каждого филиала.
-                </p>
-                {branchOptions.length > 0 ? (
-                    <select
-                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                        value={branchId}
-                        onChange={(event) => setBranchId(event.target.value)}
-                    >
-                        <option value="">Выберите филиал</option>
-                        {branchOptions.map((branch) => (
-                            <option key={branch.id} value={branch.id ?? ""}>
-                                {branch.name ?? branch.id}
-                            </option>
-                        ))}
-                    </select>
-                ) : (
-                    <div className="rounded-lg border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
-                        Нет доступных филиалов.
-                    </div>
-                )}
-                <div className="mt-6 flex justify-end">
-                    <button
-                        className="btn-primary"
-                        onClick={async () => {
-                            if (!branchId) {
-                                toast.error("Выберите филиал");
-                                return;
-                            }
-                            setIsSelectingBranch(true);
-                            try {
-                                if (typeof window !== "undefined") {
-                                    window.localStorage.setItem(BRANCH_ID_STORAGE_KEY, branchId);
+            <div className="space-y-4">
+                {renderPlatformAdminFleetPanel()}
+                {renderBranchKnowledgeReadiness()}
+                <div className="card-surface max-w-xl p-8" data-testid="knowledge-branch-gate">
+                    <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Требуется выбор</p>
+                    <h2 className="text-2xl font-semibold mt-3 mb-4">Выберите филиал</h2>
+                    <p className="text-sm text-muted-foreground mb-6">
+                        Управление знаниями выполняется отдельно для каждого филиала.
+                    </p>
+                    {branchOptions.length > 0 ? (
+                        <select
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            value={branchId}
+                            onChange={(event) => setBranchId(event.target.value)}
+                        >
+                            <option value="">Выберите филиал</option>
+                            {branchOptions.map((branch) => (
+                                <option key={branch.id} value={branch.id ?? ""}>
+                                    {branch.name ?? branch.id}
+                                </option>
+                            ))}
+                        </select>
+                    ) : (
+                        <div className="rounded-lg border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
+                            Нет доступных филиалов.
+                        </div>
+                    )}
+                    <div className="mt-6 flex justify-end">
+                        <button
+                            className="btn-primary"
+                            onClick={async () => {
+                                if (!branchId) {
+                                    toast.error("Выберите филиал");
+                                    return;
                                 }
-                                await queryClient.invalidateQueries({ queryKey: ["console-me"] });
-                                await currentQuery.refetch();
-                                await historyQuery.refetch();
-                                toast.success("Филиал выбран");
-                            } finally {
-                                setIsSelectingBranch(false);
-                            }
-                        }}
-                        disabled={!branchId || isSelectingBranch || branchOptions.length === 0}
-                    >
-                        {isSelectingBranch ? "Загрузка..." : "Продолжить"}
-                    </button>
+                                setIsSelectingBranch(true);
+                                try {
+                                    setLocalStorageValue(BRANCH_ID_STORAGE_KEY, branchId);
+                                    await queryClient.invalidateQueries({ queryKey: ["console-me"] });
+                                    await currentQuery.refetch();
+                                    await historyQuery.refetch();
+                                    toast.success("Филиал выбран");
+                                } finally {
+                                    setIsSelectingBranch(false);
+                                }
+                            }}
+                            disabled={!branchId || isSelectingBranch || branchOptions.length === 0}
+                        >
+                            {isSelectingBranch ? "Загрузка..." : "Продолжить"}
+                        </button>
+                    </div>
                 </div>
             </div>
         );
@@ -426,6 +1227,9 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                     )}
                 </div>
             </div>
+
+            {renderPlatformAdminFleetPanel()}
+            {renderBranchKnowledgeReadiness()}
 
             {apiUnavailable && (
                 <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
@@ -501,6 +1305,128 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                 <span className="text-xs text-muted-foreground">
                                     Draft хранится локально до публикации.
                                 </span>
+                            </div>
+                            <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
+                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                    <div>
+                                        <p className="text-sm font-medium">Structured Draft Builder</p>
+                                        <p className="text-xs text-muted-foreground">
+                                            Обновите часы и каталог услуг без ручного редактирования JSON.
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="btn-primary"
+                                        onClick={applyStructuredDraft}
+                                        disabled={!canEdit}
+                                    >
+                                        Собрать structured draft
+                                    </button>
+                                </div>
+
+                                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                                    <label className="text-xs text-muted-foreground">
+                                        Дни работы
+                                        <input
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={guidedHours.days}
+                                            onChange={(event) =>
+                                                setGuidedHours((prev) => ({ ...prev, days: event.target.value }))
+                                            }
+                                            disabled={!canEdit}
+                                            placeholder="Пн-Вс"
+                                        />
+                                    </label>
+                                    <label className="text-xs text-muted-foreground">
+                                        Открытие
+                                        <input
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={guidedHours.open}
+                                            onChange={(event) =>
+                                                setGuidedHours((prev) => ({ ...prev, open: event.target.value }))
+                                            }
+                                            disabled={!canEdit}
+                                            placeholder="10:00"
+                                        />
+                                    </label>
+                                    <label className="text-xs text-muted-foreground">
+                                        Закрытие
+                                        <input
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={guidedHours.close}
+                                            onChange={(event) =>
+                                                setGuidedHours((prev) => ({ ...prev, close: event.target.value }))
+                                            }
+                                            disabled={!canEdit}
+                                            placeholder="21:00"
+                                        />
+                                    </label>
+                                </div>
+
+                                <div className="mt-4 space-y-2">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <p className="text-sm font-medium">Услуги</p>
+                                        <button
+                                            type="button"
+                                            className="btn-ghost"
+                                            onClick={addGuidedService}
+                                            disabled={!canEdit}
+                                        >
+                                            Добавить услугу
+                                        </button>
+                                    </div>
+                                    {guidedServices.map((service) => (
+                                        <div key={service.id} className="flex items-center gap-2">
+                                            <input
+                                                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                value={service.name}
+                                                onChange={(event) => updateGuidedService(service.id, event.target.value)}
+                                                disabled={!canEdit}
+                                                placeholder="Название услуги"
+                                            />
+                                            <button
+                                                type="button"
+                                                className="btn-ghost"
+                                                onClick={() => removeGuidedService(service.id)}
+                                                disabled={!canEdit || guidedServices.length <= 1}
+                                            >
+                                                Удалить
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="mt-4 rounded-lg border border-border/60 bg-background p-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <p className="text-sm font-medium">Мастера филиала</p>
+                                        <button
+                                            type="button"
+                                            className="btn-ghost"
+                                            onClick={() => void openRouteWithFleetContext(
+                                                "/team",
+                                                selectedClientId || fleetClientId,
+                                                selectedCompanyId || fleetCompanyId,
+                                                selectedBranchId || null,
+                                            )}
+                                            disabled={isFleetBusy}
+                                        >
+                                            Управлять в Team
+                                        </button>
+                                    </div>
+                                    <div className="mt-2 text-xs text-muted-foreground">
+                                        {specialistsQuery.isLoading && "Загрузка мастеров..."}
+                                        {!specialistsQuery.isLoading && specialists.length === 0 && "Мастера не найдены в выбранном филиале."}
+                                    </div>
+                                    {!specialistsQuery.isLoading && specialists.length > 0 && (
+                                        <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
+                                            {specialists.slice(0, 6).map((specialist) => (
+                                                <div key={specialist.id}>
+                                                    {specialist.name} · услуг {specialist.services?.length ?? 0}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                             <textarea
                                 className="min-h-[240px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono"
