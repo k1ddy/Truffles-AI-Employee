@@ -29,7 +29,41 @@ def _load_progress_gate():
     return namespace["_llm_quality_should_expect_booking_progress"]
 
 
+def _load_slots_progress():
+    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
+    source = script_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(script_path))
+    selected_nodes = []
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "_llm_quality_booking_slots_progressed":
+            selected_nodes.append(node)
+    module = ast.Module(body=selected_nodes, type_ignores=[])
+    namespace = {}
+    exec(compile(module, str(script_path), "exec"), namespace, namespace)
+    return namespace["_llm_quality_booking_slots_progressed"]
+
+
+def _load_booking_tool_answered():
+    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
+    source = script_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(script_path))
+    selected_nodes = []
+    wanted_functions = {
+        "_llm_quality_normalize_tool_token",
+        "_llm_quality_check_booking_tool_answered",
+    }
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
+            selected_nodes.append(node)
+    module = ast.Module(body=selected_nodes, type_ignores=[])
+    namespace = {}
+    exec(compile(module, str(script_path), "exec"), namespace, namespace)
+    return namespace["_llm_quality_check_booking_tool_answered"]
+
+
 _should_expect_progress = _load_progress_gate()
+_slots_progressed = _load_slots_progress()
+_booking_tool_answered = _load_booking_tool_answered()
 
 
 def test_progress_gate_ignores_generic_booking_tag_for_service_choice():
@@ -44,3 +78,43 @@ def test_progress_gate_time_requires_time_or_date_signal():
 
 def test_progress_gate_keeps_no_tag_fallback():
     assert _should_expect_progress("time", []) is True
+
+
+def test_slots_progress_detects_new_slot_even_when_count_stays_one():
+    assert _slots_progressed({"service": "Стрижка"}, {"datetime": "15:00"}) is True
+
+
+def test_slots_progress_detects_same_slot_value_as_no_progress():
+    assert _slots_progressed({"datetime": "15:00"}, {"datetime": "15:00"}) is False
+
+
+def test_slots_progress_detects_slot_value_change():
+    assert _slots_progressed({"datetime": "15:00"}, {"datetime": "15:30"}) is True
+
+
+def test_booking_tool_answered_accepts_time_mismatch_with_requested_time_echo():
+    meta = {
+        "action": "reply",
+        "intent": "calendar.get_booking",
+        "tool_decision": "time_mismatch",
+        "requested_time": "15:30",
+    }
+    assert _booking_tool_answered(
+        meta,
+        ["check_booking", "confirm"],
+        "На 15:30 записи не вижу. Хотите проверить другую дату/время?",
+    )
+
+
+def test_booking_tool_answered_rejects_irrelevant_reply_without_requested_time_echo():
+    meta = {
+        "action": "reply",
+        "intent": "calendar.get_booking",
+        "tool_decision": "time_mismatch",
+        "requested_time": "15:30",
+    }
+    assert not _booking_tool_answered(
+        meta,
+        ["check_booking", "confirm"],
+        "Проверьте, пожалуйста, другую дату.",
+    )

@@ -8,6 +8,7 @@ import pytest
 from app.models.appointment import Appointment
 from app.models.branch import Branch
 from app.models.service import Service
+from app.services import tool_registry_service
 
 pytest.importorskip("dateparser")
 from app.routers.webhook import _legacy as legacy
@@ -226,3 +227,72 @@ def test_resolve_booking_info_intents_prefers_info_class_over_intent_decomp():
     )
 
     assert resolved == ["location", "pricing"]
+
+
+@pytest.mark.parametrize(
+    "tool_action",
+    ["calendar.get_booking", "calendar.reschedule", "calendar.cancel"],
+)
+def test_tool_registry_invalid_appointment_id_does_not_raise(tool_action):
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service, "_get_booking", return_value=(None, "booking_not_found")
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action=tool_action,
+            tool_args={"appointment_id": "15:30"},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query=None,
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "booking_not_found"
+
+
+def test_tool_registry_get_booking_reports_time_mismatch():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+    appointment = SimpleNamespace(
+        id=uuid4(),
+        start_at=datetime(2026, 2, 14, 9, 0, tzinfo=timezone.utc),
+        specialist_id=None,
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service, "_get_booking", return_value=(appointment, None)
+    ), patch.object(
+        tool_registry_service, "_format_booking_summary", return_value="dummy-summary"
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.get_booking",
+            tool_args={"appointment_id": ""},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query=None,
+            message_text="Можете подтвердить мою запись на 15:30?",
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "booking_time_mismatch"
+    assert result.decision_meta["tool_decision"] == "time_mismatch"
+    assert result.decision_meta["requested_time"] == "15:30"
+    assert result.decision_meta["appointment_time"] == "09:00"

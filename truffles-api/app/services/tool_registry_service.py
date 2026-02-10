@@ -25,6 +25,8 @@ from app.services.calendar_sync_service import enqueue_appointment_sync, get_pro
 from app.services.capabilities_runtime import get_runtime_capabilities
 from app.services.pack_runtime_service import format_reply_from_truth, load_yaml_truth
 
+_TIME_TOKEN_RE = re.compile(r"\b([01]?\d|2[0-3])[:.][0-5]\d\b")
+
 CALENDAR_TOOL_ACTIONS = {
     "calendar.list_slots",
     "calendar.book_slot",
@@ -85,6 +87,28 @@ def _parse_datetime(value: str | None, *, fallback_tz: str | None = None) -> dat
         except Exception:
             parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _parse_uuid(value: Any) -> UUID | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return UUID(text)
+    except (ValueError, TypeError):
+        return None
+
+
+def _extract_time_token(text: str | None) -> str | None:
+    if not text:
+        return None
+    match = _TIME_TOKEN_RE.search(text)
+    if not match:
+        return None
+    token = match.group(0)
+    return token.replace(".", ":")
 
 
 def _resolve_branch(db: Session, branch_id: UUID | None) -> Branch | None:
@@ -381,6 +405,15 @@ def _format_booking_summary(db: Session, appointment: Appointment) -> str:
     )
 
 
+def _appointment_time_token(appointment: Appointment | None) -> str | None:
+    if appointment is None:
+        return None
+    start_at = getattr(appointment, "start_at", None)
+    if not isinstance(start_at, datetime):
+        return None
+    return start_at.strftime("%H:%M")
+
+
 def _book_slot(
     db: Session,
     *,
@@ -567,11 +600,44 @@ def _catalog_service_query(
     return _format_service_catalog(match.name, match.duration_min, match.price, masters), None
 
 
-def _catalog_location(client_slug: str | None) -> tuple[str | None, str | None]:
-    reply = format_reply_from_truth("location", client_slug=client_slug)
+def _catalog_location(
+    client_slug: str | None, *, message_text: str | None = None
+) -> tuple[str | None, str | None, dict[str, Any]]:
+    if not client_slug:
+        return None, "location_missing", {}
+
+    include_parking = False
+    if message_text:
+        try:
+            from app.services import demo_salon_knowledge as knowledge
+
+            slug = knowledge._normalize_client_slug(client_slug)
+            normalized = knowledge._normalize_text(message_text)
+            include_parking = bool(
+                normalized
+                and knowledge._has_parking_signal(normalized, client_slug=slug)
+            )
+        except Exception:
+            include_parking = False
+
+    try:
+        from app.services import demo_salon_knowledge as knowledge
+
+        reply, meta = knowledge.build_info_combined_reply(
+            include_parking=include_parking,
+            client_slug=client_slug,
+        )
+        if reply:
+            return reply, None, meta or {}
+    except Exception:
+        pass
+
+    intent = "parking" if include_parking else "location"
+    reply = format_reply_from_truth(intent, client_slug=client_slug)
     if reply:
-        return reply, None
-    return None, "location_missing"
+        sections = ["parking"] if include_parking else ["location"]
+        return reply, None, {"info_sections": sections}
+    return None, "location_missing", {}
 
 
 def _catalog_portfolio(client_slug: str | None) -> tuple[str | None, str | None]:
@@ -593,6 +659,8 @@ def execute_tool_action(
     branch_id: UUID | None,
     client_slug: str | None,
     service_query: str | None,
+    info_sections_hint: list[str] | None = None,
+    message_text: str | None = None,
     now: datetime | None = None,
     user_name: str | None = None,
     user_phone: str | None = None,
@@ -704,6 +772,9 @@ def execute_tool_action(
                 from app.routers.webhook import _legacy as legacy
 
                 prompt = legacy.MSG_BOOKING_ASK_DATETIME
+                time_token = _extract_time_token(message_text)
+                if time_token:
+                    prompt = f"На какую дату вам удобно, если время {time_token}?"
                 expected_reply_type = legacy.EXPECTED_REPLY_TIME
             return ToolExecutionResult(
                 handled=True,
@@ -734,7 +805,8 @@ def execute_tool_action(
 
     if tool_action == "calendar.get_booking":
         appointment_id = tool_args.get("appointment_id")
-        appointment_uuid = UUID(appointment_id) if isinstance(appointment_id, str) else None
+        appointment_uuid = _parse_uuid(appointment_id)
+        requested_time = _extract_time_token(message_text)
         appointment, error = _get_booking(
             db,
             appointment_id=appointment_uuid,
@@ -751,6 +823,30 @@ def execute_tool_action(
                     "stage": "tool_registry",
                     "decision": "not_found",
                     "tool_action": tool_action,
+                },
+            )
+        appointment_time = _appointment_time_token(appointment)
+        if requested_time and appointment_time and requested_time != appointment_time:
+            return ToolExecutionResult(
+                handled=True,
+                ok=False,
+                response_text=(
+                    f"На {requested_time} записи не вижу. "
+                    "Хотите проверить другую дату/время или оформить новую запись?"
+                ),
+                error_code="booking_time_mismatch",
+                decision_meta={
+                    "tool_action": tool_action,
+                    "tool_decision": "time_mismatch",
+                    "requested_time": requested_time,
+                    "appointment_time": appointment_time,
+                },
+                trace={
+                    "stage": "tool_registry",
+                    "decision": "time_mismatch",
+                    "tool_action": tool_action,
+                    "requested_time": requested_time,
+                    "appointment_time": appointment_time,
                 },
             )
         return ToolExecutionResult(
@@ -902,7 +998,7 @@ def execute_tool_action(
 
     if tool_action == "calendar.reschedule":
         appointment_id = tool_args.get("appointment_id")
-        appointment_uuid = UUID(appointment_id) if isinstance(appointment_id, str) else None
+        appointment_uuid = _parse_uuid(appointment_id)
         appointment, error = _get_booking(
             db,
             appointment_id=appointment_uuid,
@@ -981,7 +1077,7 @@ def execute_tool_action(
 
     if tool_action == "calendar.cancel":
         appointment_id = tool_args.get("appointment_id")
-        appointment_uuid = UUID(appointment_id) if isinstance(appointment_id, str) else None
+        appointment_uuid = _parse_uuid(appointment_id)
         appointment, error = _get_booking(
             db,
             appointment_id=appointment_uuid,
@@ -1054,27 +1150,252 @@ def execute_tool_action(
                 decision_meta={"tool_action": tool_action, "tool_decision": "branch_missing"},
                 trace={"stage": "tool_registry", "decision": "branch_missing"},
             )
+        hint_set = {
+            item.strip().lower()
+            for item in (info_sections_hint or [])
+            if isinstance(item, str) and item.strip()
+        }
+        duration_hint = bool(hint_set & {"duration", "service_duration"})
+        promo_hint = bool(
+            hint_set & {"promotions", "promo", "promotion", "discount", "discounts"}
+        )
+        price_hint = bool(hint_set & {"pricing", "price", "payment", "payment_info"})
         if not service_query:
             from app.routers.webhook import _legacy as legacy
 
+            reply = legacy.MSG_BOOKING_ASK_SERVICE
+            info_sections: list[str] = []
+            tool_decision = "missing_slot"
+            expected_reply_type = legacy.EXPECTED_REPLY_SERVICE
+            if client_slug and message_text:
+                try:
+                    from app.services import demo_salon_knowledge as knowledge
+
+                    slug = knowledge._normalize_client_slug(client_slug)
+                    normalized = knowledge._normalize_text(message_text)
+                    promo_intent = None
+                    if promo_hint:
+                        promo_intent = "promotions"
+                    else:
+                        promo_intent = knowledge._detect_promotion_intent(
+                            normalized, client_slug=slug
+                        )
+                    duration_signal = duration_hint or knowledge._has_duration_signal(
+                        normalized, message=message_text, client_slug=slug
+                    )
+                    price_signal = price_hint or knowledge._has_price_signal(
+                        normalized, message_text, client_slug=slug
+                    )
+                    if promo_intent:
+                        promo_reply = knowledge.format_reply_from_truth(
+                            "promotions",
+                            slots={"promotion_intent": promo_intent},
+                            client_slug=slug,
+                        )
+                        if promo_reply:
+                            reply = promo_reply
+                            info_sections = ["promotions"]
+                            tool_decision = "promotions"
+                            expected_reply_type = None
+                    elif duration_signal and price_signal:
+                        reply = (
+                            knowledge.format_reply_from_truth(
+                                "duration_or_price_clarify", client_slug=slug
+                            )
+                            or knowledge._format_service_duration_reply(
+                                None, message=message_text, client_slug=slug
+                            )
+                        )
+                        info_sections = ["duration", "pricing"]
+                    elif duration_signal:
+                        reply = knowledge._format_service_duration_reply(
+                            None, message=message_text, client_slug=slug
+                        )
+                        info_sections = ["duration"]
+                    elif price_signal:
+                        clarify = knowledge.format_reply_from_truth(
+                            "service_clarify", client_slug=slug
+                        )
+                        if clarify:
+                            reply = clarify
+                        info_sections = ["pricing"]
+                except Exception:
+                    pass
+
+            decision_meta = {
+                "tool_action": tool_action,
+                "tool_decision": tool_decision,
+            }
+            trace = {
+                "stage": "tool_registry",
+                "decision": tool_decision,
+                "tool_action": tool_action,
+            }
+            if tool_decision == "missing_slot":
+                decision_meta["missing_slot"] = "service"
+                trace["missing_slot"] = "service"
+            if info_sections:
+                decision_meta["info_sections"] = info_sections
+                trace["info_sections"] = info_sections
+
             return ToolExecutionResult(
                 handled=True,
-                ok=False,
-                response_text=legacy.MSG_BOOKING_ASK_SERVICE,
-                error_code="missing_service",
-                decision_meta={
-                    "tool_action": tool_action,
-                    "tool_decision": "missing_slot",
-                    "missing_slot": "service",
-                },
-                trace={"stage": "tool_registry", "decision": "missing_slot"},
-                expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+                ok=tool_decision != "missing_slot",
+                response_text=reply,
+                error_code=None if tool_decision != "missing_slot" else "missing_service",
+                decision_meta=decision_meta,
+                trace=trace,
+                expected_reply_type=expected_reply_type,
             )
+        if client_slug and message_text:
+            try:
+                from app.services import demo_salon_knowledge as knowledge
+
+                slug = knowledge._normalize_client_slug(client_slug)
+                normalized = knowledge._normalize_text(message_text)
+                promo_intent = None
+                if promo_hint:
+                    promo_intent = "promotions"
+                else:
+                    promo_intent = knowledge._detect_promotion_intent(
+                        normalized, client_slug=slug
+                    )
+                if promo_intent:
+                    promo_reply = knowledge.format_reply_from_truth(
+                        "promotions",
+                        slots={"promotion_intent": promo_intent},
+                        client_slug=slug,
+                    )
+                    if promo_reply:
+                        return ToolExecutionResult(
+                            handled=True,
+                            ok=True,
+                            response_text=promo_reply,
+                            error_code=None,
+                            decision_meta={
+                                "tool_action": tool_action,
+                                "tool_decision": "promotions",
+                                "info_sections": ["promotions"],
+                            },
+                            trace={
+                                "stage": "tool_registry",
+                                "decision": "promotions",
+                                "tool_action": tool_action,
+                                "info_sections": ["promotions"],
+                            },
+                        )
+                if duration_hint or knowledge._has_duration_signal(
+                    normalized, message=message_text, client_slug=slug
+                ):
+                    service_match = (
+                        knowledge._match_service(
+                            knowledge._normalize_text(service_query), slug
+                        )
+                        if service_query
+                        else None
+                    )
+                    duration_reply = knowledge._format_service_duration_reply(
+                        service_match,
+                        message=message_text,
+                        service_label=service_query,
+                        client_slug=slug,
+                    )
+                    if duration_reply:
+                        return ToolExecutionResult(
+                            handled=True,
+                            ok=True,
+                            response_text=duration_reply,
+                            error_code=None,
+                            decision_meta={
+                                "tool_action": tool_action,
+                                "tool_decision": "duration",
+                                "info_sections": ["duration"],
+                            },
+                            trace={
+                                "stage": "tool_registry",
+                                "decision": "duration",
+                                "tool_action": tool_action,
+                                "info_sections": ["duration"],
+                            },
+                        )
+            except Exception:
+                pass
+
         reply, error = _catalog_service_query(
             db,
             branch=branch,
             service_query=service_query,
         )
+        if error and client_slug:
+            try:
+                from app.services import demo_salon_knowledge as knowledge
+
+                slug = knowledge._normalize_client_slug(client_slug)
+                normalized_query = knowledge._normalize_text(service_query)
+                truth = knowledge.load_yaml_truth(slug)
+                service_match = (
+                    knowledge._match_service(normalized_query, slug) if normalized_query else None
+                )
+                if isinstance(service_match, dict):
+                    reply = knowledge._format_service_reply(service_match, truth, slug)
+                    if reply:
+                        return ToolExecutionResult(
+                            handled=True,
+                            ok=True,
+                            response_text=reply,
+                            error_code=None,
+                            decision_meta={
+                                "tool_action": tool_action,
+                                "tool_decision": "truth_fallback",
+                                "info_sections": ["pricing"],
+                            },
+                            trace={
+                                "stage": "tool_registry",
+                                "decision": "truth_fallback",
+                                "tool_action": tool_action,
+                                "info_sections": ["pricing"],
+                            },
+                        )
+                    service_name = service_match.get("name") if isinstance(service_match, dict) else None
+                    if isinstance(service_name, str) and service_name.strip():
+                        presence = knowledge._format_service_presence_reply_for_name(service_name, slug)
+                        if presence:
+                            return ToolExecutionResult(
+                                handled=True,
+                                ok=True,
+                                response_text=presence,
+                                error_code=None,
+                                decision_meta={
+                                    "tool_action": tool_action,
+                                    "tool_decision": "presence_fallback",
+                                },
+                                trace={
+                                    "stage": "tool_registry",
+                                    "decision": "presence_fallback",
+                                    "tool_action": tool_action,
+                                },
+                            )
+                not_found = knowledge._format_service_not_found_reply(truth)
+                if not_found:
+                    return ToolExecutionResult(
+                        handled=True,
+                        ok=True,
+                        response_text=not_found,
+                        error_code=None,
+                        decision_meta={
+                            "tool_action": tool_action,
+                            "tool_decision": "not_found_fallback",
+                            "info_sections": ["pricing"],
+                        },
+                        trace={
+                            "stage": "tool_registry",
+                            "decision": "not_found_fallback",
+                            "tool_action": tool_action,
+                            "info_sections": ["pricing"],
+                        },
+                    )
+            except Exception:
+                pass
         if error:
             return ToolExecutionResult(
                 handled=True,
@@ -1089,12 +1410,21 @@ def execute_tool_action(
             ok=True,
             response_text=reply,
             error_code=None,
-            decision_meta={"tool_action": tool_action, "tool_decision": "ok"},
-            trace={"stage": "tool_registry", "decision": "ok", "tool_action": tool_action},
+            decision_meta={
+                "tool_action": tool_action,
+                "tool_decision": "ok",
+                "info_sections": ["pricing"],
+            },
+            trace={
+                "stage": "tool_registry",
+                "decision": "ok",
+                "tool_action": tool_action,
+                "info_sections": ["pricing"],
+            },
         )
 
     if tool_action == "catalog.location":
-        reply, error = _catalog_location(client_slug)
+        reply, error, meta = _catalog_location(client_slug, message_text=message_text)
         if error:
             return ToolExecutionResult(
                 handled=True,
@@ -1104,13 +1434,21 @@ def execute_tool_action(
                 decision_meta={"tool_action": tool_action, "tool_decision": "not_found"},
                 trace={"stage": "tool_registry", "decision": "not_found"},
             )
+        meta = meta or {}
+        if "info_sections" not in meta:
+            meta["info_sections"] = ["location"]
         return ToolExecutionResult(
             handled=True,
             ok=True,
             response_text=reply,
             error_code=None,
-            decision_meta={"tool_action": tool_action, "tool_decision": "ok"},
-            trace={"stage": "tool_registry", "decision": "ok", "tool_action": tool_action},
+            decision_meta={**meta, "tool_action": tool_action, "tool_decision": "ok"},
+            trace={
+                "stage": "tool_registry",
+                "decision": "ok",
+                "tool_action": tool_action,
+                "info_sections": meta.get("info_sections"),
+            },
         )
 
     if tool_action == "catalog.portfolio":

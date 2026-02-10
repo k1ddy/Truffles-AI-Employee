@@ -96,7 +96,51 @@ INFO_SECTION_INTENT_MAP = {
     "hours": "hours",
     "parking": "parking",
     "guest_policy": "guest_policy",
+    "pricing": "price_query",
+    "price": "price_query",
+    "duration": "duration",
+    "service_duration": "duration",
+    "promotion": "promotions",
+    "promotions": "promotions",
+    "promo": "promotions",
+    "discount": "promotions",
+    "discounts": "promotions",
+    "location": "location",
+    "master": "master",
+    "specialist": "master",
 }
+
+INFO_INTENT_SECTION_MAP = {
+    "price_query": ["pricing"],
+    "pricing": ["pricing"],
+    "duration": ["duration"],
+    "service_duration": ["duration"],
+    "hours": ["hours"],
+    "location": ["location"],
+    "promotions": ["promotions"],
+    "promo": ["promotions"],
+    "promotion": ["promotions"],
+    "parking": ["parking"],
+    "master": ["master"],
+    "specialist": ["master"],
+    "guest_policy": ["guest_policy"],
+}
+
+
+def _infer_info_sections_from_intents(fact_intents: list[str] | None) -> list[str] | None:
+    sections: list[str] = []
+    if not isinstance(fact_intents, list):
+        return None
+    for intent in fact_intents:
+        if not isinstance(intent, str):
+            continue
+        key = intent.strip().casefold()
+        if not key:
+            continue
+        for section in INFO_INTENT_SECTION_MAP.get(key, []):
+            if section not in sections:
+                sections.append(section)
+    return sections or None
 
 
 def _normalize_fact_intents(
@@ -151,6 +195,12 @@ def _build_fact_meta(
                 combined[key] = service_query_meta.get(key)
     if info_sections is None and isinstance(combined.get("info_sections"), list):
         info_sections = combined.get("info_sections")
+    inferred_sections = _infer_info_sections_from_intents(merged_intents)
+    if info_sections:
+        if inferred_sections:
+            info_sections = list(dict.fromkeys(info_sections + inferred_sections))
+    else:
+        info_sections = inferred_sections
     if info_sections is not None:
         combined["info_sections"] = [item for item in info_sections if isinstance(item, str)]
     combined["fact_source"] = fact_source

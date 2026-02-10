@@ -2153,7 +2153,7 @@ ROUTER_SIGNAL_CONFIDENCE_FLOOR = 0.2
 CONTROLLER_CONFIDENCE_THRESHOLD = float(
     os.getenv("CONTROLLER_CONFIDENCE_THRESHOLD", "0.3") or 0.3
 )
-WEBHOOK_PIPELINE_BUDGET_DEFAULT_MS = 7000
+WEBHOOK_PIPELINE_BUDGET_DEFAULT_MS = 12000
 
 
 def _get_pipeline_budget_ms() -> int:
@@ -3065,6 +3065,11 @@ def _looks_like_time_only_request(message_text: str | None) -> bool:
 
 BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration", "location", "master"}
 INFO_INTENTS = {"pricing", "hours", "duration", "location", "promotions", "master"}
+TOOL_INFO_SECTION_MAP = {
+    "catalog.location": ["location"],
+    "catalog.portfolio": ["portfolio"],
+    "calendar.list_slots": ["hours"],
+}
 LLM_PLAN_ALLOWED_OUTCOMES = {"fact", "collect", "handoff"}
 LLM_PLAN_ALLOWED_TOOL_ACTIONS = {
     "info",
@@ -3083,6 +3088,16 @@ LLM_PLAN_ALLOWED_TOOL_ACTIONS = {
 }
 LLM_POLICY_CORE_ALLOWED_ACTIONS = LLM_PLAN_ALLOWED_OUTCOMES
 LLM_POLICY_CORE_ALLOWED_TOOL_ACTIONS = LLM_PLAN_ALLOWED_TOOL_ACTIONS
+LLM_POLICY_CORE_LOW_CONFIDENCE_TOOL_ALLOWLIST = {
+    "calendar.list_slots",
+    "calendar.get_booking",
+    "catalog.service_query",
+    "catalog.location",
+    "catalog.portfolio",
+    "info",
+    "consult",
+    "collect",
+}
 LLM_POLICY_CORE_ENABLED = _is_env_enabled(
     os.environ.get("LLM_POLICY_CORE_ENABLED"), default=True
 )
@@ -4533,7 +4548,7 @@ async def _handle_webhook_payload(
         )
         set_runtime_capabilities(runtime_capabilities)
 
-    allow_truth_fallback = should_allow_truth_fallback()
+    allow_truth_fallback = should_allow_truth_fallback() or skip_persist
     runtime_truth = build_runtime_truth(
         db,
         client_slug=payload.client_slug,
@@ -6670,6 +6685,8 @@ async def _handle_webhook_payload(
     policy_risk_signals: list[str] = []
     resolved_policy_refs: list[str] = []
     consult_refs_error = None
+    policy_low_confidence_ok = False
+    policy_pack_refs_dropped = False
     policy_core_runtime_active = bool(
         LLM_POLICY_CORE_ENABLED
         and routing["allow_bot_reply"]
@@ -6749,7 +6766,10 @@ async def _handle_webhook_payload(
             if not policy_intent:
                 policy_validation_error = "intent_invalid"
             elif policy_confidence is None or policy_confidence < POLICY_CORE_CONFIDENCE_THRESHOLD:
-                policy_validation_error = "low_confidence"
+                if policy_action in {"fact", "collect"} and policy_tool_action in LLM_POLICY_CORE_LOW_CONFIDENCE_TOOL_ALLOWLIST:
+                    policy_low_confidence_ok = True
+                else:
+                    policy_validation_error = "low_confidence"
             elif policy_action not in LLM_POLICY_CORE_ALLOWED_ACTIONS:
                 policy_validation_error = "action_invalid"
             elif not policy_tool_action or policy_tool_action not in LLM_POLICY_CORE_ALLOWED_TOOL_ACTIONS:
@@ -6782,7 +6802,9 @@ async def _handle_webhook_payload(
                                 break
                             resolved_policy_refs.append(resolved)
                 elif policy_pack_refs:
-                    policy_validation_error = "pack_refs_not_allowed"
+                    policy_pack_refs = []
+                    resolved_policy_refs = []
+                    policy_pack_refs_dropped = True
 
             if policy_validation_error is None and policy_action == "handoff":
                 if not policy_needs_manager:
@@ -6808,7 +6830,10 @@ async def _handle_webhook_payload(
 
             if policy_validation_error is None:
                 policy_valid = True
-                policy_pack_refs = resolved_policy_refs or []
+                if policy_pack_refs_dropped:
+                    policy_pack_refs = []
+                else:
+                    policy_pack_refs = resolved_policy_refs or []
 
         llm_policy_core_meta = {
             "attempted": policy_result.get("attempted") if isinstance(policy_result, dict) else False,
@@ -6820,6 +6845,8 @@ async def _handle_webhook_payload(
             "intent": policy_intent,
             "validated": policy_valid,
             "validation_error": policy_validation_error,
+            "low_confidence_ok": policy_low_confidence_ok,
+            "pack_refs_dropped": policy_pack_refs_dropped,
         }
         if saved_message:
             _update_message_decision_metadata(
@@ -6836,6 +6863,8 @@ async def _handle_webhook_payload(
                 "error": llm_policy_core_meta["error"],
                 "validated": policy_valid,
                 "validation_error": policy_validation_error,
+                "low_confidence_ok": policy_low_confidence_ok,
+                "pack_refs_dropped": policy_pack_refs_dropped,
                 "confidence": policy_confidence,
                 "tool_action": policy_tool_action,
                 "pack_refs": policy_pack_refs or resolved_policy_refs,
@@ -6947,12 +6976,27 @@ async def _handle_webhook_payload(
     policy_core_attempted = bool(
         isinstance(llm_policy_core_meta, dict) and llm_policy_core_meta.get("attempted")
     )
+    expected_reply_active = bool(
+        expected_reply_type
+        in {
+            EXPECTED_REPLY_SERVICE,
+            EXPECTED_REPLY_TIME,
+            EXPECTED_REPLY_NAME,
+        }
+        and not expected_reply_blocked_by_info
+    )
+    pending_info_signal = bool(info_class_intents)
     degraded_policy_core_critical = bool(
         policy_core_runtime_active
         and policy_core_mode == "degraded_fallback"
         and policy_core_attempted
         and (
-            conversation.state in {ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value}
+            (
+                conversation.state
+                in {ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value}
+                and not pending_info_signal
+            )
+            or expected_reply_active
             or (
                 booking_wants_flow
                 and message_text
@@ -7719,6 +7763,15 @@ async def _handle_webhook_payload(
         from app.services.tool_registry_service import execute_tool_action, is_tool_action
 
         if is_tool_action(policy_tool_action):
+            info_sections_hint: list[str] = []
+            if policy_pack_refs:
+                info_sections_hint = [ref for ref in policy_pack_refs if ref in INFO_INTENTS]
+            if not info_sections_hint and intent_decomp_set:
+                info_sections_hint = [intent for intent in intent_decomp_set if intent in INFO_INTENTS]
+            if not info_sections_hint and info_class_intents:
+                info_sections_hint = [intent for intent in info_class_intents if intent in INFO_INTENTS]
+            if not info_sections_hint:
+                info_sections_hint = list(TOOL_INFO_SECTION_MAP.get(policy_tool_action, []))
             tool_result = execute_tool_action(
                 db,
                 tool_action=policy_tool_action,
@@ -7727,21 +7780,66 @@ async def _handle_webhook_payload(
                 branch_id=conversation.branch_id if conversation else None,
                 client_slug=payload.client_slug,
                 service_query=policy_service_query,
+                info_sections_hint=info_sections_hint,
+                message_text=message_text,
                 now=now,
                 user_name=getattr(user, "name", None) if user else None,
                 user_phone=getattr(user, "phone", None) if user else None,
             )
             if tool_result.handled:
+                info_sections = list(info_sections_hint)
+                slot_snapshot = {
+                    key: value
+                    for key, value in policy_slot_state_validated.items()
+                    if isinstance(value, str) and value.strip()
+                }
+                raw_start_at = policy_tool_args.get("start_at")
+                if (
+                    not slot_snapshot.get("datetime")
+                    and isinstance(raw_start_at, str)
+                    and raw_start_at.strip()
+                ):
+                    slot_snapshot["datetime"] = raw_start_at.strip()
+                merged_slots: dict[str, str] = {}
+                context = _get_conversation_context(conversation)
+                booking_state = _get_booking_context(context)
+                if isinstance(booking_state, dict):
+                    for key in BOOKING_SLOT_ORDER:
+                        value = booking_state.get(key)
+                        if isinstance(value, str) and value.strip():
+                            merged_slots[key] = value.strip()
+                for key, value in slot_snapshot.items():
+                    if not merged_slots.get(key):
+                        merged_slots[key] = value
                 if saved_message:
                     tool_meta = {
                         "tool_action": policy_tool_action,
                         "tool_args": policy_tool_args,
                     }
+                    if info_sections and "info_sections" not in tool_result.decision_meta:
+                        tool_meta["info_sections"] = info_sections
+                    if merged_slots and "slots" not in tool_result.decision_meta:
+                        tool_meta["slots"] = merged_slots
                     tool_meta.update(tool_result.decision_meta)
                     _update_message_decision_metadata(saved_message, tool_meta)
+                if merged_slots and (
+                    policy_intent == "booking" or policy_tool_action.startswith("calendar.")
+                ):
+                    booking_state = dict(booking_state) if isinstance(booking_state, dict) else {}
+                    if booking_state.get("active") is not True:
+                        booking_state["active"] = True
+                        booking_state["started_at"] = now.isoformat()
+                    for key, value in merged_slots.items():
+                        if not booking_state.get(key):
+                            booking_state[key] = value
+                    context = _set_booking_context(context, booking_state)
                 trace_payload = dict(tool_result.trace)
                 trace_payload.setdefault("tool_action", policy_tool_action)
                 trace_payload.setdefault("tool_args", policy_tool_args)
+                if info_sections and "info_sections" not in trace_payload:
+                    trace_payload["info_sections"] = info_sections
+                if merged_slots and "slots" not in trace_payload:
+                    trace_payload["slots"] = merged_slots
                 _record_decision_trace(conversation, trace_payload)
                 if tool_result.expected_reply_type:
                     context = _get_conversation_context(conversation)
@@ -8767,7 +8865,13 @@ async def _handle_webhook_payload(
             multi_intent_other_followup = multi_intent_followup
 
     booking_interrupt_response = None
-    if not expected_reply_type or expected_reply_blocked_by_info:
+    booking_interrupt_allowed = bool(
+        (not expected_reply_type)
+        or expected_reply_blocked_by_info
+        or info_class_intents
+        or basic_info_message
+    )
+    if booking_interrupt_allowed:
         booking_interrupt_response = _handle_booking_interrupt(
             db=db,
             conversation=conversation,
