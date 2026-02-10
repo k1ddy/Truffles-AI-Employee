@@ -1,0 +1,21 @@
+# SESSION 2026-02-10-knowledge-fleet-ux-a27 — Knowledge Fleet UX
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-10-knowledge-fleet-ux-a27.md
+- branch: feat/2026-02-10-knowledge-fleet-ux-a27
+- worktree: /home/zhan/truffles-main
+- base_ref: origin/main
+- scope: Улучшение Knowledge UX для platform_admin: fleet control + structured knowledge editing.
+- done:
+  - Добавлен Fleet Knowledge Control (client/branch context + quick actions).
+  - Добавлен Branch Knowledge Readiness с safe apply через branch-change flow.
+  - Добавлен Structured Draft Builder для hours/services.
+  - Добавлен specialists snapshot и navigation в Team.
+- next:
+  - Открыть PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-10-knowledge-fleet-ux-a27.md
+  - npm --prefix console-web run lint
+  - npm --prefix console-web run build
+- last_updated: 2026-02-10
