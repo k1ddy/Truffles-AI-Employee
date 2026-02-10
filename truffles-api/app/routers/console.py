@@ -1405,10 +1405,14 @@ def _resolve_keycloak_admin_config() -> dict[str, Optional[str]]:
     client_id = _normalize_optional_text(os.environ.get("CONSOLE_KEYCLOAK_CLIENT_ID")) or "admin-cli"
     client_secret = _normalize_optional_text(os.environ.get("CONSOLE_KEYCLOAK_CLIENT_SECRET"))
     admin_username = _normalize_optional_text(
-        os.environ.get("CONSOLE_KEYCLOAK_USERNAME") or os.environ.get("KEYCLOAK_ADMIN_USERNAME")
+        os.environ.get("CONSOLE_KEYCLOAK_USERNAME")
+        or os.environ.get("KEYCLOAK_ADMIN_USERNAME")
+        or os.environ.get("KEYCLOAK_USERNAME")
     )
     admin_password = _normalize_optional_text(
-        os.environ.get("CONSOLE_KEYCLOAK_PASSWORD") or os.environ.get("KEYCLOAK_ADMIN_PASSWORD")
+        os.environ.get("CONSOLE_KEYCLOAK_PASSWORD")
+        or os.environ.get("KEYCLOAK_ADMIN_PASSWORD")
+        or os.environ.get("KEYCLOAK_PASSWORD")
     )
 
     missing = []
@@ -1423,11 +1427,19 @@ def _resolve_keycloak_admin_config() -> dict[str, Optional[str]]:
     if not admin_password:
         missing.append("CONSOLE_KEYCLOAK_PASSWORD")
     if missing:
+        details: dict[str, object] = {"missing": missing}
+        aliases: dict[str, list[str]] = {}
+        if "CONSOLE_KEYCLOAK_USERNAME" in missing:
+            aliases["CONSOLE_KEYCLOAK_USERNAME"] = ["KEYCLOAK_ADMIN_USERNAME", "KEYCLOAK_USERNAME"]
+        if "CONSOLE_KEYCLOAK_PASSWORD" in missing:
+            aliases["CONSOLE_KEYCLOAK_PASSWORD"] = ["KEYCLOAK_ADMIN_PASSWORD", "KEYCLOAK_PASSWORD"]
+        if aliases:
+            details["aliases"] = aliases
         raise ConsoleAPIError(
             503,
             "INTEGRATION_UNAVAILABLE",
             "SSO provisioning is not configured",
-            details={"missing": missing},
+            details=details,
         )
 
     return {
