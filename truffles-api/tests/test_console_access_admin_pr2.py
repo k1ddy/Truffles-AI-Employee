@@ -27,6 +27,7 @@ def _mock_context(*, role: str = "platform_admin", accessible_clients=None, clie
         client=SimpleNamespace(id=selected_client_id, company_id=clients[0].company_id),
         accessible_clients=clients,
         branches=[],
+        effective_branch_id=None,
     )
 
 
@@ -95,6 +96,118 @@ async def test_create_agent_blocks_cross_tenant_access(monkeypatch):
         )
 
     assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_create_agent_rejects_mixed_oidc_and_sso_payload(monkeypatch):
+    client_id = uuid4()
+    company_id = uuid4()
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(id=client_id, company_id=company_id)
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=client_id, company_id=company_id)],
+            client_id=client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.create_agent(
+            request=Mock(),
+            body=ConsoleAgentCreateRequest(
+                client_id=client_id,
+                role="manager",
+                branch_id=uuid4(),
+                oidc_subject="oidc-sub",
+                sso_username="login",
+                sso_password="password123",
+            ),
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.asyncio
+async def test_create_agent_provisions_sso_user_and_binds_subject(monkeypatch):
+    client_id = uuid4()
+    company_id = uuid4()
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(id=client_id, company_id=company_id)
+    created = {}
+
+    def _fake_create_agent_with_membership(
+        _db,
+        *,
+        client,
+        role,
+        branch,
+        name,
+        is_active,
+        oidc_subject,
+        linked_from,
+        now,
+    ):
+        created["client_id"] = client.id
+        created["role"] = role
+        created["oidc_subject"] = oidc_subject
+        created["linked_from"] = linked_from
+        return SimpleNamespace(
+            id=uuid4(),
+            name=name,
+            role=role,
+            client_id=client.id,
+            branch_id=branch.id if branch else None,
+            is_active=is_active,
+        )
+
+    sso_calls = {}
+
+    def _fake_provision_sso(*, username, password, temporary_password):
+        sso_calls["username"] = username
+        sso_calls["password"] = password
+        sso_calls["temporary_password"] = temporary_password
+        return "keycloak-sub-123"
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=client_id, company_id=company_id)],
+            client_id=client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_create_agent_with_membership", _fake_create_agent_with_membership)
+    monkeypatch.setattr(console_router, "_provision_sso_user_and_get_subject", _fake_provision_sso)
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+
+    response = await console_router.create_agent(
+        request=Mock(),
+        body=ConsoleAgentCreateRequest(
+            client_id=client_id,
+            role="support",
+            name="Support User",
+            sso_username="support.user",
+            sso_password="Password123",
+            sso_temp_password=False,
+        ),
+        db=db,
+    )
+
+    assert response.agent.client_id == client_id
+    assert response.agent.role == "support"
+    assert created["oidc_subject"] == "keycloak-sub-123"
+    assert created["linked_from"] == "admin_api"
+    assert sso_calls["username"] == "support.user"
+    assert sso_calls["password"] == "Password123"
+    assert sso_calls["temporary_password"] is False
 
 
 @pytest.mark.asyncio

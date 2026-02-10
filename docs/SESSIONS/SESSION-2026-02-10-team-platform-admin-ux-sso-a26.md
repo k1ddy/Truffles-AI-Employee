@@ -1,0 +1,28 @@
+# SESSION 2026-02-10-team-platform-admin-ux-sso-a26 — Team Platform Admin UX + SSO branch scope
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-10-team-platform-admin-ux-sso-a26.md
+- branch: feat/2026-02-10-team-platform-admin-ux-sso-a26
+- worktree: /home/zhan/truffles-main
+- base_ref: origin/main
+- scope: Team control plane hardening and UX scale-up for platform_admin plus SSO provisioning for branch-scoped users.
+- done:
+  - Branch access guard fixed for privileged but branch-restricted memberships.
+  - `create_agent` supports SSO provisioning (`sso_username`, `sso_password`, `sso_temp_password`) with payload validation.
+  - Keycloak admin provisioning helpers added and wired into agent creation flow.
+  - OpenAPI contract and generated frontend API types updated for SSO fields.
+  - Team UI improved with agent search/filter, context-aware memberships lookup, and branch-scoped SSO user creation UX.
+  - Targeted backend/frontend checks executed and passing.
+- next:
+  - Push branch and open PR.
+  - Monitor CI and address failures if present.
+- evidence:
+  - pytest -q truffles-api/tests/test_console_cases_helpers.py truffles-api/tests/test_console_access_admin_pr2.py
+  - pytest -q truffles-api/tests/test_console_rbac.py truffles-api/tests/test_console_auth_access.py
+  - pytest -q truffles-api/tests/test_console_admin_provisioning.py
+  - python3 truffles-api/scripts/generate_openapi.py --check
+  - npm --prefix console-web run generate:api
+  - npm --prefix console-web run lint
+  - npm --prefix console-web run build
+- last_updated: 2026-02-10

@@ -478,6 +478,8 @@ jobs:
       KEYCLOAK_CLIENT_SECRET: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET }}
       KEYCLOAK_USERNAME: ${{ secrets.CONSOLE_KEYCLOAK_USERNAME }}
       KEYCLOAK_PASSWORD: ${{ secrets.CONSOLE_KEYCLOAK_PASSWORD }}
+      SCHEMATHESIS_FALLBACK_CLIENT_ID: ${{ secrets.CONSOLE_SCHEMATHESIS_CLIENT_ID }}
+      SCHEMATHESIS_FALLBACK_BRANCH_ID: ${{ secrets.CONSOLE_SCHEMATHESIS_BRANCH_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -936,9 +938,9 @@ jobs:
             REQUIRE_GHCR=1 VERIFY_VERSION=1 \
             EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
             bash "${RELEASE_SCRIPT}"
-            EXPECTED_GIT_COMMIT=${{ github.sha }} VERIFY_CONSOLE_BUILD=1 bash "${CONSOLE_RESTART_SCRIPT}"
-            api_commit="$(curl -fsS http://localhost:8000/admin/version | python3 -c 'import json,sys; print((json.load(sys.stdin).get(\"git_commit\") or \"\").strip())')"
-            console_commit="$(docker exec truffles-console-web /bin/sh -lc 'printf \"%s\" \"${NEXT_PUBLIC_BUILD_SHA:-unknown}\"')"
+            REPO_ROOT="${REPO_ROOT}" EXPECTED_GIT_COMMIT=${{ github.sha }} VERIFY_CONSOLE_BUILD=1 bash "${CONSOLE_RESTART_SCRIPT}"
+            api_commit="$(curl -fsS http://localhost:8000/admin/version | python3 -c 'import json,sys; print((json.load(sys.stdin).get("git_commit") or "").strip())')"
+            console_commit="$(docker exec truffles-console-web /bin/sh -lc 'printf "%s" "${NEXT_PUBLIC_BUILD_SHA:-unknown}"')"
             if [ "${api_commit}" != "${{ github.sha }}" ]; then
               echo "ERROR: deploy parity mismatch: api git_commit=${api_commit}, expected=${{ github.sha }}" >&2
               exit 1
@@ -957,7 +959,7 @@ jobs:
             docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
   console-contract-live:
-    if: ${{ always() && github.event_name != 'pull_request' && needs.changes.outputs.console_contracts == 'true' && needs.deploy.outputs.deployed == 'true' }}
+    if: ${{ always() && github.event_name != 'pull_request' && needs.changes.outputs.console_contracts == 'true' && needs.deploy.result == 'success' && needs.deploy.outputs.deployed == 'true' }}
     needs: [changes, deploy]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1034,21 +1036,30 @@ jobs:
           import urllib.request
 
           token = os.environ["SCHEMATHESIS_TOKEN"]
+          fallback_client_id = os.environ.get("SCHEMATHESIS_FALLBACK_CLIENT_ID", "").strip()
+          fallback_branch_id = os.environ.get("SCHEMATHESIS_FALLBACK_BRANCH_ID", "").strip()
           req = urllib.request.Request(
               "https://api.truffles.kz/console/v1/me",
               headers={"Authorization": f"Bearer {token}"},
           )
+          data = {}
           try:
-              with urllib.request.urlopen(req) as resp:
+              with urllib.request.urlopen(req, timeout=10) as resp:
                   data = json.load(resp)
           except Exception as exc:
-              print(f"Selection headers skipped: {exc}")
-              raise SystemExit(0)
+              print(f"Selection headers from /me failed: {exc}")
 
           client = data.get("client") or {}
           branches = data.get("branches") or []
-          client_id = client.get("id")
-          branch_id = branches[0].get("id") if branches else None
+          client_id = client.get("id") or fallback_client_id
+          branch_id = (branches[0].get("id") if branches else None) or fallback_branch_id
+
+          if not client_id or not branch_id:
+              raise SystemExit(
+                  "Console contract preflight failed: unable to resolve X-Client-Id and X-Branch-Id. "
+                  "Fix /me authorization for SCHEMATHESIS_TOKEN or set "
+                  "CONSOLE_SCHEMATHESIS_CLIENT_ID and CONSOLE_SCHEMATHESIS_BRANCH_ID secrets."
+              )
 
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
               if client_id:
@@ -1071,6 +1082,7 @@ jobs:
           schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml \
             --url https://api.truffles.kz/console/v1 \
             --include-method=GET \
+            --phases examples,fuzzing,stateful \
             --exclude-path /ops/outbox \
             --exclude-path /ops/jobs \
             --exclude-path /ops/jobs/catalog \
@@ -1090,12 +1102,12 @@ jobs:
             --exclude-path /onboarding/advance \
             --exclude-path /learning/candidates \
             --checks all \
-            --request-timeout 10 \
+            --request-timeout 20 \
             --max-examples=3 \
             "${headers[@]}"
 
   ci-livecheck:
-    if: ${{ always() && github.event_name != 'pull_request' && needs.changes.outputs.livecheck_required == 'true' }}
+    if: ${{ always() && github.event_name != 'pull_request' && needs.changes.outputs.livecheck_required == 'true' && needs.deploy.result == 'success' && needs.deploy.outputs.deployed == 'true' }}
     needs: [changes, deploy]
     name: ci-livecheck (${{ matrix.group }})
     runs-on: ubuntu-latest

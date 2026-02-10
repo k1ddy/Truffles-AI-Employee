@@ -84,6 +84,10 @@ _console_rbac_matrix: dict[str, dict[str, tuple[str, ...]]] = {
         "read": ("platform_admin", "owner", "admin", "support"),
         "write": ("platform_admin", "owner", "admin"),
     },
+    "integrations": {
+        "read": ("platform_admin",),
+        "write": ("platform_admin",),
+    },
 }
 
 

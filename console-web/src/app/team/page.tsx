@@ -36,12 +36,21 @@ type TeamTab = "users" | "specialists";
 
 type TeamBranch = { id?: string; name?: string };
 
-type TeamClient = { id?: string; name?: string };
+type TeamClient = {
+    id?: string;
+    name?: string;
+    company_id?: string | null;
+    company_name?: string | null;
+};
+type TeamCompany = { id?: string; name?: string };
 
 type TeamMe = {
     agent?: { id?: string | null; role?: ConsoleRole | null };
     client?: TeamClient | null;
     branches?: TeamBranch[];
+    clients?: TeamClient[];
+    companies?: TeamCompany[];
+    selected_company_id?: string | null;
     selected_branch_id?: string | null;
 };
 
@@ -99,14 +108,25 @@ function resolveTelegramIdentity(agent: AgentBase | AgentWithIdentities): AgentI
     return agent.identities?.find((identity) => identity.channel === "telegram");
 }
 
-function membershipTargetLabel(membership: AgentMembership, branches: TeamBranch[]) {
+function membershipTargetLabel(
+    membership: AgentMembership,
+    branches: TeamBranch[],
+    clientsById: Map<string, TeamClient>,
+    companiesById: Map<string, TeamCompany>,
+) {
     if (membership.scope === "branch") {
         return formatBranchLabel(membership.branch_id, branches);
     }
     if (membership.scope === "client") {
-        return membership.client_id ? membership.client_id.slice(0, 8) : "client: —";
+        if (!membership.client_id) {
+            return "client: —";
+        }
+        return clientsById.get(membership.client_id)?.name ?? membership.client_id.slice(0, 8);
     }
-    return membership.company_id ? membership.company_id.slice(0, 8) : "company: —";
+    if (!membership.company_id) {
+        return "company: —";
+    }
+    return companiesById.get(membership.company_id)?.name ?? membership.company_id.slice(0, 8);
 }
 
 async function fetchSpecialists(branchId?: string): Promise<SpecialistsResponse> {
@@ -120,12 +140,18 @@ function UsersPanel({
     session,
     role,
     branches,
+    clients,
+    companies,
+    companyId,
     clientId,
     currentAgentId,
 }: {
     session: SessionData;
     role: ConsoleRole;
     branches: TeamBranch[];
+    clients: TeamClient[];
+    companies: TeamCompany[];
+    companyId?: string | null;
     clientId?: string | null;
     currentAgentId?: string | null;
 }) {
@@ -144,11 +170,17 @@ function UsersPanel({
     const [createAgentBranchId, setCreateAgentBranchId] = useState("");
     const [createAgentName, setCreateAgentName] = useState("");
     const [createAgentOidcSubject, setCreateAgentOidcSubject] = useState("");
+    const [createAgentSsoUsername, setCreateAgentSsoUsername] = useState("");
+    const [createAgentSsoPassword, setCreateAgentSsoPassword] = useState("");
+    const [createAgentSsoTempPassword, setCreateAgentSsoTempPassword] = useState(true);
     const [createAgentIsActive, setCreateAgentIsActive] = useState(true);
+    const [agentSearch, setAgentSearch] = useState("");
+    const [agentRoleFilter, setAgentRoleFilter] = useState<"all" | AgentRole>("all");
+    const [agentStatusFilter, setAgentStatusFilter] = useState<"all" | "active" | "inactive">("all");
     const [membershipAgentId, setMembershipAgentId] = useState("");
     const [membershipScope, setMembershipScope] = useState<MembershipScope>("client");
     const [membershipRole, setMembershipRole] = useState<AgentRole>("manager");
-    const [membershipCompanyId, setMembershipCompanyId] = useState("");
+    const [membershipCompanyId, setMembershipCompanyId] = useState(companyId ?? "");
     const [membershipClientId, setMembershipClientId] = useState(clientId ?? "");
     const [membershipBranchId, setMembershipBranchId] = useState("");
     const [membershipIsActive, setMembershipIsActive] = useState(true);
@@ -181,22 +213,82 @@ function UsersPanel({
         });
         return mapped;
     }, [agents]);
+    const clientsById = useMemo(() => {
+        const mapped = new Map<string, TeamClient>();
+        clients.forEach((client) => {
+            if (client.id) {
+                mapped.set(client.id, client);
+            }
+        });
+        return mapped;
+    }, [clients]);
+    const companiesById = useMemo(() => {
+        const mapped = new Map<string, TeamCompany>();
+        companies.forEach((company) => {
+            if (company.id) {
+                mapped.set(company.id, company);
+            }
+        });
+        return mapped;
+    }, [companies]);
+    const filteredAgents = useMemo(() => {
+        const normalizedSearch = agentSearch.trim().toLowerCase();
+        return agents.filter((agent) => {
+            if (agentRoleFilter !== "all" && agent.role !== agentRoleFilter) {
+                return false;
+            }
+            if (agentStatusFilter === "active" && !agent.is_active) {
+                return false;
+            }
+            if (agentStatusFilter === "inactive" && agent.is_active) {
+                return false;
+            }
+            if (!normalizedSearch) {
+                return true;
+            }
+            const branchLabel = formatBranchLabel(agent.branch_id ?? null, branches).toLowerCase();
+            const haystack = `${agent.name || ""} ${agent.role || ""} ${branchLabel}`.toLowerCase();
+            return haystack.includes(normalizedSearch);
+        });
+    }, [agentRoleFilter, agentSearch, agentStatusFilter, agents, branches]);
 
     useEffect(() => {
         setMembershipClientId(clientId ?? "");
         setEditingClientId(clientId ?? "");
-    }, [clientId]);
+        setMembershipCompanyId(companyId ?? "");
+        setEditingCompanyId(companyId ?? "");
+    }, [clientId, companyId]);
 
     const membershipsQuery = useQuery({
-        queryKey: ["team-memberships", membershipIncludeInactive, membershipFilterAgentId],
+        queryKey: ["team-memberships", clientId ?? "", membershipIncludeInactive, membershipFilterAgentId],
         queryFn: async () =>
             (
                 await adminApi.listMemberships({
+                    client_id: clientId || undefined,
                     include_inactive: membershipIncludeInactive ? "true" : undefined,
                     agent_id: membershipFilterAgentId || undefined,
                 })
             ).data,
-        enabled: !!session && canReadTeam,
+        enabled: !!session && canManage,
+    });
+    const branchLookupClientId = useMemo(() => {
+        if (editingMembershipId && editingScope === "branch") {
+            return editingClientId.trim();
+        }
+        if (membershipScope === "branch") {
+            return membershipClientId.trim();
+        }
+        return "";
+    }, [editingClientId, editingMembershipId, editingScope, membershipClientId, membershipScope]);
+    const membershipBranchesQuery = useQuery({
+        queryKey: ["membership-branches", branchLookupClientId],
+        queryFn: async () =>
+            (
+                await adminApi.listBranches({
+                    client_id: branchLookupClientId || undefined,
+                })
+            ).data,
+        enabled: !!session && canReadTeam && !!branchLookupClientId,
     });
 
     useEffect(() => {
@@ -210,10 +302,25 @@ function UsersPanel({
             handleError(membershipsQuery.error);
         }
     }, [membershipsQuery.error, handleError]);
+    useEffect(() => {
+        if (membershipBranchesQuery.error) {
+            handleError(membershipBranchesQuery.error);
+        }
+    }, [membershipBranchesQuery.error, handleError]);
 
     const memberships = useMemo(() => {
         return (membershipsQuery.data?.items ?? []) as AgentMembership[];
     }, [membershipsQuery.data]);
+    const membershipBranchOptions = useMemo(() => {
+        const apiItems = ((membershipBranchesQuery.data?.items ?? []) as TeamBranch[]).filter((branch) => Boolean(branch.id));
+        if (apiItems.length > 0) {
+            return apiItems;
+        }
+        if (branchLookupClientId && clientId && branchLookupClientId === clientId) {
+            return branches.filter((branch) => Boolean(branch.id));
+        }
+        return [];
+    }, [branchLookupClientId, branches, clientId, membershipBranchesQuery.data]);
     const selectedMembershipAgent = membershipAgentId ? agentsById.get(membershipAgentId) : undefined;
     const selectedMembershipAgentIsProtected = selectedMembershipAgent?.role === "platform_admin";
 
@@ -223,40 +330,52 @@ function UsersPanel({
     };
 
     useEffect(() => {
-        if (membershipCompanyId) {
-            return;
+        if (companyId && membershipScope === "company" && membershipCompanyId !== companyId) {
+            setMembershipCompanyId(companyId);
         }
-        const fallbackCompany = memberships.find((membership) => membership.company_id)?.company_id ?? "";
-        if (fallbackCompany) {
-            setMembershipCompanyId(fallbackCompany);
-        }
-    }, [memberships, membershipCompanyId]);
+    }, [companyId, membershipCompanyId, membershipScope]);
 
     const activeCount = agents.filter((agent) => agent.is_active).length;
     const owners = agents.filter((agent) => agent.role === "owner").length;
     const managers = agents.filter((agent) => agent.role === "manager").length;
     const membershipsActiveCount = memberships.filter((membership) => membership.is_active).length;
+    const filteredAgentsCount = filteredAgents.length;
+    const selectedClientLabel = clientId
+        ? (clientsById.get(clientId)?.name ?? clientId.slice(0, 8))
+        : "не выбран";
+    const selectedCompanyLabel = companyId
+        ? (companiesById.get(companyId)?.name ?? companyId.slice(0, 8))
+        : null;
 
-    const isBranchScopedRole = createAgentRole === "manager" || createAgentRole === "specialist";
+    const isBranchRequiredRole = createAgentRole === "manager" || createAgentRole === "specialist";
+    const canSelectBranchScope = createAgentRole !== "platform_admin";
     const canCreateAgent = canManage && Boolean(clientId);
-    const agentBranchRequiredHint = isBranchScopedRole
+    const agentBranchRequiredHint = isBranchRequiredRole
         ? "Для роли manager/specialist нужно выбрать филиал."
-        : "Филиал можно оставить пустым для client-level роли.";
+        : canSelectBranchScope
+            ? "Выберите филиал для branch-only доступа или оставьте пустым для доступа ко всем филиалам клиента."
+            : "platform_admin создается только как platform scope.";
 
     useEffect(() => {
-        if (!isBranchScopedRole) {
+        if (!canSelectBranchScope) {
             setCreateAgentBranchId("");
         }
-    }, [isBranchScopedRole]);
+    }, [canSelectBranchScope]);
 
     useEffect(() => {
         if (membershipScope === "client" && clientId && !membershipClientId) {
             setMembershipClientId(clientId);
         }
+        if (membershipScope === "company" && companyId && !membershipCompanyId) {
+            setMembershipCompanyId(companyId);
+        }
+        if (membershipScope === "branch" && clientId && !membershipClientId) {
+            setMembershipClientId(clientId);
+        }
         if (membershipScope !== "branch") {
             setMembershipBranchId("");
         }
-    }, [membershipScope, clientId, membershipClientId]);
+    }, [membershipScope, clientId, companyId, membershipClientId, membershipCompanyId]);
 
     const createAgentMutation = useMutation({
         mutationFn: async () => {
@@ -269,6 +388,9 @@ function UsersPanel({
                 name: createAgentName.trim() || undefined,
                 branch_id: createAgentBranchId || undefined,
                 oidc_subject: createAgentOidcSubject.trim() || undefined,
+                sso_username: createAgentSsoUsername.trim() || undefined,
+                sso_password: createAgentSsoPassword || undefined,
+                sso_temp_password: createAgentSsoUsername.trim() ? createAgentSsoTempPassword : undefined,
                 is_active: createAgentIsActive,
             };
             return (await adminApi.createAgent(payload)).data;
@@ -277,6 +399,9 @@ function UsersPanel({
             toast.success("Учетная запись создана");
             setCreateAgentName("");
             setCreateAgentOidcSubject("");
+            setCreateAgentSsoUsername("");
+            setCreateAgentSsoPassword("");
+            setCreateAgentSsoTempPassword(true);
             setCreateAgentBranchId("");
             queryClient.invalidateQueries({ queryKey: ["agents"] });
             queryClient.invalidateQueries({ queryKey: ["team-memberships"] });
@@ -540,8 +665,23 @@ function UsersPanel({
             toast.error("Только platform_admin может создавать platform_admin учетку");
             return;
         }
-        if (isBranchScopedRole && !createAgentBranchId) {
+        if (isBranchRequiredRole && !createAgentBranchId) {
             toast.error("Для manager/specialist выберите филиал");
+            return;
+        }
+        const hasOidc = Boolean(createAgentOidcSubject.trim());
+        const hasSsoUsername = Boolean(createAgentSsoUsername.trim());
+        const hasSsoPassword = Boolean(createAgentSsoPassword);
+        if (hasOidc && (hasSsoUsername || hasSsoPassword)) {
+            toast.error("Используйте либо oidc_subject, либо SSO login/password");
+            return;
+        }
+        if (hasSsoUsername !== hasSsoPassword) {
+            toast.error("Для SSO укажите и login, и password");
+            return;
+        }
+        if (hasSsoPassword && createAgentSsoPassword.length < 8) {
+            toast.error("SSO password должен быть не короче 8 символов");
             return;
         }
         createAgentMutation.mutate();
@@ -587,6 +727,7 @@ function UsersPanel({
                     <div className="rounded-2xl border border-border/60 bg-muted/40 p-4">
                         <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Всего</p>
                         <p className="text-2xl font-semibold mt-2">{agents.length}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Показано: {filteredAgentsCount}</p>
                     </div>
                     <div className="rounded-2xl border border-border/60 bg-muted/40 p-4">
                         <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Активных</p>
@@ -596,6 +737,35 @@ function UsersPanel({
                         <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Owner/Manager</p>
                         <p className="text-2xl font-semibold mt-2">{owners} / {managers}</p>
                     </div>
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <input
+                        className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                        placeholder="Поиск: имя, роль, филиал"
+                        value={agentSearch}
+                        onChange={(event) => setAgentSearch(event.target.value)}
+                    />
+                    <select
+                        className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                        value={agentRoleFilter}
+                        onChange={(event) => setAgentRoleFilter(event.target.value as "all" | AgentRole)}
+                    >
+                        <option value="all">Все роли</option>
+                        {TEAM_AGENT_ROLES.map((roleValue) => (
+                            <option key={`filter-role-${roleValue}`} value={roleValue}>
+                                {roleValue}
+                            </option>
+                        ))}
+                    </select>
+                    <select
+                        className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                        value={agentStatusFilter}
+                        onChange={(event) => setAgentStatusFilter(event.target.value as "all" | "active" | "inactive")}
+                    >
+                        <option value="all">Все статусы</option>
+                        <option value="active">Только активные</option>
+                        <option value="inactive">Только отключенные</option>
+                    </select>
                 </div>
             </div>
 
@@ -608,7 +778,8 @@ function UsersPanel({
                         </p>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                        client: {clientId ? <span className="font-mono">{clientId.slice(0, 8)}</span> : "не выбран"}
+                        {selectedCompanyLabel ? `company: ${selectedCompanyLabel} · ` : ""}
+                        client: {selectedClientLabel}
                     </div>
                 </div>
                 {!clientId ? (
@@ -616,7 +787,7 @@ function UsersPanel({
                         Нет клиентского контекста. Выберите клиент в Tenants (`В контекст`), затем обновите Team.
                     </div>
                 ) : null}
-                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
                     <select
                         className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
                         value={createAgentRole}
@@ -643,13 +814,30 @@ function UsersPanel({
                         onChange={(event) => setCreateAgentOidcSubject(event.target.value)}
                         disabled={!canCreateAgent}
                     />
+                    <input
+                        className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                        placeholder="SSO login (optional)"
+                        value={createAgentSsoUsername}
+                        onChange={(event) => setCreateAgentSsoUsername(event.target.value)}
+                        disabled={!canCreateAgent}
+                    />
+                    <input
+                        className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                        placeholder="SSO password (optional)"
+                        type="password"
+                        value={createAgentSsoPassword}
+                        onChange={(event) => setCreateAgentSsoPassword(event.target.value)}
+                        disabled={!canCreateAgent}
+                    />
                     <select
                         className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
                         value={createAgentBranchId}
                         onChange={(event) => setCreateAgentBranchId(event.target.value)}
-                        disabled={!canCreateAgent || !isBranchScopedRole}
+                        disabled={!canCreateAgent || !canSelectBranchScope}
                     >
-                        <option value="">{isBranchScopedRole ? "Выберите филиал" : "Client scope"}</option>
+                        <option value="">
+                            {canSelectBranchScope ? "Client scope (все филиалы)" : "Platform scope"}
+                        </option>
                         {branches.map((branch) => (
                             <option key={branch.id} value={branch.id}>
                                 {branch.name ?? branch.id}
@@ -665,9 +853,18 @@ function UsersPanel({
                         />
                         active
                     </label>
+                    <label className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm">
+                        <input
+                            type="checkbox"
+                            checked={createAgentSsoTempPassword}
+                            onChange={(event) => setCreateAgentSsoTempPassword(event.target.checked)}
+                            disabled={!canCreateAgent || !createAgentSsoUsername.trim()}
+                        />
+                        temp password
+                    </label>
                     <button
                         type="button"
-                        className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed xl:col-span-2"
                         onClick={handleCreateAgent}
                         disabled={!canCreateAgent || createAgentMutation.isPending}
                     >
@@ -675,6 +872,9 @@ function UsersPanel({
                     </button>
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">{agentBranchRequiredHint}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                    Для SSO укажите пару `login/password`. `oidc_subject` и SSO credentials вместе использовать нельзя.
+                </p>
             </div>
 
             <div className="card-surface p-6">
@@ -714,8 +914,11 @@ function UsersPanel({
                         include inactive
                     </label>
                 </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                    Список memberships ограничен текущим client context: <span className="font-medium">{selectedClientLabel}</span>.
+                </p>
 
-                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-7">
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-8">
                     <select
                         className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
                         value={membershipAgentId}
@@ -756,37 +959,66 @@ function UsersPanel({
                         ))}
                     </select>
                     {membershipScope === "company" && (
-                        <input
+                        <select
                             className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                            placeholder="company_id"
                             value={membershipCompanyId}
                             onChange={(event) => setMembershipCompanyId(event.target.value)}
                             disabled={!canManage}
-                        />
-                    )}
-                    {membershipScope === "client" && (
-                        <input
-                            className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                            placeholder="client_id"
-                            value={membershipClientId}
-                            onChange={(event) => setMembershipClientId(event.target.value)}
-                            disabled={!canManage}
-                        />
-                    )}
-                    {membershipScope === "branch" && (
-                        <select
-                            className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                            value={membershipBranchId}
-                            onChange={(event) => setMembershipBranchId(event.target.value)}
-                            disabled={!canManage}
                         >
-                            <option value="">Выберите филиал</option>
-                            {branches.map((branch) => (
-                                <option key={branch.id} value={branch.id}>
-                                    {branch.name ?? branch.id}
+                            <option value="">Выберите компанию</option>
+                            {companies.map((company) => (
+                                <option key={company.id} value={company.id}>
+                                    {company.name ?? company.id}
                                 </option>
                             ))}
                         </select>
+                    )}
+                    {membershipScope === "client" && (
+                        <select
+                            className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            value={membershipClientId}
+                            onChange={(event) => setMembershipClientId(event.target.value)}
+                            disabled={!canManage}
+                        >
+                            <option value="">Выберите клиента</option>
+                            {clients.map((client) => (
+                                <option key={client.id} value={client.id}>
+                                    {client.name ?? client.id}
+                                </option>
+                            ))}
+                        </select>
+                    )}
+                    {membershipScope === "branch" && (
+                        <>
+                            <select
+                                className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                value={membershipClientId}
+                                onChange={(event) => setMembershipClientId(event.target.value)}
+                                disabled={!canManage}
+                            >
+                                <option value="">Выберите клиента</option>
+                                {clients.map((client) => (
+                                    <option key={`branch-client-${client.id}`} value={client.id}>
+                                        {client.name ?? client.id}
+                                    </option>
+                                ))}
+                            </select>
+                            <select
+                                className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                value={membershipBranchId}
+                                onChange={(event) => setMembershipBranchId(event.target.value)}
+                                disabled={!canManage || !membershipClientId}
+                            >
+                                <option value="">
+                                    {membershipBranchesQuery.isLoading ? "Загрузка филиалов..." : "Выберите филиал"}
+                                </option>
+                                {membershipBranchOptions.map((branch) => (
+                                    <option key={branch.id} value={branch.id}>
+                                        {branch.name ?? branch.id}
+                                    </option>
+                                ))}
+                            </select>
+                        </>
                     )}
                     <label className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm">
                         <input
@@ -827,7 +1059,10 @@ function UsersPanel({
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <div className="text-sm">
                                             <span className="font-medium">{membership.agent_name ?? membership.agent_id.slice(0, 8)}</span>
-                                            <span className="text-muted-foreground"> · {membershipTargetLabel(membership, branches)}</span>
+                                            <span className="text-muted-foreground">
+                                                {" · "}
+                                                {membershipTargetLabel(membership, branches, clientsById, companiesById)}
+                                            </span>
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <RoleBadge role={membership.role} />
@@ -885,34 +1120,63 @@ function UsersPanel({
                                                 ))}
                                             </select>
                                             {editingScope === "company" && (
-                                                <input
-                                                    className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                    placeholder="company_id"
-                                                    value={editingCompanyId}
-                                                    onChange={(event) => setEditingCompanyId(event.target.value)}
-                                                />
-                                            )}
-                                            {editingScope === "client" && (
-                                                <input
-                                                    className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                    placeholder="client_id"
-                                                    value={editingClientId}
-                                                    onChange={(event) => setEditingClientId(event.target.value)}
-                                                />
-                                            )}
-                                            {editingScope === "branch" && (
                                                 <select
                                                     className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                    value={editingBranchId}
-                                                    onChange={(event) => setEditingBranchId(event.target.value)}
+                                                    value={editingCompanyId}
+                                                    onChange={(event) => setEditingCompanyId(event.target.value)}
                                                 >
-                                                    <option value="">Выберите филиал</option>
-                                                    {branches.map((branch) => (
-                                                        <option key={branch.id} value={branch.id}>
-                                                            {branch.name ?? branch.id}
+                                                    <option value="">Выберите компанию</option>
+                                                    {companies.map((company) => (
+                                                        <option key={`edit-company-${company.id}`} value={company.id}>
+                                                            {company.name ?? company.id}
                                                         </option>
                                                     ))}
                                                 </select>
+                                            )}
+                                            {editingScope === "client" && (
+                                                <select
+                                                    className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={editingClientId}
+                                                    onChange={(event) => setEditingClientId(event.target.value)}
+                                                >
+                                                    <option value="">Выберите клиента</option>
+                                                    {clients.map((client) => (
+                                                        <option key={`edit-client-${client.id}`} value={client.id}>
+                                                            {client.name ?? client.id}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            )}
+                                            {editingScope === "branch" && (
+                                                <>
+                                                    <select
+                                                        className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                        value={editingClientId}
+                                                        onChange={(event) => setEditingClientId(event.target.value)}
+                                                    >
+                                                        <option value="">Выберите клиента</option>
+                                                        {clients.map((client) => (
+                                                            <option key={`edit-branch-client-${client.id}`} value={client.id}>
+                                                                {client.name ?? client.id}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <select
+                                                        className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                        value={editingBranchId}
+                                                        onChange={(event) => setEditingBranchId(event.target.value)}
+                                                        disabled={!editingClientId}
+                                                    >
+                                                        <option value="">
+                                                            {membershipBranchesQuery.isLoading ? "Загрузка филиалов..." : "Выберите филиал"}
+                                                        </option>
+                                                        {membershipBranchOptions.map((branch) => (
+                                                            <option key={`edit-branch-${branch.id}`} value={branch.id}>
+                                                                {branch.name ?? branch.id}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </>
                                             )}
                                             <label className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm">
                                                 <input
@@ -975,12 +1239,12 @@ function UsersPanel({
                         </button>
                     </div>
                 )}
-                {!agentsQuery.isLoading && agents.length === 0 && (
+                {!agentsQuery.isLoading && filteredAgents.length === 0 && (
                     <div className="card-surface p-6 text-sm text-muted-foreground">
-                        Нет участников команды.
+                        Участники не найдены по текущему фильтру.
                     </div>
                 )}
-                {!agentsQuery.isLoading && agents.length > 0 && agents.map((agent, index) => {
+                {!agentsQuery.isLoading && filteredAgents.length > 0 && filteredAgents.map((agent, index) => {
                     const identity = resolveTelegramIdentity(agent);
                     const linkData = agent.id ? linkTokens[agent.id] : undefined;
                     const displayHandle = identity?.username ? `@${identity.username}` : identity?.external_id;
@@ -1230,6 +1494,9 @@ export default function TeamPage() {
     });
 
     const branches = (meQuery.data?.branches ?? []) as TeamBranch[];
+    const clients = (meQuery.data?.clients ?? []) as TeamClient[];
+    const companies = (meQuery.data?.companies ?? []) as TeamCompany[];
+    const selectedCompanyId = meQuery.data?.selected_company_id ?? meQuery.data?.client?.company_id ?? null;
     const role = (meQuery.data?.agent?.role ?? "manager") as ConsoleRole;
     const canReadTeam = canAccessConsole(role, "team", "read");
 
@@ -1308,6 +1575,9 @@ export default function TeamPage() {
                     session={session}
                     role={role}
                     branches={branches}
+                    clients={clients}
+                    companies={companies}
+                    companyId={selectedCompanyId}
                     clientId={meQuery.data?.client?.id ?? null}
                     currentAgentId={meQuery.data?.agent?.id ?? null}
                 />
