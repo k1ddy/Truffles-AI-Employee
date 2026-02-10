@@ -936,7 +936,7 @@ jobs:
             REQUIRE_GHCR=1 VERIFY_VERSION=1 \
             EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
             bash "${RELEASE_SCRIPT}"
-            EXPECTED_GIT_COMMIT=${{ github.sha }} VERIFY_CONSOLE_BUILD=1 bash "${CONSOLE_RESTART_SCRIPT}"
+            REPO_ROOT="${REPO_ROOT}" EXPECTED_GIT_COMMIT=${{ github.sha }} VERIFY_CONSOLE_BUILD=1 bash "${CONSOLE_RESTART_SCRIPT}"
             api_commit="$(curl -fsS http://localhost:8000/admin/version | python3 -c 'import json,sys; print((json.load(sys.stdin).get(\"git_commit\") or \"\").strip())')"
             console_commit="$(docker exec truffles-console-web /bin/sh -lc 'printf \"%s\" \"${NEXT_PUBLIC_BUILD_SHA:-unknown}\"')"
             if [ "${api_commit}" != "${{ github.sha }}" ]; then

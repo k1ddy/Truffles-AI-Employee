@@ -13,15 +13,19 @@
   - Reworked CI gate to emit deterministic `run_core_eval=true|false` output and switched `core-eval` job to that output.
   - Added `CI decision summary` step to expose `deploy_required` and core-eval gate decisions in logs/summary.
   - Validated workflow YAML and merge-gate dry check against merge commit `c857608d`.
+  - Fixed deploy failure path from run `21846647112`: `restart_console_web.sh` now supports explicit `REPO_ROOT` and no longer depends on caller git cwd.
 - in_progress:
   - Fixed shell error in `CI decision summary` heredoc after first CI attempt on PR #602.
   - Fixed `run_core_eval` type ambiguity by switching to numeric gate (`1/0`) and `core-eval if == '1'`.
   - Fixed output serialization bug (`\\n` vs newline) that made `run_core_eval` absorb multiple outputs and forced `core-eval` skip.
+  - Await CI on latest commit to confirm both: PR flow keeps `core-eval` runnable, merge flow skips duplicate `core-eval`.
+  - Fixed PR #603 session-gate failure by syncing `docs/SESSION_INDEX.md` with this session update.
 - next:
   - Push branch and open PR.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-10-ci-merge-skip-core-eval-a23.md
   - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21845489527
   - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21846233615
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21846647112
   - local checks: `./scripts/session_check.sh`, YAML parse, merge-gate dry check (`pr_core_eval_success` => `run_core_eval=false`)
 - last_updated: 2026-02-10
