@@ -957,7 +957,7 @@ jobs:
             docker exec truffles-api /bin/sh -lc 'printf "OUTBOUND_ALLOWLIST_JIDS=%s\n" "${OUTBOUND_ALLOWLIST_JIDS:-}"' || true
 
   console-contract-live:
-    if: ${{ always() && github.event_name != 'pull_request' && needs.changes.outputs.console_contracts == 'true' && needs.deploy.outputs.deployed == 'true' }}
+    if: ${{ always() && github.event_name != 'pull_request' && needs.changes.outputs.console_contracts == 'true' && needs.deploy.result == 'success' && needs.deploy.outputs.deployed == 'true' }}
     needs: [changes, deploy]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1095,7 +1095,7 @@ jobs:
             "${headers[@]}"
 
   ci-livecheck:
-    if: ${{ always() && github.event_name != 'pull_request' && needs.changes.outputs.livecheck_required == 'true' }}
+    if: ${{ always() && github.event_name != 'pull_request' && needs.changes.outputs.livecheck_required == 'true' && needs.deploy.result == 'success' && needs.deploy.outputs.deployed == 'true' }}
     needs: [changes, deploy]
     name: ci-livecheck (${{ matrix.group }})
     runs-on: ubuntu-latest
