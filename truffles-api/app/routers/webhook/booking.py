@@ -1402,7 +1402,10 @@ def _handle_booking_interrupt(
     booking_state = booking if isinstance(booking, dict) else legacy._get_booking_context(booking_context or {})
     if booking_state.get("active") and all(booking_state.get(key) for key in BOOKING_SLOT_ORDER):
         return None
-    if expected_reply_type and not expected_reply_blocked_by_info:
+    has_info_interrupt = bool(info_class_intents)
+    if not has_info_interrupt and intent_decomp_set:
+        has_info_interrupt = bool(intent_decomp_set & legacy.INFO_INTENTS)
+    if expected_reply_type and not expected_reply_blocked_by_info and not has_info_interrupt:
         return None
 
     booking_interrupt_text = _select_booking_interrupt_text(

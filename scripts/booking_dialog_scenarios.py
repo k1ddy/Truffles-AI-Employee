@@ -74,6 +74,69 @@ REQUIRED_LLM_TURNS = {
     "name": {"text": "Меня зовут {name}.", "tags": ["name"]},
 }
 
+ASSISTANT_TURN_PATTERNS = [
+    re.compile(r"\bвам удобно\b", re.IGNORECASE),
+    re.compile(r"\bна какую\b", re.IGNORECASE),
+    re.compile(r"\bна какой\b", re.IGNORECASE),
+    re.compile(r"\bкакой день\b", re.IGNORECASE),
+    re.compile(r"\bкак вас зовут\b", re.IGNORECASE),
+    re.compile(r"\bвас зовут\b", re.IGNORECASE),
+    re.compile(r"\bпришлите\b", re.IGNORECASE),
+    re.compile(r"\bуточните\b", re.IGNORECASE),
+    re.compile(r"\bнапишите\b", re.IGNORECASE),
+    re.compile(r"\bсообщите\b", re.IGNORECASE),
+    re.compile(r"\bмогу помочь\b", re.IGNORECASE),
+    re.compile(r"^адрес[: ]", re.IGNORECASE),
+    re.compile(r"\bработаем\b", re.IGNORECASE),
+    re.compile(r"\bя вас записал\b", re.IGNORECASE),
+]
+
+FALLBACK_TEMPLATES_BY_TAG = {
+    "location": "Где вы находитесь?",
+    "hours": "Во сколько вы работаете?",
+    "parking": "Есть ли парковка рядом?",
+    "price": "Сколько стоит {service}?",
+    "duration": "Сколько длится {service}?",
+    "promo": "Есть ли акции на {service}?",
+    "master": "Можно к мастеру {master}?",
+    "booking": "{greet}, хочу записаться на {service}.",
+    "time": "Можно {time_exact}?",
+    "time_alt": "Если {time_exact} занято, можно {time_exact_alt}?",
+    "name": "Меня зовут {name}.",
+    "phone": "Телефон {phone}.",
+    "confirm": "Да, все верно.",
+    "check_booking": "Можете подтвердить мою запись?",
+    "cancel": "Хочу отменить запись.",
+    "reschedule": "Можно перенести запись?",
+    "media": "Могу прислать фото.",
+    "noise": "{noise}",
+    "consult": "А у вас есть {service}?",
+    "channel": "Можно только в чате?",
+    "delay": "Я уточню и вернусь.",
+    "handoff": "Можно связаться с менеджером?",
+}
+FALLBACK_TAG_PRIORITY = [
+    "booking",
+    "time",
+    "name",
+    "price",
+    "duration",
+    "location",
+    "hours",
+    "parking",
+    "promo",
+    "master",
+    "check_booking",
+    "cancel",
+    "reschedule",
+    "media",
+    "noise",
+    "consult",
+    "channel",
+    "delay",
+    "handoff",
+]
+
 WRONG_TIME_TURN = {
     "text": "Меня зовут {name}.",
     "tags": ["wrong_slot", "name"],
@@ -350,6 +413,48 @@ def _media_turn(ctx: dict[str, str], *, mode: str, kind: str) -> dict[str, Any]:
     }
 
 
+def _looks_like_assistant_turn(text: str) -> bool:
+    if not text:
+        return False
+    normalized = text.strip()
+    if not normalized:
+        return False
+    return any(pattern.search(normalized) for pattern in ASSISTANT_TURN_PATTERNS)
+
+
+def _fallback_text_for_tags(tags: list[str], ctx: dict[str, str], rng: random.Random) -> str:
+    for tag in FALLBACK_TAG_PRIORITY:
+        if tag in tags:
+            template = FALLBACK_TEMPLATES_BY_TAG.get(tag)
+            if template:
+                return template.format(**ctx)
+    return f"{ctx.get('greet', 'Здравствуйте')}, хочу записаться на {ctx.get('service', 'услугу')}."
+
+
+def _sanitize_llm_turns(
+    turns: list[dict[str, Any]], ctx: dict[str, str], rng: random.Random
+) -> list[dict[str, Any]]:
+    sanitized: list[dict[str, Any]] = []
+    for turn in turns:
+        if not isinstance(turn, dict):
+            continue
+        tags = list(turn.get("tags") or [])
+        text = str(turn.get("text") or "").strip()
+        kind = turn.get("kind") or "text"
+        if kind != "media":
+            kind = "text"
+            if not text or _looks_like_assistant_turn(text):
+                text = _fallback_text_for_tags(tags, ctx, rng)
+        if not text:
+            text = _fallback_text_for_tags(tags, ctx, rng)
+        turn["kind"] = kind
+        turn["text"] = text
+        turn["tags"] = tags
+        turn["expect"] = _merge_expectations(tags, turn.get("expect"))
+        sanitized.append(turn)
+    return sanitized
+
+
 def _default_expect() -> dict[str, Any]:
     return {
         "action": None,
@@ -472,8 +577,44 @@ def _normalize_llm_expect_override(override: Any) -> dict[str, Any]:
     }
 
 
+def _sanitize_expect_state_by_tags(tags: list[str], state: Any) -> Any:
+    if state is None:
+        return None
+    tag_set = {tag for tag in tags if isinstance(tag, str)}
+    allow_pending = bool(tag_set & {"handoff", "human", "pending", "cancel", "reschedule"})
+    allow_manager_active = bool(tag_set & {"handoff", "human", "pending"})
+
+    def _allow(token: str | None) -> bool:
+        if token is None:
+            return True
+        if token == "bot_active":
+            return True
+        if token == "pending":
+            return allow_pending
+        if token == "manager_active":
+            return allow_manager_active
+        return False
+
+    if isinstance(state, list):
+        cleaned = []
+        for token in state:
+            value = token if isinstance(token, str) else None
+            if _allow(value):
+                cleaned.append(value)
+        if not cleaned:
+            return None
+        if len(cleaned) == 1:
+            return cleaned[0]
+        return cleaned
+
+    token = state if isinstance(state, str) else None
+    return token if _allow(token) else None
+
+
 def _merge_expectations(tags: list[str], override: Any) -> dict[str, Any]:
     expect = _default_expect()
+    state_overridden = False
+    info_sections_overridden = False
     for tag in tags:
         if tag in EXPECT_INFO_SECTIONS:
             expect["info_sections"].extend(EXPECT_INFO_SECTIONS[tag])
@@ -495,12 +636,19 @@ def _merge_expectations(tags: list[str], override: Any) -> dict[str, Any]:
         for key in ("action", "reply_type", "state", "expected_reply"):
             if override.get(key) is not None:
                 expect[key] = override.get(key)
+                if key == "state":
+                    state_overridden = True
         extra_sections = override.get("info_sections") or []
         if isinstance(extra_sections, str):
             extra_sections = [extra_sections]
         for section in extra_sections:
             if section and section not in expect["info_sections"]:
                 expect["info_sections"].append(section)
+                info_sections_overridden = True
+    if not state_overridden:
+        expect["state"] = _sanitize_expect_state_by_tags(tags, expect.get("state"))
+    if not any(tag in EXPECT_INFO_SECTIONS for tag in tags) and not info_sections_overridden:
+        expect["info_sections"] = []
     return expect
 
 
@@ -681,7 +829,8 @@ def _generate_llm_dialogs(
         "Each dialog: {dialog_id, goal, turns}. "
         "turns is a list of {kind,text,tags,expect} with 10-15 client messages. "
         "Tags must be chosen from: booking, interrupt, price, duration, location, hours, parking, "
-        "promo, master, time, time_alt, consult, channel, delay, media, noise, handoff. "
+        "promo, master, time, time_alt, consult, channel, delay, media, noise, handoff, "
+        "cancel, reschedule, check_booking, confirm, tool. "
         "expect must include keys: action, info_sections, reply_type, state, expected_reply, allow_booking_stall. "
         "Use canonical tokens only in expect (no natural language): "
         "action: null or one of [booking_escalated, escalate, handoff]; "
@@ -692,7 +841,13 @@ def _generate_llm_dialogs(
         "state: null or one of [bot_active, pending, manager_active]; "
         "expected_reply: true/false/null. "
         "Include interruptions (price/location/noise), wrong slot answers, time/name swaps, and at least one media reference. "
+        "Include at least one tool-related intent (cancel/reschedule/check booking) and a follow-up confirmation/denial turn. "
         "Beauty salon domain, Russian language, natural chat. "
+        "All turns must be CLIENT messages only (no assistant/manager lines). "
+        "Do NOT write staff-like statements (e.g., 'Я вас записал', 'Работаем ежедневно', "
+        "'Адрес:', 'Пришлите фото', 'Могу помочь'). "
+        "If you mention sending a photo, tag the turn with 'media' and phrase as the client "
+        "(e.g., 'Могу прислать фото' instead of 'Вот фото'), otherwise avoid photo claims. "
         f"Count={count}, turns_range={min_turns}-{max_turns}. "
         f"media_mode={media_mode}, media_kind={media_kind}. "
         f"coverage_tags={','.join(coverage) if coverage else 'none'}. "
@@ -715,6 +870,7 @@ def _generate_llm_dialogs(
             turn["expect"] = _merge_expectations(tags, turn.get("expect"))
         ctx = _infer_context_from_dialog(dialog, rng)
         turns = _ensure_required_tags(turns, ctx, max_turns=max_turns)
+        turns = _sanitize_llm_turns(turns, ctx, rng)
         dialog["turns"] = turns
         if include_media and all("media" not in (turn.get("tags") or []) for turn in dialog.get("turns", [])):
             dialog.setdefault("turns", []).insert(

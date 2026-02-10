@@ -2279,7 +2279,9 @@ def _handle_ai_response_action(
                     for item in raw_intents
                     if isinstance(item, str) and item.strip()
                 }
-                info_intent_hint = bool(normalized_intents & {"hours", "pricing", "duration"})
+                info_intent_hint = bool(
+                    normalized_intents & {"hours", "pricing", "duration", "location"}
+                )
         if info_intent_hint:
             llm_primary_failed = True
             llm_primary_reason = "low_confidence"
@@ -2444,74 +2446,91 @@ def _handle_ai_response_action(
                         break
                 in_signals = class_router_result.get("in_signals") or []
                 anchors_in_hits = int(class_router_result.get("anchors_in_hits") or 0)
+                info_only_semantic_skip = bool(
+                    info_intent_hint
+                    and not explicit_service_hint
+                    and not intent_decomp_explicit_query
+                    and not controller_service_query
+                )
                 service_semantic_allowed = bool(
                     explicit_service_hint
                     or intent_decomp_explicit_query
                     or controller_service_query
                     or booking_signal
-                    or info_intent_hint
+                    or (info_intent_hint and not info_only_semantic_skip)
                     or in_signals
                     or anchors_in_hits > 0
                 )
                 if not service_semantic_allowed:
-                    bot_response = legacy.OUT_OF_DOMAIN_RESPONSE
-                    _record_decision_trace(
-                        conversation,
-                        {
-                            "stage": "out_of_domain",
-                            "decision": "service_semantic_guard",
-                            "state": conversation.state,
-                        },
-                    )
-                    _record_message_decision_meta(
-                        saved_message,
-                        action="out_of_domain",
-                        intent="out_of_domain",
-                        source="service_semantic_guard",
-                        fast_intent=False,
-                    )
-                    if saved_message:
-                        _update_message_decision_metadata(
-                            saved_message,
+                    if info_only_semantic_skip:
+                        if saved_message:
+                            _update_message_decision_metadata(
+                                saved_message,
+                                {
+                                    "service_semantic_match_skipped": True,
+                                    "service_semantic_match_skip_reason": "info_only_interrupt",
+                                },
+                            )
+                    else:
+                        bot_response = legacy.OUT_OF_DOMAIN_RESPONSE
+                        _record_decision_trace(
+                            conversation,
                             {
-                                "service_semantic_match_skipped": True,
-                                "service_semantic_match_skip_reason": "low_signal",
+                                "stage": "out_of_domain",
+                                "decision": "service_semantic_guard",
+                                "state": conversation.state,
                             },
                         )
-                    bot_response, sent = send_and_save(bot_response)
-                    result_message = (
-                        "Service semantic guard reply sent"
-                        if sent
-                        else "Service semantic guard reply send failed"
-                    )
-                    db.commit()
-                    return AiResponseOutcome(
-                        response=WebhookResponse(
-                            success=True,
-                            message=result_message,
-                            conversation_id=conversation.id,
+                        _record_message_decision_meta(
+                            saved_message,
+                            action="out_of_domain",
+                            intent="out_of_domain",
+                            source="service_semantic_guard",
+                            fast_intent=False,
+                        )
+                        if saved_message:
+                            _update_message_decision_metadata(
+                                saved_message,
+                                {
+                                    "service_semantic_match_skipped": True,
+                                    "service_semantic_match_skip_reason": "low_signal",
+                                },
+                            )
+                        bot_response, sent = send_and_save(bot_response)
+                        result_message = (
+                            "Service semantic guard reply sent"
+                            if sent
+                            else "Service semantic guard reply send failed"
+                        )
+                        db.commit()
+                        return AiResponseOutcome(
+                            response=WebhookResponse(
+                                success=True,
+                                message=result_message,
+                                conversation_id=conversation.id,
+                                bot_response=bot_response,
+                            ),
                             bot_response=bot_response,
-                        ),
-                        bot_response=bot_response,
-                        result_message=result_message,
-                        llm_primary_failed=llm_primary_failed,
-                        llm_primary_reason=llm_primary_reason,
-                    )
-                semantic_attempted = True
-                semantic_result = legacy.semantic_service_match(message_text, client_slug)
-                if not semantic_result:
-                    rewrite_query = legacy.rewrite_for_service_match(
-                        message_text,
-                        client_slug,
-                        client_config=client_config,
-                        timing_context=timing_context,
-                    )
-                    _record_llm_budget_trace(
-                        conversation=conversation,
-                        timing_context=timing_context,
-                    )
-                    if rewrite_query:
-                        semantic_result = legacy.semantic_service_match(rewrite_query, client_slug)
+                            result_message=result_message,
+                            llm_primary_failed=llm_primary_failed,
+                            llm_primary_reason=llm_primary_reason,
+                        )
+                if service_semantic_allowed:
+                    semantic_attempted = True
+                    semantic_result = legacy.semantic_service_match(message_text, client_slug)
+                    if not semantic_result:
+                        rewrite_query = legacy.rewrite_for_service_match(
+                            message_text,
+                            client_slug,
+                            client_config=client_config,
+                            timing_context=timing_context,
+                        )
+                        _record_llm_budget_trace(
+                            conversation=conversation,
+                            timing_context=timing_context,
+                        )
+                        if rewrite_query:
+                            semantic_result = legacy.semantic_service_match(rewrite_query, client_slug)
             if semantic_result:
                 rewrite_used = bool(rewrite_query)
                 bot_response = semantic_result.response

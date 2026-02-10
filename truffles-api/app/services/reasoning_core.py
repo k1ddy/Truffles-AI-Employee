@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Sequence
 from uuid import UUID
 
 from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger, record_delivery_failure, start_span
+from app.models import Message
 from app.routers.webhook import decision as decision_router
-from app.routers.webhook.trace import DECISION_STAGE_ORDER_SNAPSHOT
+from app.routers.webhook.trace import (
+    DECISION_STAGE_ORDER_SNAPSHOT,
+    _update_message_decision_metadata,
+)
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.alert_service import alert_error
 from app.services.chatflow_service import send_message_safe
@@ -71,6 +77,48 @@ async def handle_webhook_payload(
     outbox_ids: list[str] | None = None,
     outbox_created_at: datetime | None = None,
 ) -> WebhookResponse:
+    def _record_error_decision_meta(
+        *,
+        client_slug: str | None,
+        message_id: str | None,
+        error_type: str,
+        error_message: str,
+    ) -> bool:
+        if not client_slug or not message_id:
+            return False
+        try:
+            message = (
+                db.query(Message)
+                .filter(
+                    Message.role == "user",
+                    or_(
+                        Message.message_metadata["message_id"].astext == message_id,
+                        Message.message_metadata["messageId"].astext == message_id,
+                    ),
+                )
+                .order_by(Message.created_at.desc())
+                .first()
+            )
+            if not isinstance(message, Message):
+                return False
+            _update_message_decision_metadata(
+                message,
+                {
+                    "action": "error",
+                    "intent": "internal_error",
+                    "source": "reasoning_core",
+                    "action_error": "exception",
+                    "error_type": error_type,
+                    "error": error_message,
+                },
+            )
+            db.commit()
+            return True
+        except Exception:
+            # Never mutate transaction state from the fallback metadata helper.
+            # Main exception flow already handled rollback and delivery fallback.
+            return False
+
     try:
         return await decision_router._handle_webhook_payload(
             payload,
@@ -104,6 +152,12 @@ async def handle_webhook_payload(
             "error": str(exc)[:200],
             "error_type": type(exc).__name__,
         }
+        error_meta_recorded = _record_error_decision_meta(
+            client_slug=payload.client_slug,
+            message_id=context.get("message_id"),
+            error_type=context["error_type"],
+            error_message=context["error"],
+        )
         logger.error("Webhook processing failed", extra={"context": context})
         record_delivery_failure(
             payload.client_slug,
@@ -146,6 +200,16 @@ async def handle_webhook_payload(
                         provider="chatflow",
                         reason="fallback_send_failed",
                     )
+            if not error_meta_recorded:
+                for _ in range(15):
+                    if _record_error_decision_meta(
+                        client_slug=payload.client_slug,
+                        message_id=message_id,
+                        error_type=context["error_type"],
+                        error_message=context["error"],
+                    ):
+                        break
+                    time.sleep(0.5)
 
         result_message = "Fallback response sent" if fallback_sent else "Fallback response skipped"
         return WebhookResponse(

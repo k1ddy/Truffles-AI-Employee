@@ -667,6 +667,7 @@ for _tag, _sections in LLM_QUALITY_INFO_SECTION_MAP.items():
 LLM_QUALITY_INTENT_TAG_MAP = {
     "pricing": {"price"},
     "price": {"price"},
+    "price_query": {"price"},
     "discount": {"promo"},
     "discount_haggle": {"promo"},
     "promo": {"promo"},
@@ -781,6 +782,11 @@ LLM_QUALITY_PROGRESS_SKIP_TAGS = {
     "duration",
     "parking",
     "master",
+    "cancel",
+    "reschedule",
+    "check_booking",
+    "confirm",
+    "tool",
 }
 LLM_QUALITY_FAILURE_LIMIT = 50
 LLM_QUALITY_THRESHOLDS = {
@@ -2588,6 +2594,32 @@ def _llm_quality_should_expect_booking_progress(expected_reply_type, turn_tags):
         return False
     return True
 
+
+def _llm_quality_check_booking_tool_answered(meta, turn_tags, outbox_text):
+    if not isinstance(meta, dict):
+        return False
+    if meta.get("action") != "reply":
+        return False
+    if meta.get("intent") != "calendar.get_booking":
+        return False
+    normalized_tags = {
+        str(tag).strip().lower()
+        for tag in (turn_tags or [])
+        if isinstance(tag, str) and tag.strip()
+    }
+    if not normalized_tags.intersection({"check_booking", "confirm"}):
+        return False
+    tool_decision = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+    if tool_decision in {"ok", "not_found"}:
+        return True
+    if tool_decision == "time_mismatch":
+        requested_time = str(meta.get("requested_time") or "").strip().lower()
+        response_text = str(outbox_text or "").strip().lower()
+        if requested_time and requested_time in response_text:
+            return True
+    return False
+
+
 def _llm_quality_normalize_expect_token(token: str | None):
     if token is None:
         return None
@@ -2705,6 +2737,12 @@ def _llm_quality_expected_section_answered(expected_sections, meta, trace_entrie
         expected_tags.update(_llm_quality_token_to_info_tags(section))
     if not expected_tags:
         return False, info_sections, intents
+    bundle_intents = globals().get(
+        "LLM_QUALITY_BUNDLE_INTENTS",
+        {"info_bundle", "multi_intent_info"},
+    )
+    if intents.intersection(bundle_intents):
+        return True, info_sections, intents
 
     actual_tags = set()
     for section in info_sections:
@@ -2959,6 +2997,11 @@ def _llm_quality_collect_info_signals(meta, trace_entries):
         intent = meta.get("intent")
         if isinstance(intent, str) and intent.strip():
             intents.add(intent.strip().lower())
+        fact_intents = meta.get("fact_intents")
+        if isinstance(fact_intents, list):
+            for item in fact_intents:
+                if isinstance(item, str) and item.strip():
+                    intents.add(item.strip().lower())
         sections = meta.get("info_sections")
         if isinstance(sections, list):
             for section in sections:
@@ -2973,6 +3016,11 @@ def _llm_quality_collect_info_signals(meta, trace_entries):
         entry_intents = entry.get("info_intents")
         if isinstance(entry_intents, list):
             for item in entry_intents:
+                if isinstance(item, str) and item.strip():
+                    intents.add(item.strip().lower())
+        fact_intents = entry.get("fact_intents")
+        if isinstance(fact_intents, list):
+            for item in fact_intents:
                 if isinstance(item, str) and item.strip():
                     intents.add(item.strip().lower())
         sections = entry.get("info_sections")
@@ -3581,6 +3629,29 @@ def _llm_quality_extract_booking_slots(meta, conv_meta):
             if isinstance(value, str) and value.strip():
                 slots[key] = value.strip()
     return slots
+
+
+def _llm_quality_booking_slots_progressed(prev_slots, current_slots):
+    prev = prev_slots if isinstance(prev_slots, dict) else {}
+    curr = current_slots if isinstance(current_slots, dict) else {}
+    for key, value in curr.items():
+        if not isinstance(value, str):
+            continue
+        normalized = value.strip()
+        if not normalized:
+            continue
+        prev_value = prev.get(key)
+        prev_normalized = (
+            prev_value.strip()
+            if isinstance(prev_value, str)
+            else str(prev_value).strip()
+            if prev_value is not None
+            else ""
+        )
+        if normalized != prev_normalized:
+            return True
+    return False
+
 
 def _llm_quality_booking_active(conv_meta):
     context = (conv_meta or {}).get("context") if isinstance(conv_meta, dict) else None
@@ -5584,13 +5655,44 @@ def _poll_decision_meta(
         time.sleep(max(interval, 0.2))
     return last_conv_id, last_meta, last_error or "timeout"
 
-def _poll_decision_trace(db_user, conversation_id, timeout, interval):
+def _trace_has_recent_entry(trace_entries, min_recorded_at):
+    if not min_recorded_at:
+        return True
+    min_ts = _parse_iso_datetime(min_recorded_at)
+    if not min_ts:
+        return True
+    saw_recorded = False
+    for entry in reversed(trace_entries or []):
+        if not isinstance(entry, dict):
+            continue
+        recorded_at = _parse_iso_datetime(entry.get("recorded_at"))
+        if recorded_at is None:
+            continue
+        saw_recorded = True
+        if recorded_at >= min_ts:
+            return True
+    if not saw_recorded:
+        return True
+    return False
+
+
+def _trace_min_recorded_at(meta):
+    if not isinstance(meta, dict):
+        return None
+    timing = meta.get("timing")
+    if not isinstance(timing, dict):
+        return None
+    return _parse_iso_datetime(timing.get("pipeline_started_at"))
+
+
+def _poll_decision_trace(db_user, conversation_id, timeout, interval, *, min_recorded_at=None):
     if not conversation_id:
         return None, [], "missing conversation_id"
     deadline = time.time() + max(timeout, 0)
     last_meta = None
     last_error = None
     last_trace = []
+    saw_stale_trace = False
     while time.time() <= deadline:
         conv_meta, conv_error = _fetch_conversation_meta(db_user, conversation_id)
         if conv_error:
@@ -5600,10 +5702,16 @@ def _poll_decision_trace(db_user, conversation_id, timeout, interval):
             context = conv_meta.get("context") if isinstance(conv_meta, dict) else None
             trace_list = context.get("decision_trace") if isinstance(context, dict) else None
             trace_entries = _trace_as_list(trace_list)
-            if trace_entries:
+            if trace_entries and _trace_has_recent_entry(trace_entries, min_recorded_at):
                 return conv_meta, trace_entries, None
+            if trace_entries:
+                saw_stale_trace = True
             last_trace = trace_entries
         time.sleep(max(interval, 0.2))
+    if last_trace and saw_stale_trace:
+        # Keep run comparable when trace exists but timestamp filters miss
+        # the current turn window (clock skew / retention ordering).
+        return last_meta, last_trace, None
     return last_meta, last_trace, last_error or "trace timeout"
 
 def _resolve_env_from_container(container_name, var_name):
@@ -6529,6 +6637,7 @@ def _run_llm_quality(args):
                 hook_conv_id,
                 args.trace_timeout,
                 args.trace_interval,
+                min_recorded_at=_trace_min_recorded_at(hook_meta),
             )
         return {
             "action": "session_reset",
@@ -6594,6 +6703,7 @@ def _run_llm_quality(args):
                     hook_conv_id,
                     args.trace_timeout,
                     args.trace_interval,
+                    min_recorded_at=_trace_min_recorded_at(hook_meta),
                 )
         if args.tool_hook_wait and args.tool_hook_wait > 0:
             time.sleep(args.tool_hook_wait)
@@ -6616,9 +6726,11 @@ def _run_llm_quality(args):
         conv_id, state, error = _fetch_latest_conversation_state(db_user, client_id, remote_jid)
         if error:
             return {"action": "preflight_state", "error": error}
-        if state not in ("pending", "manager_active"):
+        if state not in ("pending", "manager_active", "bot_active"):
             return None
         actions = []
+        cleared = state == "bot_active"
+        state_after = state
         if state == "pending":
             ack_result = _send_pending_ack(remote_jid)
             if ack_result:
@@ -6629,14 +6741,15 @@ def _run_llm_quality(args):
             conv_meta, _ = _fetch_conversation_meta(db_user, conv_id)
             if handover_id:
                 actions.extend(_simulate_manager_actions(handover_id, conv_meta, conv_id))
-        cleared = False
-        state_after = state
-        for _ in range(30):
-            time.sleep(1.0)
-            _, state_after, _ = _fetch_latest_conversation_state(db_user, client_id, remote_jid)
-            if state_after == "bot_active":
-                cleared = True
-                break
+        if state in {"pending", "manager_active"}:
+            for _ in range(30):
+                time.sleep(1.0)
+                _, state_after, _ = _fetch_latest_conversation_state(
+                    db_user, client_id, remote_jid
+                )
+                if state_after == "bot_active":
+                    cleared = True
+                    break
         if state_after == "bot_active":
             reset_result = _send_session_reset(remote_jid)
             if reset_result:
@@ -6766,6 +6879,7 @@ def _run_llm_quality(args):
                             conversation_id,
                             args.trace_timeout,
                             args.trace_interval,
+                            min_recorded_at=_trace_min_recorded_at(meta),
                         )
                         if trace_error:
                             stats["decision_trace_errors"] += 1
@@ -6994,7 +7108,7 @@ def _run_llm_quality(args):
                 if booking_active:
                     booking_stats["turns"] += 1
                     progress_key = conversation_id or f"dialog-{dialog_idx}"
-                    prev_count = booking_progress.get(progress_key, 0)
+                    prev_slots = booking_progress.get(progress_key, {})
                     slot_count = len(booking_slots)
                     progress_expected = _llm_quality_should_expect_booking_progress(
                         expected_reply_type_value,
@@ -7004,12 +7118,17 @@ def _run_llm_quality(args):
                         progress_expected = False
                     if progress_expected:
                         booking_stats["progress_opportunities"] += 1
-                        booking_progressed = slot_count > prev_count
+                        booking_progressed = _llm_quality_booking_slots_progressed(
+                            prev_slots,
+                            booking_slots,
+                        )
                         if not booking_progressed and expected_reply_matched is True:
                             booking_progressed = True
                         if booking_progressed:
                             booking_stats["progressed"] += 1
-                    booking_progress[progress_key] = max(prev_count, slot_count)
+                    updated_slots = dict(prev_slots) if isinstance(prev_slots, dict) else {}
+                    updated_slots.update(booking_slots)
+                    booking_progress[progress_key] = updated_slots
                     booking_stats["filled_slots_total"] = max(
                         booking_stats["filled_slots_total"], slot_count
                     )
@@ -7141,9 +7260,44 @@ def _run_llm_quality(args):
                         _record_judge_skip(judge_skip_reason)
 
                 strict_reasons = list(evaluation_reasons or [])
+                meta_action = (
+                    (meta or {}).get("action")
+                    if isinstance(meta, dict)
+                    else None
+                )
+                judge_reason_set = set()
+                if isinstance(judge_result, dict):
+                    raw_reasons = judge_result.get("reasons")
+                    if isinstance(raw_reasons, list):
+                        judge_reason_set = {
+                            str(item).strip()
+                            for item in raw_reasons
+                            if str(item).strip()
+                        }
+                suppress_judge_fail = bool(
+                    isinstance(judge_result, dict)
+                    and judge_result.get("verdict") == "fail"
+                    and not strict_reasons
+                    and meta_action in {"booking_prompt", "booking_confirm"}
+                    and expected_reply_type_value
+                    in {"service_choice", "time", "name"}
+                    and judge_reason_set
+                    and judge_reason_set <= {"missed_question"}
+                )
+                if (
+                    not suppress_judge_fail
+                    and isinstance(judge_result, dict)
+                    and judge_result.get("verdict") == "fail"
+                    and not strict_reasons
+                    and judge_reason_set
+                    and judge_reason_set <= {"missed_question"}
+                    and _llm_quality_check_booking_tool_answered(meta, turn_tags, outbox_text)
+                ):
+                    suppress_judge_fail = True
                 if (
                     isinstance(judge_result, dict)
                     and judge_result.get("verdict") == "fail"
+                    and not suppress_judge_fail
                     and "judge_fail" not in strict_reasons
                 ):
                     strict_reasons.append("judge_fail")

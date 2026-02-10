@@ -170,26 +170,34 @@ def _retain_decision_trace(trace_list: list[dict[str, Any]]) -> list[dict[str, A
             normal_indices.append(idx)
 
     remaining = max(DECISION_TRACE_MAX - len(pinned_indices), 0)
-    if len(priority_indices) > remaining:
-        dropped = len(priority_indices) - remaining
-        keep_priority = priority_indices[-remaining:] if remaining else []
+    if remaining == 0:
+        keep_indices = set(pinned_indices)
+        return [item for idx, item in enumerate(trace_list) if idx in keep_indices]
+
+    min_critical = 1 if critical_indices else 0
+    priority_cap = min(len(priority_indices), max(remaining - min_critical, 0))
+    keep_priority = priority_indices[-priority_cap:] if priority_cap else []
+    dropped_priority = len(priority_indices) - len(keep_priority)
+    if dropped_priority > 0:
         logger.warning(
             "Decision trace priority retention exceeded limit",
             extra={
                 "context": {
                     "priority_count": len(priority_indices),
-                    "dropped_priority": dropped,
+                    "dropped_priority": dropped_priority,
                     "pinned_count": len(pinned_indices),
                     "trace_max": DECISION_TRACE_MAX,
                 }
             },
         )
-        keep_indices = set(pinned_indices + keep_priority)
-    else:
-        remaining = max(remaining - len(priority_indices), 0)
-        if len(critical_indices) > remaining:
-            dropped = len(critical_indices) - remaining
-            keep_critical = critical_indices[-remaining:] if remaining else []
+
+    remaining_after_priority = max(remaining - len(keep_priority), 0)
+    if len(critical_indices) > remaining_after_priority:
+        dropped_critical = len(critical_indices) - remaining_after_priority
+        keep_critical = (
+            critical_indices[-remaining_after_priority:] if remaining_after_priority else []
+        )
+        if dropped_critical > 0:
             logger.warning(
                 "Decision trace critical retention exceeded limit",
                 extra={
@@ -197,16 +205,17 @@ def _retain_decision_trace(trace_list: list[dict[str, Any]]) -> list[dict[str, A
                         "priority_count": len(priority_indices),
                         "critical_count": len(critical_indices),
                         "pinned_count": len(pinned_indices),
-                        "dropped_critical": dropped,
+                        "dropped_critical": dropped_critical,
                         "trace_max": DECISION_TRACE_MAX,
                     }
                 },
             )
-        else:
-            keep_critical = critical_indices
-        remaining = max(remaining - len(keep_critical), 0)
-        keep_normals = normal_indices[-remaining:] if remaining else []
-        keep_indices = set(pinned_indices + priority_indices + keep_critical + keep_normals)
+    else:
+        keep_critical = critical_indices
+
+    remaining_after_critical = max(remaining_after_priority - len(keep_critical), 0)
+    keep_normals = normal_indices[-remaining_after_critical:] if remaining_after_critical else []
+    keep_indices = set(pinned_indices + keep_priority + keep_critical + keep_normals)
 
     return [item for idx, item in enumerate(trace_list) if idx in keep_indices]
 

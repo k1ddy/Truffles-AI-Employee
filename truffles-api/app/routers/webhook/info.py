@@ -45,6 +45,19 @@ def _is_short_reply(message_text: str | None) -> bool:
     return 0 < len(tokens) <= legacy.SESSION_MEMORY_SHORT_TOKENS
 
 
+def _signal_phrase_list(client_slug: str | None, *keys: str) -> list[str]:
+    phrases: list[str] = []
+    for key in keys:
+        values = get_signal_lexicon_list(client_slug, key)
+        if not values:
+            continue
+        for phrase in values:
+            token = phrase.strip() if isinstance(phrase, str) else ""
+            if token and token not in phrases:
+                phrases.append(token)
+    return phrases
+
+
 def _has_token_prefix(tokens: list[str], prefix: str) -> bool:
     return any(token.startswith(prefix) for token in tokens)
 
@@ -99,11 +112,15 @@ def _detect_info_class_intents(
 
     parking_signal = _has_parking_signal(normalized, client_slug=client_slug)
     guest_signal = _has_guest_waiting_signal(normalized, client_slug=client_slug)
-    location_phrases = get_signal_lexicon_list(client_slug, "location_keywords")
+    location_phrases = _signal_phrase_list(
+        client_slug,
+        "location_keywords",
+        "location_phrases",
+    )
     location_signal = parking_signal or (
         bool(location_phrases) and any(phrase in normalized for phrase in location_phrases)
     )
-    hours_phrases = get_signal_lexicon_list(client_slug, "hours_keywords")
+    hours_phrases = _signal_phrase_list(client_slug, "hours_keywords")
     hours_signal = bool(hours_phrases) and any(phrase in normalized for phrase in hours_phrases)
     master_signal = False
     if normalized and any(
@@ -231,7 +248,11 @@ def _build_info_intent_reply(
     guest_signal = _has_guest_waiting_signal(normalized, client_slug=client_slug) if normalized else False
     location_signal = False
     if normalized:
-        location_phrases = get_signal_lexicon_list(client_slug, "location_keywords")
+        location_phrases = _signal_phrase_list(
+            client_slug,
+            "location_keywords",
+            "location_phrases",
+        )
         location_signal = bool(location_phrases) and any(
             phrase in normalized for phrase in location_phrases
         )
