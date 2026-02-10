@@ -8,6 +8,7 @@
 - base_ref: origin/main
 - scope: `ops/diagnose.py llm-quality` hard preflight + quality status gating + canonical baseline policy + regressions.
 - done:
+  - Stabilized booking/info routing contracts; deterministic critical suites are green. LLM quality run is blocked locally without OPENAI_API_KEY.
   - Synced AGENTS canon + local-first testing law across AGENTS/TECH/SYSTEM_REFERENCE/SESSION_START_PROMPT.
   - Added hard preflight for webhook secret branch/client match with immediate `INVALID RUN` on mismatch.
   - Added quality status split (`infra_valid`, `semantic_valid`) and blocked regression comparison on infra failure.
@@ -39,4 +40,4 @@
   - `pytest -q truffles-api/tests/test_booking_info_interrupt_contract.py`
   - `pytest -q truffles-api/tests/test_demo_salon_eval.py -k "booking_flow_info_interrupt_sections_location_hours_parking_promo"`
   - `pytest -q truffles-api/tests/test_message_endpoint.py -k "llm_policy_core_collect_sets_expected_reply_type or llm_policy_core_allows_plan_with_expected_reply or llm_policy_core_degraded_booking_guard_uses_safe_collect"`
-- last_updated: 2026-02-09
+- last_updated: 2026-02-10

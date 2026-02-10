@@ -563,10 +563,13 @@ def _should_block_expected_reply_by_info(
     if not message_text:
         return False
     normalized_message = legacy._normalize_service_text(message_text)
+    info_query = legacy._looks_like_info_query(message_text, client_slug=client_slug)
+    price_signal = legacy._has_price_signal(normalized_message, message_text)
+    duration_signal = legacy._has_duration_signal(normalized_message, message_text)
     blocked = bool(
-        legacy._looks_like_info_query(message_text, client_slug=client_slug)
-        or legacy._has_price_signal(normalized_message, message_text)
-        or legacy._has_duration_signal(normalized_message, message_text)
+        info_query
+        or price_signal
+        or duration_signal
     )
     if not blocked and expected_reply_type in {
         legacy.EXPECTED_REPLY_TIME,
@@ -583,7 +586,9 @@ def _should_block_expected_reply_by_info(
         and expected_reply_type == legacy.EXPECTED_REPLY_TIME
         and legacy._extract_datetime(message_text)
     ):
-        return False
+        # Keep info interrupts (address/hours/price/duration) in the info path
+        # even when the message also contains a time-like token.
+        return bool(info_query or price_signal or duration_signal)
     return blocked
 
 
@@ -797,18 +802,21 @@ def _apply_expected_reply_contract(
         answer_used = answer_confidence_ok or answer_valid
         answer_value_validated = True
         expected_slot_key = _expected_reply_slot_key(expected_reply_type)
-        if (
-            not deterministic_matched
-            and deterministic_available
-            and answer_interpreter_attempted
-            and not answer_result_ok
-        ):
-            deterministic_matched = True
-            if expected_slot_key:
-                answer_slot = expected_slot_key
-            if isinstance(deterministic_value, str) and deterministic_value.strip():
-                answer_value = deterministic_value
-            answer_used = False
+        use_llm_slot = _is_booking_confirm_enabled()
+        if not deterministic_matched and deterministic_available:
+            should_use_deterministic = (
+                not use_llm_slot
+                or not answer_interpreter_attempted
+                or not answer_result_ok
+            )
+            if should_use_deterministic:
+                deterministic_matched = True
+                if expected_slot_key:
+                    answer_slot = expected_slot_key
+                if isinstance(deterministic_value, str) and deterministic_value.strip():
+                    answer_value = deterministic_value
+                if not use_llm_slot:
+                    answer_used = False
         if answer_used and expected_slot_key and answer_slot and answer_slot != expected_slot_key:
             answer_used = False
             answer_confidence = 0.0
@@ -820,7 +828,6 @@ def _apply_expected_reply_contract(
         slot_source = None
         slot_confidence = 0.0
         slot_validation_error = None
-        use_llm_slot = _is_booking_confirm_enabled()
         if deterministic_matched:
             if answer_used and isinstance(answer_value, str) and isinstance(deterministic_value, str):
                 if answer_value != deterministic_value:
@@ -3056,7 +3063,7 @@ def _looks_like_time_only_request(message_text: str | None) -> bool:
     return has_time_token
 
 
-BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration", "master"}
+BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration", "location", "master"}
 INFO_INTENTS = {"pricing", "hours", "duration", "location", "promotions", "master"}
 LLM_PLAN_ALLOWED_OUTCOMES = {"fact", "collect", "handoff"}
 LLM_PLAN_ALLOWED_TOOL_ACTIONS = {
@@ -3308,6 +3315,8 @@ def _evaluate_booking_signal(
     )
     booking_signal = has_service and has_datetime
     if booking_signal and message_text:
+        if _looks_like_info_query(message_text, client_slug=client_slug):
+            return False, {"booking_blocked_reason": "info_question"}
         normalized = normalize_for_matching(message_text)
         procedure_combo_any = get_signal_lexicon_list(client_slug, "procedure_combo_require_any")
         procedure_combo_all = get_signal_lexicon_list(client_slug, "procedure_combo_require_all")
@@ -6466,6 +6475,11 @@ async def _handle_webhook_payload(
             class_carryover=class_carryover,
             client_slug=payload.client_slug,
         )
+    ):
+        booking_slot_signal = False
+    if booking_slot_signal and message_text and _looks_like_info_query(
+        message_text,
+        client_slug=payload.client_slug,
     ):
         booking_slot_signal = False
     booking_block_meta = None

@@ -637,6 +637,13 @@ def _looks_like_phone(message_text: str | None) -> bool:
 def _is_booking_slot_signal(message_text: str | None, *, client_slug: str | None) -> bool:
     if not message_text:
         return False
+    from . import _legacy as legacy
+
+    if legacy._looks_like_info_query(message_text, client_slug=client_slug) and not legacy._is_booking_request(
+        message_text,
+        client_slug=client_slug,
+    ):
+        return False
     if _looks_like_phone(message_text):
         return True
     return _is_booking_related_message(
@@ -1460,6 +1467,17 @@ def _handle_booking_interrupt(
             )
         if promotions_signal and "promotions" not in booking_info_intents:
             booking_info_intents = [*booking_info_intents, "promotions"]
+        normalized_interrupt = legacy._normalize_service_text(booking_interrupt_text or "")
+        explicit_team_lookup = any(
+            marker in normalized_interrupt
+            for marker in (
+                "кто делает",
+                "какой мастер",
+                "какой специалист",
+                "кто из мастеров",
+                "к кому запис",
+            )
+        )
         master_signal = False
         if booking_interrupt_text and client_slug:
             try:
@@ -1469,7 +1487,52 @@ def _handle_booking_interrupt(
             except Exception:
                 master_signal = False
         if master_signal and "master" not in booking_info_intents:
-            booking_info_intents = [*booking_info_intents, "master"]
+            keep_master_intent = explicit_team_lookup
+            if not keep_master_intent and policy_handler and booking_interrupt_text:
+                service_matcher = policy_handler.get("service_matcher")
+                if service_matcher:
+                    try:
+                        service_candidate = service_matcher(
+                            booking_interrupt_text,
+                            client_slug=client_slug,
+                            intent_decomp=intent_decomp_payload,
+                        )
+                    except Exception:
+                        service_candidate = None
+                    keep_master_intent = not (
+                        service_candidate
+                        and service_candidate.action == "reply"
+                        and service_candidate.intent in {"service_match", "price_query"}
+                    )
+            if keep_master_intent:
+                booking_info_intents = [*booking_info_intents, "master"]
+        if (
+            "master" in booking_info_intents
+            and not explicit_team_lookup
+            and policy_handler
+            and booking_interrupt_text
+        ):
+            service_matcher = policy_handler.get("service_matcher")
+            service_candidate = None
+            if service_matcher:
+                try:
+                    service_candidate = service_matcher(
+                        booking_interrupt_text,
+                        client_slug=client_slug,
+                        intent_decomp=intent_decomp_payload,
+                    )
+                except Exception:
+                    service_candidate = None
+            if (
+                service_candidate
+                and service_candidate.action == "reply"
+                and service_candidate.intent in {"service_match", "price_query"}
+            ):
+                booking_info_intents = [
+                    intent_name
+                    for intent_name in booking_info_intents
+                    if intent_name != "master"
+                ]
         guest_policy_hit = bool(
             booking_interrupt_text
             and legacy._matches_guest_policy_lexicon(
@@ -1788,7 +1851,8 @@ def _handle_booking_interrupt(
                     service_query = info_meta.get("service_query")
                     if isinstance(service_query, str) and service_query.strip():
                         booking_state["service"] = service_query.strip()
-                if not booking_state.get("service"):
+                # Do not auto-fill stale service hints on the first booking turn.
+                if booking_active and not booking_state.get("service"):
                     service_hint = legacy._get_recent_service_hint(context, now)
                     if service_hint:
                         booking_state["service"] = service_hint
@@ -2113,8 +2177,6 @@ def _handle_booking_flow(
         and (booking_wants_flow or booking_active or booking_signal)
     ):
         truth_gate = policy_handler.get("truth_gate") if isinstance(policy_handler, dict) else None
-        if expected_reply_type:
-            truth_gate = None
         if truth_gate:
             decision = truth_gate(message_text, client_slug=client_slug)
             if (
@@ -2477,7 +2539,8 @@ def _handle_booking_flow(
                 client_slug=client_slug,
             )
             context_manager = legacy._get_context_manager(context)
-            if not booking_state.get("service"):
+            # Only reuse service carryover while already inside an active booking flow.
+            if booking_active and not booking_state.get("service"):
                 service_hint = legacy._get_recent_service_hint(context, now)
                 if service_hint:
                     booking_state["service"] = service_hint
