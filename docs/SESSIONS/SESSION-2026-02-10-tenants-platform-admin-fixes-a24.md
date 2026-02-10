@@ -2,22 +2,27 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-02-10-tenants-platform-admin-fixes-a24.md
+- task_package: docs/TASK_PACKAGES/TP-2026-02-10-integrations-platform-admin-fleet-control-a25.md
 - branch: feat/2026-02-10-tenants-platform-admin-fixes
 - worktree: /home/zhan/truffles-main
 - base_ref: origin/main
-- scope: Закрыть критичные проблемы Tenants для platform_admin (security + UX + context-scoped behavior).
+- scope: Integrations control plane for platform_admin: fleet cross-tenant read + safe per-branch reconcile flow.
 - done:
   - Session registered in current worktree.
-  - Backend provisioning access hardening completed.
-  - Backend cross-tenant regression tests updated/added.
-  - Tenants frontend context filters and action-oriented UX improved.
-  - Targeted pytest and frontend lint passed.
+  - Platform-only RBAC for `integrations` applied in backend/frontend.
+  - `GET /admin/integrations` switched to strict platform-admin fleet read-only path (no read side-effects).
+  - Per-branch reconcile endpoint added: `POST /admin/integrations/{branch_id}/reconcile` with `dry_run -> confirmation -> execute`.
+  - OpenAPI and generated frontend types synced for integrations action/status contracts.
+  - Targeted checks passed (`scripts/test_api_container.sh`, pytest, openapi check, frontend generate:api + lint).
+  - Branch pushed and PR opened: https://github.com/k1ddy/Truffles-AI-Employee/pull/607
 - next:
-  - Commit changes and open PR.
+  - Watch CI checks and resolve failures if any.
 - evidence:
-  - docs/TASK_PACKAGES/TP-2026-02-10-tenants-platform-admin-fixes-a24.md
-  - pytest -q truffles-api/tests/test_console_admin_provisioning.py
-  - pytest -q truffles-api/tests/test_console_access_admin_pr2.py truffles-api/tests/test_console_tenants_list.py
+  - docs/TASK_PACKAGES/TP-2026-02-10-integrations-platform-admin-fleet-control-a25.md
+  - PYTEST_ARGS='/app/tests/test_console_integrations_registry.py /app/tests/test_console_rbac.py' scripts/test_api_container.sh
+  - pytest -q truffles-api/tests/test_console_integrations_registry.py truffles-api/tests/test_console_rbac.py
+  - pytest -q truffles-api/tests/test_console_fleet_attention.py
+  - python3 truffles-api/scripts/generate_openapi.py --check
+  - npm --prefix console-web run generate:api
   - npm --prefix console-web run lint
 - last_updated: 2026-02-10

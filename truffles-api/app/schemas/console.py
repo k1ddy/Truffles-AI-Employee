@@ -371,7 +371,7 @@ class ConsoleOnboardingAdvanceRequest(BaseModel):
     step_id: OnboardingStepId
 
 
-ConfirmationAction = Literal["knowledge_rollback", "branch_deactivate"]
+ConfirmationAction = Literal["knowledge_rollback", "branch_deactivate", "integration_reconcile"]
 ConfirmationTargetType = Literal["knowledge_version", "branch"]
 
 
@@ -940,6 +940,8 @@ class ConsoleWebhookSecretResponse(BaseModel):
 
 
 class ConsoleBranchIntegrationStatus(BaseModel):
+    client_id: UUID
+    client_slug: str
     branch_id: UUID
     branch_slug: str
     branch_name: str
@@ -971,6 +973,17 @@ class ConsoleBranchIntegrationStatus(BaseModel):
 class ConsoleIntegrationsListResponse(BaseModel):
     stale_after_minutes: int
     items: list[ConsoleBranchIntegrationStatus]
+
+
+class ConsoleIntegrationBranchActionRequest(BaseModel):
+    mode: ConsoleOpsJobMode = "dry_run"
+    confirmation_id: Optional[UUID] = None
+
+
+class ConsoleIntegrationBranchActionResponse(BaseModel):
+    branch_id: UUID
+    mode: ConsoleOpsJobMode
+    result: dict
 
 
 class ConsoleAgentListResponse(BaseModel):

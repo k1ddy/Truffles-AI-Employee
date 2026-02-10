@@ -91,6 +91,7 @@ export type ConsoleSection =
     | "settings"
     | "ops"
     | "audit"
+    | "integrations"
     | "tenants"
     | "provisioning";
 export type ConsoleAction = "read" | "write";
@@ -127,6 +128,10 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
     audit: {
         read: ["platform_admin", "owner", "admin", "support", "viewer"],
         write: [],
+    },
+    integrations: {
+        read: ["platform_admin"],
+        write: ["platform_admin"],
     },
     tenants: {
         read: ["platform_admin"],
@@ -473,6 +478,8 @@ export type AuditListResponse = components["schemas"]["AuditListResponse"];
 export type AgentListResponse = components["schemas"]["AgentListResponse"];
 export type BranchIntegrationStatus = components["schemas"]["BranchIntegrationStatus"];
 export type IntegrationsListResponse = components["schemas"]["IntegrationsListResponse"];
+export type IntegrationBranchActionRequest = components["schemas"]["IntegrationBranchActionRequest"];
+export type IntegrationBranchActionResponse = components["schemas"]["IntegrationBranchActionResponse"];
 export type OpsJobDefinition = components["schemas"]["OpsJobDefinition"];
 export type OpsJobCatalogResponse = components["schemas"]["OpsJobCatalogResponse"];
 export type OpsJobRunRequest = components["schemas"]["OpsJobRunRequest"];
@@ -648,6 +655,8 @@ export const adminApi = {
         apiClient.get<components["schemas"]["FleetAttentionResponse"]>("/admin/fleet/attention", { params }),
     listIntegrations: (params?: ListIntegrationsParams) =>
         apiClient.get<components["schemas"]["IntegrationsListResponse"]>("/admin/integrations", { params }),
+    reconcileIntegrationBranch: (branchId: string, data: IntegrationBranchActionRequest) =>
+        apiClient.post<IntegrationBranchActionResponse>(`/admin/integrations/${branchId}/reconcile`, data),
     listMemberships: (params?: ListMembershipsParams) =>
         apiClient.get<components["schemas"]["MembershipListResponse"]>("/admin/memberships", { params }),
     createCompany: (data: components["schemas"]["CompanyCreateRequest"]) =>
