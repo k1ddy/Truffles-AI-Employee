@@ -1032,7 +1032,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                 </div>
                 {!fleetAttentionEnabled && (
                     <div className="mt-4 text-xs text-muted-foreground">
-                        Fleet-сигналы отключены по умолчанию: включайте при необходимости оперативного контроля рисков.
+                        Fleet-сигналы отключены по умолчанию: включайте при необходимости оперативного контроля рисков и SLA.
                     </div>
                 )}
 
