@@ -1,0 +1,27 @@
+# SESSION 2026-02-10-ci-merge-skip-core-eval-a23 — Session 2026-02-10-ci-merge-skip-core-eval-a23
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-10-ci-merge-skip-core-eval-a23.md
+- branch: feat/2026-02-10-ci-merge-skip-core-eval-a23
+- worktree: /home/zhan/worktrees/2026-02-10-ci-merge-skip-core-eval-a23
+- base_ref: origin/main
+- scope: Fix duplicate `core-eval` rerun on merge and improve CI skip transparency for deploy/build.
+- done:
+  - Session created.
+  - Verified run `21845489527`: `core_eval_skip_on_merge=true` was set, but `core-eval` still ran; `deploy_required=false` caused build/deploy skip.
+  - Reworked CI gate to emit deterministic `run_core_eval=true|false` output and switched `core-eval` job to that output.
+  - Added `CI decision summary` step to expose `deploy_required` and core-eval gate decisions in logs/summary.
+  - Validated workflow YAML and merge-gate dry check against merge commit `c857608d`.
+- in_progress:
+  - Fixed shell error in `CI decision summary` heredoc after first CI attempt on PR #602.
+  - Fixed `run_core_eval` type ambiguity by switching to numeric gate (`1/0`) and `core-eval if == '1'`.
+  - Fixed output serialization bug (`\\n` vs newline) that made `run_core_eval` absorb multiple outputs and forced `core-eval` skip.
+- next:
+  - Push branch and open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-10-ci-merge-skip-core-eval-a23.md
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21845489527
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21846233615
+  - local checks: `./scripts/session_check.sh`, YAML parse, merge-gate dry check (`pr_core_eval_success` => `run_core_eval=false`)
+- last_updated: 2026-02-10

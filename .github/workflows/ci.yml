@@ -44,6 +44,7 @@ jobs:
       console_contracts: ${{ steps.manual.outputs.console_contracts || steps.filter.outputs.console_contracts }}
       deploy_required: ${{ steps.manual.outputs.deploy_required || steps.filter.outputs.deploy_required }}
       livecheck_required: ${{ steps.manual.outputs.livecheck_required || steps.filter.outputs.livecheck_required }}
+      run_core_eval: ${{ steps.core_eval_gate.outputs.run_core_eval }}
       core_eval_skip_on_merge: ${{ steps.core_eval_gate.outputs.core_eval_skip_on_merge }}
       core_eval_skip_reason: ${{ steps.core_eval_gate.outputs.core_eval_skip_reason }}
     steps:
@@ -121,6 +122,7 @@ jobs:
         id: core_eval_gate
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          L1_CHANGED: ${{ steps.manual.outputs.l1 || steps.filter.outputs.l1 || 'false' }}
         run: |
           python - <<'PY'
           import json
@@ -134,8 +136,10 @@ jobs:
           ref = os.getenv("GITHUB_REF", "")
           repo = os.getenv("GITHUB_REPOSITORY", "")
           token = os.getenv("GITHUB_TOKEN", "")
+          l1_changed = os.getenv("L1_CHANGED", "false").lower()
           output_path = os.environ["GITHUB_OUTPUT"]
 
+          run_core_eval = "1" if l1_changed == "true" else "0"
           skip = "false"
           reason = "not_main_push"
           pr_number = ""
@@ -186,6 +190,7 @@ jobs:
                               if conclusion == "success":
                                   skip = "true"
                                   reason = "pr_core_eval_success"
+                                  run_core_eval = "0"
                               else:
                                   reason = f"pr_core_eval_{conclusion}"
                   except urllib.error.HTTPError as err:
@@ -193,11 +198,34 @@ jobs:
                   except Exception:
                       reason = "api_error"
 
-          print(f"core-eval merge gate: skip={skip}, reason={reason}, pr={pr_number}, sha={pr_head_sha}")
+          print(
+              "core-eval merge gate: "
+              f"run_core_eval={run_core_eval}, skip={skip}, reason={reason}, "
+              f"pr={pr_number}, sha={pr_head_sha}, l1_changed={l1_changed}"
+          )
           with open(output_path, "a", encoding="utf-8") as out:
-              out.write(f"core_eval_skip_on_merge={skip}\\n")
-              out.write(f"core_eval_skip_reason={reason}\\n")
+              out.write(f"run_core_eval={run_core_eval}\n")
+              out.write(f"core_eval_skip_on_merge={skip}\n")
+              out.write(f"core_eval_skip_reason={reason}\n")
           PY
+
+      - name: CI decision summary
+        env:
+          L1_CHANGED: ${{ steps.manual.outputs.l1 || steps.filter.outputs.l1 || 'false' }}
+          DEPLOY_REQUIRED: ${{ steps.manual.outputs.deploy_required || steps.filter.outputs.deploy_required || 'false' }}
+          RUN_CORE_EVAL: ${{ steps.core_eval_gate.outputs.run_core_eval || '0' }}
+          CORE_EVAL_SKIP_ON_MERGE: ${{ steps.core_eval_gate.outputs.core_eval_skip_on_merge || 'false' }}
+          CORE_EVAL_SKIP_REASON: ${{ steps.core_eval_gate.outputs.core_eval_skip_reason || 'none' }}
+        run: |
+          echo "CI gate decisions: l1=$L1_CHANGED deploy_required=$DEPLOY_REQUIRED run_core_eval=$RUN_CORE_EVAL skip_on_merge=$CORE_EVAL_SKIP_ON_MERGE reason=$CORE_EVAL_SKIP_REASON"
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ### CI Gate Decisions
+          - l1_changed: \`$L1_CHANGED\`
+          - deploy_required: \`$DEPLOY_REQUIRED\`
+          - run_core_eval: \`$RUN_CORE_EVAL\`
+          - core_eval_skip_on_merge: \`$CORE_EVAL_SKIP_ON_MERGE\`
+          - core_eval_skip_reason: \`$CORE_EVAL_SKIP_REASON\`
+          EOF
 
   lint:
     runs-on: ubuntu-latest
@@ -508,7 +536,7 @@ jobs:
 
   core-eval:
     needs: [lint, unit-tests, changes]
-    if: needs.changes.outputs.l1 == 'true' && needs.changes.outputs.core_eval_skip_on_merge != 'true'
+    if: needs.changes.outputs.run_core_eval == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
