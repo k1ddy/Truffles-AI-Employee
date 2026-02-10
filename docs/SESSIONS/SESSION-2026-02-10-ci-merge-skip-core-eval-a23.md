@@ -15,6 +15,7 @@
   - Validated workflow YAML and merge-gate dry check against merge commit `c857608d`.
 - in_progress:
   - Fixed shell error in `CI decision summary` heredoc after first CI attempt on PR #602.
+  - Fixed `run_core_eval` type ambiguity by switching to numeric gate (`1/0`) and `core-eval if == '1'`.
 - next:
   - Push branch and open PR.
 - evidence:

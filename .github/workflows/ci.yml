@@ -139,7 +139,7 @@ jobs:
           l1_changed = os.getenv("L1_CHANGED", "false").lower()
           output_path = os.environ["GITHUB_OUTPUT"]
 
-          run_core_eval = "true" if l1_changed == "true" else "false"
+          run_core_eval = "1" if l1_changed == "true" else "0"
           skip = "false"
           reason = "not_main_push"
           pr_number = ""
@@ -190,7 +190,7 @@ jobs:
                               if conclusion == "success":
                                   skip = "true"
                                   reason = "pr_core_eval_success"
-                                  run_core_eval = "false"
+                                  run_core_eval = "0"
                               else:
                                   reason = f"pr_core_eval_{conclusion}"
                   except urllib.error.HTTPError as err:
@@ -213,7 +213,7 @@ jobs:
         env:
           L1_CHANGED: ${{ steps.manual.outputs.l1 || steps.filter.outputs.l1 || 'false' }}
           DEPLOY_REQUIRED: ${{ steps.manual.outputs.deploy_required || steps.filter.outputs.deploy_required || 'false' }}
-          RUN_CORE_EVAL: ${{ steps.core_eval_gate.outputs.run_core_eval || 'false' }}
+          RUN_CORE_EVAL: ${{ steps.core_eval_gate.outputs.run_core_eval || '0' }}
           CORE_EVAL_SKIP_ON_MERGE: ${{ steps.core_eval_gate.outputs.core_eval_skip_on_merge || 'false' }}
           CORE_EVAL_SKIP_REASON: ${{ steps.core_eval_gate.outputs.core_eval_skip_reason || 'none' }}
         run: |
@@ -536,7 +536,7 @@ jobs:
 
   core-eval:
     needs: [lint, unit-tests, changes]
-    if: needs.changes.outputs.run_core_eval == 'true'
+    if: needs.changes.outputs.run_core_eval == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
