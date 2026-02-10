@@ -210,6 +210,76 @@ async def test_create_agent_provisions_sso_user_and_binds_subject(monkeypatch):
     assert sso_calls["temporary_password"] is False
 
 
+def test_resolve_keycloak_admin_config_accepts_non_console_username_password_aliases(monkeypatch):
+    env_keys = (
+        "CONSOLE_OIDC_ISSUER",
+        "KEYCLOAK_ISSUER",
+        "CONSOLE_KEYCLOAK_TOKEN_URL",
+        "CONSOLE_KEYCLOAK_ADMIN_BASE_URL",
+        "KEYCLOAK_ADMIN_BASE_URL",
+        "CONSOLE_KEYCLOAK_REALM",
+        "KEYCLOAK_REALM",
+        "CONSOLE_KEYCLOAK_USERNAME",
+        "KEYCLOAK_ADMIN_USERNAME",
+        "KEYCLOAK_USERNAME",
+        "CONSOLE_KEYCLOAK_PASSWORD",
+        "KEYCLOAK_ADMIN_PASSWORD",
+        "KEYCLOAK_PASSWORD",
+        "CONSOLE_KEYCLOAK_CLIENT_ID",
+        "CONSOLE_KEYCLOAK_CLIENT_SECRET",
+    )
+    for key in env_keys:
+        monkeypatch.delenv(key, raising=False)
+
+    monkeypatch.setenv("KEYCLOAK_ISSUER", "https://auth.example.com/realms/truffles")
+    monkeypatch.setenv("KEYCLOAK_USERNAME", "svc-ops")
+    monkeypatch.setenv("KEYCLOAK_PASSWORD", "secret-pass")
+
+    resolved = console_router._resolve_keycloak_admin_config()
+
+    assert resolved["token_url"] == "https://auth.example.com/realms/truffles/protocol/openid-connect/token"
+    assert resolved["admin_base_url"] == "https://auth.example.com"
+    assert resolved["realm"] == "truffles"
+    assert resolved["admin_username"] == "svc-ops"
+    assert resolved["admin_password"] == "secret-pass"
+    assert resolved["client_id"] == "admin-cli"
+    assert resolved["client_secret"] is None
+
+
+def test_resolve_keycloak_admin_config_missing_credentials_includes_alias_hints(monkeypatch):
+    env_keys = (
+        "CONSOLE_OIDC_ISSUER",
+        "KEYCLOAK_ISSUER",
+        "CONSOLE_KEYCLOAK_TOKEN_URL",
+        "CONSOLE_KEYCLOAK_ADMIN_BASE_URL",
+        "KEYCLOAK_ADMIN_BASE_URL",
+        "CONSOLE_KEYCLOAK_REALM",
+        "KEYCLOAK_REALM",
+        "CONSOLE_KEYCLOAK_USERNAME",
+        "KEYCLOAK_ADMIN_USERNAME",
+        "KEYCLOAK_USERNAME",
+        "CONSOLE_KEYCLOAK_PASSWORD",
+        "KEYCLOAK_ADMIN_PASSWORD",
+        "KEYCLOAK_PASSWORD",
+    )
+    for key in env_keys:
+        monkeypatch.delenv(key, raising=False)
+
+    monkeypatch.setenv("KEYCLOAK_ISSUER", "https://auth.example.com/realms/truffles")
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._resolve_keycloak_admin_config()
+
+    assert exc_info.value.code == "INTEGRATION_UNAVAILABLE"
+    details = exc_info.value.details or {}
+    missing = details.get("missing") or []
+    aliases = details.get("aliases") or {}
+    assert "CONSOLE_KEYCLOAK_USERNAME" in missing
+    assert "CONSOLE_KEYCLOAK_PASSWORD" in missing
+    assert aliases.get("CONSOLE_KEYCLOAK_USERNAME") == ["KEYCLOAK_ADMIN_USERNAME", "KEYCLOAK_USERNAME"]
+    assert aliases.get("CONSOLE_KEYCLOAK_PASSWORD") == ["KEYCLOAK_ADMIN_PASSWORD", "KEYCLOAK_PASSWORD"]
+
+
 @pytest.mark.asyncio
 async def test_create_branch_bootstrap_accounts_return_created_agents(monkeypatch):
     client_id = uuid4()
