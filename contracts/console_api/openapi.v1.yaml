@@ -3339,6 +3339,15 @@ components:
         oidc_subject:
           type: string
           nullable: true
+        sso_username:
+          type: string
+          nullable: true
+        sso_password:
+          type: string
+          nullable: true
+        sso_temp_password:
+          type: boolean
+          nullable: true
         is_active:
           type: boolean
           nullable: true
@@ -4097,6 +4106,15 @@ components:
           nullable: true
         oidc_subject:
           type: string
+          nullable: true
+        sso_username:
+          type: string
+          nullable: true
+        sso_password:
+          type: string
+          nullable: true
+        sso_temp_password:
+          type: boolean
           nullable: true
 
     AgentCreateResponse:

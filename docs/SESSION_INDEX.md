@@ -4,6 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-02-10-team-platform-admin-ux-sso-a26 | active | feat/2026-02-10-team-platform-admin-ux-sso-a26 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-10-team-platform-admin-ux-sso-a26.md | 2026-02-10 |
 | 2026-02-07-tenant-lifecycle-read-a15 | done | feat/2026-02-07-tenant-lifecycle-read-a15 | /home/zhan/worktrees/2026-02-07-tenant-lifecycle-read-a15 | docs/TASK_PACKAGES/TP-2026-02-07-tenant-lifecycle-read-a15.md | 2026-02-07 |
 | 2026-02-07-tenant-context-schema-gate-a13 | active | feat/2026-02-07-tenant-context-schema-gate-a13 | /home/zhan/worktrees/2026-02-07-tenant-context-schema-gate-a13 | docs/TASK_PACKAGES/TP-2026-02-07-tenant-context-schema-gate.md | 2026-02-07 |
 | 2026-02-07-provider-channel-model-v1-a13 | active | feat/2026-02-07-provider-channel-model-v1-a13 | /home/zhan/worktrees/2026-02-07-provider-channel-model-v1-a13 | docs/TASK_PACKAGES/TP-2026-02-07-provider-channel-model-v1.md | 2026-02-07 |

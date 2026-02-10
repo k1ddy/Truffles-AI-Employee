@@ -1692,6 +1692,9 @@ export interface components {
             role: "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer";
             name?: string | null;
             oidc_subject?: string | null;
+            sso_username?: string | null;
+            sso_password?: string | null;
+            sso_temp_password?: boolean | null;
             is_active?: boolean | null;
         };
         BranchCreateRequest: {
@@ -2044,6 +2047,9 @@ export interface components {
             name?: string | null;
             is_active?: boolean | null;
             oidc_subject?: string | null;
+            sso_username?: string | null;
+            sso_password?: string | null;
+            sso_temp_password?: boolean | null;
         };
         AgentCreateResponse: {
             agent?: components["schemas"]["Agent"];
