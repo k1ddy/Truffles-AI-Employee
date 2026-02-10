@@ -129,3 +129,16 @@ def test_require_branch_access_denies_other_branch():
         console_router._require_branch_access(context, branch_id, message="Access denied")
     assert exc_info.value.status_code == 403
     assert exc_info.value.code == "ACCESS_DENIED"
+
+
+def test_require_branch_access_denies_branch_scoped_admin_outside_allowed_branch():
+    branch_id = uuid4()
+    context = SimpleNamespace(
+        role="admin",
+        branch_restricted=True,
+        branches=[SimpleNamespace(id=uuid4())],
+    )
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._require_branch_access(context, branch_id, message="Access denied")
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"

@@ -8,7 +8,10 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Callable, Optional
-from urllib.parse import urlparse
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode, urlparse
+from urllib.request import Request as URLRequest
+from urllib.request import urlopen
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
@@ -98,6 +101,8 @@ from app.schemas.console import (
     ConsoleFleetAttentionSummary,
     ConsoleFleetSummary,
     ConsoleHealthResponse,
+    ConsoleIntegrationBranchActionRequest,
+    ConsoleIntegrationBranchActionResponse,
     ConsoleIntegrationsListResponse,
     ConsoleKnowledgeCurrentResponse,
     ConsoleKnowledgeHistoryItem,
@@ -437,6 +442,13 @@ def _resolve_branch_from_context(context: ConsoleAuthContext) -> Branch:
     raise ConsoleAPIError(400, "BRANCH_SELECTION_REQUIRED", "Branch selection required")
 
 
+def _has_context_privileged_branch_access(context: ConsoleAuthContext) -> bool:
+    if not _is_privileged_access_role(context.role):
+        return False
+    # Branch-scoped owner/admin must stay branch-restricted.
+    return not bool(getattr(context, "branch_restricted", False))
+
+
 def _require_branch_access(
     context: ConsoleAuthContext,
     branch_id: Optional[UUID],
@@ -445,7 +457,7 @@ def _require_branch_access(
 ) -> None:
     if branch_id is None:
         return
-    if context.role in ("platform_admin", "owner", "admin"):
+    if _has_context_privileged_branch_access(context):
         return
     allowed_branch_ids = {branch.id for branch in context.branches}
     if branch_id not in allowed_branch_ids:
@@ -1037,14 +1049,6 @@ def _require_owner_admin(
     )
 
 
-def _require_platform_admin(context: ConsoleAuthContext) -> None:
-    _require_roles(
-        context,
-        allowed=("platform_admin", "owner", "admin", "support"),
-        message="Only platform admin/owner/admin/support can access admin operations",
-    )
-
-
 def _generate_verification_code() -> str:
     return secrets.token_hex(3).upper()
 
@@ -1352,6 +1356,228 @@ def _ensure_unique_oidc_subject(
     if query.first():
         raise ConsoleAPIError(409, "OIDC_SUBJECT_IN_USE", "oidc_subject already linked to another agent")
     return normalized_subject
+
+
+def _extract_keycloak_realm(value: Optional[str]) -> Optional[str]:
+    normalized = _normalize_optional_text(value)
+    if not normalized:
+        return None
+    marker = "/realms/"
+    if marker not in normalized:
+        return None
+    tail = normalized.split(marker, 1)[1].strip("/")
+    if not tail:
+        return None
+    return tail.split("/", 1)[0]
+
+
+def _extract_keycloak_base_url(value: Optional[str]) -> Optional[str]:
+    normalized = _normalize_optional_text(value)
+    if not normalized:
+        return None
+    marker = "/realms/"
+    if marker in normalized:
+        return normalized.split(marker, 1)[0].rstrip("/")
+    parsed = urlparse(normalized)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return None
+
+
+def _resolve_keycloak_admin_config() -> dict[str, Optional[str]]:
+    issuer = _normalize_optional_text(os.environ.get("CONSOLE_OIDC_ISSUER") or os.environ.get("KEYCLOAK_ISSUER"))
+    token_url = _normalize_optional_text(os.environ.get("CONSOLE_KEYCLOAK_TOKEN_URL"))
+    if not token_url and issuer:
+        token_url = f"{issuer.rstrip('/')}/protocol/openid-connect/token"
+
+    realm = (
+        _normalize_optional_text(os.environ.get("CONSOLE_KEYCLOAK_REALM"))
+        or _normalize_optional_text(os.environ.get("KEYCLOAK_REALM"))
+        or _extract_keycloak_realm(issuer)
+        or _extract_keycloak_realm(token_url)
+    )
+    admin_base_url = (
+        _normalize_optional_text(os.environ.get("CONSOLE_KEYCLOAK_ADMIN_BASE_URL"))
+        or _normalize_optional_text(os.environ.get("KEYCLOAK_ADMIN_BASE_URL"))
+        or _extract_keycloak_base_url(issuer)
+        or _extract_keycloak_base_url(token_url)
+    )
+    client_id = _normalize_optional_text(os.environ.get("CONSOLE_KEYCLOAK_CLIENT_ID")) or "admin-cli"
+    client_secret = _normalize_optional_text(os.environ.get("CONSOLE_KEYCLOAK_CLIENT_SECRET"))
+    admin_username = _normalize_optional_text(
+        os.environ.get("CONSOLE_KEYCLOAK_USERNAME") or os.environ.get("KEYCLOAK_ADMIN_USERNAME")
+    )
+    admin_password = _normalize_optional_text(
+        os.environ.get("CONSOLE_KEYCLOAK_PASSWORD") or os.environ.get("KEYCLOAK_ADMIN_PASSWORD")
+    )
+
+    missing = []
+    if not token_url:
+        missing.append("CONSOLE_KEYCLOAK_TOKEN_URL")
+    if not admin_base_url:
+        missing.append("CONSOLE_KEYCLOAK_ADMIN_BASE_URL")
+    if not realm:
+        missing.append("CONSOLE_KEYCLOAK_REALM")
+    if not admin_username:
+        missing.append("CONSOLE_KEYCLOAK_USERNAME")
+    if not admin_password:
+        missing.append("CONSOLE_KEYCLOAK_PASSWORD")
+    if missing:
+        raise ConsoleAPIError(
+            503,
+            "INTEGRATION_UNAVAILABLE",
+            "SSO provisioning is not configured",
+            details={"missing": missing},
+        )
+
+    return {
+        "token_url": token_url,
+        "admin_base_url": admin_base_url,
+        "realm": realm,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "admin_username": admin_username,
+        "admin_password": admin_password,
+    }
+
+
+def _fetch_keycloak_admin_token(config: dict[str, Optional[str]]) -> str:
+    payload = {
+        "grant_type": "password",
+        "client_id": config.get("client_id") or "admin-cli",
+        "username": config.get("admin_username") or "",
+        "password": config.get("admin_password") or "",
+    }
+    client_secret = config.get("client_secret")
+    if client_secret:
+        payload["client_secret"] = client_secret
+
+    body = urlencode(payload).encode("utf-8")
+    req = URLRequest(
+        str(config["token_url"]),
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=10) as response:
+            raw = response.read()
+    except HTTPError as exc:
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO provisioning token request failed") from exc
+    except URLError as exc:
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO provisioning endpoint is unreachable") from exc
+
+    try:
+        parsed = json.loads((raw or b"{}").decode("utf-8"))
+    except Exception as exc:  # pragma: no cover - defensive parse guard
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "Invalid SSO token response") from exc
+    token = _normalize_optional_text(parsed.get("access_token"))
+    if not token:
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO token response missing access_token")
+    return token
+
+
+def _keycloak_lookup_user_id(
+    config: dict[str, Optional[str]],
+    *,
+    access_token: str,
+    username: str,
+) -> Optional[str]:
+    query_url = (
+        f"{config['admin_base_url']}/admin/realms/{config['realm']}/users"
+        f"?username={quote(username)}&exact=true"
+    )
+    req = URLRequest(
+        query_url,
+        headers={"Authorization": f"Bearer {access_token}"},
+        method="GET",
+    )
+    try:
+        with urlopen(req, timeout=10) as response:
+            raw = response.read()
+    except HTTPError as exc:
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO user lookup failed") from exc
+    except URLError as exc:
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO user lookup endpoint is unreachable") from exc
+
+    try:
+        users = json.loads((raw or b"[]").decode("utf-8"))
+    except Exception as exc:  # pragma: no cover - defensive parse guard
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "Invalid SSO lookup response") from exc
+    if not isinstance(users, list) or not users:
+        return None
+    user_id = _normalize_optional_text((users[0] or {}).get("id"))
+    return user_id
+
+
+def _provision_sso_user_and_get_subject(
+    *,
+    username: str,
+    password: str,
+    temporary_password: bool,
+) -> str:
+    normalized_username = _normalize_required_text(username, "sso_username")
+    normalized_password = (password or "").strip()
+    if len(normalized_password) < 8:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "sso_password must be at least 8 characters")
+
+    config = _resolve_keycloak_admin_config()
+    access_token = _fetch_keycloak_admin_token(config)
+
+    existing_user = _keycloak_lookup_user_id(
+        config,
+        access_token=access_token,
+        username=normalized_username,
+    )
+    if existing_user:
+        raise ConsoleAPIError(409, "INVALID_PARAM", "sso_username already exists")
+
+    create_payload = {
+        "username": normalized_username,
+        "enabled": True,
+        "credentials": [
+            {
+                "type": "password",
+                "value": normalized_password,
+                "temporary": bool(temporary_password),
+            }
+        ],
+    }
+    req = URLRequest(
+        f"{config['admin_base_url']}/admin/realms/{config['realm']}/users",
+        data=json.dumps(create_payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    created_location = None
+    try:
+        with urlopen(req, timeout=10) as response:
+            created_location = response.headers.get("Location")
+    except HTTPError as exc:
+        if exc.code == 409:
+            raise ConsoleAPIError(409, "INVALID_PARAM", "sso_username already exists") from exc
+        if exc.code == 400:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid SSO user payload") from exc
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO user provisioning failed") from exc
+    except URLError as exc:
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO user provisioning endpoint is unreachable") from exc
+
+    if created_location:
+        user_id = _normalize_optional_text(created_location.rstrip("/").split("/")[-1])
+        if user_id:
+            return user_id
+
+    resolved_user = _keycloak_lookup_user_id(
+        config,
+        access_token=access_token,
+        username=normalized_username,
+    )
+    if not resolved_user:
+        raise ConsoleAPIError(503, "INTEGRATION_UNAVAILABLE", "SSO user created but subject lookup failed")
+    return resolved_user
 
 
 def _serialize_agent(agent: Agent) -> ConsoleAgent:
@@ -2201,6 +2427,7 @@ def _load_latest_branch_inbound_observations(
 
 def _build_branch_integration_status(
     *,
+    client_id: UUID,
     client_slug: str,
     branch: Branch,
     has_telegram_bot_token: bool,
@@ -2268,6 +2495,8 @@ def _build_branch_integration_status(
             drift_issues.append(integration_reason)
 
     return ConsoleBranchIntegrationStatus(
+        client_id=client_id,
+        client_slug=client_slug,
         branch_id=branch.id,
         branch_slug=branch.slug,
         branch_name=branch.name,
@@ -3444,7 +3673,7 @@ async def list_cases(
 
     # Branch filter (RBAC + Request)
     allowed_branch_ids = {b.id for b in context.branches}
-    is_privileged = context.agent.role in ("platform_admin", "owner", "admin")
+    is_privileged = _has_context_privileged_branch_access(context)
 
     if not is_privileged:
         if not allowed_branch_ids:
@@ -6929,40 +7158,60 @@ async def list_integrations(
     ),
     db: Session = Depends(get_db),
 ) -> ConsoleIntegrationsListResponse:
-    context = get_console_context(request, db, require_selection=False, include_inactive_tenants=True)
-    require_console_permission(
-        context,
-        "provisioning",
-        "read",
-        message="Only owner/admin/support can access provisioning",
-    )
+    context = get_console_context(request, db, require_selection=False, include_inactive_tenants=False)
+    _require_platform_admin(context)
     _reject_unknown_query_params(request, {"stale_after_minutes"})
+
+    active_clients = [
+        client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
+    ]
+    if not active_clients:
+        return ConsoleIntegrationsListResponse(
+            stale_after_minutes=stale_after_minutes,
+            items=[],
+        )
+
+    client_ids = [client.id for client in active_clients]
+    client_slug_map = {client.id: client.name for client in active_clients}
 
     branches = (
         db.query(Branch)
-        .filter(Branch.client_id == context.client.id)
-        .order_by(Branch.name.asc(), Branch.created_at.asc())
+        .filter(Branch.client_id.in_(client_ids))
+        .order_by(Branch.client_id.asc(), Branch.name.asc(), Branch.created_at.asc())
         .all()
     )
-    settings = db.query(ClientSettings).filter(ClientSettings.client_id == context.client.id).first()
-    has_telegram_bot_token = bool(_normalize_optional_text(settings.telegram_bot_token) if settings else None)
+    token_rows = (
+        db.query(
+            ClientSettings.client_id,
+            ClientSettings.telegram_bot_token,
+        )
+        .filter(ClientSettings.client_id.in_(client_ids))
+        .all()
+    )
+    telegram_token_map: dict[UUID, bool] = {}
+    for client_id, token in token_rows:
+        telegram_token_map[client_id] = bool(_normalize_optional_text(token))
 
-    inbound_observations = _load_latest_branch_inbound_observations(
+    inbound_observations = _load_latest_branch_inbound_observations_for_clients(
         db,
-        client_id=context.client.id,
+        client_ids=client_ids,
     )
     now = datetime.now(timezone.utc)
     items = []
     for branch in branches:
+        client_slug = client_slug_map.get(branch.client_id)
+        if not client_slug:
+            continue
         last_inbound_at: Optional[datetime] = None
         last_inbound_instance_id: Optional[str] = None
         observed = inbound_observations.get(branch.id)
         if observed:
             last_inbound_at, last_inbound_instance_id = observed
         item = _build_branch_integration_status(
-            client_slug=context.client.name,
+            client_id=branch.client_id,
+            client_slug=client_slug,
             branch=branch,
-            has_telegram_bot_token=has_telegram_bot_token,
+            has_telegram_bot_token=telegram_token_map.get(branch.client_id, False),
             stale_after_minutes=stale_after_minutes,
             last_inbound_at=last_inbound_at,
             last_inbound_instance_id=last_inbound_instance_id,
@@ -6970,14 +7219,89 @@ async def list_integrations(
         )
         items.append(item)
 
-    _emit_integration_drift_signals(
-        db,
-        context=context,
-        statuses=items,
-    )
     return ConsoleIntegrationsListResponse(
         stale_after_minutes=stale_after_minutes,
         items=items,
+    )
+
+
+@router.post(
+    "/admin/integrations/{branch_id}/reconcile",
+    response_model=ConsoleIntegrationBranchActionResponse,
+    responses={
+        401: {"model": ConsoleErrorResponse},
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+        409: {"model": ConsoleErrorResponse},
+    },
+)
+async def run_integration_reconcile_for_branch(
+    branch_id: UUID,
+    body: ConsoleIntegrationBranchActionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleIntegrationBranchActionResponse:
+    context = get_console_context(request, db, require_selection=False, include_inactive_tenants=False)
+    _require_platform_admin(context)
+    _reject_unknown_query_params(request, set())
+
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    _require_client_access(context, branch.client_id, message="Branch belongs to another tenant")
+    if not branch.is_active:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Branch is inactive")
+
+    confirmation = None
+    if body.mode == "execute":
+        confirmation = require_confirmation(
+            db,
+            context,
+            confirmation_id=body.confirmation_id,
+            action="integration_reconcile",
+            target_type="branch",
+            target_id=branch.id,
+        )
+
+    result = run_integration_watchdog_scoped(
+        db,
+        client_id=branch.client_id,
+        branch_ids=[branch.id],
+        dry_run=(body.mode == "dry_run"),
+    )
+
+    if body.mode == "execute":
+        if confirmation:
+            mark_confirmation_used(
+                db,
+                context,
+                confirmation,
+                action="integration_reconcile",
+                target_type="branch",
+                target_id=branch.id,
+            )
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="integration_reconcile_run",
+            entity_type="branch",
+            entity_id=branch.id,
+            payload={
+                "mode": body.mode,
+                "checked": result.get("checked"),
+                "degraded": result.get("degraded"),
+                "recovered": result.get("recovered"),
+                "remediated": result.get("remediated"),
+            },
+            client_id=branch.client_id,
+            branch_id=branch.id,
+        )
+        db.commit()
+
+    return ConsoleIntegrationBranchActionResponse(
+        branch_id=branch.id,
+        mode=body.mode,
+        result=result,
     )
 
 
@@ -7001,7 +7325,10 @@ async def list_fleet_attention(
     _validate_limit(limit)
     if not isinstance(stale_after_minutes, int):
         stale_after_minutes = _INTEGRATION_DEFAULT_STALE_MINUTES
-    include_low_mode = _parse_bool_param("include_low", include_low, default=False)
+    normalized_include_low = include_low
+    if normalized_include_low is not None and normalized_include_low.lower() == "null":
+        normalized_include_low = None
+    include_low_mode = _parse_bool_param("include_low", normalized_include_low, default=False)
 
     context = get_console_context(
         request,
@@ -7100,6 +7427,7 @@ async def list_fleet_attention(
                 last_inbound_at, last_inbound_instance_id = observed
 
             status = _build_branch_integration_status(
+                client_id=client.id,
                 client_slug=client.name,
                 branch=branch,
                 has_telegram_bot_token=telegram_token_map.get(client.id, False),
@@ -7251,7 +7579,12 @@ async def update_company(
     body: ConsoleCompanyUpdateRequest,
     db: Session = Depends(get_db),
 ) -> ConsoleCompany:
-    context = get_console_context(request, db, require_selection=False)
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
     require_console_permission(
         context,
         "provisioning",
@@ -7262,6 +7595,8 @@ async def update_company(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
+    if context.role != "platform_admin":
+        _require_company_access(context, company.id)
 
     updated_fields: list[str] = []
     fields_set = body.model_fields_set
@@ -7307,7 +7642,12 @@ async def create_client(
     body: ConsoleClientCreateRequest,
     db: Session = Depends(get_db),
 ) -> ConsoleClientCreateResponse:
-    context = get_console_context(request, db, require_selection=False)
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
     require_console_permission(
         context,
         "provisioning",
@@ -7323,6 +7663,8 @@ async def create_client(
     company = db.query(Company).filter(Company.id == body.company_id).first()
     if not company:
         raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
+    if context.role != "platform_admin":
+        _require_company_access(context, company.id)
     company_id = company.id
 
     status_value = (body.status or "active").strip()
@@ -7374,7 +7716,12 @@ async def update_client(
     body: ConsoleClientUpdateRequest,
     db: Session = Depends(get_db),
 ) -> ConsoleClient:
-    context = get_console_context(request, db, require_selection=False)
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
     require_console_permission(
         context,
         "provisioning",
@@ -7385,6 +7732,7 @@ async def update_client(
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+    _require_client_access(context, client.id)
 
     updated_fields: list[str] = []
     fields_set = body.model_fields_set
@@ -7415,6 +7763,8 @@ async def update_client(
             company = db.query(Company).filter(Company.id == body.company_id).first()
             if not company:
                 raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
+            if context.role != "platform_admin":
+                _require_company_access(context, company.id)
             next_company_id = company.id
         else:
             next_company_id = None
@@ -7478,6 +7828,7 @@ async def archive_client(
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+    _require_client_access(context, client.id)
     if not _is_client_active_status(client.status):
         raise ConsoleAPIError(409, "INVALID_STATE", "Client is already archived")
 
@@ -7566,6 +7917,7 @@ async def restore_client(
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+    _require_client_access(context, client.id)
     if _is_client_active_status(client.status):
         raise ConsoleAPIError(409, "INVALID_STATE", "Client is already active")
 
@@ -7737,7 +8089,12 @@ async def update_branch(
     body: ConsoleBranchUpdateRequest,
     db: Session = Depends(get_db),
 ) -> ConsoleBranch:
-    context = get_console_context(request, db, require_selection=False)
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
     require_console_permission(
         context,
         "provisioning",
@@ -7748,6 +8105,7 @@ async def update_branch(
     branch = db.query(Branch).filter(Branch.id == branch_id).first()
     if not branch:
         raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    _require_client_access(context, branch.client_id)
 
     confirmation = None
     previous_instance_id = branch.instance_id
@@ -8563,6 +8921,27 @@ async def create_agent(
     if body.role == "platform_admin" and context.role != "platform_admin":
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Only platform admin can assign platform_admin role")
 
+    sso_username = _normalize_optional_text(body.sso_username)
+    sso_password = (body.sso_password or "").strip()
+    if body.oidc_subject and sso_username:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            "Use either oidc_subject or sso_username/sso_password, not both",
+        )
+    if sso_password and not sso_username:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "sso_username is required when sso_password is provided")
+    if sso_username and not sso_password:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "sso_password is required when sso_username is provided")
+
+    resolved_oidc_subject = body.oidc_subject
+    if sso_username and sso_password:
+        resolved_oidc_subject = _provision_sso_user_and_get_subject(
+            username=sso_username,
+            password=sso_password,
+            temporary_password=bool(body.sso_temp_password if body.sso_temp_password is not None else True),
+        )
+
     branch = None
     if body.branch_id:
         branch = (
@@ -8593,7 +8972,7 @@ async def create_agent(
         branch=branch,
         name=body.name,
         is_active=is_active,
-        oidc_subject=body.oidc_subject,
+        oidc_subject=resolved_oidc_subject,
         linked_from="admin_api",
         now=now,
     )
@@ -8607,7 +8986,8 @@ async def create_agent(
         payload={
             "role": agent.role,
             "branch_id": str(agent.branch_id) if agent.branch_id else None,
-            "oidc_linked": bool(body.oidc_subject),
+            "oidc_linked": bool(resolved_oidc_subject),
+            "sso_username": sso_username,
         },
         client_id=client.id,
         branch_id=agent.branch_id,

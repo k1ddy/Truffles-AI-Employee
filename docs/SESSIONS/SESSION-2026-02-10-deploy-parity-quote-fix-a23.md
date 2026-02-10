@@ -1,0 +1,22 @@
+# SESSION 2026-02-10-deploy-parity-quote-fix-a23 — Session 2026-02-10-deploy-parity-quote-fix-a23
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-10-deploy-parity-quote-fix-a23.md
+- branch: feat/2026-02-10-deploy-parity-quote-fix-a23
+- worktree: /home/zhan/worktrees/2026-02-10-deploy-parity-quote-fix-a23
+- base_ref: origin/main
+- scope: Hotfix deploy parity-check quoting bug in CI main deploy step (run 21848271351).
+- done:
+  - Session created.
+  - Root cause confirmed from deploy job `63049260962`: `SyntaxError` in deploy parity-check `python3 -c` command.
+  - Fixed CI deploy parity-check quoting in `.github/workflows/ci.yml` to parse `/admin/version` response correctly.
+  - Added tolerant handling for `include_low=null` in `list_fleet_attention` to match nullable query contract behavior.
+  - Added regression test `test_list_fleet_attention_include_low_null_uses_default`.
+  - Local checks passed: YAML parse, `pytest -q truffles-api/tests/test_console_fleet_attention.py`, `scripts/session_check.sh`.
+- next:
+  - Open PR and merge after CI green.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-10-deploy-parity-quote-fix-a23.md
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21848271351
+- last_updated: 2026-02-10

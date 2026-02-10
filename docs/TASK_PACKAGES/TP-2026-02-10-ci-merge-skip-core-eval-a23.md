@@ -11,6 +11,7 @@
 ## Scope
 - Только `.github/workflows/ci.yml`.
 - Только логика `changes` outputs + `core-eval` condition + summary/диагностика skipped.
+- Hotfix deploy-устойчивости для `scripts/restart_console_web.sh` (не зависеть от caller cwd/.git).
 
 ## Out of scope
 - Runtime API/Console код.
@@ -18,6 +19,7 @@
 
 ## Touch-list
 - `.github/workflows/ci.yml`
+- `scripts/restart_console_web.sh`
 - `docs/SESSIONS/SESSION-2026-02-10-ci-merge-skip-core-eval-a23.md`
 - `docs/SESSION_INDEX.md`
 

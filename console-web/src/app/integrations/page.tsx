@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import toast from "react-hot-toast";
 
 import AccessDenied from "@/components/AccessDenied";
 import {
     adminApi,
     authApi,
     canAccessConsole,
+    confirmationsApi,
     type BranchIntegrationStatus,
 } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
@@ -33,7 +35,10 @@ function statusLabel(status: string): string {
         missing_instance_id: "Missing instance_id",
         instance_id_mismatch: "Instance mismatch",
         invalid_webhook_url: "Invalid webhook URL",
+        invalid_webhook_secret: "Invalid webhook secret",
+        webhook_secret_drift: "Webhook secret drift",
         no_recent_inbound: "No recent inbound",
+        inbound_without_outbound: "Inbound without outbound",
         missing_bot_token: "Missing bot token",
         missing_chat_id: "Missing chat id",
     };
@@ -69,6 +74,8 @@ export default function IntegrationsPage() {
     const { data: session } = useSession();
     const { handleError } = useErrorHandler();
     const [staleAfterMinutes, setStaleAfterMinutes] = useState(60);
+    const [runningAction, setRunningAction] = useState<{ branchId: string; mode: "dry_run" | "execute" } | null>(null);
+    const [actionSummaryByBranch, setActionSummaryByBranch] = useState<Record<string, string>>({});
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -80,7 +87,7 @@ export default function IntegrationsPage() {
     });
 
     const role = meData?.agent?.role ?? "manager";
-    const canReadProvisioning = canAccessConsole(role, "provisioning", "read");
+    const canReadIntegrations = canAccessConsole(role, "integrations", "read");
 
     const {
         data,
@@ -95,7 +102,7 @@ export default function IntegrationsPage() {
             });
             return response.data;
         },
-        enabled: !!session && canReadProvisioning,
+        enabled: !!session && canReadIntegrations,
         refetchInterval: 60000,
     });
 
@@ -121,7 +128,7 @@ export default function IntegrationsPage() {
         );
     }
 
-    if (!canReadProvisioning) {
+    if (!canReadIntegrations) {
         return <AccessDenied message="Эта роль не имеет доступа к интеграциям." />;
     }
 
@@ -157,6 +164,58 @@ export default function IntegrationsPage() {
     }
 
     const items = data?.items ?? [];
+
+    const createReconcileConfirmation = async (branchId: string, reason: string): Promise<string> => {
+        const confirmation = await confirmationsApi.create({
+            action: "integration_reconcile",
+            target_type: "branch",
+            target_id: branchId,
+            reason,
+        });
+        return confirmation.data.confirmation_id;
+    };
+
+    const runBranchReconcile = async (branchId: string, mode: "dry_run" | "execute") => {
+        setRunningAction({ branchId, mode });
+        try {
+            const runAction = async (confirmationId?: string) =>
+                adminApi.reconcileIntegrationBranch(branchId, {
+                    mode,
+                    confirmation_id: confirmationId,
+                });
+
+            let response;
+            try {
+                response = await runAction();
+            } catch (error: unknown) {
+                const apiCode = (error as { response?: { data?: { error?: { code?: string } } } })
+                    ?.response?.data?.error?.code;
+                if (mode !== "execute" || apiCode !== "CONFIRMATION_REQUIRED") {
+                    throw error;
+                }
+                const reason = window.prompt(
+                    "Укажите причину execute integration_reconcile",
+                    "manual integration reconcile from platform admin cockpit",
+                );
+                if (!reason || !reason.trim()) {
+                    toast.error("Укажите причину для execute");
+                    return;
+                }
+                const confirmationId = await createReconcileConfirmation(branchId, reason.trim());
+                response = await runAction(confirmationId);
+            }
+
+            const result = response.data.result || {};
+            const summary = `checked ${result.checked ?? 0} · degraded ${result.degraded ?? 0} · recovered ${result.recovered ?? 0} · remediated ${result.remediated ?? 0}`;
+            setActionSummaryByBranch((prev) => ({ ...prev, [branchId]: summary }));
+            toast.success(mode === "dry_run" ? "Dry-run выполнен" : "Execute выполнен");
+            await refetch();
+        } catch (error) {
+            handleError(error);
+        } finally {
+            setRunningAction(null);
+        }
+    };
 
     return (
         <div className="max-w-6xl mx-auto p-6" data-testid="integrations-page">
@@ -197,12 +256,14 @@ export default function IntegrationsPage() {
                 <table className="w-full text-left">
                     <thead className="bg-muted">
                         <tr>
+                            <th className="p-4 text-sm font-medium text-muted-foreground">Клиент</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">Филиал</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">WhatsApp</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">Telegram</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">Последний inbound</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">Drift issues</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">Итог</th>
+                            <th className="p-4 text-sm font-medium text-muted-foreground">Действия</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -212,6 +273,10 @@ export default function IntegrationsPage() {
                                 className="border-t border-border/60 hover:bg-muted/50"
                                 data-testid="integrations-row"
                             >
+                                <td className="p-4">
+                                    <div className="font-medium">{item.client_slug}</div>
+                                    <div className="text-xs text-muted-foreground">{item.client_id}</div>
+                                </td>
                                 <td className="p-4">
                                     <div className="font-medium">{item.branch_name}</div>
                                     <div className="text-xs text-muted-foreground">{item.branch_slug}</div>
@@ -245,12 +310,35 @@ export default function IntegrationsPage() {
                                         {statusLabel(item.status)}
                                     </span>
                                 </td>
+                                <td className="p-4 text-sm">
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onClick={() => runBranchReconcile(String(item.branch_id), "dry_run")}
+                                            disabled={!item.is_active || !!runningAction}
+                                        >
+                                            {runningAction?.branchId === String(item.branch_id) && runningAction?.mode === "dry_run" ? "Dry-run..." : "Dry-run"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onClick={() => runBranchReconcile(String(item.branch_id), "execute")}
+                                            disabled={!item.is_active || !!runningAction}
+                                        >
+                                            {runningAction?.branchId === String(item.branch_id) && runningAction?.mode === "execute" ? "Execute..." : "Execute"}
+                                        </button>
+                                    </div>
+                                    <div className="mt-1 text-xs text-muted-foreground">
+                                        {actionSummaryByBranch[String(item.branch_id)] ?? "—"}
+                                    </div>
+                                </td>
                             </tr>
                         ))}
                         {items.length === 0 && (
                             <tr>
-                                <td colSpan={6} className="p-8 text-center text-muted-foreground" data-testid="integrations-empty">
-                                    Для выбранного клиента филиалы не найдены.
+                                <td colSpan={8} className="p-8 text-center text-muted-foreground" data-testid="integrations-empty">
+                                    Филиалы в доступном fleet не найдены.
                                 </td>
                             </tr>
                         )}
