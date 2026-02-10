@@ -343,3 +343,4 @@
 | 2026-02-10-deploy-parity-quote-fix-a23 | done | feat/2026-02-10-deploy-parity-quote-fix-a23 | /home/zhan/worktrees/2026-02-10-deploy-parity-quote-fix-a23 | docs/TASK_PACKAGES/TP-2026-02-10-deploy-parity-quote-fix-a23.md | 2026-02-10 |
 | 2026-02-10-tenants-platform-admin-fixes-a24 | active | feat/2026-02-10-tenants-platform-admin-fixes | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-10-tenants-platform-admin-fixes-a24.md | 2026-02-10 |
 | 2026-02-10-main-ci-deploy-contract-fix-a23 | done | feat/2026-02-10-main-ci-deploy-contract-fix-a23 | /home/zhan/worktrees/2026-02-10-main-ci-deploy-contract-fix-a23 | docs/TASK_PACKAGES/TP-2026-02-10-main-ci-deploy-contract-fix-a23.md | 2026-02-10 |
+| 2026-02-10-ci-deploy-livecheck-gate-a25 | done | feat/2026-02-10-ci-deploy-livecheck-gate-a25 | /home/zhan/worktrees/2026-02-10-ci-deploy-livecheck-gate-a25 | docs/TASK_PACKAGES/TP-2026-02-10-ci-deploy-livecheck-gate-a25.md | 2026-02-10 |
