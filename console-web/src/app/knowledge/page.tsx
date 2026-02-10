@@ -70,6 +70,21 @@ function isApiUnavailable(error: unknown) {
         && [404, 501].includes(error.response?.status ?? 0);
 }
 
+function isGatewayLikeError(error: unknown) {
+    if (!axios.isAxiosError(error)) {
+        return false;
+    }
+    const status = error.response?.status ?? 0;
+    const payload = error.response?.data as { error?: { code?: unknown } } | undefined;
+    const code = payload?.error?.code;
+    return status === 502
+        || status === 503
+        || status === 504
+        || code === "PROXY_ERROR"
+        || code === "UPSTREAM_ERROR"
+        || code === "UPSTREAM_INVALID_RESPONSE";
+}
+
 function normalizeStringList(value: unknown): string[] {
     if (!Array.isArray(value)) {
         return [];
@@ -284,6 +299,8 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const [fleetCompanyId, setFleetCompanyId] = useState("");
     const [fleetBranchId, setFleetBranchId] = useState("");
     const [isApplyingFleetContext, setIsApplyingFleetContext] = useState(false);
+    const [fleetAttentionEnabled, setFleetAttentionEnabled] = useState(false);
+    const [fleetAttentionError, setFleetAttentionError] = useState<string | null>(null);
     const [branchKnowledgeTagDraft, setBranchKnowledgeTagDraft] = useState("");
     const [branchWorkingHoursDraft, setBranchWorkingHoursDraft] = useState("{}");
     const [branchChangeReason, setBranchChangeReason] = useState("");
@@ -394,7 +411,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             const response = await adminApi.listFleetAttention({ limit: 12 });
             return response.data;
         },
-        enabled: !!session && !!meData && !apiUnavailable && canRead && isPlatformAdmin,
+        enabled: !!session && !!meData && !apiUnavailable && canRead && isPlatformAdmin && fleetAttentionEnabled,
         retry: false,
     });
 
@@ -499,15 +516,30 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
 
     useEffect(() => {
         const error = fleetAttentionQuery.error;
-        if (!error || apiUnavailable) {
+        if (!fleetAttentionEnabled || !error || apiUnavailable) {
             return;
         }
         if (isApiUnavailable(error)) {
             setApiUnavailable(true);
             return;
         }
+        if (isGatewayLikeError(error)) {
+            setFleetAttentionError("Fleet сигналы временно недоступны. Попробуйте обновить позже.");
+            return;
+        }
         handleError(error);
-    }, [fleetAttentionQuery.error, apiUnavailable, handleError]);
+    }, [fleetAttentionQuery.error, fleetAttentionEnabled, apiUnavailable, handleError]);
+
+    useEffect(() => {
+        if (!fleetAttentionEnabled) {
+            setFleetAttentionError(null);
+            return;
+        }
+        if (!fleetAttentionQuery.isSuccess) {
+            return;
+        }
+        setFleetAttentionError(null);
+    }, [fleetAttentionEnabled, fleetAttentionQuery.isSuccess, fleetAttentionQuery.dataUpdatedAt]);
 
     useEffect(() => {
         const error = specialistsQuery.error;
@@ -788,7 +820,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const isFleetBusy = isApplyingFleetContext
         || fleetClientsQuery.isFetching
         || fleetBranchesQuery.isFetching
-        || fleetAttentionQuery.isFetching;
+        || (fleetAttentionEnabled && fleetAttentionQuery.isFetching);
 
     const applyConsoleContext = async ({
         companyId,
@@ -896,28 +928,42 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                             Быстрый выбор клиента и филиала для управления знаниями по всей платформе.
                         </p>
                     </div>
-                    <button
-                        type="button"
-                        className="btn-ghost"
-                        onClick={() => {
-                            fleetAttentionQuery.refetch();
-                            fleetClientsQuery.refetch();
-                            if (fleetClientId) {
-                                fleetBranchesQuery.refetch();
-                            }
-                        }}
-                        disabled={isFleetBusy}
-                    >
-                        {isFleetBusy ? "Обновление..." : "Обновить"}
-                    </button>
-                </div>
-
-                {fleetSummary && (
-                    <div className="mt-3 text-xs text-muted-foreground">
-                        активных клиентов {fleetSummary.active_clients_total} · с риском {fleetSummary.clients_with_attention} ·
-                        высокий {fleetSummary.high_risk_clients} · средний {fleetSummary.medium_risk_clients}
+                    <div className="flex flex-wrap items-center gap-2">
+                        <button
+                            type="button"
+                            className="btn-ghost"
+                            onClick={() => {
+                                if (fleetAttentionEnabled) {
+                                    setFleetAttentionEnabled(false);
+                                    setFleetAttentionError(null);
+                                    return;
+                                }
+                                setFleetAttentionError(null);
+                                setFleetAttentionEnabled(true);
+                            }}
+                            disabled={isApplyingFleetContext}
+                        >
+                            {fleetAttentionEnabled ? "Скрыть сигналы" : "Показать сигналы"}
+                        </button>
+                        <button
+                            type="button"
+                            className="btn-ghost"
+                            onClick={() => {
+                                setFleetAttentionError(null);
+                                fleetClientsQuery.refetch();
+                                if (fleetClientId) {
+                                    fleetBranchesQuery.refetch();
+                                }
+                                if (fleetAttentionEnabled) {
+                                    fleetAttentionQuery.refetch();
+                                }
+                            }}
+                            disabled={isFleetBusy}
+                        >
+                            {isFleetBusy ? "Обновление..." : "Обновить"}
+                        </button>
                     </div>
-                )}
+                </div>
 
                 <div className="mt-4 grid gap-3 lg:grid-cols-3">
                     <label className="text-xs text-muted-foreground">
@@ -984,48 +1030,92 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                         </button>
                     </div>
                 </div>
+                {!fleetAttentionEnabled && (
+                    <div className="mt-4 text-xs text-muted-foreground">
+                        Fleet-сигналы отключены по умолчанию: включайте при необходимости оперативного контроля рисков.
+                    </div>
+                )}
 
-                {fleetAttentionItems.length > 0 && (
+                {fleetAttentionEnabled && (
                     <div className="mt-4 space-y-2">
-                        {fleetAttentionItems.slice(0, 5).map((item) => (
-                            <div
-                                key={item.client_id}
-                                className="rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground"
-                            >
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <span className="font-medium text-foreground">
-                                        {item.client_name ?? item.client_slug}
-                                    </span>
-                                    <span>risk {item.attention_level} · score {item.attention_score}</span>
-                                </div>
-                                <div className="mt-1">
-                                    сервис {item.service_state} · stale {item.stale_branches} · outbox_failed_24h {item.outbox_failed_24h}
-                                </div>
-                                <div className="mt-2 flex flex-wrap items-center gap-2">
-                                    <button
-                                        type="button"
-                                        className="btn-ghost"
-                                        onClick={() => void applyConsoleContext({
-                                            companyId: item.company_id,
-                                            clientId: item.client_id,
-                                            branchId: null,
-                                            successMessage: "Контекст клиента обновлен",
-                                        })}
-                                        disabled={isFleetBusy}
-                                    >
-                                        В контекст клиента
-                                    </button>
-                                    <button
-                                        type="button"
-                                        className="btn-ghost"
-                                        onClick={() => void openRouteWithFleetContext("/integrations", item.client_id, item.company_id)}
-                                        disabled={isFleetBusy}
-                                    >
-                                        Интеграции
-                                    </button>
-                                </div>
+                        {fleetAttentionQuery.isLoading && (
+                            <div className="rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground">
+                                Загрузка fleet-сигналов...
                             </div>
-                        ))}
+                        )}
+
+                        {fleetAttentionError && (
+                            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
+                                {fleetAttentionError}
+                                <button
+                                    type="button"
+                                    className="btn-ghost ml-2"
+                                    onClick={() => {
+                                        setFleetAttentionError(null);
+                                        fleetAttentionQuery.refetch();
+                                    }}
+                                >
+                                    Повторить
+                                </button>
+                            </div>
+                        )}
+
+                        {!fleetAttentionError && fleetSummary && (
+                            <div className="text-xs text-muted-foreground">
+                                активных клиентов {fleetSummary.active_clients_total} · с риском {fleetSummary.clients_with_attention} ·
+                                высокий {fleetSummary.high_risk_clients} · средний {fleetSummary.medium_risk_clients}
+                            </div>
+                        )}
+
+                        {!fleetAttentionError && fleetAttentionItems.length > 0 && (
+                            <div className="space-y-2">
+                                {fleetAttentionItems.slice(0, 5).map((item) => (
+                                    <div
+                                        key={item.client_id}
+                                        className="rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground"
+                                    >
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <span className="font-medium text-foreground">
+                                                {item.client_name ?? item.client_slug}
+                                            </span>
+                                            <span>risk {item.attention_level} · score {item.attention_score}</span>
+                                        </div>
+                                        <div className="mt-1">
+                                            сервис {item.service_state} · stale {item.stale_branches} · outbox_failed_24h {item.outbox_failed_24h}
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                            <button
+                                                type="button"
+                                                className="btn-ghost"
+                                                onClick={() => void applyConsoleContext({
+                                                    companyId: item.company_id,
+                                                    clientId: item.client_id,
+                                                    branchId: null,
+                                                    successMessage: "Контекст клиента обновлен",
+                                                })}
+                                                disabled={isFleetBusy}
+                                            >
+                                                В контекст клиента
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="btn-ghost"
+                                                onClick={() => void openRouteWithFleetContext("/integrations", item.client_id, item.company_id)}
+                                                disabled={isFleetBusy}
+                                            >
+                                                Интеграции
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {!fleetAttentionError && !fleetAttentionQuery.isLoading && fleetAttentionItems.length === 0 && (
+                            <div className="rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground">
+                                Активных проблем во fleet-сигналах не найдено.
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
