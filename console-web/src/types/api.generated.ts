@@ -1171,6 +1171,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/integrations/{branch_id}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run integration reconcile for a single branch */
+        post: operations["runAdminIntegrationReconcileForBranch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/fleet/attention": {
         parameters: {
             query?: never;
@@ -1811,6 +1828,9 @@ export interface components {
         };
         BranchIntegrationStatus: {
             /** Format: uuid */
+            client_id: string;
+            client_slug: string;
+            /** Format: uuid */
             branch_id: string;
             branch_slug: string;
             branch_name: string;
@@ -1826,6 +1846,15 @@ export interface components {
             /** Format: date-time */
             last_inbound_at?: string | null;
             last_inbound_instance_id?: string | null;
+            /** @enum {string} */
+            integration_state?: "ok" | "degraded";
+            integration_reason?: string | null;
+            /** Format: date-time */
+            integration_checked_at?: string | null;
+            /** Format: date-time */
+            integration_degraded_at?: string | null;
+            /** Format: date-time */
+            integration_recovered_at?: string | null;
             drift_issues: string[];
             /** @enum {string} */
             status: "ok" | "warn" | "error";
@@ -1833,6 +1862,22 @@ export interface components {
         IntegrationsListResponse: {
             stale_after_minutes: number;
             items: components["schemas"]["BranchIntegrationStatus"][];
+        };
+        IntegrationBranchActionRequest: {
+            /**
+             * @default dry_run
+             * @enum {string}
+             */
+            mode: "dry_run" | "execute";
+            /** Format: uuid */
+            confirmation_id?: string | null;
+        };
+        IntegrationBranchActionResponse: {
+            /** Format: uuid */
+            branch_id: string;
+            /** @enum {string} */
+            mode: "dry_run" | "execute";
+            result: Record<string, never>;
         };
         OnboardingStepStatus: {
             /** @enum {string} */
@@ -1858,7 +1903,7 @@ export interface components {
             step_id: "branch_draft" | "integrations" | "team" | "telegram" | "knowledge" | "booking" | "go_no_go";
         };
         /** @enum {string} */
-        ConfirmationAction: "knowledge_rollback" | "branch_deactivate";
+        ConfirmationAction: "knowledge_rollback" | "branch_deactivate" | "integration_reconcile";
         /** @enum {string} */
         ConfirmationTargetType: "knowledge_version" | "branch";
         ConfirmationCreateRequest: {
@@ -4913,6 +4958,37 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    runAdminIntegrationReconcileForBranch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntegrationBranchActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Integration reconcile result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationBranchActionResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
         };
     };

@@ -98,6 +98,8 @@ from app.schemas.console import (
     ConsoleFleetAttentionSummary,
     ConsoleFleetSummary,
     ConsoleHealthResponse,
+    ConsoleIntegrationBranchActionRequest,
+    ConsoleIntegrationBranchActionResponse,
     ConsoleIntegrationsListResponse,
     ConsoleKnowledgeCurrentResponse,
     ConsoleKnowledgeHistoryItem,
@@ -1034,14 +1036,6 @@ def _require_owner_admin(
         context,
         allowed=("platform_admin", "owner", "admin"),
         message=message,
-    )
-
-
-def _require_platform_admin(context: ConsoleAuthContext) -> None:
-    _require_roles(
-        context,
-        allowed=("platform_admin", "owner", "admin", "support"),
-        message="Only platform admin/owner/admin/support can access admin operations",
     )
 
 
@@ -2201,6 +2195,7 @@ def _load_latest_branch_inbound_observations(
 
 def _build_branch_integration_status(
     *,
+    client_id: UUID,
     client_slug: str,
     branch: Branch,
     has_telegram_bot_token: bool,
@@ -2268,6 +2263,8 @@ def _build_branch_integration_status(
             drift_issues.append(integration_reason)
 
     return ConsoleBranchIntegrationStatus(
+        client_id=client_id,
+        client_slug=client_slug,
         branch_id=branch.id,
         branch_slug=branch.slug,
         branch_name=branch.name,
@@ -6929,40 +6926,60 @@ async def list_integrations(
     ),
     db: Session = Depends(get_db),
 ) -> ConsoleIntegrationsListResponse:
-    context = get_console_context(request, db, require_selection=False, include_inactive_tenants=True)
-    require_console_permission(
-        context,
-        "provisioning",
-        "read",
-        message="Only owner/admin/support can access provisioning",
-    )
+    context = get_console_context(request, db, require_selection=False, include_inactive_tenants=False)
+    _require_platform_admin(context)
     _reject_unknown_query_params(request, {"stale_after_minutes"})
+
+    active_clients = [
+        client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
+    ]
+    if not active_clients:
+        return ConsoleIntegrationsListResponse(
+            stale_after_minutes=stale_after_minutes,
+            items=[],
+        )
+
+    client_ids = [client.id for client in active_clients]
+    client_slug_map = {client.id: client.name for client in active_clients}
 
     branches = (
         db.query(Branch)
-        .filter(Branch.client_id == context.client.id)
-        .order_by(Branch.name.asc(), Branch.created_at.asc())
+        .filter(Branch.client_id.in_(client_ids))
+        .order_by(Branch.client_id.asc(), Branch.name.asc(), Branch.created_at.asc())
         .all()
     )
-    settings = db.query(ClientSettings).filter(ClientSettings.client_id == context.client.id).first()
-    has_telegram_bot_token = bool(_normalize_optional_text(settings.telegram_bot_token) if settings else None)
+    token_rows = (
+        db.query(
+            ClientSettings.client_id,
+            ClientSettings.telegram_bot_token,
+        )
+        .filter(ClientSettings.client_id.in_(client_ids))
+        .all()
+    )
+    telegram_token_map: dict[UUID, bool] = {}
+    for client_id, token in token_rows:
+        telegram_token_map[client_id] = bool(_normalize_optional_text(token))
 
-    inbound_observations = _load_latest_branch_inbound_observations(
+    inbound_observations = _load_latest_branch_inbound_observations_for_clients(
         db,
-        client_id=context.client.id,
+        client_ids=client_ids,
     )
     now = datetime.now(timezone.utc)
     items = []
     for branch in branches:
+        client_slug = client_slug_map.get(branch.client_id)
+        if not client_slug:
+            continue
         last_inbound_at: Optional[datetime] = None
         last_inbound_instance_id: Optional[str] = None
         observed = inbound_observations.get(branch.id)
         if observed:
             last_inbound_at, last_inbound_instance_id = observed
         item = _build_branch_integration_status(
-            client_slug=context.client.name,
+            client_id=branch.client_id,
+            client_slug=client_slug,
             branch=branch,
-            has_telegram_bot_token=has_telegram_bot_token,
+            has_telegram_bot_token=telegram_token_map.get(branch.client_id, False),
             stale_after_minutes=stale_after_minutes,
             last_inbound_at=last_inbound_at,
             last_inbound_instance_id=last_inbound_instance_id,
@@ -6970,14 +6987,89 @@ async def list_integrations(
         )
         items.append(item)
 
-    _emit_integration_drift_signals(
-        db,
-        context=context,
-        statuses=items,
-    )
     return ConsoleIntegrationsListResponse(
         stale_after_minutes=stale_after_minutes,
         items=items,
+    )
+
+
+@router.post(
+    "/admin/integrations/{branch_id}/reconcile",
+    response_model=ConsoleIntegrationBranchActionResponse,
+    responses={
+        401: {"model": ConsoleErrorResponse},
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+        409: {"model": ConsoleErrorResponse},
+    },
+)
+async def run_integration_reconcile_for_branch(
+    branch_id: UUID,
+    body: ConsoleIntegrationBranchActionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleIntegrationBranchActionResponse:
+    context = get_console_context(request, db, require_selection=False, include_inactive_tenants=False)
+    _require_platform_admin(context)
+    _reject_unknown_query_params(request, set())
+
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    _require_client_access(context, branch.client_id, message="Branch belongs to another tenant")
+    if not branch.is_active:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Branch is inactive")
+
+    confirmation = None
+    if body.mode == "execute":
+        confirmation = require_confirmation(
+            db,
+            context,
+            confirmation_id=body.confirmation_id,
+            action="integration_reconcile",
+            target_type="branch",
+            target_id=branch.id,
+        )
+
+    result = run_integration_watchdog_scoped(
+        db,
+        client_id=branch.client_id,
+        branch_ids=[branch.id],
+        dry_run=(body.mode == "dry_run"),
+    )
+
+    if body.mode == "execute":
+        if confirmation:
+            mark_confirmation_used(
+                db,
+                context,
+                confirmation,
+                action="integration_reconcile",
+                target_type="branch",
+                target_id=branch.id,
+            )
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="integration_reconcile_run",
+            entity_type="branch",
+            entity_id=branch.id,
+            payload={
+                "mode": body.mode,
+                "checked": result.get("checked"),
+                "degraded": result.get("degraded"),
+                "recovered": result.get("recovered"),
+                "remediated": result.get("remediated"),
+            },
+            client_id=branch.client_id,
+            branch_id=branch.id,
+        )
+        db.commit()
+
+    return ConsoleIntegrationBranchActionResponse(
+        branch_id=branch.id,
+        mode=body.mode,
+        result=result,
     )
 
 
@@ -7103,6 +7195,7 @@ async def list_fleet_attention(
                 last_inbound_at, last_inbound_instance_id = observed
 
             status = _build_branch_integration_status(
+                client_id=client.id,
                 client_slug=client.name,
                 branch=branch,
                 has_telegram_bot_token=telegram_token_map.get(client.id, False),

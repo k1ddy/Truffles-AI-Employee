@@ -18,6 +18,7 @@ CONFIRMATION_REASON_MAX_LEN = 500
 CONFIRMATION_ACTIONS = {
     "knowledge_rollback": "knowledge_version",
     "branch_deactivate": "branch",
+    "integration_reconcile": "branch",
 }
 
 

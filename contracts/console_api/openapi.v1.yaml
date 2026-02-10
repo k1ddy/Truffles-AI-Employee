@@ -2016,6 +2016,42 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /admin/integrations/{branch_id}/reconcile:
+    post:
+      operationId: runAdminIntegrationReconcileForBranch
+      tags: [integrations]
+      summary: Run integration reconcile for a single branch
+      parameters:
+        - name: branch_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IntegrationBranchActionRequest"
+      responses:
+        "200":
+          description: Integration reconcile result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationBranchActionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /admin/fleet/attention:
     get:
       operationId: listFleetAttention
@@ -3587,6 +3623,8 @@ components:
       type: object
       required:
         [
+          client_id,
+          client_slug,
           branch_id,
           branch_slug,
           branch_name,
@@ -3598,6 +3636,11 @@ components:
           status,
         ]
       properties:
+        client_id:
+          type: string
+          format: uuid
+        client_slug:
+          type: string
         branch_id:
           type: string
           format: uuid
@@ -3632,6 +3675,24 @@ components:
         last_inbound_instance_id:
           type: string
           nullable: true
+        integration_state:
+          type: string
+          enum: [ok, degraded]
+        integration_reason:
+          type: string
+          nullable: true
+        integration_checked_at:
+          type: string
+          format: date-time
+          nullable: true
+        integration_degraded_at:
+          type: string
+          format: date-time
+          nullable: true
+        integration_recovered_at:
+          type: string
+          format: date-time
+          nullable: true
         drift_issues:
           type: array
           items:
@@ -3650,6 +3711,31 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/BranchIntegrationStatus"
+
+    IntegrationBranchActionRequest:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [dry_run, execute]
+          default: dry_run
+        confirmation_id:
+          type: string
+          format: uuid
+          nullable: true
+
+    IntegrationBranchActionResponse:
+      type: object
+      required: [branch_id, mode, result]
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        mode:
+          type: string
+          enum: [dry_run, execute]
+        result:
+          type: object
 
     OnboardingStepStatus:
       type: object
@@ -3700,7 +3786,7 @@ components:
 
     ConfirmationAction:
       type: string
-      enum: [knowledge_rollback, branch_deactivate]
+      enum: [knowledge_rollback, branch_deactivate, integration_reconcile]
 
     ConfirmationTargetType:
       type: string
