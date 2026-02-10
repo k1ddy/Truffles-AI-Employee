@@ -895,6 +895,15 @@ def execute_tool_action(
             specialist_name=specialist_name,
         )
         if specialist_error:
+            explicit_specialist_requested = bool(
+                (isinstance(specialist_id, str) and specialist_id.strip())
+                or (isinstance(specialist_name, str) and specialist_name.strip())
+            )
+            if specialist_error == "specialist_not_found" and not explicit_specialist_requested:
+                specialist = None
+                specialist_selection = "none_available"
+                specialist_error = None
+        if specialist_error:
             message = (
                 "Нашла несколько мастеров с таким именем. Уточните, пожалуйста."
                 if specialist_error == "specialist_ambiguous"

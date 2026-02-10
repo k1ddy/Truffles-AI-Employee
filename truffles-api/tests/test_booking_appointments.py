@@ -98,6 +98,22 @@ def test_create_booking_appointment_collect_preferences(monkeypatch):
     assert kwargs["commit"] is False
 
 
+def test_parse_booking_datetime_handles_dateparser_timezone_conflict():
+    now = datetime(2026, 2, 10, 12, 0, tzinfo=timezone.utc)
+
+    with patch(
+        "app.routers.webhook.booking.dateparser.parse",
+        side_effect=Exception("Multiple conflicting time zone configurations found"),
+    ):
+        parsed = booking_router._parse_booking_datetime(
+            "на выходных",
+            tz_name="Asia/Almaty",
+            now=now,
+        )
+
+    assert parsed is None
+
+
 def test_create_booking_appointment_reuses_existing():
     now = datetime(2026, 1, 30, 9, 0, tzinfo=timezone.utc)
     branch_id = uuid4()
@@ -296,3 +312,51 @@ def test_tool_registry_get_booking_reports_time_mismatch():
     assert result.decision_meta["tool_decision"] == "time_mismatch"
     assert result.decision_meta["requested_time"] == "15:30"
     assert result.decision_meta["appointment_time"] == "09:00"
+
+
+def test_tool_registry_book_slot_allows_missing_specialist_when_not_explicit():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+    appointment = SimpleNamespace(id=uuid4(), specialist_id=None)
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "get_provider_health",
+        return_value=SimpleNamespace(ready=True, reason=None),
+    ), patch.object(
+        tool_registry_service,
+        "_resolve_specialist_for_booking",
+        return_value=(None, None, "specialist_not_found"),
+    ), patch.object(
+        tool_registry_service,
+        "_book_slot",
+        return_value=(appointment, None),
+    ) as book_slot_mock, patch.object(
+        tool_registry_service, "enqueue_appointment_sync", return_value=None
+    ), patch.object(
+        tool_registry_service, "schedule_default_reminders", return_value=[]
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.book_slot",
+            tool_args={"start_at": "2026-02-12T13:00:00", "service_query": "Маникюр"},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+            user_name="Лена",
+            user_phone="+77011112233",
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.decision_meta.get("tool_decision") == "ok"
+    assert result.decision_meta.get("appointment_id") == str(appointment.id)
+    assert result.decision_meta.get("specialist_selection") == "none_available"
+    _, kwargs = book_slot_mock.call_args
+    assert kwargs["specialist_id"] is None

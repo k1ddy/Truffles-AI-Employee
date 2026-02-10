@@ -268,7 +268,8 @@ def enqueue_appointment_sync(
             "client_id": str(appointment.client_id),
             "branch_id": str(appointment.branch_id),
             "client_slug": client_slug,
-            "source": "calendar_sync",
+            "source": "system",
+            "producer": "calendar_sync",
         },
         "payload": {
             "appointment_id": str(appointment.id),
@@ -318,7 +319,8 @@ def enqueue_inbound_sync(
         "tenant_context": {
             "client_id": str(client_id),
             "branch_id": str(branch_id),
-            "source": "calendar_sync",
+            "source": "system",
+            "producer": "calendar_sync",
         },
         "payload": {
             "branch_id": str(branch_id),

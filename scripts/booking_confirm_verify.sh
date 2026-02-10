@@ -158,7 +158,7 @@ info "Evidence dir: $EVIDENCE_DIR"
 
 curl -s "${BASE_URL}/admin/health" | tee "${EVIDENCE_DIR}/admin_health.json" >/dev/null
 
-branch_row="$(psql_scalar "select id, client_id, instance_id, timezone, phone from branches where slug='$(sql_escape "$BRANCH_SLUG")';")"
+branch_row="$(psql_scalar "select id, client_id, instance_id, timezone, phone from branches where slug='$(sql_escape "$BRANCH_SLUG")' and is_active = true order by updated_at desc nulls last, created_at desc nulls last limit 1;")"
 if [[ -z "$branch_row" ]]; then
   die "Branch not found: ${BRANCH_SLUG}"
 fi
