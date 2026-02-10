@@ -7254,7 +7254,12 @@ async def update_company(
     body: ConsoleCompanyUpdateRequest,
     db: Session = Depends(get_db),
 ) -> ConsoleCompany:
-    context = get_console_context(request, db, require_selection=False)
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
     require_console_permission(
         context,
         "provisioning",
@@ -7265,6 +7270,8 @@ async def update_company(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
+    if context.role != "platform_admin":
+        _require_company_access(context, company.id)
 
     updated_fields: list[str] = []
     fields_set = body.model_fields_set
@@ -7310,7 +7317,12 @@ async def create_client(
     body: ConsoleClientCreateRequest,
     db: Session = Depends(get_db),
 ) -> ConsoleClientCreateResponse:
-    context = get_console_context(request, db, require_selection=False)
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
     require_console_permission(
         context,
         "provisioning",
@@ -7326,6 +7338,8 @@ async def create_client(
     company = db.query(Company).filter(Company.id == body.company_id).first()
     if not company:
         raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
+    if context.role != "platform_admin":
+        _require_company_access(context, company.id)
     company_id = company.id
 
     status_value = (body.status or "active").strip()
@@ -7377,7 +7391,12 @@ async def update_client(
     body: ConsoleClientUpdateRequest,
     db: Session = Depends(get_db),
 ) -> ConsoleClient:
-    context = get_console_context(request, db, require_selection=False)
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
     require_console_permission(
         context,
         "provisioning",
@@ -7388,6 +7407,7 @@ async def update_client(
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+    _require_client_access(context, client.id)
 
     updated_fields: list[str] = []
     fields_set = body.model_fields_set
@@ -7418,6 +7438,8 @@ async def update_client(
             company = db.query(Company).filter(Company.id == body.company_id).first()
             if not company:
                 raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
+            if context.role != "platform_admin":
+                _require_company_access(context, company.id)
             next_company_id = company.id
         else:
             next_company_id = None
@@ -7481,6 +7503,7 @@ async def archive_client(
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+    _require_client_access(context, client.id)
     if not _is_client_active_status(client.status):
         raise ConsoleAPIError(409, "INVALID_STATE", "Client is already archived")
 
@@ -7569,6 +7592,7 @@ async def restore_client(
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+    _require_client_access(context, client.id)
     if _is_client_active_status(client.status):
         raise ConsoleAPIError(409, "INVALID_STATE", "Client is already active")
 
@@ -7740,7 +7764,12 @@ async def update_branch(
     body: ConsoleBranchUpdateRequest,
     db: Session = Depends(get_db),
 ) -> ConsoleBranch:
-    context = get_console_context(request, db, require_selection=False)
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=True,
+    )
     require_console_permission(
         context,
         "provisioning",
@@ -7751,6 +7780,7 @@ async def update_branch(
     branch = db.query(Branch).filter(Branch.id == branch_id).first()
     if not branch:
         raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    _require_client_access(context, branch.client_id)
 
     confirmation = None
     previous_instance_id = branch.instance_id
