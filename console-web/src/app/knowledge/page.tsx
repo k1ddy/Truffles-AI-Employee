@@ -426,6 +426,16 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         retry: false,
     });
 
+    const allSpecialistsQuery = useQuery({
+        queryKey: ["knowledge-specialists-all"],
+        queryFn: async () => {
+            const response = await api.get("/calendar/specialists");
+            return response.data as { items?: SpecialistSummary[] };
+        },
+        enabled: !!session && !!meData && !apiUnavailable && canRead && !branchSelectionRequired && !!selectedBranchId,
+        retry: false,
+    });
+
     const approveCandidateMutation = useMutation({
         mutationFn: async (candidateId: string) => {
             const response = await learningApi.approve(candidateId);
@@ -553,6 +563,18 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         handleError(error);
     }, [specialistsQuery.error, apiUnavailable, handleError]);
 
+    useEffect(() => {
+        const error = allSpecialistsQuery.error;
+        if (!error || apiUnavailable) {
+            return;
+        }
+        if (isApiUnavailable(error)) {
+            setApiUnavailable(true);
+            return;
+        }
+        handleError(error);
+    }, [allSpecialistsQuery.error, apiUnavailable, handleError]);
+
     const currentPayloadObject = useMemo(() => {
         const payload = currentQuery.data?.payload;
         if (payload && typeof payload === "object" && !Array.isArray(payload)) {
@@ -593,6 +615,29 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         () => (specialistsQuery.data?.items ?? []).filter((item): item is SpecialistSummary => Boolean(item?.id)),
         [specialistsQuery.data]
     );
+    const allSpecialists = useMemo(
+        () => (allSpecialistsQuery.data?.items ?? []).filter((item): item is SpecialistSummary => Boolean(item?.id)),
+        [allSpecialistsQuery.data]
+    );
+    const specialistsInOtherBranches = useMemo(
+        () => allSpecialists.filter((item) => item.branch_id && item.branch_id !== selectedBranchId),
+        [allSpecialists, selectedBranchId]
+    );
+    const specialistsByBranch = useMemo(() => {
+        const counts = new Map<string, { label: string; count: number }>();
+        for (const specialist of specialistsInOtherBranches) {
+            const key = specialist.branch_id ?? "unknown";
+            const label = specialist.branch_name ?? specialist.branch_id ?? "Другой филиал";
+            const existing = counts.get(key);
+            if (existing) {
+                existing.count += 1;
+                continue;
+            }
+            counts.set(key, { label, count: 1 });
+        }
+        return Array.from(counts.values()).sort((a, b) => b.count - a.count);
+    }, [specialistsInOtherBranches]);
+    const missingBranchSpecialistsButClientHasSome = specialists.length === 0 && specialistsInOtherBranches.length > 0;
     const fleetSummary = fleetAttentionQuery.data?.summary;
     const selectedBranchContext = useMemo(
         () => branches.find((branch) => branch.id === selectedBranchId) ?? null,
@@ -998,7 +1043,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                             <option value="">Выберите филиал</option>
                             {fleetBranches.map((branch) => (
                                 <option key={branch.id} value={branch.id}>
-                                    {branch.name ?? branch.slug ?? branch.id}
+                                    {`${branch.name ?? branch.slug ?? branch.id} · ${branch.slug ?? String(branch.id).slice(0, 8)}`}
                                 </option>
                             ))}
                         </select>
@@ -1143,16 +1188,18 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                         </p>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                        {selectedBranchContext.name ?? selectedBranchContext.slug ?? selectedBranchContext.id}
+                        <div>{selectedBranchContext.name ?? selectedBranchContext.slug ?? selectedBranchContext.id}</div>
+                        <div className="mt-1 font-mono">branch_id: {selectedBranchContext.id}</div>
+                        <div className="mt-1">status: {selectedBranchContext.is_active ? "active" : "inactive"}</div>
                     </div>
                 </div>
 
                 <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
                     <div className="rounded-lg border border-border/60 px-3 py-2">
-                        knowledge_tag: {hasKnowledgeTag ? selectedBranchContext.knowledge_tag : "не задан"}
+                        knowledge_tag: {hasKnowledgeTag ? selectedBranchContext.knowledge_tag : "не задан для этого филиала"}
                     </div>
                     <div className="rounded-lg border border-border/60 px-3 py-2">
-                        working_hours: {hasWorkingHours ? "заданы" : "не заданы"}
+                        working_hours: {hasWorkingHours ? "заданы" : "не заданы для этого филиала"}
                     </div>
                     <div className="rounded-lg border border-border/60 px-3 py-2">
                         onboarding: {selectedBranchContext.onboarding_state ?? "—"}
@@ -1181,6 +1228,9 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                 onChange={(event) => setBranchWorkingHoursDraft(event.target.value)}
                                 disabled={applyBranchKnowledgePatchMutation.isPending}
                             />
+                            <div className="mt-1">
+                                Пустой объект <span className="font-mono">{`{}`}</span> очистит часы работы филиала.
+                            </div>
                         </label>
                         <label className="text-xs text-muted-foreground">
                             Причина изменения (audit)
@@ -1258,7 +1308,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                             <option value="">Выберите филиал</option>
                             {branchOptions.map((branch) => (
                                 <option key={branch.id} value={branch.id ?? ""}>
-                                    {branch.name ?? branch.id}
+                                    {`${branch.name ?? branch.slug ?? branch.id} · ${branch.slug ?? String(branch.id).slice(0, 8)}`}
                                 </option>
                             ))}
                         </select>
@@ -1505,8 +1555,21 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                     </div>
                                     <div className="mt-2 text-xs text-muted-foreground">
                                         {specialistsQuery.isLoading && "Загрузка мастеров..."}
-                                        {!specialistsQuery.isLoading && specialists.length === 0 && "Мастера не найдены в выбранном филиале."}
+                                        {!specialistsQuery.isLoading && specialists.length === 0 && !missingBranchSpecialistsButClientHasSome && "Мастера не найдены в выбранном филиале."}
                                     </div>
+                                    {!specialistsQuery.isLoading && missingBranchSpecialistsButClientHasSome && (
+                                        <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
+                                            В этом филиале мастеров нет. В других филиалах клиента найдено {specialistsInOtherBranches.length}.
+                                            {specialistsByBranch.length > 0 && (
+                                                <div className="mt-1">
+                                                    {specialistsByBranch
+                                                        .slice(0, 3)
+                                                        .map((item) => `${item.label}: ${item.count}`)
+                                                        .join(" · ")}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                     {!specialistsQuery.isLoading && specialists.length > 0 && (
                                         <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
                                             {specialists.slice(0, 6).map((specialist) => (
