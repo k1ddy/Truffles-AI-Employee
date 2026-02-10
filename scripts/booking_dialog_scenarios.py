@@ -613,6 +613,8 @@ def _sanitize_expect_state_by_tags(tags: list[str], state: Any) -> Any:
 
 def _merge_expectations(tags: list[str], override: Any) -> dict[str, Any]:
     expect = _default_expect()
+    state_overridden = False
+    info_sections_overridden = False
     for tag in tags:
         if tag in EXPECT_INFO_SECTIONS:
             expect["info_sections"].extend(EXPECT_INFO_SECTIONS[tag])
@@ -634,14 +636,18 @@ def _merge_expectations(tags: list[str], override: Any) -> dict[str, Any]:
         for key in ("action", "reply_type", "state", "expected_reply"):
             if override.get(key) is not None:
                 expect[key] = override.get(key)
+                if key == "state":
+                    state_overridden = True
         extra_sections = override.get("info_sections") or []
         if isinstance(extra_sections, str):
             extra_sections = [extra_sections]
         for section in extra_sections:
             if section and section not in expect["info_sections"]:
                 expect["info_sections"].append(section)
-    expect["state"] = _sanitize_expect_state_by_tags(tags, expect.get("state"))
-    if not any(tag in EXPECT_INFO_SECTIONS for tag in tags):
+                info_sections_overridden = True
+    if not state_overridden:
+        expect["state"] = _sanitize_expect_state_by_tags(tags, expect.get("state"))
+    if not any(tag in EXPECT_INFO_SECTIONS for tag in tags) and not info_sections_overridden:
         expect["info_sections"] = []
     return expect
 

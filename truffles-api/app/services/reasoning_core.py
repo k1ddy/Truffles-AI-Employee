@@ -14,10 +14,12 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger, record_delivery_failure, start_span
-from app.routers.webhook import decision as decision_router
-from app.routers.webhook.trace import DECISION_STAGE_ORDER_SNAPSHOT
-from app.routers.webhook.trace import _update_message_decision_metadata
 from app.models import Message
+from app.routers.webhook import decision as decision_router
+from app.routers.webhook.trace import (
+    DECISION_STAGE_ORDER_SNAPSHOT,
+    _update_message_decision_metadata,
+)
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.alert_service import alert_error
 from app.services.chatflow_service import send_message_safe

@@ -2737,7 +2737,11 @@ def _llm_quality_expected_section_answered(expected_sections, meta, trace_entrie
         expected_tags.update(_llm_quality_token_to_info_tags(section))
     if not expected_tags:
         return False, info_sections, intents
-    if intents.intersection(LLM_QUALITY_BUNDLE_INTENTS):
+    bundle_intents = globals().get(
+        "LLM_QUALITY_BUNDLE_INTENTS",
+        {"info_bundle", "multi_intent_info"},
+    )
+    if intents.intersection(bundle_intents):
         return True, info_sections, intents
 
     actual_tags = set()
