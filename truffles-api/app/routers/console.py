@@ -10,7 +10,8 @@ from threading import Lock
 from typing import Callable, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request as URLRequest
+from urllib.request import urlopen
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
@@ -1452,7 +1453,7 @@ def _fetch_keycloak_admin_token(config: dict[str, Optional[str]]) -> str:
         payload["client_secret"] = client_secret
 
     body = urlencode(payload).encode("utf-8")
-    req = Request(
+    req = URLRequest(
         str(config["token_url"]),
         data=body,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
@@ -1486,7 +1487,7 @@ def _keycloak_lookup_user_id(
         f"{config['admin_base_url']}/admin/realms/{config['realm']}/users"
         f"?username={quote(username)}&exact=true"
     )
-    req = Request(
+    req = URLRequest(
         query_url,
         headers={"Authorization": f"Bearer {access_token}"},
         method="GET",
@@ -1542,7 +1543,7 @@ def _provision_sso_user_and_get_subject(
             }
         ],
     }
-    req = Request(
+    req = URLRequest(
         f"{config['admin_base_url']}/admin/realms/{config['realm']}/users",
         data=json.dumps(create_payload).encode("utf-8"),
         headers={
