@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root=$(git rev-parse --show-toplevel)
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -n "${REPO_ROOT:-}" ]]; then
+  repo_root="${REPO_ROOT}"
+elif repo_root_candidate="$(git -C "${script_dir}" rev-parse --show-toplevel 2>/dev/null)"; then
+  repo_root="${repo_root_candidate}"
+else
+  # Fallback for environments where .git is unavailable but scripts live under <repo>/scripts.
+  repo_root="$(cd "${script_dir}/.." && pwd)"
+fi
+
 compose_file="${repo_root}/truffles-api/docker-compose.yml"
 
 if [[ ! -f "$compose_file" ]]; then
@@ -9,7 +18,15 @@ if [[ ! -f "$compose_file" ]]; then
   exit 1
 fi
 
-EXPECTED_GIT_COMMIT=${EXPECTED_GIT_COMMIT:-${GIT_COMMIT:-$(git -C "$repo_root" rev-parse HEAD)}}
+if [[ -z "${EXPECTED_GIT_COMMIT:-}" ]]; then
+  if [[ -n "${GIT_COMMIT:-}" ]]; then
+    EXPECTED_GIT_COMMIT="${GIT_COMMIT}"
+  elif git -C "$repo_root" rev-parse HEAD >/dev/null 2>&1; then
+    EXPECTED_GIT_COMMIT="$(git -C "$repo_root" rev-parse HEAD)"
+  else
+    EXPECTED_GIT_COMMIT="unknown"
+  fi
+fi
 BUILD_TIME=${BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
 VERIFY_CONSOLE_BUILD=${VERIFY_CONSOLE_BUILD:-1}
 
