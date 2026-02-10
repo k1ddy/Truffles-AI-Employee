@@ -4540,6 +4540,29 @@ def _resolve_webhook_secret(client_slug, explicit, *, expected_secret=None):
     )
     return secret
 
+
+def _livecheck_select_webhook_secret(*, client_slug, explicit_secret, client_meta):
+    explicit_clean = _clean_webhook_secret(explicit_secret)
+    expected_secret, expected_source = _llm_quality_resolve_expected_webhook_secret(client_meta)
+
+    if explicit_clean:
+        if expected_secret and explicit_clean != expected_secret:
+            raise SystemExit(
+                "livecheck-auto: explicit webhook secret mismatch "
+                f"(expected_source={expected_source})"
+            )
+        return explicit_clean, "explicit"
+
+    if expected_secret:
+        return expected_secret, f"runtime_expected:{expected_source}"
+
+    fallback_secret, fallback_source = _resolve_webhook_secret_with_source(
+        client_slug,
+        None,
+        expected_secret=None,
+    )
+    return fallback_secret, fallback_source
+
 def _run_psql_query(db_user, query):
     result = run_command(
         [
@@ -10735,16 +10758,6 @@ def _run_livecheck_auto(args):
         raise SystemExit("livecheck-auto: TEST_MODE disabled; refusing to run")
     allow_non_allowlist = bool(args.allow_non_allowlist)
 
-    webhook_secret = _resolve_webhook_secret(client_slug, args.webhook_secret)
-    if not webhook_secret:
-        raise SystemExit("livecheck-auto: missing webhook secret")
-
-    admin_token = args.admin_token or os.environ.get("ALERTS_ADMIN_TOKEN")
-    if not admin_token and container_name:
-        admin_token = _resolve_env_from_container(container_name, "ALERTS_ADMIN_TOKEN")
-    if not admin_token and not args.dry_run:
-        raise SystemExit("livecheck-auto: missing admin token")
-
     db_user = _resolve_db_user_simple()
     client_meta, client_error = _fetch_client_meta(
         db_user, client_slug, branch_slug=args.branch_slug
@@ -10753,6 +10766,20 @@ def _run_livecheck_auto(args):
         raise SystemExit(f"livecheck-auto: client meta lookup failed ({client_error})")
     if not client_meta or not client_meta.get("client_id"):
         raise SystemExit(f"livecheck-auto: client {client_slug} not found in DB")
+
+    webhook_secret, webhook_secret_source = _livecheck_select_webhook_secret(
+        client_slug=client_slug,
+        explicit_secret=args.webhook_secret,
+        client_meta=client_meta,
+    )
+    if not webhook_secret:
+        raise SystemExit("livecheck-auto: missing webhook secret")
+
+    admin_token = args.admin_token or os.environ.get("ALERTS_ADMIN_TOKEN")
+    if not admin_token and container_name:
+        admin_token = _resolve_env_from_container(container_name, "ALERTS_ADMIN_TOKEN")
+    if not admin_token and not args.dry_run:
+        raise SystemExit("livecheck-auto: missing admin token")
 
     branch_instance_id = client_meta.get("branch_instance_id")
     if not branch_instance_id:
@@ -10811,6 +10838,7 @@ def _run_livecheck_auto(args):
         "test_mode": test_mode_enabled,
         "learning_mode": learning_env.get("learning_mode"),
         "qdrant_collection": learning_env.get("qdrant_collection_effective"),
+        "webhook_secret_source": webhook_secret_source,
     }
 
     outbox_wait_seconds = _resolve_outbox_wait_seconds(container_name)
