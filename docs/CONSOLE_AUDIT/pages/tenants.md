@@ -87,6 +87,9 @@ Provisioning Wizard
   - `working_hours` (days + time range),
   - `booking_settings` (duration/buffer constraints),
   - `onboarding_contract.purchased` (channels/providers/features).
+- Go/No-Go includes:
+  - `Domain template preset` (beauty/clinic/legal/ecom) to prefill purchased capabilities.
+  - `Readiness score` (required checks completion %) with explicit blockers list.
 - `Advanced JSON (expert)` is available as fallback and can be synced both ways with form state.
 - See `docs/CONSOLE_AUDIT/pages/settings.md` for step-by-step detail.
 
