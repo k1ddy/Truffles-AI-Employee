@@ -42,10 +42,12 @@ Client section
 - Lifecycle actions:
   - `Архивировать` / `Восстановить` open lifecycle modal.
   - Modal includes impact preview (client/company, lifecycle transition, branch impact).
+  - Modal includes mandatory pre-submit checklist (context/impact/owner alignment).
   - Reason is required.
   - Explicit confirm checkbox required before action.
   - API uses dedicated endpoints (`archive` / `restore`), status is not editable via `PATCH`.
-  - Client row shows `Lifecycle trace (текущая сессия)` with action/result/trace_id (if returned).
+  - Submit button is disabled until reason + checklist + confirm are complete.
+  - Client row shows lifecycle trace history for the current session (latest actions with result/reason/time/trace_id).
 - "Показать еще" loads next page (cursor-based).
 - Save triggers `PATCH /console/v1/admin/clients/{id}`.
 - Lifecycle triggers `POST /console/v1/admin/clients/{id}/archive|restore`.

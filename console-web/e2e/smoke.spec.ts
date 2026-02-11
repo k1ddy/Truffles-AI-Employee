@@ -692,8 +692,17 @@ test.describe('Navigation', () => {
             const lifecycleModal = page.getByTestId('tenants-client-lifecycle-modal').first();
             await expect(lifecycleModal).toBeVisible();
             await expect(page.getByTestId('tenants-client-lifecycle-impact').first()).toBeVisible();
+            await expect(page.getByTestId('tenants-client-lifecycle-checklist').first()).toBeVisible();
             await expect(page.getByTestId('tenants-client-lifecycle-reason').first()).toBeVisible();
             await expect(page.getByTestId('tenants-client-lifecycle-confirm').first()).toBeVisible();
+            const submitButton = page.getByTestId('tenants-client-lifecycle-submit').first();
+            await expect(submitButton).toBeDisabled();
+            await page.getByTestId('tenants-client-lifecycle-reason').first().fill('smoke lifecycle validation');
+            await page.getByTestId('tenants-client-lifecycle-check-context').first().check();
+            await page.getByTestId('tenants-client-lifecycle-check-impact').first().check();
+            await page.getByTestId('tenants-client-lifecycle-check-owner').first().check();
+            await page.getByTestId('tenants-client-lifecycle-confirm').first().check();
+            await expect(submitButton).toBeEnabled();
             await page.getByTestId('tenants-client-lifecycle-cancel').first().click();
             await expect(lifecycleModal).not.toBeVisible();
             return;

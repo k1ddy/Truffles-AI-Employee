@@ -56,6 +56,9 @@ type ClientLifecycleDraftState = {
     degradedBranches: number;
     reason: string;
     confirmChecked: boolean;
+    checkClientScope: boolean;
+    checkImpactReview: boolean;
+    checkOwnerAligned: boolean;
 };
 
 type ClientLifecycleAuditEntry = {
@@ -70,6 +73,8 @@ type ClientLifecycleAuditEntry = {
     actorLabel: string;
     happenedAt: string;
 };
+
+type ClientLifecycleAuditMap = Record<string, ClientLifecycleAuditEntry[]>;
 
 type BranchEditorState = {
     id: string;
@@ -203,6 +208,17 @@ function formatDateTimeLabel(value: string | undefined): string {
         return "—";
     }
     return parsed.toLocaleString("ru-RU");
+}
+
+function pushLifecycleAuditEntry(
+    previous: ClientLifecycleAuditMap,
+    entry: ClientLifecycleAuditEntry,
+): ClientLifecycleAuditMap {
+    const existing = previous[entry.clientId] ?? [];
+    return {
+        ...previous,
+        [entry.clientId]: [entry, ...existing].slice(0, 5),
+    };
 }
 
 function buildBranchChangePatch(editor: BranchEditorState): {
@@ -345,7 +361,7 @@ export default function TenantsPage() {
     const [branchChangePreview, setBranchChangePreview] = useState<components["schemas"]["BranchChangeResponse"] | null>(null);
     const [clientLifecyclePendingId, setClientLifecyclePendingId] = useState<string | null>(null);
     const [clientLifecycleDraft, setClientLifecycleDraft] = useState<ClientLifecycleDraftState | null>(null);
-    const [clientLifecycleAuditById, setClientLifecycleAuditById] = useState<Record<string, ClientLifecycleAuditEntry>>({});
+    const [clientLifecycleAuditById, setClientLifecycleAuditById] = useState<ClientLifecycleAuditMap>({});
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -787,6 +803,9 @@ export default function TenantsPage() {
             degradedBranches: client.degraded_branches ?? 0,
             reason: "",
             confirmChecked: false,
+            checkClientScope: false,
+            checkImpactReview: false,
+            checkOwnerAligned: false,
         });
     };
 
@@ -817,6 +836,14 @@ export default function TenantsPage() {
             toast.error("Подтвердите действие");
             return;
         }
+        if (
+            !clientLifecycleDraft.checkClientScope
+            || !clientLifecycleDraft.checkImpactReview
+            || !clientLifecycleDraft.checkOwnerAligned
+        ) {
+            toast.error("Заполните checklist перед выполнением действия");
+            return;
+        }
         const mode = lifecycleDraft.mode;
         setClientLifecyclePendingId(clientId);
         let lifecycleCompleted = false;
@@ -829,9 +856,7 @@ export default function TenantsPage() {
                 toast.success("Клиент восстановлен");
             }
             lifecycleCompleted = true;
-            setClientLifecycleAuditById((prev) => ({
-                ...prev,
-                [clientId]: {
+            setClientLifecycleAuditById((prev) => pushLifecycleAuditEntry(prev, {
                     clientId,
                     mode,
                     previousLifecycleLabel: lifecycleDraft.currentLifecycleLabel,
@@ -841,8 +866,7 @@ export default function TenantsPage() {
                     message: mode === "archive" ? "Архивация подтверждена API" : "Восстановление подтверждено API",
                     actorLabel: meData?.agent?.name ?? role,
                     happenedAt: new Date().toISOString(),
-                },
-            }));
+                }));
             if (clientEditor?.id === clientId) {
                 setClientEditor(null);
             }
@@ -852,9 +876,7 @@ export default function TenantsPage() {
             const parsed = handleError(error) as
                 | { message?: string; trace_id?: string }
                 | undefined;
-            setClientLifecycleAuditById((prev) => ({
-                ...prev,
-                [clientId]: {
+            setClientLifecycleAuditById((prev) => pushLifecycleAuditEntry(prev, {
                     clientId,
                     mode,
                     previousLifecycleLabel: lifecycleDraft.currentLifecycleLabel,
@@ -865,8 +887,7 @@ export default function TenantsPage() {
                     traceId: parsed?.trace_id,
                     actorLabel: meData?.agent?.name ?? role,
                     happenedAt: new Date().toISOString(),
-                },
-            }));
+                }));
         } finally {
             setClientLifecyclePendingId(null);
             if (lifecycleCompleted) {
@@ -1475,9 +1496,9 @@ export default function TenantsPage() {
                                 const isArchived = isClientArchived(client);
                                 const lifecyclePending = clientLifecyclePendingId === client.id;
                                 const lifecycleMode: ClientLifecycleMode = isArchived ? "restore" : "archive";
-                                const lifecycleAudit = client.id
-                                    ? clientLifecycleAuditById[client.id]
-                                    : undefined;
+                                const lifecycleAuditHistory = client.id
+                                    ? (clientLifecycleAuditById[client.id] ?? [])
+                                    : [];
                                 const companyLocked = (client.total_branches ?? 0) > 0 && !!client.company_id;
                                 return (
                                     <div
@@ -1503,23 +1524,29 @@ export default function TenantsPage() {
                                             <div className="text-xs text-muted-foreground">
                                                 филиалы: активные {client.active_branches ?? 0}/{client.total_branches ?? 0} · деградация {client.degraded_branches ?? 0} · готовы к запуску {client.go_live_ready_branches ?? 0}
                                             </div>
-                                            {lifecycleAudit ? (
+                                            {lifecycleAuditHistory.length > 0 ? (
                                                 <div className="mt-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs" data-testid="tenants-client-lifecycle-audit">
                                                     <div className="font-medium">
-                                                        Lifecycle trace (текущая сессия)
+                                                        Lifecycle trace (последние действия, текущая сессия)
                                                     </div>
-                                                    <div className="text-muted-foreground">
-                                                        действие: {lifecycleAudit.mode === "archive" ? "Архивация" : "Восстановление"} · оператор: {lifecycleAudit.actorLabel} · время: {formatDateTimeLabel(lifecycleAudit.happenedAt)}
-                                                    </div>
-                                                    <div className="text-muted-foreground">
-                                                        переход: {lifecycleAudit.previousLifecycleLabel}{" -> "}{lifecycleAudit.targetLifecycleLabel}
-                                                    </div>
-                                                    <div className="text-muted-foreground">
-                                                        причина: {lifecycleAudit.reason}
-                                                    </div>
-                                                    <div className={lifecycleAudit.status === "success" ? "text-emerald-700" : "text-red-700"}>
-                                                        {lifecycleAudit.status === "success" ? "OK" : "ERROR"}: {lifecycleAudit.message}
-                                                        {lifecycleAudit.traceId ? ` (trace_id: ${lifecycleAudit.traceId})` : ""}
+                                                    <div className="mt-1 space-y-2" data-testid="tenants-client-lifecycle-audit-history">
+                                                        {lifecycleAuditHistory.map((entry, index) => (
+                                                            <div key={`${entry.happenedAt}-${index}`} className="rounded border border-border/50 px-2 py-1" data-testid="tenants-client-lifecycle-audit-item">
+                                                                <div className="text-muted-foreground">
+                                                                    действие: {entry.mode === "archive" ? "Архивация" : "Восстановление"} · оператор: {entry.actorLabel} · время: {formatDateTimeLabel(entry.happenedAt)}
+                                                                </div>
+                                                                <div className="text-muted-foreground">
+                                                                    переход: {entry.previousLifecycleLabel}{" -> "}{entry.targetLifecycleLabel}
+                                                                </div>
+                                                                <div className="text-muted-foreground">
+                                                                    причина: {entry.reason}
+                                                                </div>
+                                                                <div className={entry.status === "success" ? "text-emerald-700" : "text-red-700"}>
+                                                                    {entry.status === "success" ? "OK" : "ERROR"}: {entry.message}
+                                                                    {entry.traceId ? ` (trace_id: ${entry.traceId})` : ""}
+                                                                </div>
+                                                            </div>
+                                                        ))}
                                                     </div>
                                                 </div>
                                             ) : null}
@@ -1546,8 +1573,8 @@ export default function TenantsPage() {
                                                     {lifecyclePending
                                                         ? "Выполняется..."
                                                         : lifecycleMode === "restore"
-                                                            ? "Восстановить"
-                                                            : "Архивировать"}
+                                                            ? "Открыть восстановление"
+                                                            : "Открыть архивирование"}
                                                 </button>
                                             ) : null}
                                             <button
@@ -2021,7 +2048,7 @@ export default function TenantsPage() {
                                 {clientLifecycleDraft.mode === "archive" ? "Архивировать клиента" : "Восстановить клиента"}
                             </h3>
                             <p className="text-sm text-muted-foreground">
-                                Подтвердите lifecycle-действие перед отправкой в API.
+                                Подтвердите lifecycle-действие перед отправкой в API. Заполнение checklist обязательно.
                             </p>
                         </div>
                         <div className="rounded-lg border border-border/60 bg-background p-3 text-xs" data-testid="tenants-client-lifecycle-impact">
@@ -2035,6 +2062,65 @@ export default function TenantsPage() {
                             <div className="text-muted-foreground">
                                 филиалы: активные {clientLifecycleDraft.activeBranches}/{clientLifecycleDraft.totalBranches} · деградация {clientLifecycleDraft.degradedBranches}
                             </div>
+                        </div>
+                        <div className="rounded-lg border border-border/60 bg-background p-3 text-xs" data-testid="tenants-client-lifecycle-checklist">
+                            <div className="font-medium mb-1">Pre-submit checklist</div>
+                            <label className="mb-2 flex items-start gap-2 text-muted-foreground">
+                                <input
+                                    type="checkbox"
+                                    className="mt-0.5 h-4 w-4"
+                                    checked={clientLifecycleDraft.checkClientScope}
+                                    data-testid="tenants-client-lifecycle-check-context"
+                                    onChange={(event) =>
+                                        setClientLifecycleDraft((prev) =>
+                                            prev
+                                                ? { ...prev, checkClientScope: event.target.checked }
+                                                : prev
+                                        )
+                                    }
+                                    disabled={Boolean(clientLifecyclePendingId)}
+                                />
+                                <span>Проверил контекст клиента/компании перед действием.</span>
+                            </label>
+                            <label className="mb-2 flex items-start gap-2 text-muted-foreground">
+                                <input
+                                    type="checkbox"
+                                    className="mt-0.5 h-4 w-4"
+                                    checked={clientLifecycleDraft.checkImpactReview}
+                                    data-testid="tenants-client-lifecycle-check-impact"
+                                    onChange={(event) =>
+                                        setClientLifecycleDraft((prev) =>
+                                            prev
+                                                ? { ...prev, checkImpactReview: event.target.checked }
+                                                : prev
+                                        )
+                                    }
+                                    disabled={Boolean(clientLifecyclePendingId)}
+                                />
+                                <span>
+                                    Проверил impact:
+                                    {clientLifecycleDraft.mode === "archive"
+                                        ? " клиент уйдет из активного списка и деактивация отразится в операционном контуре."
+                                        : " клиент вернется в активный список и потребует операционного контроля после восстановления."}
+                                </span>
+                            </label>
+                            <label className="flex items-start gap-2 text-muted-foreground">
+                                <input
+                                    type="checkbox"
+                                    className="mt-0.5 h-4 w-4"
+                                    checked={clientLifecycleDraft.checkOwnerAligned}
+                                    data-testid="tenants-client-lifecycle-check-owner"
+                                    onChange={(event) =>
+                                        setClientLifecycleDraft((prev) =>
+                                            prev
+                                                ? { ...prev, checkOwnerAligned: event.target.checked }
+                                                : prev
+                                        )
+                                    }
+                                    disabled={Boolean(clientLifecyclePendingId)}
+                                />
+                                <span>Подтвердил решение с ответственным владельцем клиента.</span>
+                            </label>
                         </div>
                         <label className="text-xs text-muted-foreground">
                             Причина действия (обязательно)
@@ -2082,7 +2168,14 @@ export default function TenantsPage() {
                                 className="btn-primary"
                                 onClick={handleClientLifecycleAction}
                                 data-testid="tenants-client-lifecycle-submit"
-                                disabled={Boolean(clientLifecyclePendingId)}
+                                disabled={
+                                    Boolean(clientLifecyclePendingId)
+                                    || !clientLifecycleDraft.reason.trim()
+                                    || !clientLifecycleDraft.confirmChecked
+                                    || !clientLifecycleDraft.checkClientScope
+                                    || !clientLifecycleDraft.checkImpactReview
+                                    || !clientLifecycleDraft.checkOwnerAligned
+                                }
                             >
                                 {clientLifecyclePendingId
                                     ? "Выполняется..."
