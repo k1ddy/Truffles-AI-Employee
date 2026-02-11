@@ -37,6 +37,7 @@ Client section
 - Rows show slug + company_id.
 - Selected row shows "Выбран"; "В контекст" sets client context and clears branch.
 - Edit mode fields: slug, company_id.
+- Contract note: `company_id` становится immutable после появления филиалов у клиента (guard в backend + UI lock).
 - Save/Cancel buttons in inline editor.
 - Lifecycle actions:
   - `Архивировать` / `Восстановить` open lifecycle modal.
@@ -55,6 +56,7 @@ Branch section
 - "В контекст" sets branch context (keeps company/client).
 - Edit mode fields:
   - name, slug, timezone, phone, instance_id, telegram_chat_id, knowledge_tag, is_active.
+  - Input-contract panel показывает ожидаемые форматы (`slug`, `timezone`, `phone`, `telegram_chat_id`, `knowledge_tag`).
   - Active филиал requires instance_id.
   - Deactivation or instance_id removal requires confirmation.
 - Change management buttons:
@@ -75,6 +77,9 @@ Branch section
 
 Context shortcuts
 - Buttons labeled \"В контекст\" set localStorage (`console:company_id`, `console:client_id`, `console:branch_id`) and refetch `/console/v1/me`.
+
+Workspace guide
+- Верхний guide-блок описывает назначение зон (`Portfolio`, `Onboarding`, `Change Management`, `Decommission`) и pre-Go-Live checklist для операторов.
 
 Provisioning Wizard
 - Same wizard as Settings, with `accessSection="tenants"`.

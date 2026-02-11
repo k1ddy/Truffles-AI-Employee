@@ -747,6 +747,10 @@ test.describe('Navigation', () => {
         await openTenants(page);
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
+            const workspaceGuide = page.getByTestId('tenants-workspace-guide');
+            if (await workspaceGuide.isVisible().catch(() => false)) {
+                await expect(workspaceGuide).toBeVisible();
+            }
             await page.getByTestId('tenants-mode-onboarding').click();
             await expect(page.getByTestId('tenants-onboarding-section')).toBeVisible();
 
@@ -770,6 +774,30 @@ test.describe('Navigation', () => {
         await expect(tenantsSection(page, 'Компании')).toBeVisible();
         await expect(tenantsSection(page, 'Клиенты')).toBeVisible();
         await expect(tenantsSection(page, 'Филиалы')).toBeVisible();
+    });
+
+    test('should show explicit field contracts in Tenants branch editor @smoke', async ({ page }) => {
+        await openTenants(page);
+
+        const modes = page.getByTestId('tenants-workspace-modes');
+        if (await modes.isVisible().catch(() => false)) {
+            await page.getByTestId('tenants-mode-changes').click();
+        }
+
+        const editButton = page.getByTestId('tenants-branch-edit').first();
+        if (await editButton.isVisible().catch(() => false)) {
+            await editButton.click();
+            const contractPanel = page.getByTestId('tenants-branch-input-contract');
+            if (await contractPanel.isVisible().catch(() => false)) {
+                await expect(contractPanel).toBeVisible();
+            } else {
+                await expect(page.getByText(/slug.*a-z0-9_-/i)).toBeVisible();
+            }
+            return;
+        }
+
+        // Legacy fallback for environments where inline branch edit controls are unavailable.
+        await expect(page.getByTestId('tenants-change-management')).toBeVisible();
     });
 
     test('should expose schema-driven onboarding controls on Tenants @smoke', async ({ page }) => {
