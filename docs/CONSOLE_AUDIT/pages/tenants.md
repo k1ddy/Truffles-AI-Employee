@@ -83,6 +83,21 @@ Context shortcuts
 Workspace guide
 - Верхний guide-блок описывает назначение зон (`Portfolio`, `Onboarding`, `Change Management`, `Decommission`) и pre-Go-Live checklist для операторов.
 
+Operational KPI panel
+- Panel `Операционные KPI` (Portfolio/All in `active` lifecycle mode) aggregates proxy-metrics from:
+  - `clients summary`,
+  - `fleet attention summary`,
+  - recent `branch changes` (window: last 100).
+- KPI cards:
+  - onboarding coverage (proxy),
+  - go-live readiness (proxy),
+  - service stability,
+  - decommission share,
+  - publish failure rate (proxy),
+  - rollback share (proxy),
+  - blocked signals count.
+- UI explicitly labels these values as proxy metrics and shows branch-change window counters.
+
 Provisioning Wizard
 - Same wizard as Settings, with `accessSection="tenants"`.
 - Steps: филиал → интеграции → команда → Telegram → знания → booking → go/no-go.
