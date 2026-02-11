@@ -741,6 +741,35 @@ test.describe('Navigation', () => {
         await expect(branches.getByRole('button', { name: /Применить|Publish/i }).first()).toBeVisible();
         await expect(branches.getByRole('button', { name: /Откат|Rollback/i }).first()).toBeVisible();
     });
+
+    test('should switch Tenants workspace modes @smoke', async ({ page }) => {
+        await openTenants(page);
+        const modes = page.getByTestId('tenants-workspace-modes');
+        if (await modes.isVisible().catch(() => false)) {
+            await page.getByTestId('tenants-mode-onboarding').click();
+            await expect(page.getByTestId('tenants-onboarding-section')).toBeVisible();
+
+            await page.getByTestId('tenants-mode-changes').click();
+            await expect(page.getByTestId('tenants-change-management')).toBeVisible();
+
+            await page.getByTestId('tenants-mode-decommission').click();
+            await expect(page.getByTestId('tenants-decommission-center')).toBeVisible();
+            await expect(page.getByTestId('tenants-clients-section')).toBeVisible();
+
+            await page.getByTestId('tenants-mode-portfolio').click();
+            await expect(page.getByTestId('tenants-portfolio-companies')).toBeVisible();
+
+            await page.getByTestId('tenants-mode-all').click();
+            await expect(page.getByTestId('tenants-onboarding-section')).toBeVisible();
+            await expect(page.getByTestId('tenants-change-management')).toBeVisible();
+            return;
+        }
+
+        // Legacy fallback for not-yet-deployed IA v2.
+        await expect(tenantsSection(page, 'Компании')).toBeVisible();
+        await expect(tenantsSection(page, 'Клиенты')).toBeVisible();
+        await expect(tenantsSection(page, 'Филиалы')).toBeVisible();
+    });
 });
 
 // =========================================

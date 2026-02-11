@@ -82,6 +82,7 @@ type FleetLifecycleFilter = "all" | "lead" | "contracting" | "onboarding" | "go_
 type FleetPaymentFilter = "all" | "pending" | "confirmed" | "rejected" | "unknown";
 type FleetServiceFilter = "all" | "ok" | "degraded" | "attention";
 type FleetAttentionLevel = "high" | "medium" | "low";
+type TenantsWorkspaceMode = "all" | "portfolio" | "onboarding" | "changes" | "decommission";
 
 function stringifyOptionalJson(value: unknown): string {
     if (!value || typeof value !== "object") {
@@ -248,6 +249,7 @@ export default function TenantsPage() {
     const [branchQuery, setBranchQuery] = useState("");
     const [companyQuery, setCompanyQuery] = useState("");
     const [tenantLifecycle, setTenantLifecycle] = useState<TenantLifecycleMode>("active");
+    const [workspaceMode, setWorkspaceMode] = useState<TenantsWorkspaceMode>("all");
     const [fleetLifecycleFilter, setFleetLifecycleFilter] = useState<FleetLifecycleFilter>("all");
     const [fleetPaymentFilter, setFleetPaymentFilter] = useState<FleetPaymentFilter>("all");
     const [fleetServiceFilter, setFleetServiceFilter] = useState<FleetServiceFilter>("all");
@@ -890,6 +892,13 @@ export default function TenantsPage() {
         }
     };
 
+    const showPortfolio = workspaceMode === "all" || workspaceMode === "portfolio";
+    const showOnboarding = workspaceMode === "all" || workspaceMode === "onboarding";
+    const showChangeManagement = workspaceMode === "all" || workspaceMode === "changes";
+    const showDecommission = workspaceMode === "all" || workspaceMode === "decommission";
+    const showClientsSection = showPortfolio || showDecommission;
+    const decommissionFocused = workspaceMode === "decommission";
+
     if (!session) {
         return (
             <div className="p-8 text-center text-muted-foreground">
@@ -919,6 +928,46 @@ export default function TenantsPage() {
                 <div className="text-xs text-muted-foreground">
                     Контекст: {selectedCompanyName ?? selectedCompanyId ?? "—"} / {meData?.client?.name ?? selectedClientId ?? "—"} / {selectedBranchName ?? selectedBranchId ?? "—"}
                 </div>
+                <div className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-workspace-modes">
+                    <div className="text-xs text-muted-foreground mb-2">Рабочая зона Tenants:</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <button
+                            className={workspaceMode === "all" ? "btn-primary" : "btn-ghost"}
+                            onClick={() => setWorkspaceMode("all")}
+                            data-testid="tenants-mode-all"
+                        >
+                            Все зоны
+                        </button>
+                        <button
+                            className={workspaceMode === "portfolio" ? "btn-primary" : "btn-ghost"}
+                            onClick={() => setWorkspaceMode("portfolio")}
+                            data-testid="tenants-mode-portfolio"
+                        >
+                            Portfolio
+                        </button>
+                        <button
+                            className={workspaceMode === "onboarding" ? "btn-primary" : "btn-ghost"}
+                            onClick={() => setWorkspaceMode("onboarding")}
+                            data-testid="tenants-mode-onboarding"
+                        >
+                            Onboarding
+                        </button>
+                        <button
+                            className={workspaceMode === "changes" ? "btn-primary" : "btn-ghost"}
+                            onClick={() => setWorkspaceMode("changes")}
+                            data-testid="tenants-mode-changes"
+                        >
+                            Change Management
+                        </button>
+                        <button
+                            className={workspaceMode === "decommission" ? "btn-primary" : "btn-ghost"}
+                            onClick={() => setWorkspaceMode("decommission")}
+                            data-testid="tenants-mode-decommission"
+                        >
+                            Decommission
+                        </button>
+                    </div>
+                </div>
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                     <span className="text-xs text-muted-foreground">Режим списка:</span>
                     <button
@@ -943,7 +992,7 @@ export default function TenantsPage() {
             </div>
 
             <div className="grid gap-6">
-                {tenantLifecycle === "active" ? (
+                {showPortfolio && tenantLifecycle === "active" ? (
                     <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-fleet-attention">
                         <div className="flex items-start justify-between gap-4 mb-4">
                             <div>
@@ -1035,7 +1084,8 @@ export default function TenantsPage() {
                     </section>
                 ) : null}
 
-                <section className="bg-card border border-border/60 rounded-lg p-5">
+                {showPortfolio ? (
+                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-portfolio-companies">
                     <div className="flex items-center justify-between gap-4 mb-4">
                         <div>
                             <h2 className="text-lg font-semibold">Компании</h2>
@@ -1157,14 +1207,59 @@ export default function TenantsPage() {
                         </div>
                     ) : null}
                 </section>
+                ) : null}
 
-                <section className="bg-card border border-border/60 rounded-lg p-5">
+                {showDecommission ? (
+                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-decommission-center">
+                    <div className="flex items-center justify-between gap-4 mb-3">
+                        <div>
+                            <h2 className="text-lg font-semibold">Decommission</h2>
+                            <p className="text-sm text-muted-foreground">
+                                Архивация и восстановление клиентов с прозрачным подтверждением.
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                className={tenantLifecycle === "archived" ? "btn-primary" : "btn-ghost"}
+                                onClick={() => setTenantLifecycle("archived")}
+                            >
+                                Только архив
+                            </button>
+                            <button
+                                className={tenantLifecycle === "all" ? "btn-primary" : "btn-ghost"}
+                                onClick={() => setTenantLifecycle("all")}
+                            >
+                                Все
+                            </button>
+                            <button
+                                className={tenantLifecycle === "active" ? "btn-primary" : "btn-ghost"}
+                                onClick={() => setTenantLifecycle("active")}
+                            >
+                                Активные
+                            </button>
+                        </div>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                        Для decommission используйте действия `Архивировать/Восстановить` в карточке клиента ниже.
+                    </div>
+                </section>
+                ) : null}
+
+                {showClientsSection ? (
+                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-clients-section">
                     <div className="flex items-center justify-between gap-4 mb-4">
                         <div>
-                            <h2 className="text-lg font-semibold">Клиенты</h2>
+                            <h2 className="text-lg font-semibold">
+                                {decommissionFocused ? "Клиенты (Decommission)" : "Клиенты"}
+                            </h2>
                             <p className="text-sm text-muted-foreground">
                                 {clientsQuery.isLoading ? "—" : `${clients.length} всего`}
                             </p>
+                            {decommissionFocused ? (
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                    Фокус на жизненном цикле клиента: архив/восстановление.
+                                </div>
+                            ) : null}
                             {clientsSummary ? (
                                 <div className="mt-1 text-xs text-muted-foreground">
                                     портфель: клиентов {clientsSummary.total_clients} · активные {clientsSummary.active_clients} · онбординг {clientsSummary.onboarding_clients} · пауза {clientsSummary.paused_clients} · архив {clientsSummary.archived_clients} · деградация {clientsSummary.degraded_clients}
@@ -1435,8 +1530,10 @@ export default function TenantsPage() {
                         </div>
                     ) : null}
                 </section>
+                ) : null}
 
-                <section className="bg-card border border-border/60 rounded-lg p-5">
+                {showChangeManagement ? (
+                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-change-management">
                     <div className="flex items-center justify-between gap-4 mb-4">
                         <div>
                             <h2 className="text-lg font-semibold">Филиалы</h2>
@@ -1790,11 +1887,14 @@ export default function TenantsPage() {
                         </div>
                     ) : null}
                 </section>
+                ) : null}
             </div>
 
-            <div className="mt-10">
-                <ProvisioningWizard session={session} accessSection="tenants" />
-            </div>
+            {showOnboarding ? (
+                <div className="mt-10" data-testid="tenants-onboarding-section">
+                    <ProvisioningWizard session={session} accessSection="tenants" />
+                </div>
+            ) : null}
         </div>
     );
 }

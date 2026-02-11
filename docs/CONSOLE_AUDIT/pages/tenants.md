@@ -10,6 +10,13 @@ Roles
 - Read/write: platform_admin only.
 
 Sections
+- Workspace modes:
+  - `All` (all zones),
+  - `Portfolio` (risk + companies + client portfolio),
+  - `Onboarding` (wizard focus),
+  - `Change Management` (branch changes focus),
+  - `Decommission` (client lifecycle archive/restore focus).
+- Decommission center with quick lifecycle filters (`active` / `archived` / `all`).
 - Companies list with search and inline edit.
 - Clients list with search and inline edit.
 - Branches list with search and inline edit.
