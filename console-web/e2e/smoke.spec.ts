@@ -739,6 +739,15 @@ test.describe('Navigation', () => {
             await expect(page.getByTestId('tenants-kpi-service-stability')).toBeVisible();
             await expect(page.getByTestId('tenants-kpi-change-failure')).toBeVisible();
             await expect(page.getByTestId('tenants-kpi-rollback-share')).toBeVisible();
+            const kpiDrilldown = page.getByTestId('tenants-kpi-drilldown');
+            if (await kpiDrilldown.isVisible().catch(() => false)) {
+                await expect(page.getByTestId('tenants-kpi-export-controls')).toBeVisible();
+                await expect(page.getByTestId('tenants-kpi-export-json')).toBeVisible();
+                await expect(page.getByTestId('tenants-kpi-export-csv')).toBeVisible();
+                await expect(page.getByTestId('tenants-kpi-save-weekly-snapshot')).toBeVisible();
+                await expect(page.getByTestId('tenants-kpi-alert-hooks')).toBeVisible();
+                await expect(page.getByTestId('tenants-kpi-alert-severity')).toBeVisible();
+            }
             return;
         }
 

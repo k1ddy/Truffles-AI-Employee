@@ -47,7 +47,11 @@ Client section
   - Explicit confirm checkbox required before action.
   - API uses dedicated endpoints (`archive` / `restore`), status is not editable via `PATCH`.
   - Submit button is disabled until reason + checklist + confirm are complete.
-  - Client row shows lifecycle trace history for the current session (latest actions with result/reason/time/trace_id).
+  - Client row shows persistent lifecycle timeline:
+    - session actions are persisted in localStorage (`tenants:client-lifecycle-audit:v2`);
+    - selected client is enriched by API audit feed (`GET /console/v1/audit`, `entity_type=client`, `entity_id=<selected_client>`).
+  - Timeline supports filter by result (`all` / `success` / `error`) and manual API refresh.
+  - Timeline entries include source tag (`session`/`api`) + result/reason/time/trace_id (if present).
 - "Показать еще" loads next page (cursor-based).
 - Save triggers `PATCH /console/v1/admin/clients/{id}`.
 - Lifecycle triggers `POST /console/v1/admin/clients/{id}/archive|restore`.
@@ -97,6 +101,20 @@ Operational KPI panel
   - rollback share (proxy),
   - blocked signals count.
 - UI explicitly labels these values as proxy metrics and shows branch-change window counters.
+- KPI threshold model is embedded in UI (`ok` / `warn` / `critical`) with per-metric rules and visual status chips.
+- Threshold drill-down section:
+  - explicit threshold condition (`warn`/`critical`) per KPI,
+  - reason line (why breach / normal),
+  - action CTA that opens relevant workspace area (`Portfolio`/`Onboarding`/`Change Management`/`Decommission`).
+- Export/report controls:
+  - `Экспорт JSON`,
+  - `Экспорт CSV`,
+  - `Weekly snapshot` (persisted in localStorage `tenants:operational-weekly-snapshots:v1`).
+- Weekly snapshots panel stores capped history and shows quick delta for change-failure metric vs previous snapshot.
+- Alert hooks panel:
+  - generates operator payload (`severity`, `breaches`, summary counters),
+  - supports payload copy,
+  - operator-triggered `metrics_snapshot` job dry-run/execute via `/console/v1/ops/jobs/run`.
 
 Provisioning Wizard
 - Same wizard as Settings, with `accessSection="tenants"`.
