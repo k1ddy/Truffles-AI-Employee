@@ -324,3 +324,71 @@ def test_schedule_inbound_syncs_enqueues_when_stale(monkeypatch):
     assert results["scheduled"] == 1
     assert results["errors"] == 0
     enqueue.assert_called_once()
+
+
+def test_enqueue_appointment_sync_uses_contract_valid_tenant_source():
+    appointment = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        branch_id=uuid4(),
+        conversation_id=uuid4(),
+        version=3,
+    )
+    connection = SimpleNamespace(id=uuid4(), calendar_id="primary")
+    sync_state = SimpleNamespace(state=None, last_error=None, updated_at=None)
+    client = SimpleNamespace(name="demo_salon")
+
+    db = Mock()
+    client_query = _make_query(first=client)
+    db.query.side_effect = lambda model: client_query if model.__name__ == "Client" else Mock()
+
+    with patch(
+        "app.services.calendar_sync_service.get_calendar_connection",
+        return_value=connection,
+    ), patch(
+        "app.services.calendar_sync_service._get_or_create_sync_state",
+        return_value=sync_state,
+    ), patch(
+        "app.services.calendar_sync_service.enqueue_outbox_message",
+        return_value=True,
+    ) as enqueue:
+        ok, error = calendar_sync_service.enqueue_appointment_sync(
+            db,
+            appointment=appointment,
+            action="create",
+            commit=False,
+        )
+
+    assert ok is True
+    assert error is None
+    payload_json = enqueue.call_args.kwargs["payload_json"]
+    assert payload_json["tenant_context"]["source"] == "system"
+    assert payload_json["tenant_context"]["producer"] == "calendar_sync"
+
+
+def test_enqueue_inbound_sync_uses_contract_valid_tenant_source():
+    client_id = uuid4()
+    branch_id = uuid4()
+    connection = SimpleNamespace(id=uuid4(), calendar_id="primary")
+
+    db = Mock()
+
+    with patch(
+        "app.services.calendar_sync_service.get_calendar_connection",
+        return_value=connection,
+    ), patch(
+        "app.services.calendar_sync_service.enqueue_outbox_message",
+        return_value=True,
+    ) as enqueue:
+        ok, error = calendar_sync_service.enqueue_inbound_sync(
+            db,
+            client_id=client_id,
+            branch_id=branch_id,
+            commit=False,
+        )
+
+    assert ok is True
+    assert error is None
+    payload_json = enqueue.call_args.kwargs["payload_json"]
+    assert payload_json["tenant_context"]["source"] == "system"
+    assert payload_json["tenant_context"]["producer"] == "calendar_sync"

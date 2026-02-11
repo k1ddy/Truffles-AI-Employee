@@ -343,7 +343,7 @@
 | 2026-02-09-unified-pr4bc-cicd-a22 | done | feat/2026-02-09-unified-pr4bc-cicd-a22 | /home/zhan/worktrees/2026-02-09-unified-pr4bc-cicd-a22 | docs/TASK_PACKAGES/TP-2026-02-09-unified-pr4bc-cicd-a22.md | 2026-02-09 |
 | 2026-02-09-deploy-untracked-hotfix-a22 | done | feat/2026-02-09-deploy-untracked-hotfix-a22 | /home/zhan/worktrees/2026-02-09-deploy-untracked-hotfix-a22 | docs/TASK_PACKAGES/TP-2026-02-09-deploy-untracked-hotfix-a22.md | 2026-02-09 |
 | 2026-02-10-ci-merge-skip-core-eval-a23 | done | feat/2026-02-10-ci-merge-skip-core-eval-a23 | /home/zhan/worktrees/2026-02-10-ci-merge-skip-core-eval-a23 | docs/TASK_PACKAGES/TP-2026-02-10-ci-merge-skip-core-eval-a23.md | 2026-02-10 |
-| 2026-02-10-stress-quality-a1 | active | feat/2026-02-10-stress-quality-a1 | /home/zhan/worktrees/2026-02-10-stress-quality-a1 | docs/TASK_PACKAGES/TP-2026-02-10-stress-quality-hardening.md | 2026-02-10 |
+| 2026-02-10-stress-quality-a1 | active | feat/2026-02-10-stress-quality-a1 | /home/zhan/worktrees/2026-02-10-stress-quality-a1 | docs/TASK_PACKAGES/TP-2026-02-10-stress-quality-hardening.md | 2026-02-11 |
 | 2026-02-10-ci-merge-skip-core-eval-a23 | done | feat/2026-02-10-ci-merge-skip-core-eval-a23 | /home/zhan/worktrees/2026-02-10-ci-merge-skip-core-eval-a23 | docs/TASK_PACKAGES/TP-2026-02-10-ci-merge-skip-core-eval-a23.md | 2026-02-10 (sync) |
 | 2026-02-10-deploy-parity-quote-fix-a23 | done | feat/2026-02-10-deploy-parity-quote-fix-a23 | /home/zhan/worktrees/2026-02-10-deploy-parity-quote-fix-a23 | docs/TASK_PACKAGES/TP-2026-02-10-deploy-parity-quote-fix-a23.md | 2026-02-10 |
 | 2026-02-10-tenants-platform-admin-fixes-a24 | active | feat/2026-02-10-tenants-platform-admin-fixes | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-10-integrations-platform-admin-fleet-control-a25.md | 2026-02-10 |
@@ -351,3 +351,5 @@
 | 2026-02-10-ci-deploy-livecheck-gate-a25 | done | feat/2026-02-10-ci-deploy-livecheck-gate-a25 | /home/zhan/worktrees/2026-02-10-ci-deploy-livecheck-gate-a25 | docs/TASK_PACKAGES/TP-2026-02-10-ci-deploy-livecheck-gate-a25.md | 2026-02-10 |
 | 2026-02-10-livecheck-webhook-secret-a25 | active | fix/2026-02-10-livecheck-webhook-secret | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-10-ci-deploy-livecheck-gate-a25.md | 2026-02-10 |
 | 2026-02-10-knowledge-fleet-ux-a27 | active | feat/2026-02-10-knowledge-fleet-ux-a27 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-10-knowledge-fleet-ux-a27.md | 2026-02-11 |
+| 2026-02-10-deploy-clean-source-a27 | active | fix/2026-02-10-deploy-clean-source | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-10-main-ci-deploy-contract-fix-a23.md | 2026-02-10 |
+| 2026-02-10-knowledge-fleet-ux-a27 | active | feat/2026-02-10-knowledge-fleet-ux-a27 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-10-knowledge-fleet-ux-a27.md | 2026-02-10 |

@@ -2555,7 +2555,12 @@ def _llm_quality_parse_actions(value):
         return []
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
-def _llm_quality_pick_jid(jids, idx, rng, mode):
+def _llm_quality_pick_jid(jids, idx, rng, mode, run_id=None):
+    if mode == "unique":
+        base = int(os.environ.get("LLM_QUALITY_JID_BASE", "99900000000"))
+        token = f"{run_id or 'llm_quality'}:{idx}".encode("utf-8")
+        suffix = int(hashlib.sha256(token).hexdigest()[:8], 16) % 90000000
+        return f"{base + suffix}@s.whatsapp.net"
     if not jids:
         return None
     if mode == "random":
@@ -4144,7 +4149,11 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--max-wait", type=float, default=1.5)
     parser.add_argument("--allowlist-jids", default=None)
     parser.add_argument("--remote-jid", default=None)
-    parser.add_argument("--jid-mode", choices=["round_robin", "random"], default="round_robin")
+    parser.add_argument(
+        "--jid-mode",
+        choices=["round_robin", "random", "unique"],
+        default="round_robin",
+    )
     parser.add_argument("--allow-non-allowlist", action="store_true")
     parser.add_argument("--webhook-secret", default=None)
     parser.add_argument("--admin-token", default=None)
@@ -5635,9 +5644,7 @@ def _poll_decision_meta(
             last_meta = meta
             if not require_action:
                 return last_conv_id, last_meta, None
-            action = meta.get("action") or meta.get("pending_action")
-            policy_gate = meta.get("policy_gate")
-            if action or policy_gate:
+            if _decision_meta_ready(meta):
                 return last_conv_id, last_meta, None
             if fail_fast_after is not None:
                 if missing_action_since is None:
@@ -5648,32 +5655,53 @@ def _poll_decision_meta(
                         last_conv_id,
                         last_meta,
                         (
-                            "missing_action (message_id="
+                            "decision_meta_not_ready (message_id="
                             f"{message_id}, conv_id={last_conv_id}, meta_keys={meta_keys})"
                         ),
                     )
         time.sleep(max(interval, 0.2))
     return last_conv_id, last_meta, last_error or "timeout"
 
-def _trace_has_recent_entry(trace_entries, min_recorded_at):
-    if not min_recorded_at:
+
+def _decision_meta_ready(meta):
+    if not isinstance(meta, dict):
+        return False
+    if meta.get("action") or meta.get("pending_action") or meta.get("policy_gate"):
         return True
-    min_ts = _parse_iso_datetime(min_recorded_at)
-    if not min_ts:
+    timing = meta.get("timing")
+    if isinstance(timing, dict) and timing.get("pipeline_finished_at"):
         return True
-    saw_recorded = False
-    for entry in reversed(trace_entries or []):
-        if not isinstance(entry, dict):
-            continue
-        recorded_at = _parse_iso_datetime(entry.get("recorded_at"))
-        if recorded_at is None:
-            continue
-        saw_recorded = True
-        if recorded_at >= min_ts:
-            return True
-    if not saw_recorded:
+    if meta.get("source") and meta.get("intent"):
         return True
     return False
+
+
+def _trace_filter_since(trace_entries, min_recorded_at):
+    entries = [entry for entry in (trace_entries or []) if isinstance(entry, dict)]
+    if not min_recorded_at:
+        return entries, False
+    min_ts = _parse_iso_datetime(min_recorded_at)
+    if not min_ts:
+        return entries, False
+    fresh_entries = []
+    stale_seen = False
+    recorded_seen = False
+    for entry in entries:
+        recorded_at = _parse_iso_datetime(entry.get("recorded_at"))
+        if recorded_at is None:
+            if fresh_entries:
+                fresh_entries.append(entry)
+            continue
+        recorded_seen = True
+        if recorded_at >= min_ts:
+            fresh_entries.append(entry)
+        else:
+            stale_seen = True
+    if fresh_entries:
+        return fresh_entries, stale_seen
+    if not recorded_seen:
+        return entries, False
+    return [], stale_seen
 
 
 def _trace_min_recorded_at(meta):
@@ -5702,16 +5730,15 @@ def _poll_decision_trace(db_user, conversation_id, timeout, interval, *, min_rec
             context = conv_meta.get("context") if isinstance(conv_meta, dict) else None
             trace_list = context.get("decision_trace") if isinstance(context, dict) else None
             trace_entries = _trace_as_list(trace_list)
-            if trace_entries and _trace_has_recent_entry(trace_entries, min_recorded_at):
-                return conv_meta, trace_entries, None
-            if trace_entries:
+            filtered_trace, stale_seen = _trace_filter_since(trace_entries, min_recorded_at)
+            if filtered_trace:
+                return conv_meta, filtered_trace, None
+            if trace_entries and stale_seen:
                 saw_stale_trace = True
-            last_trace = trace_entries
+            last_trace = filtered_trace
         time.sleep(max(interval, 0.2))
-    if last_trace and saw_stale_trace:
-        # Keep run comparable when trace exists but timestamp filters miss
-        # the current turn window (clock skew / retention ordering).
-        return last_meta, last_trace, None
+    if saw_stale_trace and min_recorded_at:
+        return last_meta, [], "trace_stale"
     return last_meta, last_trace, last_error or "trace timeout"
 
 def _resolve_env_from_container(container_name, var_name):
@@ -6772,7 +6799,7 @@ def _run_llm_quality(args):
     ) as trace_handle:
         for dialog_idx, dialog in enumerate(dialogs, start=1):
             remote_jid = args.remote_jid or _llm_quality_pick_jid(
-                allowlist_jids, dialog_idx - 1, rng, args.jid_mode
+                allowlist_jids, dialog_idx - 1, rng, args.jid_mode, run_id=run_id
             )
             if not remote_jid:
                 raise SystemExit("llm-quality: remote_jid unresolved")

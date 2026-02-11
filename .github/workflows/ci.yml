@@ -809,38 +809,26 @@ jobs:
           script: |
             set -euo pipefail
             REPO_ROOT="/home/zhan/truffles-main"
+            DEPLOY_SOURCE_ROOT="/home/zhan/truffles-main-deploy"
             if [ ! -d "${REPO_ROOT}/.git" ]; then
-              echo "ERROR: repo not found on host: ${REPO_ROOT}" >&2
+              echo "ERROR: runtime repo not found on host: ${REPO_ROOT}" >&2
               exit 1
             fi
             git -C "${REPO_ROOT}" fetch origin
-            git -C "${REPO_ROOT}" checkout main
-            if [ -n "$(git -C "${REPO_ROOT}" status --porcelain --untracked-files=no)" ]; then
-              echo "ERROR: tracked changes exist in ${REPO_ROOT}; cannot fast-forward safely" >&2
-              git -C "${REPO_ROOT}" status --short >&2 || true
+            if [ ! -d "${DEPLOY_SOURCE_ROOT}/.git" ]; then
+              git clone "${REPO_ROOT}" "${DEPLOY_SOURCE_ROOT}"
+            fi
+            DEPLOY_ORIGIN_URL="$(git -C "${REPO_ROOT}" config --get remote.origin.url)"
+            if [ -z "${DEPLOY_ORIGIN_URL}" ]; then
+              echo "ERROR: cannot resolve remote.origin.url in ${REPO_ROOT}" >&2
               exit 1
             fi
-            mapfile -t CONFLICTING_UNTRACKED < <(
-              git -C "${REPO_ROOT}" ls-files --others --exclude-standard | while read -r rel_path; do
-                if git -C "${REPO_ROOT}" cat-file -e "origin/main:${rel_path}" 2>/dev/null; then
-                  printf '%s\n' "${rel_path}"
-                fi
-              done
-            )
-            if [ "${#CONFLICTING_UNTRACKED[@]}" -gt 0 ]; then
-              BACKUP_DIR="${REPO_ROOT}/.deploy-untracked-backup/$(date -u +%Y%m%dT%H%M%SZ)"
-              mkdir -p "${BACKUP_DIR}"
-              echo "Found ${#CONFLICTING_UNTRACKED[@]} conflicting untracked paths; moving to ${BACKUP_DIR}"
-              for rel_path in "${CONFLICTING_UNTRACKED[@]}"; do
-                src_path="${REPO_ROOT}/${rel_path}"
-                dst_path="${BACKUP_DIR}/${rel_path}"
-                mkdir -p "$(dirname "${dst_path}")"
-                mv "${src_path}" "${dst_path}"
-                echo "moved: ${rel_path}"
-              done
-            fi
-            git -C "${REPO_ROOT}" pull --ff-only origin main
-            echo "Host repo HEAD after sync: $(git -C "${REPO_ROOT}" rev-parse HEAD)"
+            git -C "${DEPLOY_SOURCE_ROOT}" remote set-url origin "${DEPLOY_ORIGIN_URL}"
+            git -C "${DEPLOY_SOURCE_ROOT}" fetch origin
+            git -C "${DEPLOY_SOURCE_ROOT}" checkout -f main
+            git -C "${DEPLOY_SOURCE_ROOT}" reset --hard origin/main
+            git -C "${DEPLOY_SOURCE_ROOT}" clean -fd
+            echo "Deploy source HEAD after sync: $(git -C "${DEPLOY_SOURCE_ROOT}" rev-parse HEAD)"
 
             export ALLOWLIST="77015705555@s.whatsapp.net,77785890765@s.whatsapp.net,77000000001@s.whatsapp.net,77000000002@s.whatsapp.net"
             ENV_FILES=(
@@ -910,9 +898,15 @@ jobs:
                 echo "ENV_FILE missing: ${ENV_FILE}"
               fi
             done
-            RESTART_SCRIPT="${REPO_ROOT}/scripts/restart_api.sh"
-            RELEASE_SCRIPT="${REPO_ROOT}/scripts/restart_release.sh"
-            CONSOLE_RESTART_SCRIPT="${REPO_ROOT}/scripts/restart_console_web.sh"
+            if [ -f "${REPO_ROOT}/truffles-api/.env" ]; then
+              cp "${REPO_ROOT}/truffles-api/.env" "${DEPLOY_SOURCE_ROOT}/truffles-api/.env"
+            fi
+            if [ -f "${REPO_ROOT}/console-web/.env.local" ]; then
+              cp "${REPO_ROOT}/console-web/.env.local" "${DEPLOY_SOURCE_ROOT}/console-web/.env.local"
+            fi
+            RESTART_SCRIPT="${DEPLOY_SOURCE_ROOT}/scripts/restart_api.sh"
+            RELEASE_SCRIPT="${DEPLOY_SOURCE_ROOT}/scripts/restart_release.sh"
+            CONSOLE_RESTART_SCRIPT="${DEPLOY_SOURCE_ROOT}/scripts/restart_console_web.sh"
             test -f "${RESTART_SCRIPT}"
             test -f "${RELEASE_SCRIPT}"
             test -f "${CONSOLE_RESTART_SCRIPT}"
@@ -935,11 +929,13 @@ jobs:
             IMAGE_NAME="${IMAGE_DIGEST}" PULL_IMAGE=0 \
             RUN_MIGRATIONS=1 \
             MIGRATION_BOOTSTRAP_MODE=auto \
+            API_WORKDIR="${DEPLOY_SOURCE_ROOT}/truffles-api" \
+            API_ENV_FILE="${DEPLOY_SOURCE_ROOT}/truffles-api/.env" \
             OUTBOUND_ALLOWLIST_JIDS=77015705555@s.whatsapp.net,77785890765@s.whatsapp.net,77000000001@s.whatsapp.net,77000000002@s.whatsapp.net \
             REQUIRE_GHCR=1 VERIFY_VERSION=1 \
             EXPECTED_GIT_COMMIT=${{ github.sha }} EXPECTED_VERSION=${{ github.ref_name }} \
             bash "${RELEASE_SCRIPT}"
-            REPO_ROOT="${REPO_ROOT}" EXPECTED_GIT_COMMIT=${{ github.sha }} VERIFY_CONSOLE_BUILD=1 bash "${CONSOLE_RESTART_SCRIPT}"
+            REPO_ROOT="${DEPLOY_SOURCE_ROOT}" EXPECTED_GIT_COMMIT=${{ github.sha }} VERIFY_CONSOLE_BUILD=1 bash "${CONSOLE_RESTART_SCRIPT}"
             api_commit="$(curl -fsS http://localhost:8000/admin/version | python3 -c 'import json,sys; print((json.load(sys.stdin).get("git_commit") or "").strip())')"
             console_commit="$(docker exec truffles-console-web /bin/sh -lc 'printf "%s" "${NEXT_PUBLIC_BUILD_SHA:-unknown}"')"
             if [ "${api_commit}" != "${{ github.sha }}" ]; then
