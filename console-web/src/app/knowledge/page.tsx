@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -351,6 +351,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const [isApplyingFleetContext, setIsApplyingFleetContext] = useState(false);
     const [fleetAttentionEnabled, setFleetAttentionEnabled] = useState(false);
     const [fleetAttentionError, setFleetAttentionError] = useState<string | null>(null);
+    const fleetAutoApplyRef = useRef<string | null>(null);
     const [branchKnowledgeTagDraft, setBranchKnowledgeTagDraft] = useState("");
     const [branchWorkingHoursDraft, setBranchWorkingHoursDraft] = useState("{}");
     const [branchChangeReason, setBranchChangeReason] = useState("");
@@ -1005,7 +1006,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         || fleetBranchesQuery.isFetching
         || (fleetAttentionEnabled && fleetAttentionQuery.isFetching);
 
-    const applyConsoleContext = async ({
+    const applyConsoleContext = useCallback(async ({
         companyId,
         clientId,
         branchId: nextBranchId,
@@ -1035,9 +1036,9 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         } finally {
             setIsApplyingFleetContext(false);
         }
-    };
+    }, [queryClient]);
 
-    const resolveFleetCompanyId = (clientId?: string | null): string | null => {
+    const resolveFleetCompanyId = useCallback((clientId?: string | null): string | null => {
         if (clientId) {
             const matchedClient = fleetClients.find((client) => client.id === clientId);
             if (matchedClient?.company_id) {
@@ -1045,7 +1046,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             }
         }
         return fleetCompanyId || selectedFleetClient?.company_id || selectedCompanyId || null;
-    };
+    }, [fleetClients, fleetCompanyId, selectedFleetClient?.company_id, selectedCompanyId]);
 
     const openRouteWithFleetContext = async (
         path: string,
@@ -1103,6 +1104,41 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             successMessage: "Контекст Knowledge обновлен",
         });
     };
+
+    useEffect(() => {
+        if (!isPlatformAdmin || !branchSelectionRequired || isApplyingFleetContext) {
+            return;
+        }
+        if (!fleetClientId || !fleetBranchId) {
+            return;
+        }
+        const autoKey = `${fleetClientId}:${fleetBranchId}`;
+        if (fleetAutoApplyRef.current === autoKey) {
+            return;
+        }
+        fleetAutoApplyRef.current = autoKey;
+        void applyConsoleContext({
+            companyId: resolveFleetCompanyId(fleetClientId),
+            clientId: fleetClientId,
+            branchId: fleetBranchId,
+            successMessage: "Контекст филиала применен автоматически",
+        });
+    }, [
+        isPlatformAdmin,
+        branchSelectionRequired,
+        isApplyingFleetContext,
+        fleetClientId,
+        fleetBranchId,
+        applyConsoleContext,
+        resolveFleetCompanyId,
+    ]);
+
+    useEffect(() => {
+        if (branchSelectionRequired) {
+            return;
+        }
+        fleetAutoApplyRef.current = null;
+    }, [branchSelectionRequired]);
 
     const addGuidedService = () => {
         setGuidedServices((prev) => [
