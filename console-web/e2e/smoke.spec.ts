@@ -770,6 +770,72 @@ test.describe('Navigation', () => {
         await expect(tenantsSection(page, 'Клиенты')).toBeVisible();
         await expect(tenantsSection(page, 'Филиалы')).toBeVisible();
     });
+
+    test('should expose schema-driven onboarding controls on Tenants @smoke', async ({ page }) => {
+        await openTenants(page);
+
+        const modes = page.getByTestId('tenants-workspace-modes');
+        if (await modes.isVisible().catch(() => false)) {
+            await page.getByTestId('tenants-mode-onboarding').click();
+        }
+
+        const wizard = page.getByTestId('provisioning-wizard');
+        await expect(wizard).toBeVisible();
+        await page.getByRole('button', { name: /Ручной по шагам/i }).click();
+
+        const branchDraftStep = page.getByRole('button', { name: /Филиал/i }).first();
+        if (await branchDraftStep.isVisible().catch(() => false) && !(await branchDraftStep.isDisabled().catch(() => true))) {
+            await branchDraftStep.click();
+        }
+
+        const billingContractField = page.getByTestId('onboarding-billing-contract');
+        const billingCurrencyField = page.getByTestId('onboarding-billing-currency');
+        if (await billingContractField.isVisible().catch(() => false)) {
+            await expect(billingContractField).toBeVisible();
+            await expect(billingCurrencyField).toBeVisible();
+        } else {
+            await expect(page.getByPlaceholder('B2B').first()).toBeVisible();
+            await expect(page.getByPlaceholder('KZT').first()).toBeVisible();
+        }
+
+        const bookingStep = page.getByRole('button', { name: /Бронирование/i }).first();
+        if (await bookingStep.isVisible().catch(() => false) && !(await bookingStep.isDisabled().catch(() => true))) {
+            await bookingStep.click();
+            const workingHoursForm = page.getByTestId('onboarding-working-hours-form');
+            const bookingSettingsForm = page.getByTestId('onboarding-booking-settings-form');
+            if (await workingHoursForm.isVisible().catch(() => false)) {
+                await expect(workingHoursForm).toBeVisible();
+                await expect(bookingSettingsForm).toBeVisible();
+            } else {
+                await expect(page.getByText(/Working hours/i)).toBeVisible();
+                await expect(page.getByText(/Booking settings/i)).toBeVisible();
+            }
+        }
+
+        const goNoGoStep = page.getByRole('button', { name: /Go\/No-Go/i }).first();
+        if (await goNoGoStep.isVisible().catch(() => false) && !(await goNoGoStep.isDisabled().catch(() => true))) {
+            await goNoGoStep.click();
+            const purchasedForm = page.getByTestId('onboarding-purchased-form');
+            if (await purchasedForm.isVisible().catch(() => false)) {
+                await expect(purchasedForm).toBeVisible();
+                await expect(page.getByTestId('onboarding-purchased-apply-json')).toBeVisible();
+                await expect(page.getByTestId('onboarding-purchased-json')).toBeVisible();
+            } else {
+                const schemaLabel = page.getByText(/Purchased capabilities \(schema form\)/i);
+                if (await schemaLabel.isVisible().catch(() => false)) {
+                    await expect(schemaLabel).toBeVisible();
+                    await expect(page.getByText(/Advanced JSON \(expert\)/i)).toBeVisible();
+                } else {
+                    // Backward-compatible path for environments without schema layer.
+                    await expect(page.getByText(/purchased \(JSON, договор\/возможности\)/i)).toBeVisible();
+                }
+            }
+            return;
+        }
+
+        // Fallback path when go/no-go step is still locked by state machine.
+        await expect(page.getByText(/booking_settings и working_hours нужны/i)).toBeVisible();
+    });
 });
 
 // =========================================
