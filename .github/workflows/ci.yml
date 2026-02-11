@@ -809,22 +809,24 @@ jobs:
           script: |
             set -euo pipefail
             REPO_ROOT="/home/zhan/truffles-main"
-            DEPLOY_SOURCE_ROOT="/home/zhan/truffles-main-deploy"
             if [ ! -d "${REPO_ROOT}/.git" ]; then
               echo "ERROR: runtime repo not found on host: ${REPO_ROOT}" >&2
               exit 1
             fi
             git -C "${REPO_ROOT}" fetch origin
-            if [ ! -d "${DEPLOY_SOURCE_ROOT}/.git" ]; then
-              git clone "${REPO_ROOT}" "${DEPLOY_SOURCE_ROOT}"
-            fi
             DEPLOY_ORIGIN_URL="$(git -C "${REPO_ROOT}" config --get remote.origin.url)"
             if [ -z "${DEPLOY_ORIGIN_URL}" ]; then
               echo "ERROR: cannot resolve remote.origin.url in ${REPO_ROOT}" >&2
               exit 1
             fi
-            git -C "${DEPLOY_SOURCE_ROOT}" remote set-url origin "${DEPLOY_ORIGIN_URL}"
-            git -C "${DEPLOY_SOURCE_ROOT}" fetch origin
+            DEPLOY_SOURCE_ROOT="$(mktemp -d /tmp/truffles-main-deploy-XXXXXX)"
+            cleanup_deploy_source() {
+              if [ -n "${DEPLOY_SOURCE_ROOT:-}" ] && [ -d "${DEPLOY_SOURCE_ROOT}" ]; then
+                rm -rf "${DEPLOY_SOURCE_ROOT}"
+              fi
+            }
+            trap cleanup_deploy_source EXIT
+            git clone --quiet --branch main --single-branch "${DEPLOY_ORIGIN_URL}" "${DEPLOY_SOURCE_ROOT}"
             git -C "${DEPLOY_SOURCE_ROOT}" checkout -f main
             git -C "${DEPLOY_SOURCE_ROOT}" reset --hard origin/main
             git -C "${DEPLOY_SOURCE_ROOT}" clean -fd
