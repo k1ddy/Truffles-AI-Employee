@@ -77,6 +77,12 @@ Context shortcuts
 Provisioning Wizard
 - Same wizard as Settings, with `accessSection="tenants"`.
 - Steps: филиал → интеграции → команда → Telegram → знания → booking → go/no-go.
+- Schema-driven onboarding forms are the primary path for:
+  - `billing_info` (contract + ISO currency),
+  - `working_hours` (days + time range),
+  - `booking_settings` (duration/buffer constraints),
+  - `onboarding_contract.purchased` (channels/providers/features).
+- `Advanced JSON (expert)` is available as fallback and can be synced both ways with form state.
 - See `docs/CONSOLE_AUDIT/pages/settings.md` for step-by-step detail.
 
 API endpoints used
