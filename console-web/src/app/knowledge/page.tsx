@@ -1055,6 +1055,19 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         router.push(path);
     };
 
+    const resolveBranchContextForClient = (clientId?: string | null): string | null => {
+        if (!clientId) {
+            return selectedBranchId || fleetBranchId || null;
+        }
+        if (selectedClientId === clientId && selectedBranchId) {
+            return selectedBranchId;
+        }
+        if (fleetClientId === clientId && fleetBranchId) {
+            return fleetBranchId;
+        }
+        return null;
+    };
+
     const selectKnowledgeBranch = async () => {
         if (!fleetClientId || !fleetBranchId) {
             toast.error("Выберите клиента и филиал");
@@ -1202,7 +1215,12 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                         <button
                             type="button"
                             className="btn-ghost"
-                            onClick={() => void openRouteWithFleetContext("/integrations", fleetClientId, fleetCompanyId)}
+                            onClick={() => void openRouteWithFleetContext(
+                                "/integrations",
+                                fleetClientId,
+                                fleetCompanyId,
+                                resolveBranchContextForClient(fleetClientId),
+                            )}
                             disabled={!fleetClientId || isFleetBusy}
                         >
                             Интеграции
@@ -1210,12 +1228,20 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                         <button
                             type="button"
                             className="btn-ghost"
-                            onClick={() => void openRouteWithFleetContext("/", fleetClientId, fleetCompanyId)}
+                            onClick={() => void openRouteWithFleetContext(
+                                "/",
+                                fleetClientId,
+                                fleetCompanyId,
+                                resolveBranchContextForClient(fleetClientId),
+                            )}
                             disabled={!fleetClientId || isFleetBusy}
                         >
                             Заявки
                         </button>
                     </div>
+                </div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                    Переходы в `Интеграции` и `Заявки` сохраняют branch context, если выбран филиал клиента.
                 </div>
                 {!fleetAttentionEnabled && (
                     <div className="mt-4 text-xs text-muted-foreground">
@@ -1287,7 +1313,12 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                             <button
                                                 type="button"
                                                 className="btn-ghost"
-                                                onClick={() => void openRouteWithFleetContext("/integrations", item.client_id, item.company_id)}
+                                                onClick={() => void openRouteWithFleetContext(
+                                                    "/integrations",
+                                                    item.client_id,
+                                                    item.company_id,
+                                                    resolveBranchContextForClient(item.client_id),
+                                                )}
                                                 disabled={isFleetBusy}
                                             >
                                                 Интеграции
@@ -1476,6 +1507,47 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     }
 
     if (branchSelectionRequired) {
+        if (isPlatformAdmin) {
+            const fallbackBranchId = branchOptions[0]?.id ?? "";
+            return (
+                <div className="space-y-4">
+                    {renderPlatformAdminFleetPanel()}
+                    <div className="card-surface max-w-xl p-8" data-testid="knowledge-branch-gate-platform">
+                        <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Требуется контекст</p>
+                        <h2 className="text-2xl font-semibold mt-3 mb-4">Выберите филиал во Fleet Control</h2>
+                        <p className="text-sm text-muted-foreground mb-4">
+                            Для Platform Admin источник выбора филиала — блок `Fleet Knowledge Control`. Нажмите `Открыть филиал` после выбора клиента и филиала.
+                        </p>
+                        <div className="rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground">
+                            client_id: {selectedClientId || "—"} · branch_id: {selectedBranchId || "не выбран"}
+                        </div>
+                        {fallbackBranchId && (
+                            <div className="mt-4">
+                                <button
+                                    className="btn-ghost"
+                                    onClick={async () => {
+                                        setIsSelectingBranch(true);
+                                        try {
+                                            await applyConsoleContext({
+                                                companyId: selectedCompanyId || null,
+                                                clientId: selectedClientId || null,
+                                                branchId: fallbackBranchId,
+                                                successMessage: "Филиал выбран из текущего клиента",
+                                            });
+                                        } finally {
+                                            setIsSelectingBranch(false);
+                                        }
+                                    }}
+                                    disabled={isSelectingBranch || !selectedClientId}
+                                >
+                                    {isSelectingBranch ? "Загрузка..." : "Открыть первый филиал текущего клиента"}
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
         return (
             <div className="space-y-4">
                 {renderPlatformAdminFleetPanel()}
