@@ -645,9 +645,11 @@ def _normalize_branch_change_patch(*, db: Session, branch: Branch, patch_payload
         raw_slug = patch_payload.get("slug")
         if raw_slug is None:
             errors.append("slug cannot be null")
+        elif not isinstance(raw_slug, str):
+            errors.append("slug must be string")
         else:
             try:
-                slug = _normalize_slug(str(raw_slug), "branch_slug")
+                slug = _normalize_slug(raw_slug, "branch_slug")
             except ConsoleAPIError as exc:
                 errors.append(exc.message)
             else:
@@ -664,9 +666,11 @@ def _normalize_branch_change_patch(*, db: Session, branch: Branch, patch_payload
         raw_name = patch_payload.get("name")
         if raw_name is None:
             errors.append("name cannot be null")
+        elif not isinstance(raw_name, str):
+            errors.append("name must be string")
         else:
             try:
-                normalized["name"] = _normalize_required_text(str(raw_name), "name")
+                normalized["name"] = _normalize_required_text(raw_name, "name")
             except ConsoleAPIError as exc:
                 errors.append(exc.message)
 
@@ -681,17 +685,19 @@ def _normalize_branch_change_patch(*, db: Session, branch: Branch, patch_payload
                 errors.append(exc.message)
 
     if "instance_id" in patch_payload:
-        instance_id = _normalize_optional_text(
-            patch_payload.get("instance_id") if isinstance(patch_payload.get("instance_id"), str) else None
-        )
-        _ensure_unique_branch_field(
-            db,
-            client_id=branch.client_id,
-            field_name="instance_id",
-            value=instance_id,
-            exclude_branch_id=branch.id,
-        )
-        normalized["instance_id"] = instance_id
+        raw_instance_id = patch_payload.get("instance_id")
+        if raw_instance_id is not None and not isinstance(raw_instance_id, str):
+            errors.append("instance_id must be string")
+        else:
+            instance_id = _normalize_optional_text(raw_instance_id)
+            _ensure_unique_branch_field(
+                db,
+                client_id=branch.client_id,
+                field_name="instance_id",
+                value=instance_id,
+                exclude_branch_id=branch.id,
+            )
+            normalized["instance_id"] = instance_id
 
     if "phone" in patch_payload:
         raw_phone = patch_payload.get("phone")
@@ -7848,6 +7854,18 @@ async def update_client(
         else:
             next_company_id = None
         if next_company_id != client.company_id:
+            has_client_branches = (
+                db.query(Branch.id)
+                .filter(Branch.client_id == client.id)
+                .first()
+                is not None
+            )
+            if has_client_branches:
+                raise ConsoleAPIError(
+                    400,
+                    "INVALID_PARAM",
+                    "company_id is immutable once client has branches",
+                )
             client.company_id = next_company_id
         updated_fields.append("company_id")
 

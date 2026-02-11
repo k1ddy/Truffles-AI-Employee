@@ -357,3 +357,4 @@
 | 2026-02-11-knowledge-ux-hotfix-a27 | active | fix/2026-02-11-knowledge-ux-hotfix-a27 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-11-knowledge-ux-hotfix-a27.md | 2026-02-11 |
 | 2026-02-11-knowledge-gate-context-a27 | active | fix/2026-02-11-knowledge-gate-context-a27 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-11-knowledge-gate-context-a27.md | 2026-02-11 (sync) |
 | 2026-02-11-tenants-pr-c-schema-forms-a27 | active | feat/2026-02-11-tenants-pr-c-schema-forms-a27 | /home/zhan/worktrees/2026-02-11-tenants-pr-c-schema-forms-a27 | docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-c-schema-forms-a27.md | 2026-02-11 (sync) |
+| 2026-02-11-tenants-pr-ef-validators-ia-a28 | done | feat/2026-02-11-tenants-pr-ef-validators-ia-a28 | /home/zhan/worktrees/2026-02-11-tenants-pr-ef-validators-ia-a28 | docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-ef-validators-ia-a27.md | 2026-02-11 |

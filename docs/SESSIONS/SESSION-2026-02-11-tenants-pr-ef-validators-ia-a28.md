@@ -1,0 +1,29 @@
+# SESSION 2026-02-11-tenants-pr-ef-validators-ia-a28 — Session 2026-02-11-tenants-pr-ef-validators-ia-a28
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-ef-validators-ia-a27.md
+- branch: feat/2026-02-11-tenants-pr-ef-validators-ia-a28
+- worktree: /home/zhan/worktrees/2026-02-11-tenants-pr-ef-validators-ia-a28
+- base_ref: origin/main
+- scope: Tenants PR-EF: backend strict validation + immutable company_id guard + IA/input-contract uplift.
+- done:
+  - Tightened backend branch change patch normalization (`slug/name/instance_id` type checks, no silent coercion).
+  - Added immutable guard for `client.company_id` reassignment once client has branches.
+  - Hardened request schemas for Tenants write-paths using strict string fields + `extra=forbid`.
+  - Added provisioning tests for immutable guard and strict patch validation.
+  - Added Tenants UI operational guide + explicit format contracts + client-side validation before draft/publish.
+  - Added UI lock for `company_id` edit after branch creation.
+  - Updated Tenants smoke tests for new contracts with legacy-safe fallbacks.
+  - Synced tenants audit docs.
+- next:
+  - Commit changes and open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-ef-validators-ia-a27.md
+  - truffles-api/app/routers/console.py
+  - truffles-api/app/schemas/console.py
+  - truffles-api/tests/test_console_admin_provisioning.py
+  - console-web/src/app/tenants/page.tsx
+  - console-web/e2e/smoke.spec.ts
+  - docs/CONSOLE_AUDIT/pages/tenants.md
+- last_updated: 2026-02-11
