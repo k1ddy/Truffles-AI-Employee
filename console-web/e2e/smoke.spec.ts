@@ -96,6 +96,16 @@ async function openSettings(page: import('@playwright/test').Page) {
     await handleSettingsResponse(page, await settingsResponse);
 }
 
+async function openTenants(page: import('@playwright/test').Page) {
+    await page.getByTestId('nav-tenants').click();
+    await expect(page).toHaveURL(urlPathPattern('/tenants'));
+    await expect(page.getByTestId('tenants-title')).toBeVisible();
+}
+
+function tenantsSection(page: import('@playwright/test').Page, title: string) {
+    return page.locator('section').filter({ has: page.getByRole('heading', { name: title }) }).first();
+}
+
 async function resolveAuthOrigin(page: import('@playwright/test').Page) {
     await page.goto(buildSignInUrl(baseURL), { waitUntil: 'domcontentloaded' });
     const providerForm = page.locator('form[action*="keycloak"]').first();
@@ -669,6 +679,67 @@ test.describe('Navigation', () => {
             return `${year}-${month}-${day}`;
         });
         await expect(dateInput).toHaveValue(localDate);
+    });
+
+    test('should render inline lifecycle panel on Tenants @smoke', async ({ page }) => {
+        await openTenants(page);
+        const clients = tenantsSection(page, 'Клиенты');
+        await expect(clients).toBeVisible();
+
+        const lifecycleButton = page.getByTestId('tenants-client-lifecycle-open').first();
+        if (await lifecycleButton.isVisible().catch(() => false)) {
+            await lifecycleButton.click();
+            const lifecyclePanel = page.getByTestId('tenants-client-lifecycle-panel').first();
+            await expect(lifecyclePanel).toBeVisible();
+            await expect(lifecyclePanel.getByTestId('tenants-client-lifecycle-reason')).toBeVisible();
+            await expect(lifecyclePanel.getByTestId('tenants-client-lifecycle-confirm')).toBeVisible();
+            await lifecyclePanel.getByTestId('tenants-client-lifecycle-cancel').click();
+            await expect(lifecyclePanel).not.toBeVisible();
+            return;
+        }
+
+        // Backward-compatible check for pre-inline lifecycle UI.
+        const legacyButton = clients.getByRole('button', { name: /Архивировать|Восстановить/i }).first();
+        if (await legacyButton.isVisible().catch(() => false)) {
+            let sawDialog = false;
+            page.once('dialog', async (dialog) => {
+                sawDialog = true;
+                await dialog.dismiss();
+            });
+            await legacyButton.click();
+            await expect.poll(() => sawDialog, { timeout: 5000 }).toBe(true);
+            return;
+        }
+
+        await expect(clients.getByText(/Клиенты не найдены|фильтр по компании из контекста/i)).toBeVisible();
+    });
+
+    test('should expose branch change controls on Tenants @smoke', async ({ page }) => {
+        await openTenants(page);
+        const branches = tenantsSection(page, 'Филиалы');
+        await expect(branches).toBeVisible();
+
+        let editButton = page.getByTestId('tenants-branch-edit').first();
+        if (!(await editButton.isVisible().catch(() => false))) {
+            editButton = branches.getByRole('button', { name: 'Редактировать' }).first();
+        }
+        if (!(await editButton.isVisible().catch(() => false))) {
+            await expect(branches.getByText(/Филиалы не найдены|фильтр по клиенту из контекста/i)).toBeVisible();
+            return;
+        }
+
+        await editButton.click();
+        const previewButton = page.getByTestId('tenants-branch-change-preview').first();
+        if (await previewButton.isVisible().catch(() => false)) {
+            await expect(previewButton).toBeVisible();
+            await expect(page.getByTestId('tenants-branch-change-publish').first()).toBeVisible();
+            await expect(page.getByTestId('tenants-branch-change-rollback').first()).toBeVisible();
+            return;
+        }
+
+        await expect(branches.getByRole('button', { name: /Черновик \+ проверка|Draft \+ Validate/i }).first()).toBeVisible();
+        await expect(branches.getByRole('button', { name: /Применить|Publish/i }).first()).toBeVisible();
+        await expect(branches.getByRole('button', { name: /Откат|Rollback/i }).first()).toBeVisible();
     });
 });
 

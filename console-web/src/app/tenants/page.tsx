@@ -42,6 +42,14 @@ type ClientEditorState = {
     originalCompanyId: string;
 };
 
+type ClientLifecycleMode = "archive" | "restore";
+type ClientLifecycleDraftState = {
+    clientId: string;
+    mode: ClientLifecycleMode;
+    reason: string;
+    confirmChecked: boolean;
+};
+
 type BranchEditorState = {
     id: string;
     name: string;
@@ -106,6 +114,48 @@ function attentionLevelClass(level?: FleetAttentionLevel): string {
         return "bg-amber-100 text-amber-700";
     }
     return "bg-blue-100 text-blue-700";
+}
+
+const FLEET_LIFECYCLE_LABELS: Record<string, string> = {
+    lead: "Лид",
+    contracting: "Договор",
+    onboarding: "Онбординг",
+    go_live_ready: "Готов к запуску",
+    active: "Активный",
+    paused: "Пауза",
+    archived: "Архив",
+};
+
+const FLEET_PAYMENT_LABELS: Record<string, string> = {
+    pending: "Ожидает",
+    confirmed: "Подтверждена",
+    rejected: "Отклонена",
+    unknown: "Не задана",
+};
+
+const FLEET_SERVICE_LABELS: Record<string, string> = {
+    ok: "Стабильно",
+    degraded: "Деградация",
+    attention: "Требует внимания",
+};
+
+const BRANCH_CHANGE_STATUS_LABELS: Record<string, string> = {
+    draft: "Черновик",
+    validated: "Проверено",
+    published: "Применено",
+    publish_failed: "Ошибка применения",
+    rolled_back: "Откат выполнен",
+    rollback_failed: "Ошибка отката",
+};
+
+function formatStateLabel(
+    value: string | null | undefined,
+    map: Record<string, string>,
+): string {
+    if (!value) {
+        return "—";
+    }
+    return map[value] ?? value;
 }
 
 function buildBranchChangePatch(editor: BranchEditorState): {
@@ -211,6 +261,7 @@ export default function TenantsPage() {
     const [rollingBackBranchChange, setRollingBackBranchChange] = useState(false);
     const [branchChangePreview, setBranchChangePreview] = useState<components["schemas"]["BranchChangeResponse"] | null>(null);
     const [clientLifecyclePendingId, setClientLifecyclePendingId] = useState<string | null>(null);
+    const [clientLifecycleDraft, setClientLifecycleDraft] = useState<ClientLifecycleDraftState | null>(null);
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -473,6 +524,7 @@ export default function TenantsPage() {
             toast.error("Не удалось открыть компанию без ID");
             return;
         }
+        setClientLifecycleDraft(null);
         setBranchChangePreview(null);
         setClientEditor(null);
         setBranchEditor(null);
@@ -491,6 +543,7 @@ export default function TenantsPage() {
             toast.error("Не удалось открыть клиента без ID");
             return;
         }
+        setClientLifecycleDraft(null);
         setBranchChangePreview(null);
         setCompanyEditor(null);
         setBranchEditor(null);
@@ -508,6 +561,7 @@ export default function TenantsPage() {
             toast.error("Не удалось открыть филиал без ID");
             return;
         }
+        setClientLifecycleDraft(null);
         setBranchChangePreview(null);
         setCompanyEditor(null);
         setClientEditor(null);
@@ -619,42 +673,50 @@ export default function TenantsPage() {
         return (client.status ?? "").trim().toLowerCase() !== "active";
     };
 
-    const askClientLifecycleReason = (mode: "archive" | "restore"): string | null => {
-        const promptText = mode === "archive"
-            ? "Укажите причину архивации клиента"
-            : "Укажите причину восстановления клиента";
-        const raw = window.prompt(promptText, "");
-        if (raw === null) {
-            return null;
-        }
-        const reason = raw.trim();
-        if (!reason) {
-            toast.error("Укажите причину");
-            return null;
-        }
-        return reason;
-    };
-
-    const handleClientLifecycleAction = async (
+    const openClientLifecycleAction = (
         client: components["schemas"]["Client"],
-        mode: "archive" | "restore",
+        mode: ClientLifecycleMode,
     ) => {
         if (!client.id) {
             toast.error("Не удалось выполнить действие без ID клиента");
             return;
         }
-        const reason = askClientLifecycleReason(mode);
+        setClientLifecycleDraft({
+            clientId: client.id,
+            mode,
+            reason: "",
+            confirmChecked: false,
+        });
+    };
+
+    const closeClientLifecycleDraft = () => {
+        if (clientLifecyclePendingId) {
+            return;
+        }
+        setClientLifecycleDraft(null);
+    };
+
+    const handleClientLifecycleAction = async (
+        client: components["schemas"]["Client"],
+    ) => {
+        if (!client.id) {
+            toast.error("Не удалось выполнить действие без ID клиента");
+            return;
+        }
+        if (!clientLifecycleDraft || clientLifecycleDraft.clientId !== client.id) {
+            toast.error("Сначала подготовьте действие");
+            return;
+        }
+        const reason = clientLifecycleDraft.reason.trim();
         if (!reason) {
+            toast.error("Укажите причину");
             return;
         }
-        const confirmed = window.confirm(
-            mode === "archive"
-                ? "Архивировать клиента? Клиент исчезнет из active-списка."
-                : "Восстановить клиента в active-список?",
-        );
-        if (!confirmed) {
+        if (!clientLifecycleDraft.confirmChecked) {
+            toast.error("Подтвердите действие");
             return;
         }
+        const mode = clientLifecycleDraft.mode;
         setClientLifecyclePendingId(client.id);
         try {
             if (mode === "archive") {
@@ -673,6 +735,7 @@ export default function TenantsPage() {
             handleError(error);
         } finally {
             setClientLifecyclePendingId(null);
+            setClientLifecycleDraft(null);
         }
     };
 
@@ -719,16 +782,16 @@ export default function TenantsPage() {
             });
             const draftChangeId = draftResponse.data.change?.id;
             if (!draftChangeId) {
-                toast.error("Не удалось создать draft");
+                toast.error("Не удалось создать черновик");
                 return;
             }
             const validateResponse = await adminApi.validateBranchChange(draftChangeId);
             setBranchChangePreview(validateResponse.data);
             const status = validateResponse.data.change?.status;
             if (status === "validated") {
-                toast.success("Draft валидирован. Можно публиковать.");
+                toast.success("Черновик прошел проверку. Можно применять.");
             } else {
-                toast.error("Draft не прошёл валидацию. Проверьте ошибки.");
+                toast.error("Черновик не прошел проверку. Исправьте ошибки.");
             }
             await branchChangesQuery.refetch();
         } catch (error) {
@@ -744,7 +807,7 @@ export default function TenantsPage() {
         }
         const changeId = branchChangePreview?.change?.id;
         if (!changeId) {
-            toast.error("Сначала выполните draft+validate");
+            toast.error("Сначала подготовьте и проверьте черновик");
             return;
         }
         setPublishingBranchChange(true);
@@ -783,12 +846,12 @@ export default function TenantsPage() {
             : latestPublishedBranchChange;
         const changeId = targetChange?.id;
         if (!changeId) {
-            toast.error("Нет опубликованного изменения для rollback");
+            toast.error("Нет примененного изменения для отката");
             return;
         }
         const reason = branchEditor.rollbackReason.trim();
         if (!reason) {
-            toast.error("Укажите причину rollback");
+            toast.error("Укажите причину отката");
             return;
         }
 
@@ -816,7 +879,7 @@ export default function TenantsPage() {
 
             setBranchChangePreview(rollbackResponse.data);
             setBranchEditor((prev) => (prev ? applyBranchSnapshotToEditor(prev, rollbackResponse.data.branch) : prev));
-            toast.success("Rollback выполнен");
+            toast.success("Откат выполнен");
             await branchChangesQuery.refetch();
             refreshTenants();
             refreshContext();
@@ -830,7 +893,7 @@ export default function TenantsPage() {
     if (!session) {
         return (
             <div className="p-8 text-center text-muted-foreground">
-                Пожалуйста, войдите для просмотра Tenants.
+                Пожалуйста, войдите для просмотра вкладки «Тенанты».
             </div>
         );
     }
@@ -845,7 +908,7 @@ export default function TenantsPage() {
 
     if (!canReadTenants) {
         return (
-            <AccessDenied message="Эта роль не имеет доступа к Tenants." />
+            <AccessDenied message="Эта роль не имеет доступа к вкладке Тенанты." />
         );
     }
 
@@ -886,7 +949,7 @@ export default function TenantsPage() {
                             <div>
                                 <h2 className="text-lg font-semibold">Риски и внимание</h2>
                                 <p className="text-sm text-muted-foreground">
-                                    Операционные риски по активным клиентам (top by score)
+                                    Операционные риски по активным клиентам (топ по score)
                                 </p>
                             </div>
                             <button
@@ -902,17 +965,17 @@ export default function TenantsPage() {
                             <div className="mb-3 text-xs text-muted-foreground" data-testid="tenants-fleet-attention-summary">
                                 активных клиентов {fleetAttention.summary.active_clients_total} · с риском {fleetAttention.summary.clients_with_attention} ·
                                 высокий {fleetAttention.summary.high_risk_clients} · средний {fleetAttention.summary.medium_risk_clients} ·
-                                ошибок outbox за 24ч {fleetAttention.summary.outbox_failed_24h_total} · pending handover {fleetAttention.summary.pending_handovers_total}
+                                ошибок outbox за 24ч {fleetAttention.summary.outbox_failed_24h_total} · ожидают передачи {fleetAttention.summary.pending_handovers_total}
                             </div>
                         ) : null}
 
                         <div className="space-y-3">
                             {fleetAttentionQuery.isLoading ? (
-                                <div className="text-sm text-muted-foreground">Загрузка risk cockpit...</div>
+                                <div className="text-sm text-muted-foreground">Загрузка панели рисков...</div>
                             ) : fleetAttentionQuery.isError ? (
-                                <div className="text-sm text-muted-foreground">Не удалось загрузить risk cockpit.</div>
+                                <div className="text-sm text-muted-foreground">Не удалось загрузить панель рисков.</div>
                             ) : !fleetAttention?.items?.length ? (
-                                <div className="text-sm text-muted-foreground">Клиенты с medium/high риском не найдены.</div>
+                                <div className="text-sm text-muted-foreground">Клиенты со средним/высоким риском не найдены.</div>
                             ) : (
                                 fleetAttention.items.map((item) => (
                                     <div
@@ -934,10 +997,10 @@ export default function TenantsPage() {
                                             </div>
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
-                                            жизненный цикл {item.lifecycle_state} · сервис {item.service_state} · владелец {item.owner_name ?? "—"} · следующее действие {item.next_action}
+                                            жизненный цикл {formatStateLabel(item.lifecycle_state, FLEET_LIFECYCLE_LABELS)} · сервис {formatStateLabel(item.service_state, FLEET_SERVICE_LABELS)} · владелец {item.owner_name ?? "—"} · следующее действие {item.next_action}
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
-                                            филиалы active {item.active_branches}/{item.total_branches} · stale {item.stale_branches} · интеграционных ошибок {item.integration_error_branches} · outbox_failed_24h {item.outbox_failed_24h} · pending_handovers {item.pending_handovers}
+                                            филиалы активные {item.active_branches}/{item.total_branches} · неактуальные {item.stale_branches} · интеграционных ошибок {item.integration_error_branches} · outbox_failed_24h {item.outbox_failed_24h} · ожидают передачи {item.pending_handovers}
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
                                             причины: {item.reasons?.join(", ") || "—"}
@@ -1043,7 +1106,7 @@ export default function TenantsPage() {
                                                         />
                                                     </label>
                                                     <label className="text-xs text-muted-foreground">
-                                                        billing_info (JSON, optional)
+                                                        billing_info (JSON, опционально)
                                                         <textarea
                                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
                                                             rows={3}
@@ -1104,7 +1167,7 @@ export default function TenantsPage() {
                             </p>
                             {clientsSummary ? (
                                 <div className="mt-1 text-xs text-muted-foreground">
-                                    портфель: клиентов {clientsSummary.total_clients} · active {clientsSummary.active_clients} · onboarding {clientsSummary.onboarding_clients} · paused {clientsSummary.paused_clients} · archived {clientsSummary.archived_clients} · degraded {clientsSummary.degraded_clients}
+                                    портфель: клиентов {clientsSummary.total_clients} · активные {clientsSummary.active_clients} · онбординг {clientsSummary.onboarding_clients} · пауза {clientsSummary.paused_clients} · архив {clientsSummary.archived_clients} · деградация {clientsSummary.degraded_clients}
                                 </div>
                             ) : null}
                             {selectedCompanyId ? (
@@ -1126,13 +1189,13 @@ export default function TenantsPage() {
                                 onChange={(event) => setFleetLifecycleFilter(event.target.value as FleetLifecycleFilter)}
                             >
                                 <option value="all">Этап: все</option>
-                                <option value="lead">lead</option>
-                                <option value="contracting">contracting</option>
-                                <option value="onboarding">onboarding</option>
-                                <option value="go_live_ready">go_live_ready</option>
-                                <option value="active">active</option>
-                                <option value="paused">paused</option>
-                                <option value="archived">archived</option>
+                                <option value="lead">лид</option>
+                                <option value="contracting">договор</option>
+                                <option value="onboarding">онбординг</option>
+                                <option value="go_live_ready">готов к запуску</option>
+                                <option value="active">активный</option>
+                                <option value="paused">пауза</option>
+                                <option value="archived">архив</option>
                             </select>
                             <select
                                 className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
@@ -1140,10 +1203,10 @@ export default function TenantsPage() {
                                 onChange={(event) => setFleetPaymentFilter(event.target.value as FleetPaymentFilter)}
                             >
                                 <option value="all">Оплата: все</option>
-                                <option value="pending">pending</option>
-                                <option value="confirmed">confirmed</option>
-                                <option value="rejected">rejected</option>
-                                <option value="unknown">unknown</option>
+                                <option value="pending">ожидает</option>
+                                <option value="confirmed">подтверждена</option>
+                                <option value="rejected">отклонена</option>
+                                <option value="unknown">не задана</option>
                             </select>
                             <select
                                 className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
@@ -1151,9 +1214,9 @@ export default function TenantsPage() {
                                 onChange={(event) => setFleetServiceFilter(event.target.value as FleetServiceFilter)}
                             >
                                 <option value="all">Сервис: все</option>
-                                <option value="ok">ok</option>
-                                <option value="degraded">degraded</option>
-                                <option value="attention">attention</option>
+                                <option value="ok">стабильно</option>
+                                <option value="degraded">деградация</option>
+                                <option value="attention">внимание</option>
                             </select>
                         </div>
                     </div>
@@ -1169,9 +1232,12 @@ export default function TenantsPage() {
                                 const isEditing = clientEditor?.id === client.id;
                                 const isArchived = isClientArchived(client);
                                 const lifecyclePending = clientLifecyclePendingId === client.id;
+                                const lifecycleMode: ClientLifecycleMode = isArchived ? "restore" : "archive";
+                                const lifecycleDraftActive = clientLifecycleDraft?.clientId === client.id;
                                 return (
                                     <div
                                         key={client.id}
+                                        data-testid="tenants-client-row"
                                         className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3"
                                     >
                                         <div>
@@ -1181,16 +1247,16 @@ export default function TenantsPage() {
                                                 <div className="text-xs text-muted-foreground">{client.company_name}</div>
                                             ) : null}
                                             {client.status ? (
-                                                <div className="text-xs text-muted-foreground">status: {client.status}</div>
+                                                <div className="text-xs text-muted-foreground">статус: {client.status}</div>
                                             ) : null}
                                             <div className="text-xs text-muted-foreground">
-                                                lifecycle: {client.lifecycle_state ?? "—"} · payment: {client.payment_status ?? "—"} · service: {client.service_state ?? "—"}
+                                                lifecycle: {formatStateLabel(client.lifecycle_state, FLEET_LIFECYCLE_LABELS)} · payment: {formatStateLabel(client.payment_status, FLEET_PAYMENT_LABELS)} · service: {formatStateLabel(client.service_state, FLEET_SERVICE_LABELS)}
                                             </div>
                                             <div className="text-xs text-muted-foreground">
                                                 owner: {client.owner_name ?? "—"} · next: {client.next_action ?? "—"}
                                             </div>
                                             <div className="text-xs text-muted-foreground">
-                                                branches: active {client.active_branches ?? 0}/{client.total_branches ?? 0} · degraded {client.degraded_branches ?? 0} · go_live_ready {client.go_live_ready_branches ?? 0}
+                                                филиалы: активные {client.active_branches ?? 0}/{client.total_branches ?? 0} · деградация {client.degraded_branches ?? 0} · готовы к запуску {client.go_live_ready_branches ?? 0}
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -1199,6 +1265,8 @@ export default function TenantsPage() {
                                                 <button
                                                     className="btn-ghost"
                                                     onClick={() => startClientEdit(client)}
+                                                    data-testid="tenants-client-edit"
+                                                    disabled={lifecyclePending}
                                                 >
                                                     Редактировать
                                                 </button>
@@ -1206,14 +1274,13 @@ export default function TenantsPage() {
                                             {canWriteTenants ? (
                                                 <button
                                                     className="btn-ghost"
-                                                    onClick={() =>
-                                                        handleClientLifecycleAction(client, isArchived ? "restore" : "archive")
-                                                    }
+                                                    onClick={() => openClientLifecycleAction(client, lifecycleMode)}
+                                                    data-testid="tenants-client-lifecycle-open"
                                                     disabled={lifecyclePending}
                                                 >
                                                     {lifecyclePending
                                                         ? "Выполняется..."
-                                                        : isArchived
+                                                        : lifecycleMode === "restore"
                                                             ? "Восстановить"
                                                             : "Архивировать"}
                                                 </button>
@@ -1226,11 +1293,77 @@ export default function TenantsPage() {
                                                 В контекст
                                             </button>
                                         </div>
+                                        {canWriteTenants && lifecycleDraftActive && clientLifecycleDraft ? (
+                                            <div className="w-full mt-3 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid="tenants-client-lifecycle-panel">
+                                                <div className="grid gap-3">
+                                                    <div className="text-xs text-muted-foreground">
+                                                        {clientLifecycleDraft.mode === "archive"
+                                                            ? "Клиент будет переведен в архив и исчезнет из списка активных."
+                                                            : "Клиент будет восстановлен в список активных."}
+                                                    </div>
+                                                    <label className="text-xs text-muted-foreground">
+                                                        Причина действия
+                                                        <input
+                                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                            value={clientLifecycleDraft.reason}
+                                                            data-testid="tenants-client-lifecycle-reason"
+                                                            onChange={(event) =>
+                                                                setClientLifecycleDraft((prev) =>
+                                                                    prev && prev.clientId === client.id
+                                                                        ? { ...prev, reason: event.target.value }
+                                                                        : prev
+                                                                )
+                                                            }
+                                                            disabled={lifecyclePending}
+                                                        />
+                                                    </label>
+                                                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="h-4 w-4"
+                                                            checked={clientLifecycleDraft.confirmChecked}
+                                                            data-testid="tenants-client-lifecycle-confirm"
+                                                            onChange={(event) =>
+                                                                setClientLifecycleDraft((prev) =>
+                                                                    prev && prev.clientId === client.id
+                                                                        ? { ...prev, confirmChecked: event.target.checked }
+                                                                        : prev
+                                                                )
+                                                            }
+                                                            disabled={lifecyclePending}
+                                                        />
+                                                        Подтверждаю выполнение действия
+                                                    </label>
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            className="btn-primary"
+                                                            onClick={() => handleClientLifecycleAction(client)}
+                                                            data-testid="tenants-client-lifecycle-submit"
+                                                            disabled={lifecyclePending}
+                                                        >
+                                                            {lifecyclePending
+                                                                ? "Выполняется..."
+                                                                : clientLifecycleDraft.mode === "archive"
+                                                                    ? "Подтвердить архив"
+                                                                    : "Подтвердить восстановление"}
+                                                        </button>
+                                                        <button
+                                                            className="btn-ghost"
+                                                            onClick={closeClientLifecycleDraft}
+                                                            data-testid="tenants-client-lifecycle-cancel"
+                                                            disabled={lifecyclePending}
+                                                        >
+                                                            Отмена
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : null}
                                         {isEditing && clientEditor ? (
                                             <div className="w-full mt-3 rounded-lg border border-border/60 bg-muted/30 p-3">
                                                 <div className="grid gap-3">
                                                     <label className="text-xs text-muted-foreground">
-                                                        Slug
+                                                        Slug (идентификатор)
                                                         <input
                                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                             value={clientEditor.slug}
@@ -1339,6 +1472,7 @@ export default function TenantsPage() {
                                 return (
                                     <div
                                         key={branch.id}
+                                        data-testid="tenants-branch-row"
                                         className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3"
                                     >
                                         <div>
@@ -1348,7 +1482,7 @@ export default function TenantsPage() {
                                                 {branch.instance_id ? `instance_id: ${branch.instance_id}` : "instance_id: —"}
                                             </div>
                                             <div className="text-xs text-muted-foreground">
-                                                {branch.onboarding_state ? `onboarding: ${branch.onboarding_state}` : "onboarding: —"}
+                                                {branch.onboarding_state ? `этап онбординга: ${branch.onboarding_state}` : "этап онбординга: —"}
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -1357,6 +1491,7 @@ export default function TenantsPage() {
                                                 <button
                                                     className="btn-ghost"
                                                     onClick={() => startBranchEdit(branch)}
+                                                    data-testid="tenants-branch-edit"
                                                 >
                                                     Редактировать
                                                 </button>
@@ -1389,7 +1524,7 @@ export default function TenantsPage() {
                                                             />
                                                         </label>
                                                         <label className="text-xs text-muted-foreground">
-                                                            Slug
+                                                            Slug (идентификатор)
                                                             <input
                                                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                                 value={branchEditor.slug}
@@ -1401,10 +1536,11 @@ export default function TenantsPage() {
                                                                     )
                                                                 }
                                                                 disabled={!canWriteTenants || savingBranch}
+                                                                placeholder="branch-slug"
                                                             />
                                                         </label>
                                                         <label className="text-xs text-muted-foreground">
-                                                            Timezone (optional)
+                                                            Timezone (опционально)
                                                             <input
                                                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                                 value={branchEditor.timezone}
@@ -1416,10 +1552,11 @@ export default function TenantsPage() {
                                                                     )
                                                                 }
                                                                 disabled={!canWriteTenants || savingBranch}
+                                                                placeholder="Asia/Almaty"
                                                             />
                                                         </label>
                                                         <label className="text-xs text-muted-foreground">
-                                                            Phone (optional)
+                                                            Phone (опционально)
                                                             <input
                                                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                                 value={branchEditor.phone}
@@ -1431,10 +1568,11 @@ export default function TenantsPage() {
                                                                     )
                                                                 }
                                                                 disabled={!canWriteTenants || savingBranch}
+                                                                placeholder="+7 700 000 00 00"
                                                             />
                                                         </label>
                                                         <label className="text-xs text-muted-foreground">
-                                                            instance_id (optional)
+                                                            instance_id (опционально)
                                                             <input
                                                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                                 value={branchEditor.instanceId}
@@ -1446,10 +1584,11 @@ export default function TenantsPage() {
                                                                     )
                                                                 }
                                                                 disabled={!canWriteTenants || savingBranch}
+                                                                placeholder="instance-123"
                                                             />
                                                         </label>
                                                         <label className="text-xs text-muted-foreground">
-                                                            telegram_chat_id (optional)
+                                                            telegram_chat_id (опционально)
                                                             <input
                                                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                                 value={branchEditor.telegramChatId}
@@ -1461,10 +1600,11 @@ export default function TenantsPage() {
                                                                     )
                                                                 }
                                                                 disabled={!canWriteTenants || savingBranch}
+                                                                placeholder="-1001234567890"
                                                             />
                                                         </label>
                                                         <label className="text-xs text-muted-foreground">
-                                                            knowledge_tag (optional)
+                                                            knowledge_tag (опционально)
                                                             <input
                                                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                                 value={branchEditor.knowledgeTag}
@@ -1476,6 +1616,7 @@ export default function TenantsPage() {
                                                                     )
                                                                 }
                                                                 disabled={!canWriteTenants || savingBranch}
+                                                                placeholder="demo_salon"
                                                             />
                                                         </label>
                                                     </div>
@@ -1496,7 +1637,7 @@ export default function TenantsPage() {
                                                         Активен
                                                     </label>
                                                     <label className="text-xs text-muted-foreground">
-                                                        Причина изменения (audit)
+                                                        Причина изменения (аудит)
                                                         <input
                                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                             value={branchEditor.changeReason}
@@ -1531,20 +1672,23 @@ export default function TenantsPage() {
                                                         <button
                                                             className="btn-primary"
                                                             onClick={handlePreviewBranchChange}
+                                                            data-testid="tenants-branch-change-preview"
                                                             disabled={!canWriteTenants || savingBranch || publishingBranchChange || rollingBackBranchChange}
                                                         >
-                                                            {savingBranch ? "Подготовка..." : "Draft + Validate"}
+                                                            {savingBranch ? "Подготовка..." : "Черновик + проверка"}
                                                         </button>
                                                         <button
                                                             className="btn-primary"
                                                             onClick={handlePublishBranchChange}
+                                                            data-testid="tenants-branch-change-publish"
                                                             disabled={!canWriteTenants || savingBranch || publishingBranchChange || rollingBackBranchChange || !branchChangePreview?.change?.id}
                                                         >
-                                                            {publishingBranchChange ? "Публикация..." : "Publish"}
+                                                            {publishingBranchChange ? "Применение..." : "Применить"}
                                                         </button>
                                                         <button
                                                             className="btn-ghost"
                                                             onClick={handleRollbackBranchChange}
+                                                            data-testid="tenants-branch-change-rollback"
                                                             disabled={
                                                                 !canWriteTenants ||
                                                                 savingBranch ||
@@ -1553,7 +1697,7 @@ export default function TenantsPage() {
                                                                 !(branchChangePreview?.change?.status === "published" || latestPublishedBranchChange)
                                                             }
                                                         >
-                                                            {rollingBackBranchChange ? "Rollback..." : "Rollback"}
+                                                            {rollingBackBranchChange ? "Откат..." : "Откат"}
                                                         </button>
                                                         <button
                                                             className="btn-ghost"
@@ -1567,7 +1711,7 @@ export default function TenantsPage() {
                                                         </button>
                                                     </div>
                                                     <label className="text-xs text-muted-foreground">
-                                                        Причина rollback
+                                                        Причина отката
                                                         <input
                                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                             value={branchEditor.rollbackReason}
@@ -1584,14 +1728,14 @@ export default function TenantsPage() {
                                                     {branchChangePreview?.change ? (
                                                         <div className="rounded-lg border border-border/60 bg-background p-3 text-xs">
                                                             <div className="font-medium mb-1">
-                                                                Change #{branchChangePreview.change.id}
+                                                                Изменение #{branchChangePreview.change.id}
                                                             </div>
                                                             <div className="text-muted-foreground mb-2">
-                                                                status: {branchChangePreview.change.status}
+                                                                статус: {formatStateLabel(branchChangePreview.change.status, BRANCH_CHANGE_STATUS_LABELS)}
                                                             </div>
                                                             {previewValidationErrors.length > 0 ? (
                                                                 <div className="mb-2 text-red-600">
-                                                                    validation: {previewValidationErrors.join("; ")}
+                                                                    проверка: {previewValidationErrors.join("; ")}
                                                                 </div>
                                                             ) : null}
                                                             {previewDiffEntries.length > 0 ? (
@@ -1605,7 +1749,7 @@ export default function TenantsPage() {
                                                                     ))}
                                                                 </div>
                                                             ) : (
-                                                                <div className="text-muted-foreground">diff пуст</div>
+                                                                <div className="text-muted-foreground">изменений нет</div>
                                                             )}
                                                         </div>
                                                     ) : null}
@@ -1619,7 +1763,7 @@ export default function TenantsPage() {
                                                             <div className="space-y-1">
                                                                 {branchChangesQuery.data.items.slice(0, 5).map((item) => (
                                                                     <div key={item.id} className="flex items-center justify-between gap-2">
-                                                                        <span>{item.status}</span>
+                                                                        <span>{formatStateLabel(item.status, BRANCH_CHANGE_STATUS_LABELS)}</span>
                                                                         <span className="text-muted-foreground">{item.created_at ? new Date(item.created_at).toLocaleString("ru-RU") : "—"}</span>
                                                                     </div>
                                                                 ))}
