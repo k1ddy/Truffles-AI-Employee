@@ -681,7 +681,7 @@ test.describe('Navigation', () => {
         await expect(dateInput).toHaveValue(localDate);
     });
 
-    test('should render inline lifecycle panel on Tenants @smoke', async ({ page }) => {
+    test('should render lifecycle modal flow on Tenants @smoke', async ({ page }) => {
         await openTenants(page);
         const clients = tenantsSection(page, 'Клиенты');
         await expect(clients).toBeVisible();
@@ -689,12 +689,13 @@ test.describe('Navigation', () => {
         const lifecycleButton = page.getByTestId('tenants-client-lifecycle-open').first();
         if (await lifecycleButton.isVisible().catch(() => false)) {
             await lifecycleButton.click();
-            const lifecyclePanel = page.getByTestId('tenants-client-lifecycle-panel').first();
-            await expect(lifecyclePanel).toBeVisible();
-            await expect(lifecyclePanel.getByTestId('tenants-client-lifecycle-reason')).toBeVisible();
-            await expect(lifecyclePanel.getByTestId('tenants-client-lifecycle-confirm')).toBeVisible();
-            await lifecyclePanel.getByTestId('tenants-client-lifecycle-cancel').click();
-            await expect(lifecyclePanel).not.toBeVisible();
+            const lifecycleModal = page.getByTestId('tenants-client-lifecycle-modal').first();
+            await expect(lifecycleModal).toBeVisible();
+            await expect(page.getByTestId('tenants-client-lifecycle-impact').first()).toBeVisible();
+            await expect(page.getByTestId('tenants-client-lifecycle-reason').first()).toBeVisible();
+            await expect(page.getByTestId('tenants-client-lifecycle-confirm').first()).toBeVisible();
+            await page.getByTestId('tenants-client-lifecycle-cancel').first().click();
+            await expect(lifecycleModal).not.toBeVisible();
             return;
         }
 
