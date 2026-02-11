@@ -156,6 +156,55 @@ function parseOptionalJson(value: string, label: string): { value?: Record<strin
     }
 }
 
+function normalizeKnowledgeTag(value: string | null | undefined): string | null {
+    const trimmed = (value ?? "").trim();
+    return trimmed.length > 0 ? trimmed : null;
+}
+
+function sortJsonValue(value: unknown): unknown {
+    if (Array.isArray(value)) {
+        return value.map((item) => sortJsonValue(item));
+    }
+    if (!value || typeof value !== "object") {
+        return value;
+    }
+    const entries = Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, sortJsonValue(item)] as const);
+    return Object.fromEntries(entries);
+}
+
+function stableJsonStringify(value: unknown): string {
+    return JSON.stringify(sortJsonValue(value));
+}
+
+function extractPayloadWorkingHours(payload: Record<string, unknown> | null): Record<string, unknown> | null {
+    if (!payload) {
+        return null;
+    }
+    const clientPack = ensureObject(payload.client_pack);
+    const salon = ensureObject(clientPack.salon);
+    const hours = salon.hours;
+    if (!hours || typeof hours !== "object" || Array.isArray(hours)) {
+        return null;
+    }
+    return hours as Record<string, unknown>;
+}
+
+function formatWorkingHoursSummary(hours: Record<string, unknown> | null | undefined): string {
+    if (!hours || Object.keys(hours).length === 0) {
+        return "не заданы";
+    }
+    const days = typeof hours.days === "string" ? hours.days.trim() : "";
+    const open = typeof hours.open === "string" ? hours.open.trim() : "";
+    const close = typeof hours.close === "string" ? hours.close.trim() : "";
+    const base = [days, open && close ? `${open}-${close}` : ""].filter(Boolean);
+    if (base.length > 0) {
+        return base.join(" · ");
+    }
+    return `JSON (${Object.keys(hours).join(", ")})`;
+}
+
 function createDefaultPayload(): Record<string, unknown> {
     return {
         client_pack: {
@@ -287,6 +336,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const [draftText, setDraftText] = useState("");
     const [ackWarnings, setAckWarnings] = useState(false);
     const [apiUnavailable, setApiUnavailable] = useState(false);
+    const [gatewayError, setGatewayError] = useState<string | null>(null);
     const [selectedVersionId, setSelectedVersionId] = useState("");
     const [lastValidatedDraft, setLastValidatedDraft] = useState<string | null>(null);
     const [lastPublishAt, setLastPublishAt] = useState<string | null>(null);
@@ -416,7 +466,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     });
 
     const specialistsQuery = useQuery({
-        queryKey: ["knowledge-specialists", selectedBranchId],
+        queryKey: ["knowledge-specialists", selectedClientId, selectedBranchId],
         queryFn: async () => {
             const query = selectedBranchId ? `?branch_id=${selectedBranchId}` : "";
             const response = await api.get(`/calendar/specialists${query}`);
@@ -427,12 +477,12 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     });
 
     const allSpecialistsQuery = useQuery({
-        queryKey: ["knowledge-specialists-all"],
+        queryKey: ["knowledge-specialists-all", selectedClientId],
         queryFn: async () => {
             const response = await api.get("/calendar/specialists");
             return response.data as { items?: SpecialistSummary[] };
         },
-        enabled: !!session && !!meData && !apiUnavailable && canRead && !branchSelectionRequired && !!selectedBranchId,
+        enabled: !!session && !!meData && !apiUnavailable && canRead && !branchSelectionRequired && !!selectedClientId,
         retry: false,
     });
 
@@ -473,6 +523,10 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             setApiUnavailable(true);
             return;
         }
+        if (isGatewayLikeError(error)) {
+            setGatewayError("Knowledge API временно недоступен (gateway). Попробуйте обновить позже.");
+            return;
+        }
         handleError(error);
     }, [currentQuery.error, apiUnavailable, handleError]);
 
@@ -483,6 +537,10 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         }
         if (isApiUnavailable(error)) {
             setApiUnavailable(true);
+            return;
+        }
+        if (isGatewayLikeError(error)) {
+            setGatewayError("History недоступен из-за временной ошибки gateway.");
             return;
         }
         handleError(error);
@@ -497,6 +555,10 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             setApiUnavailable(true);
             return;
         }
+        if (isGatewayLikeError(error)) {
+            setGatewayError("Learning candidates временно недоступны (gateway).");
+            return;
+        }
         handleError(error);
     }, [candidatesQuery.error, apiUnavailable, handleError]);
 
@@ -509,6 +571,10 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             setApiUnavailable(true);
             return;
         }
+        if (isGatewayLikeError(error)) {
+            setGatewayError("Fleet clients временно недоступны (gateway).");
+            return;
+        }
         handleError(error);
     }, [fleetClientsQuery.error, apiUnavailable, handleError]);
 
@@ -519,6 +585,10 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         }
         if (isApiUnavailable(error)) {
             setApiUnavailable(true);
+            return;
+        }
+        if (isGatewayLikeError(error)) {
+            setGatewayError("Fleet branches временно недоступны (gateway).");
             return;
         }
         handleError(error);
@@ -560,6 +630,10 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             setApiUnavailable(true);
             return;
         }
+        if (isGatewayLikeError(error)) {
+            setGatewayError("Список мастеров временно недоступен (gateway).");
+            return;
+        }
         handleError(error);
     }, [specialistsQuery.error, apiUnavailable, handleError]);
 
@@ -572,8 +646,28 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             setApiUnavailable(true);
             return;
         }
+        if (isGatewayLikeError(error)) {
+            setGatewayError("Список мастеров по клиенту временно недоступен (gateway).");
+            return;
+        }
         handleError(error);
     }, [allSpecialistsQuery.error, apiUnavailable, handleError]);
+
+    useEffect(() => {
+        if (
+            currentQuery.isSuccess
+            || historyQuery.isSuccess
+            || specialistsQuery.isSuccess
+            || allSpecialistsQuery.isSuccess
+        ) {
+            setGatewayError(null);
+        }
+    }, [
+        currentQuery.isSuccess,
+        historyQuery.isSuccess,
+        specialistsQuery.isSuccess,
+        allSpecialistsQuery.isSuccess,
+    ]);
 
     const currentPayloadObject = useMemo(() => {
         const payload = currentQuery.data?.payload;
@@ -643,6 +737,48 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         () => branches.find((branch) => branch.id === selectedBranchId) ?? null,
         [branches, selectedBranchId]
     );
+    const selectedBranchWorkingHours = useMemo(() => {
+        if (!selectedBranchContext?.working_hours) {
+            return {} as Record<string, unknown>;
+        }
+        if (
+            typeof selectedBranchContext.working_hours === "object"
+            && !Array.isArray(selectedBranchContext.working_hours)
+        ) {
+            return selectedBranchContext.working_hours as Record<string, unknown>;
+        }
+        return {} as Record<string, unknown>;
+    }, [selectedBranchContext]);
+    const parsedBranchWorkingHours = useMemo(
+        () => parseOptionalJson(branchWorkingHoursDraft, "working_hours"),
+        [branchWorkingHoursDraft]
+    );
+    const effectiveWorkingHours = useMemo(() => {
+        if (Object.keys(selectedBranchWorkingHours).length > 0) {
+            return selectedBranchWorkingHours;
+        }
+        return extractPayloadWorkingHours(currentPayloadObject);
+    }, [selectedBranchWorkingHours, currentPayloadObject]);
+    const hasBranchChangeReason = branchChangeReason.trim().length > 0;
+    const isBranchPatchDirty = useMemo(() => {
+        if (!selectedBranchContext || parsedBranchWorkingHours.error) {
+            return false;
+        }
+        const currentTag = normalizeKnowledgeTag(selectedBranchContext.knowledge_tag);
+        const draftTag = normalizeKnowledgeTag(branchKnowledgeTagDraft);
+        if (currentTag !== draftTag) {
+            return true;
+        }
+        const currentHours = selectedBranchWorkingHours ?? {};
+        const draftHours = parsedBranchWorkingHours.value ?? {};
+        return stableJsonStringify(currentHours) !== stableJsonStringify(draftHours);
+    }, [
+        selectedBranchContext,
+        parsedBranchWorkingHours.error,
+        parsedBranchWorkingHours.value,
+        branchKnowledgeTagDraft,
+        selectedBranchWorkingHours,
+    ]);
 
     useEffect(() => {
         if (!selectedBranchContext) {
@@ -798,9 +934,11 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             if (!selectedBranchContext?.id) {
                 throw new Error("Выберите филиал");
             }
-            const parsedWorkingHours = parseOptionalJson(branchWorkingHoursDraft, "working_hours");
-            if (parsedWorkingHours.error) {
-                throw new Error(parsedWorkingHours.error);
+            if (parsedBranchWorkingHours.error) {
+                throw new Error(parsedBranchWorkingHours.error);
+            }
+            if (!isBranchPatchDirty) {
+                throw new Error("Нет изменений для публикации");
             }
             const reason = branchChangeReason.trim();
             if (!reason) {
@@ -812,7 +950,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                 reason,
                 patch: {
                     knowledge_tag: branchKnowledgeTagDraft.trim() || null,
-                    working_hours: parsedWorkingHours.value ?? {},
+                    working_hours: parsedBranchWorkingHours.value ?? {},
                 },
             });
             const draftChange = draftResponse.data.change;
@@ -879,14 +1017,18 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         successMessage?: string;
     }) => {
         setIsApplyingFleetContext(true);
+        setGatewayError(null);
         try {
             setLocalStorageValue(COMPANY_ID_STORAGE_KEY, companyId ?? null);
             setLocalStorageValue(CLIENT_ID_STORAGE_KEY, clientId ?? null);
             setLocalStorageValue(BRANCH_ID_STORAGE_KEY, nextBranchId ?? null);
             await queryClient.invalidateQueries({ queryKey: ["console-me"] });
+            await queryClient.refetchQueries({ queryKey: ["console-me"], exact: true });
             await queryClient.invalidateQueries({ queryKey: ["knowledge-current"] });
             await queryClient.invalidateQueries({ queryKey: ["knowledge-history"] });
             await queryClient.invalidateQueries({ queryKey: ["learning-candidates"] });
+            await queryClient.invalidateQueries({ queryKey: ["knowledge-specialists"] });
+            await queryClient.invalidateQueries({ queryKey: ["knowledge-specialists-all"] });
             if (successMessage) {
                 toast.success(successMessage);
             }
@@ -1172,19 +1314,21 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             return null;
         }
         const hasKnowledgeTag = Boolean((selectedBranchContext.knowledge_tag ?? "").trim());
-        const hasWorkingHours = Boolean(
-            selectedBranchContext.working_hours
-            && typeof selectedBranchContext.working_hours === "object"
-            && Object.keys(selectedBranchContext.working_hours as Record<string, unknown>).length > 0
-        );
-        const canApplyPatch = canEdit && !applyBranchKnowledgePatchMutation.isPending;
+        const hasBranchWorkingHours = Object.keys(selectedBranchWorkingHours).length > 0;
+        const effectiveHoursSummary = formatWorkingHoursSummary(effectiveWorkingHours);
+        const effectiveHoursSource = hasBranchWorkingHours ? "branch override" : "published pack";
+        const canApplyPatch = canEdit
+            && !applyBranchKnowledgePatchMutation.isPending
+            && isBranchPatchDirty
+            && hasBranchChangeReason
+            && !parsedBranchWorkingHours.error;
         return (
             <div className="card-surface p-5" data-testid="knowledge-branch-readiness">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                         <h2 className="text-lg font-semibold">Branch Knowledge Readiness</h2>
                         <p className="text-sm text-muted-foreground">
-                            Быстрое управление базовыми знаниями филиала: knowledge tag и часы работы.
+                            Управление branch-override: `knowledge_tag` и `working_hours` для текущего филиала.
                         </p>
                     </div>
                     <div className="text-xs text-muted-foreground">
@@ -1199,7 +1343,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                         knowledge_tag: {hasKnowledgeTag ? selectedBranchContext.knowledge_tag : "не задан для этого филиала"}
                     </div>
                     <div className="rounded-lg border border-border/60 px-3 py-2">
-                        working_hours: {hasWorkingHours ? "заданы" : "не заданы для этого филиала"}
+                        working_hours: {hasBranchWorkingHours ? "заданы для филиала" : "не заданы (используется published pack)"}
                     </div>
                     <div className="rounded-lg border border-border/60 px-3 py-2">
                         onboarding: {selectedBranchContext.onboarding_state ?? "—"}
@@ -1207,12 +1351,18 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                     <div className="rounded-lg border border-border/60 px-3 py-2">
                         go_live: {selectedBranchContext.go_live_state ?? "pending"}
                     </div>
+                    <div className="rounded-lg border border-border/60 px-3 py-2">
+                        effective_hours: {effectiveHoursSummary}
+                    </div>
+                    <div className="rounded-lg border border-border/60 px-3 py-2">
+                        source: {effectiveHoursSource} · version: {currentQuery.data?.version_id ?? "не опубликована"}
+                    </div>
                 </div>
 
                 {canEdit && (
                     <div className="mt-4 grid gap-3">
                         <label className="text-xs text-muted-foreground">
-                            knowledge_tag
+                            `knowledge_tag` (идентификатор branch pack)
                             <input
                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                 value={branchKnowledgeTagDraft}
@@ -1221,7 +1371,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                             />
                         </label>
                         <label className="text-xs text-muted-foreground">
-                            working_hours JSON
+                            `working_hours` JSON (override для branch)
                             <textarea
                                 className="mt-1 min-h-[140px] w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
                                 value={branchWorkingHoursDraft}
@@ -1231,7 +1381,34 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                             <div className="mt-1">
                                 Пустой объект <span className="font-mono">{`{}`}</span> очистит часы работы филиала.
                             </div>
+                            {parsedBranchWorkingHours.error && (
+                                <div className="mt-1 text-destructive">{parsedBranchWorkingHours.error}</div>
+                            )}
                         </label>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                className="btn-ghost"
+                                onClick={() => {
+                                    if (!effectiveWorkingHours || Object.keys(effectiveWorkingHours).length === 0) {
+                                        toast.error("Нет published часов для подстановки");
+                                        return;
+                                    }
+                                    setBranchWorkingHoursDraft(JSON.stringify(effectiveWorkingHours, null, 2));
+                                }}
+                                disabled={applyBranchKnowledgePatchMutation.isPending}
+                            >
+                                Подставить effective hours
+                            </button>
+                            <button
+                                type="button"
+                                className="btn-ghost"
+                                onClick={() => setBranchWorkingHoursDraft("{}")}
+                                disabled={applyBranchKnowledgePatchMutation.isPending}
+                            >
+                                Очистить override
+                            </button>
+                        </div>
                         <label className="text-xs text-muted-foreground">
                             Причина изменения (audit)
                             <input
@@ -1242,6 +1419,16 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                 placeholder="Например: обновление часов после смены графика"
                             />
                         </label>
+                        {!isBranchPatchDirty && (
+                            <div className="text-xs text-muted-foreground">
+                                Нет изменений: скорректируйте `knowledge_tag` или `working_hours`.
+                            </div>
+                        )}
+                        {isBranchPatchDirty && !hasBranchChangeReason && (
+                            <div className="text-xs text-muted-foreground">
+                                Укажите причину изменения, чтобы опубликовать branch change.
+                            </div>
+                        )}
                         <div className="flex flex-wrap items-center gap-2">
                             <button
                                 type="button"
@@ -1249,7 +1436,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                 onClick={() => applyBranchKnowledgePatchMutation.mutate()}
                                 disabled={!canApplyPatch}
                             >
-                                {applyBranchKnowledgePatchMutation.isPending ? "Применение..." : "Сохранить и опубликовать"}
+                                {applyBranchKnowledgePatchMutation.isPending ? "Применение..." : "Сохранить branch change"}
                             </button>
                             <button
                                 type="button"
@@ -1327,11 +1514,12 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                 }
                                 setIsSelectingBranch(true);
                                 try {
-                                    setLocalStorageValue(BRANCH_ID_STORAGE_KEY, branchId);
-                                    await queryClient.invalidateQueries({ queryKey: ["console-me"] });
-                                    await currentQuery.refetch();
-                                    await historyQuery.refetch();
-                                    toast.success("Филиал выбран");
+                                    await applyConsoleContext({
+                                        companyId: selectedCompanyId || null,
+                                        clientId: selectedClientId || null,
+                                        branchId,
+                                        successMessage: "Филиал выбран",
+                                    });
                                 } finally {
                                     setIsSelectingBranch(false);
                                 }
@@ -1370,6 +1558,32 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
 
             {renderPlatformAdminFleetPanel()}
             {renderBranchKnowledgeReadiness()}
+
+            {gatewayError && !apiUnavailable && (
+                <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-700">
+                    <div>{gatewayError}</div>
+                    <button
+                        type="button"
+                        className="btn-ghost mt-3"
+                        onClick={() => {
+                            setGatewayError(null);
+                            currentQuery.refetch();
+                            historyQuery.refetch();
+                            candidatesQuery.refetch();
+                            specialistsQuery.refetch();
+                            allSpecialistsQuery.refetch();
+                            if (isPlatformAdmin && fleetClientId) {
+                                fleetBranchesQuery.refetch();
+                            }
+                            if (isPlatformAdmin && fleetAttentionEnabled) {
+                                fleetAttentionQuery.refetch();
+                            }
+                        }}
+                    >
+                        Повторить запросы
+                    </button>
+                </div>
+            )}
 
             {apiUnavailable && (
                 <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
@@ -1555,7 +1769,12 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                     </div>
                                     <div className="mt-2 text-xs text-muted-foreground">
                                         {specialistsQuery.isLoading && "Загрузка мастеров..."}
-                                        {!specialistsQuery.isLoading && specialists.length === 0 && !missingBranchSpecialistsButClientHasSome && "Мастера не найдены в выбранном филиале."}
+                                        {!specialistsQuery.isLoading && specialists.length === 0 && !missingBranchSpecialistsButClientHasSome && "В выбранном филиале пока нет мастеров в Calendar."}
+                                        {!allSpecialistsQuery.isLoading && allSpecialists.length > 0 && (
+                                            <div className="mt-1">
+                                                Всего по клиенту: {allSpecialists.length}
+                                            </div>
+                                        )}
                                     </div>
                                     {!specialistsQuery.isLoading && missingBranchSpecialistsButClientHasSome && (
                                         <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
