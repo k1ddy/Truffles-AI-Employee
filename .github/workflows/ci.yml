@@ -88,6 +88,7 @@ jobs:
               - "truffles-api/requirements.txt"
               - "truffles-api/Dockerfile"
               - "console-web/**"
+              - ".github/workflows/ci.yml"
               - "scripts/restart_api.sh"
               - "scripts/restart_workers.sh"
               - "scripts/restart_release.sh"
