@@ -210,6 +210,13 @@ function formatDateTimeLabel(value: string | undefined): string {
     return parsed.toLocaleString("ru-RU");
 }
 
+function asPercent(numerator: number, denominator: number): number {
+    if (denominator <= 0) {
+        return 0;
+    }
+    return Math.round((numerator / denominator) * 100);
+}
+
 function pushLifecycleAuditEntry(
     previous: ClientLifecycleAuditMap,
     entry: ClientLifecycleAuditEntry,
@@ -523,6 +530,16 @@ export default function TenantsPage() {
         },
         enabled: tenantsEnabled && !!branchEditor?.id,
     });
+    const recentBranchChangesKpiQuery = useQuery({
+        queryKey: ["tenants-branch-changes-recent-kpi", tenantLifecycle],
+        queryFn: async () => {
+            const response = await adminApi.listBranchChanges({
+                limit: 100,
+            });
+            return response.data;
+        },
+        enabled: tenantsEnabled && tenantLifecycle === "active",
+    });
 
     const companies = useMemo(
         () => companiesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
@@ -580,6 +597,42 @@ export default function TenantsPage() {
         () => fleetAttentionQuery.data ?? null,
         [fleetAttentionQuery.data],
     );
+    const recentBranchChangesForKpi = useMemo(
+        () => recentBranchChangesKpiQuery.data?.items ?? [],
+        [recentBranchChangesKpiQuery.data],
+    );
+    const operationalKpi = useMemo(() => {
+        const summary = clientsSummary;
+        const attentionSummary = fleetAttention?.summary;
+        const totalClients = summary?.total_clients ?? 0;
+        const activeClients = summary?.active_clients ?? 0;
+        const onboardingClients = summary?.onboarding_clients ?? 0;
+        const goLiveReadyClients = summary?.go_live_ready_clients ?? 0;
+        const archivedClients = summary?.archived_clients ?? 0;
+        const degradedClients = summary?.degraded_clients ?? 0;
+
+        const totalChanges = recentBranchChangesForKpi.length;
+        const publishedChanges = recentBranchChangesForKpi.filter((item) => item.status === "published").length;
+        const publishFailedChanges = recentBranchChangesForKpi.filter((item) => item.status === "publish_failed").length;
+        const rolledBackChanges = recentBranchChangesForKpi.filter((item) => item.status === "rolled_back").length;
+
+        return {
+            onboardingCoveragePct: asPercent(onboardingClients + goLiveReadyClients, totalClients),
+            goLiveReadinessPct: asPercent(goLiveReadyClients, onboardingClients + goLiveReadyClients),
+            serviceStabilityPct: asPercent(Math.max(activeClients - degradedClients, 0), activeClients),
+            decommissionSharePct: asPercent(archivedClients, totalClients),
+            changeFailurePct: asPercent(publishFailedChanges, totalChanges),
+            rollbackSharePct: asPercent(rolledBackChanges, publishedChanges + rolledBackChanges),
+            blockedSignalsCount:
+                (attentionSummary?.outbox_failed_24h_total ?? 0)
+                + (attentionSummary?.pending_handovers_total ?? 0)
+                + publishFailedChanges,
+            sourceWindow: totalChanges,
+            publishedChanges,
+            publishFailedChanges,
+            rolledBackChanges,
+        };
+    }, [clientsSummary, fleetAttention, recentBranchChangesForKpi]);
 
     const refreshContext = () => {
         queryClient.invalidateQueries({ queryKey: ["console-me"] });
@@ -590,6 +643,7 @@ export default function TenantsPage() {
         queryClient.invalidateQueries({ queryKey: ["tenants-clients"] });
         queryClient.invalidateQueries({ queryKey: ["tenants-branches"] });
         queryClient.invalidateQueries({ queryKey: ["tenants-fleet-attention"] });
+        queryClient.invalidateQueries({ queryKey: ["tenants-branch-changes-recent-kpi"] });
     };
 
     const setCompanyContext = (companyId?: string | null) => {
@@ -1160,6 +1214,62 @@ export default function TenantsPage() {
             </div>
 
             <div className="grid gap-6">
+                {showPortfolio && tenantLifecycle === "active" ? (
+                    <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-operational-kpi">
+                        <div className="flex items-start justify-between gap-4 mb-4">
+                            <div>
+                                <h2 className="text-lg font-semibold">Операционные KPI</h2>
+                                <p className="text-sm text-muted-foreground">
+                                    Прокси-метрики: портфель + attention + branch changes (последние 100 изменений)
+                                </p>
+                            </div>
+                            <button
+                                className="btn-ghost"
+                                onClick={() => {
+                                    fleetAttentionQuery.refetch();
+                                    recentBranchChangesKpiQuery.refetch();
+                                }}
+                                disabled={fleetAttentionQuery.isFetching || recentBranchChangesKpiQuery.isFetching}
+                            >
+                                {fleetAttentionQuery.isFetching || recentBranchChangesKpiQuery.isFetching ? "Обновление..." : "Обновить KPI"}
+                            </button>
+                        </div>
+                        <div className="mb-3 text-xs text-muted-foreground">
+                            окно расчета branch-change: {operationalKpi.sourceWindow} · published: {operationalKpi.publishedChanges} · publish_failed: {operationalKpi.publishFailedChanges} · rolled_back: {operationalKpi.rolledBackChanges}
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                            <div className="rounded-lg border border-border/60 px-3 py-2" data-testid="tenants-kpi-onboarding-coverage">
+                                <div className="text-xs text-muted-foreground">Onboarding coverage (proxy)</div>
+                                <div className="text-xl font-semibold">{operationalKpi.onboardingCoveragePct}%</div>
+                            </div>
+                            <div className="rounded-lg border border-border/60 px-3 py-2" data-testid="tenants-kpi-go-live-readiness">
+                                <div className="text-xs text-muted-foreground">Go-live readiness (proxy)</div>
+                                <div className="text-xl font-semibold">{operationalKpi.goLiveReadinessPct}%</div>
+                            </div>
+                            <div className="rounded-lg border border-border/60 px-3 py-2" data-testid="tenants-kpi-service-stability">
+                                <div className="text-xs text-muted-foreground">Service stability</div>
+                                <div className="text-xl font-semibold">{operationalKpi.serviceStabilityPct}%</div>
+                            </div>
+                            <div className="rounded-lg border border-border/60 px-3 py-2" data-testid="tenants-kpi-decommission-share">
+                                <div className="text-xs text-muted-foreground">Decommission share</div>
+                                <div className="text-xl font-semibold">{operationalKpi.decommissionSharePct}%</div>
+                            </div>
+                            <div className="rounded-lg border border-border/60 px-3 py-2" data-testid="tenants-kpi-change-failure">
+                                <div className="text-xs text-muted-foreground">Publish failure rate (proxy)</div>
+                                <div className="text-xl font-semibold">{operationalKpi.changeFailurePct}%</div>
+                            </div>
+                            <div className="rounded-lg border border-border/60 px-3 py-2" data-testid="tenants-kpi-rollback-share">
+                                <div className="text-xs text-muted-foreground">Rollback share (proxy)</div>
+                                <div className="text-xl font-semibold">{operationalKpi.rollbackSharePct}%</div>
+                            </div>
+                            <div className="rounded-lg border border-border/60 px-3 py-2" data-testid="tenants-kpi-blocked-signals">
+                                <div className="text-xs text-muted-foreground">Blocked signals</div>
+                                <div className="text-xl font-semibold">{operationalKpi.blockedSignalsCount}</div>
+                            </div>
+                        </div>
+                    </section>
+                ) : null}
+
                 {showPortfolio && tenantLifecycle === "active" ? (
                     <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-fleet-attention">
                         <div className="flex items-start justify-between gap-4 mb-4">

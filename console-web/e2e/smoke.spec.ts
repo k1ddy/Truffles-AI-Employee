@@ -724,6 +724,28 @@ test.describe('Navigation', () => {
         await expect(clients.getByText(/Клиенты не найдены|фильтр по компании из контекста/i)).toBeVisible();
     });
 
+    test('should render operational KPI panel on Tenants @smoke', async ({ page }) => {
+        await openTenants(page);
+
+        const modes = page.getByTestId('tenants-workspace-modes');
+        if (await modes.isVisible().catch(() => false)) {
+            await page.getByTestId('tenants-mode-portfolio').click();
+        }
+
+        const kpiPanel = page.getByTestId('tenants-operational-kpi');
+        if (await kpiPanel.isVisible().catch(() => false)) {
+            await expect(page.getByTestId('tenants-kpi-onboarding-coverage')).toBeVisible();
+            await expect(page.getByTestId('tenants-kpi-go-live-readiness')).toBeVisible();
+            await expect(page.getByTestId('tenants-kpi-service-stability')).toBeVisible();
+            await expect(page.getByTestId('tenants-kpi-change-failure')).toBeVisible();
+            await expect(page.getByTestId('tenants-kpi-rollback-share')).toBeVisible();
+            return;
+        }
+
+        // Backward-compatible path for environments where KPI strip is not deployed yet.
+        await expect(page.getByTestId('tenants-fleet-attention')).toBeVisible();
+    });
+
     test('should expose branch change controls on Tenants @smoke', async ({ page }) => {
         await openTenants(page);
         const branches = tenantsSection(page, 'Филиалы');

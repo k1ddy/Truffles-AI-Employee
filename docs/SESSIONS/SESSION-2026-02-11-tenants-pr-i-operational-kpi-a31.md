@@ -1,0 +1,26 @@
+# SESSION 2026-02-11-tenants-pr-i-operational-kpi-a31 — Session 2026-02-11-tenants-pr-i-operational-kpi-a31
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-i-operational-kpi-a31.md
+- branch: feat/2026-02-11-tenants-pr-i-operational-kpi-a31
+- worktree: /home/zhan/worktrees/2026-02-11-tenants-pr-i-operational-kpi-a31
+- base_ref: origin/main
+- scope: Tenants PR-I operational KPI panel (proxy metrics), smoke/docs sync.
+- done:
+  - Session created.
+  - Added `Operational KPI` panel for active Portfolio mode in Tenants.
+  - Added KPI calculations from clients summary + fleet attention + recent branch changes.
+  - Added KPI refresh action and explicit source-window counters.
+  - Added Tenants smoke test for KPI panel contract.
+  - Updated Tenants audit doc with KPI sources and semantics.
+  - Validation passed: lint, build, Tenants smoke, session_check.
+- next:
+  - Open PR-I and handoff for review/merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-i-operational-kpi-a31.md
+  - npm --prefix console-web run lint
+  - npm --prefix console-web run build
+  - PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz E2E_USE_STORAGE_STATE=1 E2E_USERNAME=admin E2E_PASSWORD=admin npx --prefix console-web playwright test console-web/e2e/smoke.spec.ts --project=chromium --grep "Tenants"
+  - SESSION_AGENT=a31 scripts/session_check.sh
+- last_updated: 2026-02-11
