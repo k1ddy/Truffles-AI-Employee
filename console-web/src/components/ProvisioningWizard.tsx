@@ -33,6 +33,14 @@ type OnboardingStepStatus = components["schemas"]["OnboardingStepStatus"];
 
 type AgentRole = ConsoleRole;
 type OnboardingMode = "autopilot" | "manual";
+type DomainTemplateId = "beauty" | "clinic" | "legal" | "ecom";
+
+type DomainTemplatePreset = {
+    id: DomainTemplateId;
+    label: string;
+    summary: string;
+    payload: CapabilitiesPayload;
+};
 
 const DEFAULT_TIMEZONE = "Asia/Almaty";
 const DOMAIN_SLUG_RE = /^[a-z0-9_]+$/;
@@ -132,6 +140,53 @@ const AUTOPILOT_SERVICE_OPTIONS: Array<{
     { id: "provider_manual", label: "Manual provider" },
     { id: "provider_amocrm", label: "amoCRM" },
     { id: "provider_bitrix", label: "Bitrix" },
+];
+
+const DOMAIN_TEMPLATE_PRESETS: DomainTemplatePreset[] = [
+    {
+        id: "beauty",
+        label: "Beauty / Salon",
+        summary: "WhatsApp+Telegram, запись, knowledge upload",
+        payload: {
+            domain_slug: "beauty",
+            channels: { whatsapp: true, telegram: true, instagram: null },
+            providers: { availability_provider: "google_calendar", crm_provider: "amocrm", calendar_provider: "google_calendar" },
+            features: { booking_mode: "confirm_slots", knowledge_upload: true, analytics: true, auto_learn: false },
+        },
+    },
+    {
+        id: "clinic",
+        label: "Clinic",
+        summary: "WhatsApp, запись через календарь, строгий ручной контроль",
+        payload: {
+            domain_slug: "clinic",
+            channels: { whatsapp: true, telegram: false, instagram: null },
+            providers: { availability_provider: "google_calendar", crm_provider: "custom", calendar_provider: "google_calendar" },
+            features: { booking_mode: "confirm_slots", knowledge_upload: true, analytics: true, auto_learn: false },
+        },
+    },
+    {
+        id: "legal",
+        label: "Legal",
+        summary: "Консультационный режим без слот-подтверждения",
+        payload: {
+            domain_slug: "legal",
+            channels: { whatsapp: true, telegram: true, instagram: false },
+            providers: { availability_provider: "manual", crm_provider: "none", calendar_provider: "local" },
+            features: { booking_mode: "collect_preferences", knowledge_upload: true, analytics: true, auto_learn: false },
+        },
+    },
+    {
+        id: "ecom",
+        label: "E-commerce",
+        summary: "Мультиканал и аналитика, без confirm-slots по умолчанию",
+        payload: {
+            domain_slug: "ecom",
+            channels: { whatsapp: true, telegram: true, instagram: true },
+            providers: { availability_provider: "none", crm_provider: "bitrix", calendar_provider: "none" },
+            features: { booking_mode: "collect_preferences", knowledge_upload: true, analytics: true, auto_learn: true },
+        },
+    },
 ];
 
 type WizardStepId = (typeof WIZARD_STEPS)[number]["id"];
@@ -572,6 +627,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const [purchasedCapabilitiesDraft, setPurchasedCapabilitiesDraft] = useState<CapabilitiesPayload>(() => normalizeCapabilities());
     const [purchasedJsonDraft, setPurchasedJsonDraft] = useState("{}");
     const [purchasedJsonDirty, setPurchasedJsonDirty] = useState(false);
+    const [selectedDomainTemplate, setSelectedDomainTemplate] = useState<DomainTemplateId>("beauty");
     const [paymentStatusDraft, setPaymentStatusDraft] = useState<"pending" | "confirmed" | "rejected">("pending");
     const [referencePackTitle, setReferencePackTitle] = useState("");
     const [specialistsConfirmed, setSpecialistsConfirmed] = useState(false);
@@ -919,6 +975,29 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         setOnboardingContractTouched(true);
         setPurchasedCapabilitiesDraft(normalized);
         setPurchasedJsonDirty(false);
+    };
+
+    const handleApplyDomainTemplate = () => {
+        const selected = DOMAIN_TEMPLATE_PRESETS.find((template) => template.id === selectedDomainTemplate);
+        if (!selected) {
+            toast.error("Выберите валидный template");
+            return;
+        }
+        const normalized = normalizeCapabilities(selected.payload);
+        const validationError = validatePurchasedPayload(normalized);
+        if (validationError) {
+            toast.error(validationError);
+            return;
+        }
+        setOnboardingContractTouched(true);
+        setOnboardingContractDraft((prev) => ({
+            ...normalizeOnboardingContractPayload(prev),
+            domain_slug: normalized.domain_slug,
+        }));
+        setPurchasedCapabilitiesDraft(normalized);
+        setPurchasedJsonDraft(JSON.stringify(normalized, null, 2));
+        setPurchasedJsonDirty(false);
+        toast.success(`Template применён: ${selected.label}`);
     };
 
     const { data: capabilitiesData, isLoading: capabilitiesLoading, error: capabilitiesError, refetch: refetchCapabilities } = useQuery({
@@ -1421,7 +1500,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const canManageReferencePacks = role === "platform_admin";
     const hasOnboardingContractRecord = !!onboardingContractData?.client_contract || !!onboardingContractData?.branch_contract;
     const paymentStatusEffective = onboardingContractData?.payment_status ?? "pending";
-    const capabilityMismatches = onboardingContractData?.capability_mismatches ?? [];
+    const capabilityMismatches = useMemo(
+        () => onboardingContractData?.capability_mismatches ?? [],
+        [onboardingContractData?.capability_mismatches],
+    );
     const referencePacks = referencePackData?.items ?? [];
     const hasActiveReferencePack = referencePacks.some((item) => item.status === "active");
 
@@ -1507,8 +1589,38 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     ]);
 
     const missingRequirements = readinessItems.filter((item) => item.required && !item.ok);
-    const goNoGoMissing = stepStateById.go_no_go?.missing ?? [];
+    const goNoGoMissing = useMemo(
+        () => stepStateById.go_no_go?.missing ?? [],
+        [stepStateById.go_no_go?.missing],
+    );
     const goNoGoReady = missingRequirements.length === 0 && goNoGoMissing.length === 0;
+    const requiredReadinessItems = readinessItems.filter((item) => item.required);
+    const readinessCompletedCount = requiredReadinessItems.filter((item) => item.ok).length;
+    const readinessScore = requiredReadinessItems.length > 0
+        ? Math.round((readinessCompletedCount / requiredReadinessItems.length) * 100)
+        : 100;
+    const readinessLevel: "high" | "medium" | "low" = readinessScore >= 85
+        ? "high"
+        : readinessScore >= 60
+            ? "medium"
+            : "low";
+    const readinessStatusLabel = readinessLevel === "high"
+        ? "Готово к Go/No-Go"
+        : readinessLevel === "medium"
+            ? "Есть блокеры"
+            : "Критические блокеры";
+    const readinessToneClass = readinessLevel === "high"
+        ? "border-green-200 bg-green-50 text-green-800"
+        : readinessLevel === "medium"
+            ? "border-amber-200 bg-amber-50 text-amber-800"
+            : "border-destructive/30 bg-destructive/10 text-destructive";
+    const readinessBlockers = useMemo(() => {
+        const blockers: string[] = [];
+        missingRequirements.forEach((item) => blockers.push(item.label));
+        goNoGoMissing.forEach((item) => blockers.push(formatMissingRequirement(item)));
+        capabilityMismatches.forEach((item) => blockers.push(`Договор: ${CAPABILITY_FIELD_LABELS[item] ?? item}`));
+        return Array.from(new Set(blockers));
+    }, [missingRequirements, goNoGoMissing, capabilityMismatches]);
     const branchGoLiveStateRaw = (branchData as Record<string, unknown> | null)?.go_live_state;
     const branchGoLiveState: "pending" | "approved" | "rejected" = (
         branchGoLiveStateRaw === "pending" || branchGoLiveStateRaw === "approved" || branchGoLiveStateRaw === "rejected"
@@ -2022,6 +2134,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         setPurchasedCapabilitiesDraft(normalizeCapabilities());
         setPurchasedJsonDraft("{}");
         setPurchasedJsonDirty(false);
+        setSelectedDomainTemplate("beauty");
         setPaymentStatusDraft("pending");
         setReferencePackTitle("");
         setSpecialistsConfirmed(false);
@@ -3412,6 +3525,25 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                 <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                                     Проверки Go/No-Go
                                 </h4>
+                                <div className={`rounded-lg border px-3 py-3 text-xs ${readinessToneClass}`} data-testid="onboarding-readiness-score">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="font-semibold">Readiness score</span>
+                                        <span className="font-mono">{readinessScore}%</span>
+                                    </div>
+                                    <div className="mt-1">
+                                        {readinessStatusLabel} · {readinessCompletedCount}/{requiredReadinessItems.length} обязательных критериев.
+                                    </div>
+                                    {readinessBlockers.length > 0 && (
+                                        <div className="mt-2 rounded-md border border-current/30 bg-white/50 px-2 py-2" data-testid="onboarding-readiness-blockers">
+                                            <div className="font-semibold mb-1">Блокеры:</div>
+                                            <div className="space-y-1">
+                                                {readinessBlockers.slice(0, 8).map((item) => (
+                                                    <div key={item}>- {item}</div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                                 <div className="space-y-2">
                                     {readinessItems.map((item) => (
                                         <div
@@ -3524,6 +3656,38 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                     <h5 className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
                                         Договор онбординга
                                     </h5>
+                                    <div className="rounded-lg border border-border/60 bg-background p-3 space-y-2" data-testid="onboarding-domain-template">
+                                        <div className="text-xs text-muted-foreground">
+                                            Domain template preset: применяет стартовый контракт под нишу.
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+                                            <select
+                                                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                value={selectedDomainTemplate}
+                                                onChange={(event) => setSelectedDomainTemplate(event.target.value as DomainTemplateId)}
+                                                disabled={!canEdit}
+                                                data-testid="onboarding-domain-template-select"
+                                            >
+                                                {DOMAIN_TEMPLATE_PRESETS.map((template) => (
+                                                    <option key={template.id} value={template.id}>
+                                                        {template.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <button
+                                                type="button"
+                                                className="btn-ghost"
+                                                onClick={handleApplyDomainTemplate}
+                                                disabled={!canEdit}
+                                                data-testid="onboarding-domain-template-apply"
+                                            >
+                                                Применить template
+                                            </button>
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            {DOMAIN_TEMPLATE_PRESETS.find((item) => item.id === selectedDomainTemplate)?.summary ?? "—"}
+                                        </p>
+                                    </div>
                                     <div>
                                         <label className="text-xs text-muted-foreground">domain_slug (ниша)</label>
                                         <input

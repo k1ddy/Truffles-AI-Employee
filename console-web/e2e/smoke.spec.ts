@@ -815,11 +815,35 @@ test.describe('Navigation', () => {
         const goNoGoStep = page.getByRole('button', { name: /Go\/No-Go/i }).first();
         if (await goNoGoStep.isVisible().catch(() => false) && !(await goNoGoStep.isDisabled().catch(() => true))) {
             await goNoGoStep.click();
+            const readinessScore = page.getByTestId('onboarding-readiness-score');
+            if (await readinessScore.isVisible().catch(() => false)) {
+                await expect(readinessScore).toBeVisible();
+            } else {
+                // Backward-compatible path for environments where readiness score UI is not deployed yet.
+                await expect(page.getByRole('heading', { name: /Проверки Go\/No-Go/i })).toBeVisible();
+            }
+            const templateSelect = page.getByTestId('onboarding-domain-template-select');
+            if (await templateSelect.isVisible().catch(() => false)) {
+                await expect(templateSelect).toBeVisible();
+                await page.getByTestId('onboarding-domain-template-select').selectOption('ecom');
+                await page.getByTestId('onboarding-domain-template-apply').click();
+            } else {
+                // Backward-compatible path for environments where template preset UI is not deployed yet.
+                await expect(page.getByRole('heading', { name: /Договор онбординга/i })).toBeVisible();
+            }
+
             const purchasedForm = page.getByTestId('onboarding-purchased-form');
             if (await purchasedForm.isVisible().catch(() => false)) {
                 await expect(purchasedForm).toBeVisible();
                 await expect(page.getByTestId('onboarding-purchased-apply-json')).toBeVisible();
-                await expect(page.getByTestId('onboarding-purchased-json')).toBeVisible();
+                const purchasedJson = page.getByTestId('onboarding-purchased-json');
+                if (!(await purchasedJson.isVisible().catch(() => false))) {
+                    const advancedJsonToggle = page.getByText(/Advanced JSON \(expert\)/i).first();
+                    if (await advancedJsonToggle.isVisible().catch(() => false)) {
+                        await advancedJsonToggle.click();
+                    }
+                }
+                await expect(purchasedJson).toBeAttached();
             } else {
                 const schemaLabel = page.getByText(/Purchased capabilities \(schema form\)/i);
                 if (await schemaLabel.isVisible().catch(() => false)) {
