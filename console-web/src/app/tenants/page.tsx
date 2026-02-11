@@ -40,6 +40,7 @@ type ClientEditorState = {
     companyId: string;
     originalSlug: string;
     originalCompanyId: string;
+    totalBranches: number;
 };
 
 type ClientLifecycleMode = "archive" | "restore";
@@ -149,6 +150,20 @@ const BRANCH_CHANGE_STATUS_LABELS: Record<string, string> = {
     rollback_failed: "Ошибка отката",
 };
 
+const SLUG_INPUT_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
+const BRANCH_PHONE_INPUT_PATTERN = /^\+?[0-9][0-9\s()-]{5,23}$/;
+const TELEGRAM_CHAT_ID_INPUT_PATTERN = /^-?[0-9]{5,20}$/;
+const KNOWLEDGE_TAG_INPUT_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+function isValidTimezoneName(value: string): boolean {
+    try {
+        Intl.DateTimeFormat("en-US", { timeZone: value });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 function formatStateLabel(
     value: string | null | undefined,
     map: Record<string, string>,
@@ -173,6 +188,13 @@ function buildBranchChangePatch(editor: BranchEditorState): {
             error: "Заполните название и slug филиала",
         };
     }
+    if (!SLUG_INPUT_PATTERN.test(slug)) {
+        return {
+            patch: {},
+            hasChanges: false,
+            error: "slug должен быть в формате snake-case: [a-z0-9_-], без пробелов",
+        };
+    }
     const patch: components["schemas"]["BranchChangePatch"] = {};
     if (name !== editor.original.name) {
         patch.name = name;
@@ -181,10 +203,24 @@ function buildBranchChangePatch(editor: BranchEditorState): {
         patch.slug = slug;
     }
     const timezone = editor.timezone.trim();
+    if (timezone && !isValidTimezoneName(timezone)) {
+        return {
+            patch: {},
+            hasChanges: false,
+            error: "timezone должен быть в формате IANA, например Asia/Almaty",
+        };
+    }
     if (timezone !== editor.original.timezone) {
         patch.timezone = timezone || null;
     }
     const phone = editor.phone.trim();
+    if (phone && !BRANCH_PHONE_INPUT_PATTERN.test(phone)) {
+        return {
+            patch: {},
+            hasChanges: false,
+            error: "phone: ожидается +7 700 000 00 00 (7-15 цифр, допускаются пробелы/скобки)",
+        };
+    }
     if (phone !== editor.original.phone) {
         patch.phone = phone || null;
     }
@@ -193,10 +229,24 @@ function buildBranchChangePatch(editor: BranchEditorState): {
         patch.instance_id = instanceId || null;
     }
     const telegramChatId = editor.telegramChatId.trim();
+    if (telegramChatId && !TELEGRAM_CHAT_ID_INPUT_PATTERN.test(telegramChatId)) {
+        return {
+            patch: {},
+            hasChanges: false,
+            error: "telegram_chat_id: ожидается целое число (например -1001234567890)",
+        };
+    }
     if (telegramChatId !== editor.original.telegramChatId) {
         patch.telegram_chat_id = telegramChatId || null;
     }
     const knowledgeTag = editor.knowledgeTag.trim();
+    if (knowledgeTag && !KNOWLEDGE_TAG_INPUT_PATTERN.test(knowledgeTag.toLowerCase())) {
+        return {
+            patch: {},
+            hasChanges: false,
+            error: "knowledge_tag: [a-z0-9_-], до 64 символов",
+        };
+    }
     if (knowledgeTag !== editor.original.knowledgeTag) {
         patch.knowledge_tag = knowledgeTag || null;
     }
@@ -555,6 +605,7 @@ export default function TenantsPage() {
             companyId: client.company_id ?? "",
             originalSlug: client.slug ?? client.name ?? "",
             originalCompanyId: client.company_id ?? "",
+            totalBranches: client.total_branches ?? 0,
         });
     };
 
@@ -641,11 +692,20 @@ export default function TenantsPage() {
             toast.error("Укажите slug клиента");
             return;
         }
+        if (!SLUG_INPUT_PATTERN.test(slug)) {
+            toast.error("slug: [a-z0-9_-], без пробелов");
+            return;
+        }
         const payload: components["schemas"]["ClientUpdateRequest"] = {};
         if (slug !== clientEditor.originalSlug) {
             payload.slug = slug;
         }
         const companyId = clientEditor.companyId.trim();
+        const companyLocked = clientEditor.totalBranches > 0 && !!clientEditor.originalCompanyId;
+        if (companyLocked && companyId !== clientEditor.originalCompanyId) {
+            toast.error("company_id нельзя менять после создания филиалов");
+            return;
+        }
         if (companyId !== clientEditor.originalCompanyId) {
             payload.company_id = companyId || null;
         }
@@ -966,6 +1026,19 @@ export default function TenantsPage() {
                         >
                             Decommission
                         </button>
+                    </div>
+                </div>
+                <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="tenants-workspace-guide">
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground mb-2">
+                        Операционный guide
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                        Portfolio: риск-панель и состав портфеля. Onboarding: запуск нового филиала. Change Management:
+                        controlled change + draft/validate/publish. Decommission: archive/restore по подтверждению.
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                        Перед Go-Live проверьте: `instance_id`, `phone`, `timezone`, `telegram_chat_id`, `knowledge_tag`,
+                        `payment_status`, active reference pack.
                     </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -1329,6 +1402,7 @@ export default function TenantsPage() {
                                 const lifecyclePending = clientLifecyclePendingId === client.id;
                                 const lifecycleMode: ClientLifecycleMode = isArchived ? "restore" : "archive";
                                 const lifecycleDraftActive = clientLifecycleDraft?.clientId === client.id;
+                                const companyLocked = (client.total_branches ?? 0) > 0 && !!client.company_id;
                                 return (
                                     <div
                                         key={client.id}
@@ -1471,6 +1545,9 @@ export default function TenantsPage() {
                                                             }
                                                             disabled={!canWriteTenants || savingClient}
                                                         />
+                                                        <div className="mt-1 text-[11px] text-muted-foreground">
+                                                            Формат: `a-z0-9_-`, без пробелов.
+                                                        </div>
                                                     </label>
                                                     <label className="text-xs text-muted-foreground">
                                                         Компания
@@ -1484,7 +1561,7 @@ export default function TenantsPage() {
                                                                         : prev
                                                                 )
                                                             }
-                                                            disabled={!canWriteTenants || savingClient}
+                                                            disabled={!canWriteTenants || savingClient || companyLocked}
                                                         >
                                                             <option value="">Без компании</option>
                                                             {knownCompanies.map((company) => (
@@ -1493,6 +1570,11 @@ export default function TenantsPage() {
                                                                 </option>
                                                             ))}
                                                         </select>
+                                                        {companyLocked ? (
+                                                            <div className="mt-1 text-[11px] text-muted-foreground">
+                                                                `company_id` зафиксирован после создания филиалов.
+                                                            </div>
+                                                        ) : null}
                                                     </label>
                                                     <div className="flex items-center gap-2">
                                                         <button
@@ -1604,6 +1686,12 @@ export default function TenantsPage() {
                                         {isEditing && branchEditor ? (
                                             <div className="w-full mt-3 rounded-lg border border-border/60 bg-muted/30 p-3">
                                                 <div className="grid gap-3">
+                                                    <div className="rounded-lg border border-border/60 bg-background p-3 text-[11px] text-muted-foreground" data-testid="tenants-branch-input-contract">
+                                                        Форматы: `slug` = `a-z0-9_-`; `timezone` = IANA (`Asia/Almaty`);
+                                                        `phone` = 7-15 цифр (допускаются `+`, пробелы, `()`, `-`);
+                                                        `telegram_chat_id` = целое число (`-100...`);
+                                                        `knowledge_tag` = `a-z0-9_-` до 64.
+                                                    </div>
                                                     <div className="grid gap-3 sm:grid-cols-2">
                                                         <label className="text-xs text-muted-foreground">
                                                             Название

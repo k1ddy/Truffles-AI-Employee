@@ -1,7 +1,7 @@
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, StrictStr
 
 from app.schemas.capabilities import CapabilitiesPayload
 from app.schemas.onboarding_contract import OnboardingContractPayload
@@ -16,6 +16,10 @@ class ConsoleError(BaseModel):
 
 class ConsoleErrorResponse(BaseModel):
     error: ConsoleError
+
+
+class ConsoleRequestModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 class ConsoleAgent(BaseModel):
@@ -227,8 +231,8 @@ class ConsoleMacroUpdateRequest(BaseModel):
     is_active: Optional[bool] = None
 
 
-class ConsoleCompanyCreateRequest(BaseModel):
-    name: str
+class ConsoleCompanyCreateRequest(ConsoleRequestModel):
+    name: StrictStr
     billing_info: Optional[dict] = None
 
 
@@ -236,29 +240,29 @@ class ConsoleCompanyCreateResponse(BaseModel):
     company: ConsoleCompany
 
 
-class ConsoleCompanyUpdateRequest(BaseModel):
-    name: Optional[str] = None
+class ConsoleCompanyUpdateRequest(ConsoleRequestModel):
+    name: Optional[StrictStr] = None
     billing_info: Optional[dict] = None
 
 
-class ConsoleClientCreateRequest(BaseModel):
-    slug: str
+class ConsoleClientCreateRequest(ConsoleRequestModel):
+    slug: StrictStr
     company_id: UUID
-    status: Optional[str] = "active"
+    status: Optional[StrictStr] = "active"
 
 
 class ConsoleClientCreateResponse(BaseModel):
     client: ConsoleClient
 
 
-class ConsoleClientUpdateRequest(BaseModel):
-    slug: Optional[str] = None
+class ConsoleClientUpdateRequest(ConsoleRequestModel):
+    slug: Optional[StrictStr] = None
     company_id: Optional[UUID] = None
-    status: Optional[str] = None
+    status: Optional[StrictStr] = None
 
 
-class ConsoleClientLifecycleActionRequest(BaseModel):
-    reason: str
+class ConsoleClientLifecycleActionRequest(ConsoleRequestModel):
+    reason: StrictStr
 
 
 class ConsoleBranchBootstrapAccountTemplate(BaseModel):
@@ -268,15 +272,15 @@ class ConsoleBranchBootstrapAccountTemplate(BaseModel):
     is_active: Optional[bool] = True
 
 
-class ConsoleBranchCreateRequest(BaseModel):
+class ConsoleBranchCreateRequest(ConsoleRequestModel):
     client_id: UUID
-    slug: str
-    name: str
-    timezone: Optional[str] = None
-    instance_id: Optional[str] = None
-    phone: Optional[str] = None
-    telegram_chat_id: Optional[str] = None
-    knowledge_tag: Optional[str] = None
+    slug: StrictStr
+    name: StrictStr
+    timezone: Optional[StrictStr] = None
+    instance_id: Optional[StrictStr] = None
+    phone: Optional[StrictStr] = None
+    telegram_chat_id: Optional[StrictStr] = None
+    knowledge_tag: Optional[StrictStr] = None
     working_hours: Optional[dict] = None
     booking_settings: Optional[dict] = None
     is_active: Optional[bool] = None
@@ -288,54 +292,54 @@ class ConsoleBranchCreateResponse(BaseModel):
     created_agents: list[ConsoleAgent] = []
 
 
-class ConsoleBranchUpdateRequest(BaseModel):
-    slug: Optional[str] = None
-    name: Optional[str] = None
-    timezone: Optional[str] = None
-    instance_id: Optional[str] = None
-    phone: Optional[str] = None
-    telegram_chat_id: Optional[str] = None
-    knowledge_tag: Optional[str] = None
+class ConsoleBranchUpdateRequest(ConsoleRequestModel):
+    slug: Optional[StrictStr] = None
+    name: Optional[StrictStr] = None
+    timezone: Optional[StrictStr] = None
+    instance_id: Optional[StrictStr] = None
+    phone: Optional[StrictStr] = None
+    telegram_chat_id: Optional[StrictStr] = None
+    knowledge_tag: Optional[StrictStr] = None
     working_hours: Optional[dict] = None
     booking_settings: Optional[dict] = None
     is_active: Optional[bool] = None
     confirmation_id: Optional[UUID] = None
 
 
-class ConsoleBranchChangePatch(BaseModel):
-    slug: Optional[str] = None
-    name: Optional[str] = None
-    timezone: Optional[str] = None
-    instance_id: Optional[str] = None
-    phone: Optional[str] = None
-    telegram_chat_id: Optional[str] = None
-    knowledge_tag: Optional[str] = None
+class ConsoleBranchChangePatch(ConsoleRequestModel):
+    slug: Optional[StrictStr] = None
+    name: Optional[StrictStr] = None
+    timezone: Optional[StrictStr] = None
+    instance_id: Optional[StrictStr] = None
+    phone: Optional[StrictStr] = None
+    telegram_chat_id: Optional[StrictStr] = None
+    knowledge_tag: Optional[StrictStr] = None
     working_hours: Optional[dict] = None
     booking_settings: Optional[dict] = None
     is_active: Optional[bool] = None
 
 
-class ConsoleBranchChangeDraftRequest(BaseModel):
+class ConsoleBranchChangeDraftRequest(ConsoleRequestModel):
     branch_id: UUID
-    reason: str
+    reason: StrictStr
     patch: ConsoleBranchChangePatch
 
 
-class ConsoleBranchChangePublishRequest(BaseModel):
+class ConsoleBranchChangePublishRequest(ConsoleRequestModel):
     confirmation_id: Optional[UUID] = None
 
 
-class ConsoleBranchChangeRollbackRequest(BaseModel):
-    reason: str
+class ConsoleBranchChangeRollbackRequest(ConsoleRequestModel):
+    reason: StrictStr
     confirmation_id: Optional[UUID] = None
 
 
-class ConsoleBranchGoLiveDecisionRequest(BaseModel):
-    reason: str
+class ConsoleBranchGoLiveDecisionRequest(ConsoleRequestModel):
+    reason: StrictStr
 
 
-class ConsoleBranchGoLiveWaiverRequest(BaseModel):
-    reason: str
+class ConsoleBranchGoLiveWaiverRequest(ConsoleRequestModel):
+    reason: StrictStr
     ttl_hours: int
 
 
@@ -886,22 +890,22 @@ OnboardingPurchasedService = Literal[
 ]
 
 
-class ConsoleOnboardingAutopilotRequest(BaseModel):
+class ConsoleOnboardingAutopilotRequest(ConsoleRequestModel):
     company_id: Optional[UUID] = None
-    company_name: Optional[str] = None
+    company_name: Optional[StrictStr] = None
     client_id: Optional[UUID] = None
-    client_slug: Optional[str] = None
+    client_slug: Optional[StrictStr] = None
     branch_id: Optional[UUID] = None
-    branch_slug: Optional[str] = None
-    branch_name: Optional[str] = None
-    timezone: Optional[str] = None
-    phone: str
-    instance_id: str
+    branch_slug: Optional[StrictStr] = None
+    branch_name: Optional[StrictStr] = None
+    timezone: Optional[StrictStr] = None
+    phone: StrictStr
+    instance_id: StrictStr
     payment_status: Optional[Literal["pending", "confirmed", "rejected"]] = "pending"
-    domain_slug: Optional[str] = None
+    domain_slug: Optional[StrictStr] = None
     purchased: Optional[CapabilitiesPayload] = None
     purchased_services: Optional[list[OnboardingPurchasedService]] = None
-    client_data_text: Optional[str] = None
+    client_data_text: Optional[StrictStr] = None
     client_data_json: Optional[dict] = None
     activate_branch: Optional[bool] = False
     auto_create_reference_pack: Optional[bool] = True
