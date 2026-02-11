@@ -46,9 +46,29 @@ type ClientEditorState = {
 type ClientLifecycleMode = "archive" | "restore";
 type ClientLifecycleDraftState = {
     clientId: string;
+    clientLabel: string;
+    companyLabel: string;
     mode: ClientLifecycleMode;
+    currentLifecycleLabel: string;
+    targetLifecycleLabel: string;
+    activeBranches: number;
+    totalBranches: number;
+    degradedBranches: number;
     reason: string;
     confirmChecked: boolean;
+};
+
+type ClientLifecycleAuditEntry = {
+    clientId: string;
+    mode: ClientLifecycleMode;
+    previousLifecycleLabel: string;
+    targetLifecycleLabel: string;
+    reason: string;
+    status: "success" | "error";
+    message: string;
+    traceId?: string;
+    actorLabel: string;
+    happenedAt: string;
 };
 
 type BranchEditorState = {
@@ -172,6 +192,17 @@ function formatStateLabel(
         return "—";
     }
     return map[value] ?? value;
+}
+
+function formatDateTimeLabel(value: string | undefined): string {
+    if (!value) {
+        return "—";
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return "—";
+    }
+    return parsed.toLocaleString("ru-RU");
 }
 
 function buildBranchChangePatch(editor: BranchEditorState): {
@@ -314,6 +345,7 @@ export default function TenantsPage() {
     const [branchChangePreview, setBranchChangePreview] = useState<components["schemas"]["BranchChangeResponse"] | null>(null);
     const [clientLifecyclePendingId, setClientLifecyclePendingId] = useState<string | null>(null);
     const [clientLifecycleDraft, setClientLifecycleDraft] = useState<ClientLifecycleDraftState | null>(null);
+    const [clientLifecycleAuditById, setClientLifecycleAuditById] = useState<Record<string, ClientLifecycleAuditEntry>>({});
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -745,7 +777,14 @@ export default function TenantsPage() {
         }
         setClientLifecycleDraft({
             clientId: client.id,
+            clientLabel: client.name ?? client.slug ?? client.id,
+            companyLabel: client.company_name ?? "—",
             mode,
+            currentLifecycleLabel: formatStateLabel(client.lifecycle_state, FLEET_LIFECYCLE_LABELS),
+            targetLifecycleLabel: mode === "archive" ? FLEET_LIFECYCLE_LABELS.archived : FLEET_LIFECYCLE_LABELS.active,
+            activeBranches: client.active_branches ?? 0,
+            totalBranches: client.total_branches ?? 0,
+            degradedBranches: client.degraded_branches ?? 0,
             reason: "",
             confirmChecked: false,
         });
@@ -758,15 +797,15 @@ export default function TenantsPage() {
         setClientLifecycleDraft(null);
     };
 
-    const handleClientLifecycleAction = async (
-        client: components["schemas"]["Client"],
-    ) => {
-        if (!client.id) {
-            toast.error("Не удалось выполнить действие без ID клиента");
+    const handleClientLifecycleAction = async () => {
+        if (!clientLifecycleDraft) {
+            toast.error("Сначала подготовьте действие");
             return;
         }
-        if (!clientLifecycleDraft || clientLifecycleDraft.clientId !== client.id) {
-            toast.error("Сначала подготовьте действие");
+        const lifecycleDraft = clientLifecycleDraft;
+        const clientId = lifecycleDraft.clientId;
+        if (!clientId) {
+            toast.error("Не удалось выполнить действие без ID клиента");
             return;
         }
         const reason = clientLifecycleDraft.reason.trim();
@@ -778,26 +817,61 @@ export default function TenantsPage() {
             toast.error("Подтвердите действие");
             return;
         }
-        const mode = clientLifecycleDraft.mode;
-        setClientLifecyclePendingId(client.id);
+        const mode = lifecycleDraft.mode;
+        setClientLifecyclePendingId(clientId);
+        let lifecycleCompleted = false;
         try {
             if (mode === "archive") {
-                await adminApi.archiveClient(client.id, { reason });
+                await adminApi.archiveClient(clientId, { reason });
                 toast.success("Клиент архивирован");
             } else {
-                await adminApi.restoreClient(client.id, { reason });
+                await adminApi.restoreClient(clientId, { reason });
                 toast.success("Клиент восстановлен");
             }
-            if (clientEditor?.id === client.id) {
+            lifecycleCompleted = true;
+            setClientLifecycleAuditById((prev) => ({
+                ...prev,
+                [clientId]: {
+                    clientId,
+                    mode,
+                    previousLifecycleLabel: lifecycleDraft.currentLifecycleLabel,
+                    targetLifecycleLabel: lifecycleDraft.targetLifecycleLabel,
+                    reason,
+                    status: "success",
+                    message: mode === "archive" ? "Архивация подтверждена API" : "Восстановление подтверждено API",
+                    actorLabel: meData?.agent?.name ?? role,
+                    happenedAt: new Date().toISOString(),
+                },
+            }));
+            if (clientEditor?.id === clientId) {
                 setClientEditor(null);
             }
             refreshTenants();
             refreshContext();
         } catch (error) {
-            handleError(error);
+            const parsed = handleError(error) as
+                | { message?: string; trace_id?: string }
+                | undefined;
+            setClientLifecycleAuditById((prev) => ({
+                ...prev,
+                [clientId]: {
+                    clientId,
+                    mode,
+                    previousLifecycleLabel: lifecycleDraft.currentLifecycleLabel,
+                    targetLifecycleLabel: lifecycleDraft.targetLifecycleLabel,
+                    reason,
+                    status: "error",
+                    message: parsed?.message ?? "Ошибка выполнения lifecycle-действия",
+                    traceId: parsed?.trace_id,
+                    actorLabel: meData?.agent?.name ?? role,
+                    happenedAt: new Date().toISOString(),
+                },
+            }));
         } finally {
             setClientLifecyclePendingId(null);
-            setClientLifecycleDraft(null);
+            if (lifecycleCompleted) {
+                setClientLifecycleDraft(null);
+            }
         }
     };
 
@@ -1401,7 +1475,9 @@ export default function TenantsPage() {
                                 const isArchived = isClientArchived(client);
                                 const lifecyclePending = clientLifecyclePendingId === client.id;
                                 const lifecycleMode: ClientLifecycleMode = isArchived ? "restore" : "archive";
-                                const lifecycleDraftActive = clientLifecycleDraft?.clientId === client.id;
+                                const lifecycleAudit = client.id
+                                    ? clientLifecycleAuditById[client.id]
+                                    : undefined;
                                 const companyLocked = (client.total_branches ?? 0) > 0 && !!client.company_id;
                                 return (
                                     <div
@@ -1427,6 +1503,26 @@ export default function TenantsPage() {
                                             <div className="text-xs text-muted-foreground">
                                                 филиалы: активные {client.active_branches ?? 0}/{client.total_branches ?? 0} · деградация {client.degraded_branches ?? 0} · готовы к запуску {client.go_live_ready_branches ?? 0}
                                             </div>
+                                            {lifecycleAudit ? (
+                                                <div className="mt-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs" data-testid="tenants-client-lifecycle-audit">
+                                                    <div className="font-medium">
+                                                        Lifecycle trace (текущая сессия)
+                                                    </div>
+                                                    <div className="text-muted-foreground">
+                                                        действие: {lifecycleAudit.mode === "archive" ? "Архивация" : "Восстановление"} · оператор: {lifecycleAudit.actorLabel} · время: {formatDateTimeLabel(lifecycleAudit.happenedAt)}
+                                                    </div>
+                                                    <div className="text-muted-foreground">
+                                                        переход: {lifecycleAudit.previousLifecycleLabel}{" -> "}{lifecycleAudit.targetLifecycleLabel}
+                                                    </div>
+                                                    <div className="text-muted-foreground">
+                                                        причина: {lifecycleAudit.reason}
+                                                    </div>
+                                                    <div className={lifecycleAudit.status === "success" ? "text-emerald-700" : "text-red-700"}>
+                                                        {lifecycleAudit.status === "success" ? "OK" : "ERROR"}: {lifecycleAudit.message}
+                                                        {lifecycleAudit.traceId ? ` (trace_id: ${lifecycleAudit.traceId})` : ""}
+                                                    </div>
+                                                </div>
+                                            ) : null}
                                         </div>
                                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                             <span>{client.id === selectedClientId ? "Выбран" : ""}</span>
@@ -1462,72 +1558,6 @@ export default function TenantsPage() {
                                                 В контекст
                                             </button>
                                         </div>
-                                        {canWriteTenants && lifecycleDraftActive && clientLifecycleDraft ? (
-                                            <div className="w-full mt-3 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid="tenants-client-lifecycle-panel">
-                                                <div className="grid gap-3">
-                                                    <div className="text-xs text-muted-foreground">
-                                                        {clientLifecycleDraft.mode === "archive"
-                                                            ? "Клиент будет переведен в архив и исчезнет из списка активных."
-                                                            : "Клиент будет восстановлен в список активных."}
-                                                    </div>
-                                                    <label className="text-xs text-muted-foreground">
-                                                        Причина действия
-                                                        <input
-                                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                            value={clientLifecycleDraft.reason}
-                                                            data-testid="tenants-client-lifecycle-reason"
-                                                            onChange={(event) =>
-                                                                setClientLifecycleDraft((prev) =>
-                                                                    prev && prev.clientId === client.id
-                                                                        ? { ...prev, reason: event.target.value }
-                                                                        : prev
-                                                                )
-                                                            }
-                                                            disabled={lifecyclePending}
-                                                        />
-                                                    </label>
-                                                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                                                        <input
-                                                            type="checkbox"
-                                                            className="h-4 w-4"
-                                                            checked={clientLifecycleDraft.confirmChecked}
-                                                            data-testid="tenants-client-lifecycle-confirm"
-                                                            onChange={(event) =>
-                                                                setClientLifecycleDraft((prev) =>
-                                                                    prev && prev.clientId === client.id
-                                                                        ? { ...prev, confirmChecked: event.target.checked }
-                                                                        : prev
-                                                                )
-                                                            }
-                                                            disabled={lifecyclePending}
-                                                        />
-                                                        Подтверждаю выполнение действия
-                                                    </label>
-                                                    <div className="flex items-center gap-2">
-                                                        <button
-                                                            className="btn-primary"
-                                                            onClick={() => handleClientLifecycleAction(client)}
-                                                            data-testid="tenants-client-lifecycle-submit"
-                                                            disabled={lifecyclePending}
-                                                        >
-                                                            {lifecyclePending
-                                                                ? "Выполняется..."
-                                                                : clientLifecycleDraft.mode === "archive"
-                                                                    ? "Подтвердить архив"
-                                                                    : "Подтвердить восстановление"}
-                                                        </button>
-                                                        <button
-                                                            className="btn-ghost"
-                                                            onClick={closeClientLifecycleDraft}
-                                                            data-testid="tenants-client-lifecycle-cancel"
-                                                            disabled={lifecyclePending}
-                                                        >
-                                                            Отмена
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ) : null}
                                         {isEditing && clientEditor ? (
                                             <div className="w-full mt-3 rounded-lg border border-border/60 bg-muted/30 p-3">
                                                 <div className="grid gap-3">
@@ -1977,6 +2007,93 @@ export default function TenantsPage() {
                 </section>
                 ) : null}
             </div>
+
+            {clientLifecycleDraft ? (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" data-testid="tenants-client-lifecycle-modal-overlay">
+                    <div
+                        className="card-surface w-full max-w-xl space-y-4 p-6"
+                        role="dialog"
+                        aria-modal="true"
+                        data-testid="tenants-client-lifecycle-modal"
+                    >
+                        <div>
+                            <h3 className="text-lg font-semibold">
+                                {clientLifecycleDraft.mode === "archive" ? "Архивировать клиента" : "Восстановить клиента"}
+                            </h3>
+                            <p className="text-sm text-muted-foreground">
+                                Подтвердите lifecycle-действие перед отправкой в API.
+                            </p>
+                        </div>
+                        <div className="rounded-lg border border-border/60 bg-background p-3 text-xs" data-testid="tenants-client-lifecycle-impact">
+                            <div className="font-medium mb-1">Impact preview</div>
+                            <div className="text-muted-foreground">
+                                клиент: {clientLifecycleDraft.clientLabel} · компания: {clientLifecycleDraft.companyLabel}
+                            </div>
+                            <div className="text-muted-foreground">
+                                переход: {clientLifecycleDraft.currentLifecycleLabel}{" -> "}{clientLifecycleDraft.targetLifecycleLabel}
+                            </div>
+                            <div className="text-muted-foreground">
+                                филиалы: активные {clientLifecycleDraft.activeBranches}/{clientLifecycleDraft.totalBranches} · деградация {clientLifecycleDraft.degradedBranches}
+                            </div>
+                        </div>
+                        <label className="text-xs text-muted-foreground">
+                            Причина действия (обязательно)
+                            <input
+                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                value={clientLifecycleDraft.reason}
+                                data-testid="tenants-client-lifecycle-reason"
+                                onChange={(event) =>
+                                    setClientLifecycleDraft((prev) =>
+                                        prev
+                                            ? { ...prev, reason: event.target.value }
+                                            : prev
+                                    )
+                                }
+                                disabled={Boolean(clientLifecyclePendingId)}
+                            />
+                        </label>
+                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <input
+                                type="checkbox"
+                                className="h-4 w-4"
+                                checked={clientLifecycleDraft.confirmChecked}
+                                data-testid="tenants-client-lifecycle-confirm"
+                                onChange={(event) =>
+                                    setClientLifecycleDraft((prev) =>
+                                        prev
+                                            ? { ...prev, confirmChecked: event.target.checked }
+                                            : prev
+                                    )
+                                }
+                                disabled={Boolean(clientLifecyclePendingId)}
+                            />
+                            Подтверждаю выполнение действия и влияние на lifecycle клиента
+                        </label>
+                        <div className="flex flex-wrap justify-end gap-2">
+                            <button
+                                className="btn-ghost"
+                                onClick={closeClientLifecycleDraft}
+                                data-testid="tenants-client-lifecycle-cancel"
+                                disabled={Boolean(clientLifecyclePendingId)}
+                            >
+                                Отмена
+                            </button>
+                            <button
+                                className="btn-primary"
+                                onClick={handleClientLifecycleAction}
+                                data-testid="tenants-client-lifecycle-submit"
+                                disabled={Boolean(clientLifecyclePendingId)}
+                            >
+                                {clientLifecyclePendingId
+                                    ? "Выполняется..."
+                                    : clientLifecycleDraft.mode === "archive"
+                                        ? "Подтвердить архив"
+                                        : "Подтвердить восстановление"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
 
             {showOnboarding ? (
                 <div className="mt-10" data-testid="tenants-onboarding-section">

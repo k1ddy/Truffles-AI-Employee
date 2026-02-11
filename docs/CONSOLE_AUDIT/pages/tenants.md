@@ -40,10 +40,12 @@ Client section
 - Contract note: `company_id` становится immutable после появления филиалов у клиента (guard в backend + UI lock).
 - Save/Cancel buttons in inline editor.
 - Lifecycle actions:
-  - `Архивировать` / `Восстановить` open inline confirmation block.
+  - `Архивировать` / `Восстановить` open lifecycle modal.
+  - Modal includes impact preview (client/company, lifecycle transition, branch impact).
   - Reason is required.
   - Explicit confirm checkbox required before action.
   - API uses dedicated endpoints (`archive` / `restore`), status is not editable via `PATCH`.
+  - Client row shows `Lifecycle trace (текущая сессия)` with action/result/trace_id (if returned).
 - "Показать еще" loads next page (cursor-based).
 - Save triggers `PATCH /console/v1/admin/clients/{id}`.
 - Lifecycle triggers `POST /console/v1/admin/clients/{id}/archive|restore`.
