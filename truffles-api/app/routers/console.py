@@ -13,6 +13,7 @@ from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request as URLRequest
 from urllib.request import urlopen
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -374,6 +375,9 @@ def _build_console_telegram_caption(manager_label: str, caption: Optional[str]) 
 
 
 _SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+_KNOWLEDGE_TAG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+_BRANCH_PHONE_ALLOWED_PATTERN = re.compile(r"^\+?[0-9][0-9\s()-]{5,23}$")
+_TELEGRAM_CHAT_ID_PATTERN = re.compile(r"^-?[0-9]{5,20}$")
 
 
 def _normalize_slug(value: Optional[str], field_name: str) -> str:
@@ -401,6 +405,48 @@ def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _normalize_timezone_name(value: Optional[str], field_name: str = "timezone") -> Optional[str]:
+    normalized = _normalize_optional_text(value)
+    if not normalized:
+        return None
+    try:
+        ZoneInfo(normalized)
+    except ZoneInfoNotFoundError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {field_name}") from exc
+    return normalized
+
+
+def _normalize_branch_phone(value: Optional[str], field_name: str = "phone") -> Optional[str]:
+    normalized = _normalize_optional_text(value)
+    if not normalized:
+        return None
+    if not _BRANCH_PHONE_ALLOWED_PATTERN.fullmatch(normalized):
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {field_name}")
+    digits = _normalize_phone_digits(normalized)
+    if len(digits) < 7 or len(digits) > 15:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {field_name}")
+    return normalized
+
+
+def _normalize_telegram_chat_id(value: Optional[str], field_name: str = "telegram_chat_id") -> Optional[str]:
+    normalized = _normalize_optional_text(value)
+    if not normalized:
+        return None
+    if not _TELEGRAM_CHAT_ID_PATTERN.fullmatch(normalized):
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {field_name}")
+    return normalized
+
+
+def _normalize_knowledge_tag(value: Optional[str], field_name: str = "knowledge_tag") -> Optional[str]:
+    normalized = _normalize_optional_text(value)
+    if not normalized:
+        return None
+    lowered = normalized.lower()
+    if not _KNOWLEDGE_TAG_PATTERN.fullmatch(lowered):
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {field_name}")
+    return lowered
 
 
 CONSOLE_MEDIA_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
@@ -625,9 +671,14 @@ def _normalize_branch_change_patch(*, db: Session, branch: Branch, patch_payload
                 errors.append(exc.message)
 
     if "timezone" in patch_payload:
-        normalized["timezone"] = _normalize_optional_text(
-            patch_payload.get("timezone") if isinstance(patch_payload.get("timezone"), str) else None
-        )
+        raw_timezone = patch_payload.get("timezone")
+        if raw_timezone is not None and not isinstance(raw_timezone, str):
+            errors.append("timezone must be string")
+        else:
+            try:
+                normalized["timezone"] = _normalize_timezone_name(raw_timezone, "timezone")
+            except ConsoleAPIError as exc:
+                errors.append(exc.message)
 
     if "instance_id" in patch_payload:
         instance_id = _normalize_optional_text(
@@ -643,27 +694,43 @@ def _normalize_branch_change_patch(*, db: Session, branch: Branch, patch_payload
         normalized["instance_id"] = instance_id
 
     if "phone" in patch_payload:
-        phone = _normalize_optional_text(
-            patch_payload.get("phone") if isinstance(patch_payload.get("phone"), str) else None
-        )
-        _ensure_unique_branch_field(
-            db,
-            client_id=branch.client_id,
-            field_name="phone",
-            value=phone,
-            exclude_branch_id=branch.id,
-        )
-        normalized["phone"] = phone
+        raw_phone = patch_payload.get("phone")
+        if raw_phone is not None and not isinstance(raw_phone, str):
+            errors.append("phone must be string")
+        else:
+            try:
+                phone = _normalize_branch_phone(raw_phone, "phone")
+            except ConsoleAPIError as exc:
+                errors.append(exc.message)
+            else:
+                _ensure_unique_branch_field(
+                    db,
+                    client_id=branch.client_id,
+                    field_name="phone",
+                    value=phone,
+                    exclude_branch_id=branch.id,
+                )
+                normalized["phone"] = phone
 
     if "telegram_chat_id" in patch_payload:
-        normalized["telegram_chat_id"] = _normalize_optional_text(
-            patch_payload.get("telegram_chat_id") if isinstance(patch_payload.get("telegram_chat_id"), str) else None
-        )
+        raw_chat_id = patch_payload.get("telegram_chat_id")
+        if raw_chat_id is not None and not isinstance(raw_chat_id, str):
+            errors.append("telegram_chat_id must be string")
+        else:
+            try:
+                normalized["telegram_chat_id"] = _normalize_telegram_chat_id(raw_chat_id, "telegram_chat_id")
+            except ConsoleAPIError as exc:
+                errors.append(exc.message)
 
     if "knowledge_tag" in patch_payload:
-        normalized["knowledge_tag"] = _normalize_optional_text(
-            patch_payload.get("knowledge_tag") if isinstance(patch_payload.get("knowledge_tag"), str) else None
-        )
+        raw_knowledge_tag = patch_payload.get("knowledge_tag")
+        if raw_knowledge_tag is not None and not isinstance(raw_knowledge_tag, str):
+            errors.append("knowledge_tag must be string")
+        else:
+            try:
+                normalized["knowledge_tag"] = _normalize_knowledge_tag(raw_knowledge_tag, "knowledge_tag")
+            except ConsoleAPIError as exc:
+                errors.append(exc.message)
 
     if "working_hours" in patch_payload:
         value = patch_payload.get("working_hours")
@@ -7991,10 +8058,10 @@ async def create_branch(
     slug = _normalize_slug(body.slug, "branch_slug")
     name = _normalize_required_text(body.name, "name")
     instance_id = _normalize_optional_text(body.instance_id)
-    phone = _normalize_optional_text(body.phone)
-    telegram_chat_id = _normalize_optional_text(body.telegram_chat_id)
-    knowledge_tag = _normalize_optional_text(body.knowledge_tag)
-    timezone_value = _normalize_optional_text(body.timezone)
+    phone = _normalize_branch_phone(body.phone, "phone")
+    telegram_chat_id = _normalize_telegram_chat_id(body.telegram_chat_id, "telegram_chat_id")
+    knowledge_tag = _normalize_knowledge_tag(body.knowledge_tag, "knowledge_tag")
+    timezone_value = _normalize_timezone_name(body.timezone, "timezone")
 
     _ensure_unique_branch_field(db, client_id=client.id, field_name="slug", value=slug)
     _ensure_unique_branch_field(db, client_id=client.id, field_name="instance_id", value=instance_id)
@@ -8167,7 +8234,7 @@ async def update_branch(
         updated_fields.append("instance_id")
 
     if "phone" in fields_set:
-        phone = _normalize_optional_text(body.phone)
+        phone = _normalize_branch_phone(body.phone, "phone")
         if phone != branch.phone:
             _ensure_unique_branch_field(
                 db,
@@ -8180,15 +8247,15 @@ async def update_branch(
         updated_fields.append("phone")
 
     if "telegram_chat_id" in fields_set:
-        branch.telegram_chat_id = _normalize_optional_text(body.telegram_chat_id)
+        branch.telegram_chat_id = _normalize_telegram_chat_id(body.telegram_chat_id, "telegram_chat_id")
         updated_fields.append("telegram_chat_id")
 
     if "knowledge_tag" in fields_set:
-        branch.knowledge_tag = _normalize_optional_text(body.knowledge_tag)
+        branch.knowledge_tag = _normalize_knowledge_tag(body.knowledge_tag, "knowledge_tag")
         updated_fields.append("knowledge_tag")
 
     if "timezone" in fields_set:
-        branch.timezone = _normalize_optional_text(body.timezone)
+        branch.timezone = _normalize_timezone_name(body.timezone, "timezone")
         updated_fields.append("timezone")
 
     if "working_hours" in fields_set:
@@ -10276,7 +10343,9 @@ async def run_onboarding_autopilot(
     now = datetime.now(timezone.utc)
     actions: list[str] = []
 
-    phone = _normalize_required_text(body.phone, "phone")
+    phone = _normalize_branch_phone(body.phone, "phone")
+    if not phone:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "phone is required")
     instance_id = _normalize_required_text(body.instance_id, "instance_id")
     requested_payment_status = body.payment_status or "pending"
     if context.role != "platform_admin":
@@ -10385,7 +10454,7 @@ async def run_onboarding_autopilot(
             name=branch_name,
             instance_id=instance_id,
             phone=phone,
-            timezone=_normalize_optional_text(body.timezone) or _AUTOPILOT_DEFAULT_TIMEZONE,
+            timezone=_normalize_timezone_name(body.timezone, "timezone") or _AUTOPILOT_DEFAULT_TIMEZONE,
             working_hours={},
             booking_settings={},
             is_active=bool(body.activate_branch if body.activate_branch is not None else False),
@@ -10415,7 +10484,7 @@ async def run_onboarding_autopilot(
             branch.name = branch_name
         branch.phone = phone
         branch.instance_id = instance_id
-        branch.timezone = _normalize_optional_text(body.timezone) or branch.timezone or _AUTOPILOT_DEFAULT_TIMEZONE
+        branch.timezone = _normalize_timezone_name(body.timezone, "timezone") or branch.timezone or _AUTOPILOT_DEFAULT_TIMEZONE
         if body.activate_branch is not None:
             branch.is_active = body.activate_branch
         if not branch.onboarding_state:

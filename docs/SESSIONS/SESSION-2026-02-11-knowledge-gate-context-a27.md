@@ -9,11 +9,16 @@
 - scope: Упростить gate выбора branch и стабилизировать context transitions в Knowledge для Platform Admin.
 - done:
   - Подготовлен task package.
+  - Зафиксирован PR-A (stabilization) и открыт PR #624: https://github.com/k1ddy/Truffles-AI-Employee/pull/624
+  - Внесён PR-B uplift для Tenants IA: workspace modes (`All/Portfolio/Onboarding/Change Management/Decommission`) и условный рендер секций.
+  - Добавлен smoke тест переключения режимов Tenants с legacy fallback (`console-web/e2e/smoke.spec.ts`).
+  - Выполнен scope-guard: knowledge-изменение исключено из ветки отдельным `revert`.
+  - Локальные проверки: `npm run lint`, `npm run build`, `npx playwright ... --grep "Tenants"` -> pass (4 passed).
 - next:
-  - Внести UX-правки в `knowledge/page.tsx`.
-  - Прогнать lint/build.
-  - Открыть PR.
+  - Дождаться зелёного CI по PR #624 и закрыть remaining checks.
 - evidence:
-  - `console-web/src/app/knowledge/page.tsx`
-  - audit artifacts in `/tmp/knowledge_audit_*`
+  - PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/624
+  - `console-web/src/app/tenants/page.tsx`
+  - `console-web/e2e/smoke.spec.ts`
+  - `docs/CONSOLE_AUDIT/pages/tenants.md`
 - last_updated: 2026-02-11

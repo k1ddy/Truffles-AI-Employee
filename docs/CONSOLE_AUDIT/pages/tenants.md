@@ -10,6 +10,13 @@ Roles
 - Read/write: platform_admin only.
 
 Sections
+- Workspace modes:
+  - `All` (all zones),
+  - `Portfolio` (risk + companies + client portfolio),
+  - `Onboarding` (wizard focus),
+  - `Change Management` (branch changes focus),
+  - `Decommission` (client lifecycle archive/restore focus).
+- Decommission center with quick lifecycle filters (`active` / `archived` / `all`).
 - Companies list with search and inline edit.
 - Clients list with search and inline edit.
 - Branches list with search and inline edit.
@@ -29,10 +36,16 @@ Client section
 - Search input.
 - Rows show slug + company_id.
 - Selected row shows "Выбран"; "В контекст" sets client context and clears branch.
-- Edit mode fields: slug, company_id, status.
+- Edit mode fields: slug, company_id.
 - Save/Cancel buttons in inline editor.
+- Lifecycle actions:
+  - `Архивировать` / `Восстановить` open inline confirmation block.
+  - Reason is required.
+  - Explicit confirm checkbox required before action.
+  - API uses dedicated endpoints (`archive` / `restore`), status is not editable via `PATCH`.
 - "Показать еще" loads next page (cursor-based).
 - Save triggers `PATCH /console/v1/admin/clients/{id}`.
+- Lifecycle triggers `POST /console/v1/admin/clients/{id}/archive|restore`.
 
 Branch section
 - Search input.
@@ -41,12 +54,22 @@ Branch section
 - Edit mode fields:
   - name, slug, timezone, phone, instance_id, telegram_chat_id, knowledge_tag, is_active.
   - Active филиал requires instance_id.
-  - Deactivation or instance_id removal requires confirmation reason input.
-- Save/Cancel buttons in inline editor.
+  - Deactivation or instance_id removal requires confirmation.
+- Change management buttons:
+  - `Черновик + проверка` -> create draft + validate.
+  - `Применить` -> publish validated change.
+  - `Откат` -> rollback published change.
+  - `Отмена` -> close editor.
+- Includes diff preview + validation errors + recent change history.
 - "Показать еще" loads next page (cursor-based).
-- Save triggers:
+- Change flow triggers:
+  - `POST /console/v1/admin/branch-changes/draft`
+  - `POST /console/v1/admin/branch-changes/{id}/validate`
+  - `POST /console/v1/admin/branch-changes/{id}/publish`
+  - `POST /console/v1/admin/branch-changes/{id}/rollback`
+- Destructive publish/rollback may require confirmation:
   - `POST /console/v1/confirmations` (action `branch_deactivate`) when destructive.
-  - `PATCH /console/v1/admin/branches/{id}`.
+  - `PATCH /console/v1/admin/branches/{id}` is executed by publish/rollback backend flow.
 
 Context shortcuts
 - Buttons labeled \"В контекст\" set localStorage (`console:company_id`, `console:client_id`, `console:branch_id`) and refetch `/console/v1/me`.
@@ -58,13 +81,18 @@ Provisioning Wizard
 
 API endpoints used
 - List: `GET /console/v1/admin/companies|clients|branches`.
-- Update: `PATCH /console/v1/admin/companies/{id}`; `PATCH /console/v1/admin/clients/{id}`; `PATCH /console/v1/admin/branches/{id}`.
+- Direct update: `PATCH /console/v1/admin/companies/{id}`; `PATCH /console/v1/admin/clients/{id}`.
+- Client lifecycle: `POST /console/v1/admin/clients/{id}/archive|restore`.
+- Branch changes: `POST /console/v1/admin/branch-changes/draft|{id}/validate|{id}/publish|{id}/rollback`; `GET /console/v1/admin/branch-changes`.
 - Confirmations: `POST /console/v1/confirmations` (branch deactivation).
 
 Backend handlers
 - `truffles-api/app/routers/console.py`:
   - `list_companies`, `list_clients`, `list_branches`.
-  - `patch_company`, `patch_client`, `patch_branch`.
+  - `patch_company`, `patch_client`.
+  - `archive_client`, `restore_client`.
+  - `draft_branch_change`, `validate_branch_change`, `publish_branch_change`, `rollback_branch_change`.
+  - `patch_branch` (called by branch change publish/rollback flow).
   - `create_confirmation`.
 
 Data sources

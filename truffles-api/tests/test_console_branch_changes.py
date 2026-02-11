@@ -49,6 +49,61 @@ def test_normalize_branch_change_patch_requires_instance_for_activation(monkeypa
     assert "instance_id required to activate branch" in errors
 
 
+@pytest.mark.parametrize(
+    ("patch", "expected_error"),
+    [
+        ({"timezone": "Mars/Phobos"}, "Invalid timezone"),
+        ({"phone": "abc"}, "Invalid phone"),
+        ({"phone": 12345}, "phone must be string"),
+        ({"telegram_chat_id": "chat-1"}, "Invalid telegram_chat_id"),
+        ({"knowledge_tag": "Bad Tag"}, "Invalid knowledge_tag"),
+    ],
+)
+def test_normalize_branch_change_patch_rejects_invalid_inputs(monkeypatch, patch, expected_error):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        instance_id="inst-1",
+        is_active=False,
+        go_live_state="approved",
+        go_live_reason=None,
+        go_live_waiver_until=None,
+    )
+    monkeypatch.setattr(console_router, "_ensure_unique_branch_field", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_require_branch_go_live_gate", lambda *args, **kwargs: None)
+
+    _normalized, errors = console_router._normalize_branch_change_patch(
+        db=SimpleNamespace(),
+        branch=branch,
+        patch_payload=patch,
+    )
+
+    assert expected_error in errors
+
+
+def test_normalize_branch_change_patch_normalizes_knowledge_tag(monkeypatch):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        instance_id="inst-1",
+        is_active=False,
+        go_live_state="approved",
+        go_live_reason=None,
+        go_live_waiver_until=None,
+    )
+    monkeypatch.setattr(console_router, "_ensure_unique_branch_field", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_require_branch_go_live_gate", lambda *args, **kwargs: None)
+
+    normalized, errors = console_router._normalize_branch_change_patch(
+        db=SimpleNamespace(),
+        branch=branch,
+        patch_payload={"knowledge_tag": "Demo_Tag"},
+    )
+
+    assert errors == []
+    assert normalized["knowledge_tag"] == "demo_tag"
+
+
 @pytest.mark.asyncio
 async def test_publish_branch_change_requires_validated_state(monkeypatch):
     context = SimpleNamespace(

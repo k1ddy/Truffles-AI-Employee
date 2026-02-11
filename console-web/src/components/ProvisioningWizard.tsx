@@ -46,13 +46,13 @@ const WORKING_DAYS = [
 ] as const;
 
 const WIZARD_STEPS = [
-    { id: "branch_draft", label: "Филиал", hint: "Draft" },
+    { id: "branch_draft", label: "Филиал", hint: "Черновик" },
     { id: "integrations", label: "Интеграции", hint: "instance_id" },
-    { id: "team", label: "Команда", hint: "Owner/Admin" },
+    { id: "team", label: "Команда", hint: "владелец/админ" },
     { id: "telegram", label: "Telegram", hint: "chat_id" },
-    { id: "knowledge", label: "Knowledge", hint: "pack" },
-    { id: "booking", label: "Booking", hint: "calendar" },
-    { id: "go_no_go", label: "Go/No-Go", hint: "capabilities" },
+    { id: "knowledge", label: "Знания", hint: "pack" },
+    { id: "booking", label: "Бронирование", hint: "calendar" },
+    { id: "go_no_go", label: "Go/No-Go", hint: "готовность" },
 ] as const;
 
 const MISSING_LABELS: Record<string, string> = {
@@ -2151,15 +2151,15 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 {autopilotResult && (
                     <div className="rounded-lg border border-border/60 bg-background p-3 space-y-2 text-xs">
                         <div>
-                            Company: <span className="font-mono">{autopilotResult.company.id}</span> | Client:{" "}
-                            <span className="font-mono">{autopilotResult.client.id}</span> | Branch:{" "}
+                            Компания: <span className="font-mono">{autopilotResult.company.id}</span> | Клиент:{" "}
+                            <span className="font-mono">{autopilotResult.client.id}</span> | Филиал:{" "}
                             <span className="font-mono">{autopilotResult.branch.id}</span>
                         </div>
                         <div>
-                            Go/No-Go missing:{" "}
+                            Не выполнены критерии Go/No-Go:{" "}
                             {autopilotResult.go_no_go_missing.length
                                 ? autopilotResult.go_no_go_missing.map((item) => formatMissingRequirement(item)).join(", ")
-                                : "none"}
+                                : "нет"}
                         </div>
                         <div>
                             Webhook secret: <span className="font-mono">{autopilotResult.webhook_secret}</span>
@@ -2168,10 +2168,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                             Webhook URL: <span className="font-mono">{autopilotResult.webhook_url}</span>
                         </div>
                         <div>
-                            Intake missing fields:{" "}
+                            Не заполнены поля intake:{" "}
                             {autopilotResult.intake.missing_fields.length
                                 ? autopilotResult.intake.missing_fields.map((item) => formatMissingRequirement(item)).join(", ")
-                                : "none"}
+                                : "нет"}
                         </div>
                         {autopilotResult.intake.missing_questions.length > 0 && (
                             <div>
@@ -2197,7 +2197,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-card border border-border/60 rounded-lg p-4">
                     <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground mb-3">
-                        Company
+                        Компания
                     </h3>
                     <label className="text-xs text-muted-foreground">Company ID (existing)</label>
                     <input
@@ -2283,7 +2283,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
                 <div className="bg-card border border-border/60 rounded-lg p-4">
                     <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground mb-3">
-                        Client
+                        Клиент
                     </h3>
                     <label className="text-xs text-muted-foreground">Client ID (existing)</label>
                     <input
@@ -3246,7 +3246,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
                             <div className="space-y-4">
                                 <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                                    Go/No-Go checks
+                                    Проверки Go/No-Go
                                 </h4>
                                 <div className="space-y-2">
                                     {readinessItems.map((item) => (
@@ -3261,7 +3261,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             }`}
                                         >
                                             <span>{item.label}</span>
-                                            <span>{item.required ? (item.ok ? "OK" : "Missing") : "N/A"}</span>
+                                            <span>{item.required ? (item.ok ? "OK" : "Не заполнено") : "N/A"}</span>
                                         </div>
                                     ))}
                                 </div>
@@ -3277,24 +3277,24 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                 )}
                                 <div className="rounded-lg border border-border/60 bg-muted/10 p-3 space-y-2">
                                     <h5 className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                                        Go-Live Gate
+                                        Гейт запуска
                                     </h5>
                                     <p className="text-xs">
-                                        status: <span className="font-mono">{branchGoLiveState}</span> · allowed:{" "}
+                                        статус: <span className="font-mono">{branchGoLiveState}</span> · разрешено:{" "}
                                         <span className={branchGoLiveAllowed ? "text-green-700" : "text-destructive"}>
-                                            {branchGoLiveAllowed ? "yes" : "no"}
+                                            {branchGoLiveAllowed ? "да" : "нет"}
                                         </span>
                                     </p>
                                     {branchGoLiveReason && (
                                         <p className="text-xs text-muted-foreground">
-                                            reason: <span className="font-mono">{String(branchGoLiveReason)}</span>
+                                            причина: <span className="font-mono">{String(branchGoLiveReason)}</span>
                                         </p>
                                     )}
                                     {branchGoLiveWaiverUntil && (
                                         <p className="text-xs text-muted-foreground">
                                             waiver_until: <span className="font-mono">{String(branchGoLiveWaiverUntil)}</span>
                                             {" · "}
-                                            {branchGoLiveWaiverActive ? "active" : "expired"}
+                                            {branchGoLiveWaiverActive ? "активен" : "истек"}
                                         </p>
                                     )}
                                     <textarea
@@ -3302,7 +3302,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                         rows={2}
                                         value={goLiveDecisionReason}
                                         onChange={(event) => setGoLiveDecisionReason(event.target.value)}
-                                        placeholder="reason for approve / reject / waiver"
+                                        placeholder="причина для approve / reject / waiver"
                                         disabled={!canEdit}
                                     />
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -3313,7 +3313,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs"
                                             value={goLiveWaiverHours}
                                             onChange={(event) => setGoLiveWaiverHours(event.target.value)}
-                                            placeholder="waiver ttl_hours"
+                                            placeholder="waiver ttl_hours (часы)"
                                             disabled={!canEdit}
                                         />
                                         <button
@@ -3322,7 +3322,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             onClick={handleWaiveGoLive}
                                             disabled={!canEdit || waiveGoLiveMutation.isPending}
                                         >
-                                            {waiveGoLiveMutation.isPending ? "Waiving..." : "Waive TTL"}
+                                            {waiveGoLiveMutation.isPending ? "Сохранение..." : "Выдать waiver TTL"}
                                         </button>
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -3332,7 +3332,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             onClick={handleApproveGoLive}
                                             disabled={!canEdit || approveGoLiveMutation.isPending}
                                         >
-                                            {approveGoLiveMutation.isPending ? "Approving..." : "Approve Go-Live"}
+                                            {approveGoLiveMutation.isPending ? "Сохранение..." : "Approve Go-Live"}
                                         </button>
                                         <button
                                             type="button"
@@ -3340,7 +3340,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             onClick={handleRejectGoLive}
                                             disabled={!canEdit || rejectGoLiveMutation.isPending}
                                         >
-                                            {rejectGoLiveMutation.isPending ? "Rejecting..." : "Reject Go-Live"}
+                                            {rejectGoLiveMutation.isPending ? "Сохранение..." : "Reject Go-Live"}
                                         </button>
                                     </div>
                                 </div>
@@ -3358,10 +3358,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
                                 <div className="rounded-lg border border-border/60 bg-muted/10 p-3 space-y-3">
                                     <h5 className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                                        Onboarding Contract
+                                        Договор онбординга
                                     </h5>
                                     <div>
-                                        <label className="text-xs text-muted-foreground">domain_slug (niche)</label>
+                                        <label className="text-xs text-muted-foreground">domain_slug (ниша)</label>
                                         <input
                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                             value={onboardingContractDraft.domain_slug ?? ""}
@@ -3377,7 +3377,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                         />
                                     </div>
                                     <div>
-                                        <label className="text-xs text-muted-foreground">purchased (JSON)</label>
+                                        <label className="text-xs text-muted-foreground">purchased (JSON, договор/возможности)</label>
                                         <textarea
                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
                                             rows={8}
@@ -3400,9 +3400,9 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             }}
                                             disabled={!canManagePayment}
                                         >
-                                            <option value="pending">pending</option>
-                                            <option value="confirmed">confirmed</option>
-                                            <option value="rejected">rejected</option>
+                                            <option value="pending">pending (ожидает)</option>
+                                            <option value="confirmed">confirmed (подтверждено)</option>
+                                            <option value="rejected">rejected (отклонено)</option>
                                         </select>
                                         {!canManagePayment && (
                                             <p className="mt-1 text-[11px] text-muted-foreground">
