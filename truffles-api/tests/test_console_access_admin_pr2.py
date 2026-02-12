@@ -521,6 +521,76 @@ async def test_run_onboarding_autopilot_rejects_blank_phone(monkeypatch):
     assert exc_info.value.code == "INVALID_PARAM"
 
 
+@pytest.mark.asyncio
+async def test_run_onboarding_autopilot_blocks_cross_tenant_company(monkeypatch):
+    allowed_client_id = uuid4()
+    allowed_company_id = uuid4()
+    foreign_company_id = uuid4()
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(id=foreign_company_id)
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="owner",
+            accessible_clients=[SimpleNamespace(id=allowed_client_id, company_id=allowed_company_id)],
+            client_id=allowed_client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.run_onboarding_autopilot(
+            request=Mock(),
+            body=ConsoleOnboardingAutopilotRequest(
+                phone="+77001112233",
+                instance_id="inst-1",
+                company_id=foreign_company_id,
+            ),
+            db=db,
+        )
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_run_onboarding_autopilot_blocks_cross_tenant_client(monkeypatch):
+    allowed_client_id = uuid4()
+    allowed_company_id = uuid4()
+    foreign_client_id = uuid4()
+    db = Mock()
+    db.query.return_value.filter.return_value.first.side_effect = [
+        SimpleNamespace(id=allowed_company_id),
+        SimpleNamespace(id=foreign_client_id),
+    ]
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="owner",
+            accessible_clients=[SimpleNamespace(id=allowed_client_id, company_id=allowed_company_id)],
+            client_id=allowed_client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.run_onboarding_autopilot(
+            request=Mock(),
+            body=ConsoleOnboardingAutopilotRequest(
+                phone="+77001112233",
+                instance_id="inst-1",
+                company_id=allowed_company_id,
+                client_id=foreign_client_id,
+            ),
+            db=db,
+        )
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
 def test_membership_role_guard_rejects_platform_admin():
     with pytest.raises(ConsoleAPIError) as exc_info:
         console_router._ensure_membership_role_is_assignable("platform_admin")

@@ -340,11 +340,18 @@ def validate_draft(
     draft_text: str,
     *,
     current_payload: dict | None,
+    domain_slug: str | None = None,
+    require_booking: bool | None = None,
 ) -> tuple[dict | None, list[str], list[str], str]:
     payload, parse_errors = parse_draft_text(draft_text)
     if parse_errors:
         return None, parse_errors, [], ""
-    errors, warnings = validate_payload(payload, previous_payload=current_payload)
+    errors, warnings = validate_payload(
+        payload,
+        previous_payload=current_payload,
+        domain_slug=domain_slug,
+        require_booking=require_booking,
+    )
     diff = build_diff(current_payload, payload)
     return payload, errors, warnings, diff
 

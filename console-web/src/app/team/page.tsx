@@ -130,10 +130,49 @@ function membershipTargetLabel(
 }
 
 async function fetchSpecialists(branchId?: string): Promise<SpecialistsResponse> {
-    const params = branchId ? `?branch_id=${branchId}` : "";
-    const response = await api.get(`/calendar/specialists${params}`);
+    const params = new URLSearchParams();
+    if (branchId) {
+        params.set("branch_id", branchId);
+    }
+    const query = params.toString();
+    const response = await api.get(`/calendar/specialists${query ? `?${query}` : ""}`);
     const data = response.data || {};
     return { items: (data.items || []) as Specialist[] };
+}
+
+async function fetchSpecialistsAdmin(branchId?: string): Promise<SpecialistsResponse> {
+    const params = new URLSearchParams();
+    if (branchId) {
+        params.set("branch_id", branchId);
+    }
+    params.set("include_inactive", "true");
+    const response = await api.get(`/calendar/specialists?${params.toString()}`);
+    const data = response.data || {};
+    return { items: (data.items || []) as Specialist[] };
+}
+
+type SpecialistMutationPayload = {
+    name: string;
+    branch_id?: string;
+};
+
+async function createSpecialist(data: SpecialistMutationPayload): Promise<Specialist> {
+    const response = await api.post("/calendar/specialists", data);
+    return (response.data || {}) as Specialist;
+}
+
+async function updateSpecialist(
+    specialistId: string,
+    data: Partial<SpecialistMutationPayload>,
+): Promise<Specialist> {
+    const response = await api.patch(`/calendar/specialists/${specialistId}`, data);
+    return (response.data || {}) as Specialist;
+}
+
+async function setSpecialistActive(specialistId: string, isActive: boolean): Promise<Specialist> {
+    const endpoint = isActive ? "enable" : "disable";
+    const response = await api.post(`/calendar/specialists/${specialistId}/${endpoint}`);
+    return (response.data || {}) as Specialist;
 }
 
 function UsersPanel({
@@ -1368,13 +1407,34 @@ function SpecialistsPanel({
     onSelectBranch: (value: string) => void;
 }) {
     const { handleError } = useErrorHandler();
+    const queryClient = useQueryClient();
     const canWriteTeam = canAccessConsole(role, "team", "write");
+    const branchOptions = useMemo(
+        () => branches.filter((branch): branch is TeamBranch & { id: string } => Boolean(branch.id)),
+        [branches],
+    );
+    const [createName, setCreateName] = useState("");
+    const [createBranchId, setCreateBranchId] = useState("");
+    const [editingSpecialistId, setEditingSpecialistId] = useState<string | null>(null);
+    const [editName, setEditName] = useState("");
+    const [editBranchId, setEditBranchId] = useState("");
+    const [statusTarget, setStatusTarget] = useState<string | null>(null);
 
     const specialistsQuery = useQuery({
-        queryKey: ["calendar-specialists", selectedBranchId],
-        queryFn: () => fetchSpecialists(selectedBranchId || undefined),
+        queryKey: ["calendar-specialists", selectedBranchId, canWriteTeam ? "all" : "active"],
+        queryFn: () => (
+            canWriteTeam
+                ? fetchSpecialistsAdmin(selectedBranchId || undefined)
+                : fetchSpecialists(selectedBranchId || undefined)
+        ),
         enabled: !!session,
     });
+
+    useEffect(() => {
+        if (!createBranchId && selectedBranchId) {
+            setCreateBranchId(selectedBranchId);
+        }
+    }, [createBranchId, selectedBranchId]);
 
     useEffect(() => {
         if (specialistsQuery.error) {
@@ -1382,8 +1442,111 @@ function SpecialistsPanel({
         }
     }, [specialistsQuery.error, handleError]);
 
+    const createMutation = useMutation({
+        mutationFn: (payload: SpecialistMutationPayload) => createSpecialist(payload),
+        onSuccess: () => {
+            toast.success("Специалист добавлен");
+            setCreateName("");
+            queryClient.invalidateQueries({ queryKey: ["calendar-specialists"] });
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+    });
+
+    const updateMutation = useMutation({
+        mutationFn: (payload: { specialistId: string; data: Partial<SpecialistMutationPayload> }) =>
+            updateSpecialist(payload.specialistId, payload.data),
+        onSuccess: () => {
+            toast.success("Специалист обновлен");
+            setEditingSpecialistId(null);
+            setEditName("");
+            setEditBranchId("");
+            queryClient.invalidateQueries({ queryKey: ["calendar-specialists"] });
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+    });
+
+    const statusMutation = useMutation({
+        mutationFn: (payload: { specialistId: string; isActive: boolean }) =>
+            setSpecialistActive(payload.specialistId, payload.isActive),
+        onMutate: ({ specialistId }) => {
+            setStatusTarget(specialistId);
+        },
+        onSuccess: (_data, payload) => {
+            toast.success(payload.isActive ? "Специалист включен" : "Специалист отключен");
+            queryClient.invalidateQueries({ queryKey: ["calendar-specialists"] });
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+        onSettled: () => {
+            setStatusTarget(null);
+        },
+    });
+
+    const resolveTargetBranchId = (preferredBranchId: string) => {
+        if (preferredBranchId) {
+            return preferredBranchId;
+        }
+        if (selectedBranchId) {
+            return selectedBranchId;
+        }
+        if (branchOptions.length === 1) {
+            return branchOptions[0].id as string;
+        }
+        return "";
+    };
+
+    const handleCreateSpecialist = (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        if (!canWriteTeam) {
+            return;
+        }
+        const name = createName.trim();
+        if (!name) {
+            toast.error("Введите имя специалиста");
+            return;
+        }
+        const branchId = resolveTargetBranchId(createBranchId);
+        if (!branchId) {
+            toast.error("Выберите филиал");
+            return;
+        }
+        createMutation.mutate({ name, branch_id: branchId });
+    };
+
+    const startEditSpecialist = (specialist: Specialist) => {
+        setEditingSpecialistId(specialist.id);
+        setEditName(specialist.name ?? "");
+        setEditBranchId(specialist.branch_id ?? "");
+    };
+
+    const handleSaveSpecialist = (specialistId: string) => {
+        if (!canWriteTeam) {
+            return;
+        }
+        const name = editName.trim();
+        if (!name) {
+            toast.error("Введите имя специалиста");
+            return;
+        }
+        const branchId = resolveTargetBranchId(editBranchId);
+        if (!branchId) {
+            toast.error("Выберите филиал");
+            return;
+        }
+        updateMutation.mutate({
+            specialistId,
+            data: { name, branch_id: branchId },
+        });
+    };
+
     const specialists = specialistsQuery.data?.items ?? [];
     const totalServices = specialists.reduce((total, specialist) => total + (specialist.services?.length ?? 0), 0);
+    const activeCount = specialists.filter((specialist) => specialist.is_active).length;
 
     return (
         <div className="space-y-6">
@@ -1410,10 +1573,14 @@ function SpecialistsPanel({
                         </select>
                     )}
                 </div>
-                <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-4">
                     <div className="rounded-2xl border border-border/60 bg-muted/40 p-4">
                         <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Специалисты</p>
                         <p className="text-2xl font-semibold mt-2">{specialists.length}</p>
+                    </div>
+                    <div className="rounded-2xl border border-border/60 bg-muted/40 p-4">
+                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Активные</p>
+                        <p className="text-2xl font-semibold mt-2">{activeCount}</p>
                     </div>
                     <div className="rounded-2xl border border-border/60 bg-muted/40 p-4">
                         <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Услуги</p>
@@ -1428,6 +1595,44 @@ function SpecialistsPanel({
                 </div>
             </div>
 
+            {canWriteTeam && (
+                <form onSubmit={handleCreateSpecialist} className="card-surface p-6 space-y-4">
+                    <div>
+                        <h3 className="text-base font-semibold">Добавить специалиста</h3>
+                        <p className="text-sm text-muted-foreground mt-1">
+                            Создание привязано к onboarding booking шагу и текущему клиенту.
+                        </p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                        <input
+                            className="rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
+                            placeholder="Имя специалиста"
+                            value={createName}
+                            onChange={(event) => setCreateName(event.target.value)}
+                        />
+                        <select
+                            className="rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
+                            value={createBranchId}
+                            onChange={(event) => setCreateBranchId(event.target.value)}
+                        >
+                            <option value="">Выберите филиал</option>
+                            {branchOptions.map((branch) => (
+                                <option key={branch.id} value={branch.id}>
+                                    {branch.name ?? branch.id}
+                                </option>
+                            ))}
+                        </select>
+                        <button
+                            type="submit"
+                            className="btn-primary"
+                            disabled={createMutation.isPending}
+                        >
+                            {createMutation.isPending ? "Добавление..." : "Добавить"}
+                        </button>
+                    </div>
+                </form>
+            )}
+
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {specialistsQuery.isLoading && (
                     <div className="card-surface p-6 animate-pulse text-sm text-muted-foreground">
@@ -1436,7 +1641,7 @@ function SpecialistsPanel({
                 )}
                 {!specialistsQuery.isLoading && specialists.length === 0 && (
                     <div className="card-surface p-6 text-sm text-muted-foreground">
-                        Специалисты не найдены. Добавьте их через provisioning.
+                        Специалисты не найдены.
                     </div>
                 )}
                 {!specialistsQuery.isLoading && specialists.map((specialist) => (
@@ -1456,6 +1661,66 @@ function SpecialistsPanel({
                                 {specialist.is_active ? "Активен" : "Неактивен"}
                             </span>
                         </div>
+                        {canWriteTeam && (
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                                    onClick={() => (
+                                        editingSpecialistId === specialist.id
+                                            ? setEditingSpecialistId(null)
+                                            : startEditSpecialist(specialist)
+                                    )}
+                                >
+                                    {editingSpecialistId === specialist.id ? "Скрыть редактирование" : "Редактировать"}
+                                </button>
+                                <button
+                                    type="button"
+                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                                    onClick={() => statusMutation.mutate({
+                                        specialistId: specialist.id,
+                                        isActive: !(specialist.is_active ?? true),
+                                    })}
+                                    disabled={statusTarget === specialist.id}
+                                >
+                                    {statusTarget === specialist.id
+                                        ? "Сохранение..."
+                                        : specialist.is_active
+                                            ? "Отключить"
+                                            : "Включить"}
+                                </button>
+                            </div>
+                        )}
+                        {canWriteTeam && editingSpecialistId === specialist.id && (
+                            <div className="mt-4 rounded-xl border border-border/60 bg-muted/20 p-3 space-y-3">
+                                <input
+                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                                    value={editName}
+                                    onChange={(event) => setEditName(event.target.value)}
+                                    placeholder="Имя специалиста"
+                                />
+                                <select
+                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                                    value={editBranchId}
+                                    onChange={(event) => setEditBranchId(event.target.value)}
+                                >
+                                    <option value="">Выберите филиал</option>
+                                    {branchOptions.map((branch) => (
+                                        <option key={branch.id} value={branch.id}>
+                                            {branch.name ?? branch.id}
+                                        </option>
+                                    ))}
+                                </select>
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    onClick={() => handleSaveSpecialist(specialist.id)}
+                                    disabled={updateMutation.isPending}
+                                >
+                                    {updateMutation.isPending ? "Сохранение..." : "Сохранить"}
+                                </button>
+                            </div>
+                        )}
                         <div className="mt-4 text-xs text-muted-foreground">Услуги</div>
                         <div className="mt-2 space-y-2">
                             {(specialist.services ?? []).length === 0 && (

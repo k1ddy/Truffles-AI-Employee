@@ -3,6 +3,7 @@ import copy
 from app.services.knowledge_validation import (
     build_diff,
     dump_pack_yaml,
+    get_missing_required_fields,
     parse_draft_text,
     validate_payload,
 )
@@ -94,3 +95,31 @@ def test_build_diff_returns_text():
     payload["client_pack"]["salon"]["city"] = "Astana"
     diff = build_diff(previous, payload)
     assert "Astana" in diff
+
+
+def test_domain_legal_skips_booking_required_fields_by_default():
+    payload = _base_payload()
+    payload["client_pack"].pop("service_duration_estimates", None)
+    payload["client_pack"].pop("booking", None)
+
+    missing = get_missing_required_fields(payload, domain_slug="legal")
+
+    assert "client_pack.service_duration_estimates" not in missing
+    assert "client_pack.booking.collect_fields" not in missing
+    assert "client_pack.booking.bot_can_confirm" not in missing
+
+
+def test_domain_legal_can_force_booking_required_fields():
+    payload = _base_payload()
+    payload["client_pack"].pop("service_duration_estimates", None)
+    payload["client_pack"].pop("booking", None)
+
+    missing = get_missing_required_fields(
+        payload,
+        domain_slug="legal",
+        require_booking=True,
+    )
+
+    assert "client_pack.service_duration_estimates" in missing
+    assert "client_pack.booking.collect_fields" in missing
+    assert "client_pack.booking.bot_can_confirm" in missing

@@ -255,8 +255,6 @@ def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
     published_version = get_current_published(db, branch_id=branch.id)
     has_published_knowledge = published_version is not None
     missing_pack_fields: list[str] = []
-    if published_version and isinstance(published_version.payload_json, dict):
-        missing_pack_fields = get_missing_required_fields(published_version.payload_json)
 
     has_specialists = (
         db.query(Specialist)
@@ -294,6 +292,13 @@ def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
         capability_mismatches = find_capability_mismatches(
             purchased=onboarding_contract.payload.purchased,
             effective=capabilities.payload,
+        )
+    booking_required = capabilities.payload.features.booking_mode is not None
+    if published_version and isinstance(published_version.payload_json, dict):
+        missing_pack_fields = get_missing_required_fields(
+            published_version.payload_json,
+            domain_slug=reference_pack_domain_slug,
+            require_booking=booking_required,
         )
 
     return OnboardingInputs(

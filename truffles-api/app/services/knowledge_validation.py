@@ -27,6 +27,16 @@ REQUIRED_CLIENT_PACK_FIELDS = [
     "client_pack.price_list",
 ]
 
+_BOOKING_REQUIRED_FIELDS = [
+    "client_pack.service_duration_estimates",
+    "client_pack.booking.collect_fields",
+    "client_pack.booking.bot_can_confirm",
+]
+
+_COMMON_REQUIRED_FIELDS = [
+    field for field in REQUIRED_CLIENT_PACK_FIELDS if field not in _BOOKING_REQUIRED_FIELDS
+]
+
 REQUIRED_POLICY_FIELDS = [
     "client_pack.policy.hard_law",
     "client_pack.policy.payment_info",
@@ -82,6 +92,56 @@ _MINIMUM_DATA_DURATION_KEYS = (
 _MISSING = object()
 _COMPILED_ARTIFACTS_KEY = "compiled_artifacts"
 _LANGUAGE_ALIASES = {"kz": "kk"}
+_DOMAIN_DEFAULT_BOOKING_REQUIRED = {
+    "beauty": True,
+    "clinic": True,
+    "legal": False,
+    "ecom": False,
+}
+_DOMAIN_EXTRA_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {}
+
+
+def _normalize_domain_slug(domain_slug: str | None) -> str | None:
+    if not isinstance(domain_slug, str):
+        return None
+    cleaned = domain_slug.strip().lower()
+    return cleaned or None
+
+
+def _booking_required_for_domain(
+    *,
+    domain_slug: str | None,
+    require_booking: bool | None,
+) -> bool:
+    if require_booking is not None:
+        return bool(require_booking)
+    normalized_domain = _normalize_domain_slug(domain_slug)
+    if not normalized_domain:
+        return True
+    return _DOMAIN_DEFAULT_BOOKING_REQUIRED.get(normalized_domain, True)
+
+
+def get_required_fields_for_domain(
+    *,
+    domain_slug: str | None = None,
+    require_booking: bool | None = None,
+) -> list[str]:
+    required_fields: list[str] = list(_COMMON_REQUIRED_FIELDS)
+    normalized_domain = _normalize_domain_slug(domain_slug)
+    for field in _DOMAIN_EXTRA_REQUIRED_FIELDS.get(normalized_domain or "", ()):
+        if field not in required_fields:
+            required_fields.append(field)
+    if _booking_required_for_domain(
+        domain_slug=normalized_domain,
+        require_booking=require_booking,
+    ):
+        for field in _BOOKING_REQUIRED_FIELDS:
+            if field not in required_fields:
+                required_fields.append(field)
+    for field in REQUIRED_POLICY_FIELDS:
+        if field not in required_fields:
+            required_fields.append(field)
+    return required_fields
 
 
 def strip_compiled_artifacts(payload: dict | None) -> dict | None:
@@ -160,9 +220,18 @@ def get_missing_required_fields(
     payload: dict,
     *,
     required_fields: list[str] | None = None,
+    domain_slug: str | None = None,
+    require_booking: bool | None = None,
 ) -> list[str]:
     normalized = _normalize_payload(payload)
-    fields = required_fields if required_fields is not None else REQUIRED_PACK_FIELDS
+    fields = (
+        required_fields
+        if required_fields is not None
+        else get_required_fields_for_domain(
+            domain_slug=domain_slug,
+            require_booking=require_booking,
+        )
+    )
     missing: list[str] = []
     for path in fields:
         value = _get_nested_value(normalized, path)
@@ -231,11 +300,23 @@ def parse_draft_text(draft_text: str) -> tuple[dict | None, list[str]]:
     return _normalize_payload(payload), []
 
 
-def validate_payload(payload: dict, *, previous_payload: dict | None = None) -> tuple[list[str], list[str]]:
+def validate_payload(
+    payload: dict,
+    *,
+    previous_payload: dict | None = None,
+    required_fields: list[str] | None = None,
+    domain_slug: str | None = None,
+    require_booking: bool | None = None,
+) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
 
-    missing_fields = get_missing_required_fields(payload)
+    missing_fields = get_missing_required_fields(
+        payload,
+        required_fields=required_fields,
+        domain_slug=domain_slug,
+        require_booking=require_booking,
+    )
     for path in missing_fields:
         errors.append(f"Missing required field: {path}")
 
