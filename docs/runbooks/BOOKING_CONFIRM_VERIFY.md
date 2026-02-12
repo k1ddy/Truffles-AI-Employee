@@ -194,6 +194,118 @@ TEST_MODE=1 python3 ops/diagnose.py llm-quality \
   --max-failures 20
 ```
 
+Realistic timeout profile (recommended for stable evidence)
+```bash
+# Default profile (recommended): realistic
+--timeout-profile realistic
+
+# For iterative replay loops (faster, still safe):
+--timeout-profile fast-replay \
+--min-wait 0 \
+--max-wait 0.15
+```
+
+Parallel-safe runs across worktrees
+- Do not reuse the same `--run-id` concurrently.
+- If `--run-id` is omitted, `llm-quality` auto-generates a worktree-scoped id (`<timestamp>-<namespace>-p<pid>-<rand>`).
+- This default keeps simultaneous runs from different worktrees isolated in `/tmp/booking_quality/*`.
+
+Webhook timeout triage (stop-the-line for invalid runs)
+- Symptom: `/webhook/<client>` returns no bytes for 30-180s and runner logs `curl rc=28`.
+- Check quickly before long replay:
+  - `curl -sS --max-time 5 http://127.0.0.1:18084/admin/health`
+  - Send one manual webhook and measure latency (same secret + instance_id as replay).
+- If webhook hangs for >10 minutes (no `responses.jsonl` growth), stop run and mark infra:
+  - `pkill -f "<run-id>"`
+  - Keep partial artifacts, do not delete output dir.
+- Restart only after infra is stable, then replay with the same:
+  - `--scenarios-file`, `--baseline-summary`, `--run-id`, timeout profile.
+- If branch routing is ambiguous, pass explicit `--instance-id` from `branches.instance_id` for target branch.
+
+Judge modes and when to use them
+- `--judge-mode critical`: default for rapid fix loops. Judges only critical turns (booking/handoff/tool-sensitive or turns with strict reasons/explicit expectations).
+- `--judge-mode all`: full semantic audit before final acceptance/baseline decision.
+- `--judge-mode sample`: lightweight monitoring.
+- `--judge-mode off`: debug only (not canonical for strict replay evidence).
+
+Three-step release-quality flow (`1/2/3`)
+```bash
+# 1) Replay on frozen scenarios with realistic profile and critical judge (fastest valid loop)
+TEST_MODE=1 python3 ops/diagnose.py llm-quality \
+  --base-url http://127.0.0.1:18084 \
+  --client-slug demo_salon \
+  --branch-slug main \
+  --scenarios-file /tmp/booking_quality/<lock>/scenarios.json \
+  --baseline-summary /tmp/booking_quality/<lock>/summary.json \
+  --count 10 \
+  --tool-hooks auto \
+  --reset-before-dialog \
+  --judge-mode critical \
+  --judge-max-tokens 220 \
+  --judge-timeout 20 \
+  --timeout 30 \
+  --poll-timeout 25 \
+  --poll-interval 0.4 \
+  --trace-timeout 25 \
+  --trace-interval 0.4 \
+  --min-wait 0.2 \
+  --max-wait 0.4 \
+  --retry-count 2 \
+  --retry-backoff 0.5 \
+  --max-failures 20 \
+  --run-id booking-replay-<stamp>-critical
+
+# 2) Run the same frozen scenarios with judge-mode all for full semantic check
+TEST_MODE=1 python3 ops/diagnose.py llm-quality \
+  --base-url http://127.0.0.1:18084 \
+  --client-slug demo_salon \
+  --branch-slug main \
+  --scenarios-file /tmp/booking_quality/<lock>/scenarios.json \
+  --baseline-summary /tmp/booking_quality/<lock>/summary.json \
+  --count 10 \
+  --tool-hooks auto \
+  --reset-before-dialog \
+  --judge-mode all \
+  --judge-timeout 25 \
+  --timeout 30 \
+  --poll-timeout 25 \
+  --poll-interval 0.4 \
+  --trace-timeout 25 \
+  --trace-interval 0.4 \
+  --min-wait 0.2 \
+  --max-wait 0.4 \
+  --retry-count 2 \
+  --retry-backoff 0.5 \
+  --max-failures 20 \
+  --run-id booking-replay-<stamp>-all
+
+# 3) Update canonical baseline only if run is canonical-valid:
+# infra_valid=true, semantic_valid=true, judge.enabled=true
+TEST_MODE=1 python3 ops/diagnose.py llm-quality \
+  --mode llm \
+  --count 10 \
+  --min-turns 10 \
+  --max-turns 15 \
+  --include-media \
+  --allowlist-jids "$OUTBOUND_ALLOWLIST_JIDS" \
+  --scenario-coverage booking,info,interrupt,handoff \
+  --tool-hooks auto \
+  --seed 42 \
+  --judge-mode all \
+  --timeout 30 \
+  --poll-timeout 25 \
+  --trace-timeout 25 \
+  --reset-before-dialog \
+  --update-baseline \
+  --run-id booking-lock-<stamp>-canonical
+```
+
+Parallel worktree isolation notes
+- Use dedicated output dirs per run: `/tmp/booking_quality/<run-id>`.
+- Keep unique `run-id` per run/worktree.
+- Judge cache file is namespaced by worktree path to avoid cross-worktree contamination.
+- Never compare runs with different scenarios/seed/profile.
+
 Strict replay (fast, frozen scenarios, anti-false-OK)
 ```bash
 # Use external timeout so network/outbox stalls do not block progress for hours.
