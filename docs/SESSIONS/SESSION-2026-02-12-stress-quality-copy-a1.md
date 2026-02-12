@@ -20,18 +20,43 @@
   - Restored consult-return trace stability for long dialogs by pinning `consult_return` in decision-trace retention.
   - Hardened consult-return trigger in intent decomposition with lexical booking fallback when LLM intent decomposition is unavailable.
   - Opened PR #635 with commit `367e03f9` for these runtime/testability fixes.
+  - Validated PR #635 checks are green (`changes`, `lint`, `secret-scan`, `unit-tests`, `core-eval`).
+  - Ran fast realistic llm-quality smoke with frozen scenarios and judge-all:
+    - `booking-replay-20260212-a1c4-fastcheck1` (1 dialog, 12 turns, elapsed `2:18`, `infra_valid=true`, `strict_pass_rate=0.9167`).
+  - Ran full 10-dialog realistic loop on frozen scenarios:
+    - `booking-lock-20260212-a1c5-fast` (125 turns, elapsed `17:51`, `strict_pass_rate=0.84`, `hard_fail_rate=0.016`, `decision_meta_errors=2` -> `infra_valid=false`).
+  - Confirmed state-isolation fix:
+    - `booking-replay-20260212-a1c5-fastcheck2` with `--jid-mode unique` (1 dialog, 12 turns, elapsed `1:33`, `infra_valid=true`, `decision_meta_errors=0`).
+  - Updated runbook with state-isolated realistic profile and anti-stall diagnostics (`docs/runbooks/BOOKING_CONFIRM_VERIFY.md`).
+  - Fixed recurring `missing_api_key` false-negative in `llm-quality` by adding robust `OPENAI_API_KEY` resolver (`--judge-api-key/--llm-api-key` -> env -> `.env` candidates -> container env) and surfacing `api_key_source` in summary/config (`ops/diagnose.py`).
+  - Added `OPENAI_API_KEY` auto-discovery to `scripts/booking_dialog_scenarios.py` (same env-file candidates) to avoid LLM scenario-gen failures when key exists only in `.env`.
+  - Added regression tests for key resolution and env-file fallback:
+    - `truffles-api/tests/test_booking_quality_openai_key_resolution.py`
+    - `truffles-api/tests/test_booking_dialog_scenarios_script.py::test_resolve_openai_api_key_reads_local_truffles_api_env`
+  - Verified strict replay no longer fails on `missing_api_key` when env var is unset but key exists in env-file candidates:
+    - `env -u OPENAI_API_KEY TRUFFLES_API_ENV_FILE=/tmp/openai_test.env ... llm-quality --judge-mode all --scenarios-file /tmp/booking_quality/nonexistent.json` now fails at scenarios-file validation (not key gate).
+  - Captured dry-run evidence with judge enabled and key source:
+    - run-id `booking-keysource-check3`, summary reports `judge.enabled=true`, `judge.api_key_source=env_file:/tmp/openai_test.env`.
 - next:
-  - Monitor PR #635 CI (session-gate + deterministic suite) and merge after green.
-  - Continue remaining unstaged stress-quality diff as separate, scoped commits.
-  - Keep baseline update blocked until canonical-valid all-run (`infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`).
+  - Re-run full `count=10` lock with `--jid-mode unique` and publish canonical-valid evidence (`infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`).
+  - Run replay against that lock (`--baseline-summary <lock>/summary.json --fail-on-regression --max-failures 20`) and collect top-failures delta.
+  - Keep baseline update blocked until canonical-valid all-run.
 - evidence:
   - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-critical2/summary.json
   - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-all1/summary.json
   - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-all1/dialog_samples_last10.md
   - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-all1/digest.md
+  - /tmp/booking_quality/booking-replay-20260212-a1c4-fastcheck1/summary.json
+  - /tmp/booking_quality/booking-replay-20260212-a1c5-fastcheck2/summary.json
+  - /tmp/booking_quality/booking-lock-20260212-a1c5-fast/summary.json
+  - /tmp/booking_quality/booking-lock-20260212-a1c5-fast/brief.md
+  - /tmp/booking_quality/booking-keysource-check3/summary.json
+  - /tmp/booking_quality/booking-keysource-check3/brief.md
   - Local checks:
     - `ruff check truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/trace.py`
     - `python3 -m py_compile truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/decision.py`
     - `pytest -q truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_chaos_dialogs.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_demo_salon_eval.py -q`
     - `pytest -q truffles-api/tests/test_booking_quality_info_sections.py truffles-api/tests/test_booking_quality_progress_gate.py truffles-api/tests/test_intent.py truffles-api/tests/test_master_info_flow.py -q`
-- last_updated: 2026-02-12T01:20:00Z
+    - `python3 -m py_compile ops/diagnose.py scripts/booking_dialog_scenarios.py`
+    - `pytest -q truffles-api/tests/test_booking_quality_openai_key_resolution.py truffles-api/tests/test_booking_dialog_scenarios_script.py`
+- last_updated: 2026-02-12T03:47:02Z

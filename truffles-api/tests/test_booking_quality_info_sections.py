@@ -2,6 +2,8 @@ import ast
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from app.services import demo_salon_knowledge
+
 
 def _load_expected_section_matcher():
     script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
@@ -111,3 +113,18 @@ def test_expected_sections_do_not_fallback_to_tail_when_window_is_empty():
     assert matched is False
     assert "address" not in info_sections
     assert intents == {"booking"}
+
+
+def test_parking_signal_ignores_machine_haircut_phrase():
+    normalized = demo_salon_knowledge._normalize_text("Сколько стоит стрижка машинкой?")
+    assert demo_salon_knowledge._has_parking_signal(normalized, client_slug="demo_salon") is False
+
+
+def test_parking_signal_accepts_machine_phrase_with_parking_context():
+    normalized = demo_salon_knowledge._normalize_text("Машинку можно оставить во дворе?")
+    assert demo_salon_knowledge._has_parking_signal(normalized, client_slug="demo_salon") is True
+
+
+def test_parking_signal_accepts_colloquial_parking_wording():
+    normalized = demo_salon_knowledge._normalize_text("Подскажите, есть ли паркинг возле салона?")
+    assert demo_salon_knowledge._has_parking_signal(normalized, client_slug="demo_salon") is True

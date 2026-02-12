@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from app.schemas.webhook import WebhookResponse
 from app.services.pack_runtime_service import (
     _build_fact_meta,
+    _has_contact_signal,
     _has_guest_waiting_signal,
     _has_parking_signal,
     build_info_combined_reply,
@@ -112,6 +113,21 @@ def _detect_info_class_intents(
 
     parking_signal = _has_parking_signal(normalized, client_slug=client_slug)
     guest_signal = _has_guest_waiting_signal(normalized, client_slug=client_slug)
+    price_signal = legacy._has_price_signal(
+        normalized,
+        message_text,
+        client_slug=client_slug,
+    )
+    duration_signal = legacy._has_duration_signal(
+        normalized,
+        message_text,
+        client_slug=client_slug,
+    )
+    contact_signal = _has_contact_signal(
+        normalized,
+        message_text,
+        client_slug=client_slug,
+    )
     location_phrases = _signal_phrase_list(
         client_slug,
         "location_keywords",
@@ -128,6 +144,7 @@ def _detect_info_class_intents(
         for keyword in (
             "мастер",
             "специалист",
+            "специальн",
             "кто делает",
             "шебер",
             "маман",
@@ -150,6 +167,12 @@ def _detect_info_class_intents(
 
     if parking_signal:
         intents.add("parking")
+    if price_signal:
+        intents.add("pricing")
+    if duration_signal:
+        intents.add("duration")
+    if contact_signal:
+        intents.add("contact")
     if location_signal:
         intents.add("location")
     if hours_signal:
@@ -173,6 +196,9 @@ def _detect_info_class_intents(
         meta["anchor_boost"] = anchor_boost
     meta["info_signals"] = {
         "parking": parking_signal,
+        "pricing": price_signal,
+        "duration": duration_signal,
+        "contact": contact_signal,
         "guest": guest_signal,
         "location": location_signal,
         "hours": hours_signal,
@@ -193,7 +219,16 @@ def _looks_like_info_query(message_text: str | None, *, client_slug: str | None 
     if isinstance(info_signals, dict):
         if any(
             info_signals.get(signal)
-            for signal in ("parking", "guest", "location", "hours", "master")
+            for signal in (
+                "parking",
+                "pricing",
+                "duration",
+                "contact",
+                "guest",
+                "location",
+                "hours",
+                "master",
+            )
         ):
             return True
     if message_text:
@@ -260,7 +295,62 @@ def _build_info_intent_reply(
         intent in {"location", "hours"} or location_signal or parking_signal or guest_signal
     )
 
+    if intent == "contact":
+        truth = load_yaml_truth(client_slug)
+        salon = truth.get("salon", {}) if isinstance(truth, dict) else {}
+        if isinstance(salon, dict):
+            phone = str(salon.get("phone") or "").strip()
+            whatsapp = str(salon.get("whatsapp") or "").strip()
+            telegram = str(salon.get("telegram") or "").strip()
+            instagram = str(salon.get("instagram") or "").strip()
+            lines: list[str] = []
+            if phone:
+                lines.append(f"Телефон: {phone}.")
+            if whatsapp:
+                lines.append(f"WhatsApp: {whatsapp}.")
+            if telegram:
+                lines.append(f"Telegram: {telegram}.")
+            if instagram:
+                lines.append(f"Instagram: {instagram}.")
+            if lines:
+                if not phone and (whatsapp or telegram or instagram):
+                    lines.insert(0, "Телефон в карточке салона не указан.")
+                meta = _build_fact_meta(
+                    meta={"info_sections": ["contact"]},
+                    fact_source="truth",
+                    fact_intents=["contact"],
+                    info_sections=["contact"],
+                )
+                return " ".join(lines), meta or None
+
     if intent == "hours":
+        if not (parking_signal or guest_signal or location_signal):
+            truth = load_yaml_truth(client_slug)
+            hours = truth.get("salon", {}).get("hours", {}) if isinstance(truth, dict) else {}
+            if isinstance(hours, dict):
+                days = str(hours.get("days") or "").strip()
+                open_label = str(hours.get("open") or "").strip()
+                close_label = str(hours.get("close") or "").strip()
+                parts = ["Работаем"]
+                if days:
+                    parts.append(days)
+                if open_label and close_label:
+                    parts.append(f"с {open_label} до {close_label}")
+                elif open_label:
+                    parts.append(f"с {open_label}")
+                elif close_label:
+                    parts.append(f"до {close_label}")
+                hours_text = " ".join(part for part in parts if part).strip()
+                if hours_text:
+                    if not hours_text.endswith("."):
+                        hours_text = f"{hours_text}."
+                    meta = _build_fact_meta(
+                        meta={"info_sections": ["hours"]},
+                        fact_source="truth",
+                        fact_intents=[intent],
+                        info_sections=["hours"],
+                    )
+                    return hours_text, meta or None
         reply, meta = build_info_combined_reply(
             include_parking=parking_signal,
             include_guest=guest_signal,
@@ -842,20 +932,22 @@ def _handle_info_flow(
         if isinstance(info_signals, dict):
             include_base_bundle = any(
                 bool(info_signals.get(key))
-                for key in ("parking", "guest", "location", "hours")
+                for key in ("parking", "guest", "location")
             )
         if not include_base_bundle:
-            include_base_bundle = bool({"hours", "location"} & info_class_intents_for_reply)
+            include_base_bundle = bool({"location"} & info_class_intents_for_reply)
         if force_parking_followup:
             include_base_bundle = True
         base_bundle_reply: str | None = None
         base_bundle_meta: dict[str, Any] = {}
+        base_bundle_intents: set[str] = set()
         if include_base_bundle:
             base_bundle_reply, base_bundle_meta = build_info_combined_reply(
                 include_parking=include_parking,
                 include_guest=include_guest,
                 client_slug=client_slug,
             )
+            base_bundle_intents = {"location", "hours"}
 
         replies: list[str] = []
         info_meta_combined: dict[str, Any] = {}
@@ -868,9 +960,7 @@ def _handle_info_flow(
             if base_bundle_reply:
                 replies.append(base_bundle_reply)
         extra_intents = [
-            intent_name
-            for intent_name in answer_intents
-            if intent_name not in {"hours", "location"}
+            intent_name for intent_name in answer_intents if intent_name not in base_bundle_intents
         ]
         for intent_name in extra_intents:
             reply, meta = _build_info_intent_reply(

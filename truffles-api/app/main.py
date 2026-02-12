@@ -9,6 +9,9 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+# Load .env before importing app modules that read env at import-time.
+load_dotenv()
+
 from app.database import SessionLocal, engine, get_db
 from app.logging_config import (
     CONTENT_TYPE_LATEST,
@@ -37,8 +40,6 @@ from app.routers import (
     webhook,
 )
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
-
-load_dotenv()
 
 setup_logging()
 

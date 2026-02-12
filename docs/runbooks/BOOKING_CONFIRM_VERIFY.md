@@ -138,6 +138,7 @@ Prerequisites
 - Admin token for outbox (`ALERTS_ADMIN_TOKEN`) unless `--skip-outbox`.
 - Manager simulation: Telegram chat id in client settings or Console token.
 - LLM-judge (optional): `OPENAI_API_KEY` (or `--judge-api-key`).
+- `llm-quality` now auto-discovers `OPENAI_API_KEY` from env files (`truffles-api/.env`, `infrastructure/.env`) and container env; if unresolved, run fails fast with explicit key-source diagnostics.
 
 Quickstart (smoke, no baseline update)
 ```bash
@@ -194,6 +195,32 @@ TEST_MODE=1 python3 ops/diagnose.py llm-quality \
   --max-failures 20
 ```
 
+State-isolated realistic profile (faster, less drift; recommended for daily bugfix loops)
+```bash
+# Fast lock/replay on frozen scenarios with stable runtime checks (logic-first)
+TEST_MODE=1 python3 ops/diagnose.py llm-quality \
+  --base-url http://127.0.0.1:18084 \
+  --client-slug demo_salon \
+  --scenarios-file /tmp/booking_quality/<lock>/scenarios.json \
+  --count 10 \
+  --timeout-profile realistic \
+  --reset-before-dialog \
+  --jid-mode unique \
+  --manager-mode skip \
+  --pending-mode skip \
+  --tool-hooks check \
+  --skip-outbox \
+  --judge-mode all \
+  --baseline-summary /tmp/booking_quality/<canonical-baseline>/summary.json \
+  --run-id booking-replay-<stamp>-unique
+```
+
+Why this profile
+- `--jid-mode unique` isolates dialog state and prevents pending/handover leftovers from previous runs.
+- `--skip-outbox` removes outbox latency from logic-focused debugging; keep full outbox checks for acceptance runs.
+- `manager-mode/pending-mode=skip` avoids synthetic manager races while fixing core dialog logic.
+- `--timeout-profile realistic` keeps non-aggressive network/poll windows.
+
 Realistic timeout profile (recommended for stable evidence)
 ```bash
 # Default profile (recommended): realistic
@@ -209,6 +236,10 @@ Parallel-safe runs across worktrees
 - Do not reuse the same `--run-id` concurrently.
 - If `--run-id` is omitted, `llm-quality` auto-generates a worktree-scoped id (`<timestamp>-<namespace>-p<pid>-<rand>`).
 - This default keeps simultaneous runs from different worktrees isolated in `/tmp/booking_quality/*`.
+- Prefer dedicated local API port per worktree (`--base-url http://127.0.0.1:<port>`); shared API ports increase state bleed and timeout noise.
+- Preflight health gate before long run: `curl -sS --max-time 5 $BASE_URL/admin/health`.
+- If run appears stalled, track progress by DB message-id count (not only `responses.jsonl`, which is buffered until process exit):
+  - `SELECT count(*) FROM messages WHERE metadata->>'messageId' LIKE 'LLM-QUAL-<run-id>%';`
 
 Webhook timeout triage (stop-the-line for invalid runs)
 - Symptom: `/webhook/<client>` returns no bytes for 30-180s and runner logs `curl rc=28`.
@@ -221,6 +252,7 @@ Webhook timeout triage (stop-the-line for invalid runs)
 - Restart only after infra is stable, then replay with the same:
   - `--scenarios-file`, `--baseline-summary`, `--run-id`, timeout profile.
 - If branch routing is ambiguous, pass explicit `--instance-id` from `branches.instance_id` for target branch.
+- If `preflight_clear` prints `state_before=pending` with `cleared=false`, treat run as contaminated and restart with `--jid-mode unique`.
 
 Judge modes and when to use them
 - `--judge-mode critical`: default for rapid fix loops. Judges only critical turns (booking/handoff/tool-sensitive or turns with strict reasons/explicit expectations).

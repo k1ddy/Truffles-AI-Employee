@@ -831,6 +831,10 @@ def _next_booking_prompt(booking: dict, *, refusal_flags: dict | None = None) ->
             booking["last_question"] = None
             return booking, None
         booking["last_question"] = "name"
+        datetime_value = booking.get("datetime")
+        if isinstance(datetime_value, str) and datetime_value.strip():
+            prompt = f"Отлично, время {datetime_value.strip()} подходит. {legacy.MSG_BOOKING_ASK_NAME}"
+            return booking, prompt
         return booking, legacy.MSG_BOOKING_ASK_NAME
     booking["last_question"] = None
     return booking, None

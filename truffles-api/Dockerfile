@@ -19,6 +19,7 @@ COPY truffles-api/tests/ ./tests/
 COPY truffles-api/migrations/ ./migrations/
 COPY truffles-api/scripts/ ./scripts/
 COPY contracts/ ./contracts/
+COPY ops/ /ops/
 
 EXPOSE 8000
 
