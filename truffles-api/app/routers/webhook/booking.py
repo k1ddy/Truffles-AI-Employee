@@ -1431,18 +1431,27 @@ def _handle_booking_interrupt(
 
     def _merge_info_sections(info_meta: dict[str, Any], intents: list[str]) -> list[str]:
         sections: list[str] = []
+        aliases = {
+            "duration": ("duration", "service_duration"),
+            "service_duration": ("duration", "service_duration"),
+        }
+
+        def _append_section(section: str) -> None:
+            values = aliases.get(section, (section,))
+            for value in values:
+                if value not in sections:
+                    sections.append(value)
+
         existing = info_meta.get("info_sections")
         if isinstance(existing, list):
             for section in existing:
                 if isinstance(section, str) and section.strip():
                     key = section.strip().lower()
-                    if key not in sections:
-                        sections.append(key)
+                    _append_section(key)
         for intent in intents or []:
             if isinstance(intent, str) and intent.strip():
                 key = intent.strip().lower()
-                if key not in sections:
-                    sections.append(key)
+                _append_section(key)
         return sections
     if (
         routing.get("allow_booking_flow")
@@ -1684,6 +1693,44 @@ def _handle_booking_interrupt(
                         if legacy._is_booking_time_service_decision(candidate):
                             info_decision = candidate
                             info_source = "truth_gate"
+
+            if not info_decision and booking_interrupt_text and booking_info_intents:
+                multi_result = compose_multi_truth_reply(
+                    booking_interrupt_text,
+                    client_slug,
+                    intent_decomp=intent_decomp_payload,
+                    return_meta=True,
+                )
+                if multi_result:
+                    multi_reply, multi_meta = multi_result
+                    info_decision = PackDecision(
+                        action="reply",
+                        response=multi_reply,
+                        intent="multi_truth",
+                        meta=multi_meta if isinstance(multi_meta, dict) else None,
+                    )
+                    info_source = "multi_truth_fallback"
+
+            if not info_decision and booking_info_intents:
+                for intent_name in booking_info_intents:
+                    fallback_reply = format_reply_from_truth(
+                        intent_name,
+                        client_slug=client_slug,
+                    )
+                    if not fallback_reply:
+                        continue
+                    info_decision = PackDecision(
+                        action="reply",
+                        response=fallback_reply,
+                        intent=intent_name,
+                        meta={
+                            "fact_source": "truth",
+                            "fact_intents": [intent_name],
+                            "info_sections": [intent_name],
+                        },
+                    )
+                    info_source = "truth_fallback"
+                    break
 
             if info_decision and info_decision.action == "escalate":
                 info_meta = info_decision.meta if isinstance(info_decision.meta, dict) else {}
