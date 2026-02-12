@@ -10,6 +10,7 @@ from app.services.console_errors import ConsoleAPIError
 from app.services.onboarding_state import (
     OnboardingInputs,
     OnboardingStep,
+    build_onboarding_scorecard_from_inputs,
     can_advance_to_step,
     missing_prerequisites,
 )
@@ -170,3 +171,55 @@ def test_ensure_onboarding_step_requires_previous(monkeypatch):
         onboarding_state.ensure_onboarding_step(Mock(), branch, OnboardingStep.TEAM)
 
     assert exc_info.value.code == "ONBOARDING_STEP_REQUIRED"
+
+
+def test_onboarding_scorecard_passes_when_go_no_go_requirements_are_satisfied():
+    capabilities = CapabilitiesPayload.model_validate(
+        {
+            "channels": {"whatsapp": True, "telegram": True},
+            "features": {"knowledge_upload": True, "booking_mode": "confirm_slots"},
+        }
+    )
+    inputs = _make_inputs(
+        capabilities=capabilities,
+        has_capabilities=True,
+        has_onboarding_contract=True,
+        payment_confirmed=True,
+        has_webhook_secret=True,
+        has_reference_pack=True,
+        reference_pack_domain_slug="beauty",
+        has_instance_id=True,
+        has_phone=True,
+        branch_is_active=True,
+        has_team=True,
+        has_telegram_chat=True,
+        has_knowledge_tag=True,
+        has_published_knowledge=True,
+        has_working_hours=True,
+        has_booking_settings=True,
+        has_specialists=True,
+    )
+
+    scorecard = build_onboarding_scorecard_from_inputs(inputs)
+    assert scorecard.ready is True
+    go_no_go = next(check for check in scorecard.checks if check.id == OnboardingStep.GO_NO_GO)
+    assert go_no_go.passed is True
+    assert go_no_go.missing == []
+
+
+def test_onboarding_scorecard_fails_when_go_no_go_requirements_missing():
+    capabilities = CapabilitiesPayload.model_validate({"channels": {"whatsapp": True}})
+    inputs = _make_inputs(
+        capabilities=capabilities,
+        has_capabilities=True,
+        has_instance_id=False,
+        has_phone=False,
+        payment_confirmed=False,
+        has_webhook_secret=False,
+    )
+
+    scorecard = build_onboarding_scorecard_from_inputs(inputs)
+    assert scorecard.ready is False
+    assert "payment_confirmed" in scorecard.missing
+    assert "instance_id" in scorecard.missing
+    assert "phone" in scorecard.missing

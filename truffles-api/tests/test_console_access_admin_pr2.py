@@ -809,6 +809,45 @@ async def test_update_branch_blocks_activation_without_go_live_approval(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_get_onboarding_scorecard_returns_fail_payload(monkeypatch):
+    branch = SimpleNamespace(id=uuid4())
+    context = _mock_context(role="owner")
+    context.branches = [branch]
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda *args, **kwargs: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_scorecard",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            ready=False,
+            missing=["payment_confirmed"],
+            checks=[
+                SimpleNamespace(
+                    id=console_router.OnboardingStep.GO_NO_GO,
+                    required=True,
+                    passed=False,
+                    missing=["payment_confirmed"],
+                )
+            ],
+        ),
+    )
+
+    response = await console_router.get_onboarding_scorecard(
+        request=Mock(),
+        branch_id=branch.id,
+        db=Mock(),
+    )
+
+    assert response.branch_id == branch.id
+    assert response.status == "fail"
+    assert response.ready is False
+    assert response.missing == ["payment_confirmed"]
+    assert response.checks[0].id == "go_no_go"
+    assert response.checks[0].passed is False
+
+
+@pytest.mark.asyncio
 async def test_approve_branch_go_live_sets_state_and_clears_waiver(monkeypatch):
     branch = SimpleNamespace(
         id=uuid4(),
@@ -850,8 +889,15 @@ async def test_approve_branch_go_live_sets_state_and_clears_waiver(monkeypatch):
         ),
     )
     monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
-    monkeypatch.setattr(console_router, "build_onboarding_inputs", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(console_router, "missing_prerequisites", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_scorecard",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            ready=True,
+            missing=[],
+            checks=[SimpleNamespace(id=console_router.OnboardingStep.GO_NO_GO, required=True, passed=True)],
+        ),
+    )
     monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
 
     response = await console_router.approve_branch_go_live(
@@ -897,8 +943,21 @@ async def test_approve_branch_go_live_requires_prerequisites(monkeypatch):
         ),
     )
     monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
-    monkeypatch.setattr(console_router, "build_onboarding_inputs", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(console_router, "missing_prerequisites", lambda *_args, **_kwargs: ["payment_confirmed"])
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_scorecard",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            ready=False,
+            missing=["payment_confirmed"],
+            checks=[
+                SimpleNamespace(
+                    id=console_router.OnboardingStep.GO_NO_GO,
+                    required=True,
+                    passed=False,
+                )
+            ],
+        ),
+    )
 
     with pytest.raises(ConsoleAPIError) as exc_info:
         await console_router.approve_branch_go_live(
@@ -909,6 +968,9 @@ async def test_approve_branch_go_live_requires_prerequisites(monkeypatch):
         )
 
     assert exc_info.value.code == "GO_LIVE_GATE_REQUIRED"
+    assert exc_info.value.details["missing"] == ["payment_confirmed"]
+    assert exc_info.value.details["scorecard_status"] == "fail"
+    assert "go_no_go" in exc_info.value.details["failed_checks"]
 
 
 @pytest.mark.asyncio

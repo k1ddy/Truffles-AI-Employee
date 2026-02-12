@@ -1,12 +1,12 @@
-"""Neutral default pack adapter.
+"""Neutral fallback adapter for non-specialized packs.
 
-This adapter intentionally exposes pack-level call points without binding
-`pack_runtime_default` to a demo-specific module path.
+Current behavior intentionally mirrors demo runtime decisions to preserve
+backward compatibility while generic contracts are finalized.
 """
 
 from __future__ import annotations
 
-from app.services.pack_runtime_fallback_adapter import (
+from app.services.pack_runtime_demo_adapter import (
     _build_fact_meta,
     _detect_promotion_intent,
     _format_service_not_found_reply,

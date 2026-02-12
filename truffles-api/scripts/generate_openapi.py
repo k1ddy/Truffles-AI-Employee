@@ -9,7 +9,7 @@ from fastapi.openapi.utils import get_openapi
 # Add the parent directory to sys.path to allow importing app
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.routers import console
+from app.routers import calendar, console
 
 def _extract_methods(spec: dict) -> set[tuple[str, str]]:
     methods: set[tuple[str, str]] = set()
@@ -42,6 +42,8 @@ def _build_app(canonical_info: dict) -> FastAPI:
         description=canonical_info.get("description", ""),
     )
     app.include_router(console.router)
+    # Mirror production wiring for contract drift checks.
+    app.include_router(calendar.router, prefix="/console/v1")
     return app
 
 
