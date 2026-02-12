@@ -920,6 +920,33 @@ LLM_QUALITY_JUDGE_PAYLOAD_LIMITS = {
     "max_dict_keys": 24,
     "max_string_len": 320,
 }
+LLM_QUALITY_TIMEOUT_PROFILES = {
+    "realistic": {
+        "timeout": 30.0,
+        "poll_timeout": 25.0,
+        "poll_interval": 0.5,
+        "trace_timeout": 25.0,
+        "trace_interval": 0.5,
+    },
+    "balanced": {
+        "timeout": 24.0,
+        "poll_timeout": 20.0,
+        "poll_interval": 0.4,
+        "trace_timeout": 20.0,
+        "trace_interval": 0.4,
+    },
+    "fast-replay": {
+        "timeout": 20.0,
+        "poll_timeout": 16.0,
+        "poll_interval": 0.3,
+        "trace_timeout": 16.0,
+        "trace_interval": 0.3,
+    },
+}
+LLM_QUALITY_WAIT_DEFAULTS = {
+    "generated": {"min_wait": 0.2, "max_wait": 0.4},
+    "replay": {"min_wait": 0.0, "max_wait": 0.15},
+}
 
 
 def _chaos_pick(rng, items):
@@ -3707,6 +3734,22 @@ def _llm_quality_build_replay_command(args, scenarios_path, count):
         scenarios_path,
         "--count",
         str(count),
+        "--timeout-profile",
+        str(args.timeout_profile),
+        "--timeout",
+        str(args.timeout),
+        "--poll-timeout",
+        str(args.poll_timeout),
+        "--poll-interval",
+        str(args.poll_interval),
+        "--trace-timeout",
+        str(args.trace_timeout),
+        "--trace-interval",
+        str(args.trace_interval),
+        "--min-wait",
+        str(args.min_wait),
+        "--max-wait",
+        str(args.max_wait),
         "--manager-mode",
         args.manager_mode,
         "--pending-mode",
@@ -4662,6 +4705,33 @@ def _parse_chaos_sim_args(argv):
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 
+
+def _llm_quality_apply_timeout_profile(args):
+    profile_name = (getattr(args, "timeout_profile", None) or "realistic").strip().lower()
+    profile = LLM_QUALITY_TIMEOUT_PROFILES.get(profile_name)
+    if profile is None:
+        profile_name = "realistic"
+        profile = LLM_QUALITY_TIMEOUT_PROFILES[profile_name]
+    args.timeout_profile = profile_name
+    for field, profile_value in profile.items():
+        if getattr(args, field, None) is None:
+            setattr(args, field, float(profile_value))
+
+    wait_profile = "replay" if getattr(args, "scenarios_file", None) else "generated"
+    wait_defaults = LLM_QUALITY_WAIT_DEFAULTS[wait_profile]
+    if getattr(args, "min_wait", None) is None:
+        args.min_wait = float(wait_defaults["min_wait"])
+    if getattr(args, "max_wait", None) is None:
+        args.max_wait = float(wait_defaults["max_wait"])
+    return args
+
+
+def _llm_quality_build_default_run_id(timestamp=None):
+    stamp = timestamp or datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    namespace = _llm_quality_worktree_namespace()
+    return f"{stamp}-{namespace}-p{os.getpid()}-{uuid.uuid4().hex[:6]}"
+
+
 def _parse_llm_quality_args(argv):
     parser = argparse.ArgumentParser(
         prog="ops/diagnose.py llm-quality",
@@ -4699,8 +4769,8 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--batch-size", type=int, default=5)
     parser.add_argument("--retry-count", type=int, default=2)
     parser.add_argument("--retry-backoff", type=float, default=0.6)
-    parser.add_argument("--min-wait", type=float, default=0.5)
-    parser.add_argument("--max-wait", type=float, default=1.5)
+    parser.add_argument("--min-wait", type=float, default=None)
+    parser.add_argument("--max-wait", type=float, default=None)
     parser.add_argument("--allowlist-jids", default=None)
     parser.add_argument("--remote-jid", default=None)
     parser.add_argument(
@@ -4712,11 +4782,16 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--webhook-secret", default=None)
     parser.add_argument("--admin-token", default=None)
     parser.add_argument("--instance-id", default=None)
-    parser.add_argument("--timeout", type=float, default=15.0)
-    parser.add_argument("--poll-timeout", type=float, default=20.0)
-    parser.add_argument("--poll-interval", type=float, default=0.6)
-    parser.add_argument("--trace-timeout", type=float, default=20.0)
-    parser.add_argument("--trace-interval", type=float, default=0.6)
+    parser.add_argument(
+        "--timeout-profile",
+        choices=sorted(LLM_QUALITY_TIMEOUT_PROFILES.keys()),
+        default=os.environ.get("LLM_QUALITY_TIMEOUT_PROFILE", "realistic"),
+    )
+    parser.add_argument("--timeout", type=float, default=None)
+    parser.add_argument("--poll-timeout", type=float, default=None)
+    parser.add_argument("--poll-interval", type=float, default=None)
+    parser.add_argument("--trace-timeout", type=float, default=None)
+    parser.add_argument("--trace-interval", type=float, default=None)
     parser.add_argument("--skip-outbox", action="store_true")
     parser.add_argument("--outbox-wait", type=float, default=None)
     parser.add_argument("--manager-mode", choices=["simulate", "check", "skip"], default="simulate")
@@ -4784,7 +4859,8 @@ def _parse_llm_quality_args(argv):
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.set_defaults(judge_redact=True)
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    return _llm_quality_apply_timeout_profile(args)
 
 def _parse_explain_args(argv):
     parser = argparse.ArgumentParser(
@@ -6747,7 +6823,7 @@ def _run_llm_quality(args):
         raise SystemExit("llm-quality: --count must be >= 1")
     rng = random.Random(args.seed or int(time.time()))
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    run_id = args.run_id or timestamp
+    run_id = args.run_id or _llm_quality_build_default_run_id(timestamp)
     base_url = args.base_url.rstrip("/")
     client_slug = args.client_slug
     webhook_url = f"{base_url}/webhook/{client_slug}"

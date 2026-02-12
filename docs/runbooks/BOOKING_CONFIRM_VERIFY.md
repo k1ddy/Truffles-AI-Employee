@@ -196,18 +196,19 @@ TEST_MODE=1 python3 ops/diagnose.py llm-quality \
 
 Realistic timeout profile (recommended for stable evidence)
 ```bash
-# Use this profile for lock/replay loops in real LLM mode.
-# Avoid aggressive --timeout 10 for long booking dialogs; it increases retries/noise.
---timeout 30 \
---poll-timeout 25 \
---poll-interval 0.4 \
---trace-timeout 25 \
---trace-interval 0.4 \
---min-wait 0.2 \
---max-wait 0.4 \
---retry-count 2 \
---retry-backoff 0.5
+# Default profile (recommended): realistic
+--timeout-profile realistic
+
+# For iterative replay loops (faster, still safe):
+--timeout-profile fast-replay \
+--min-wait 0 \
+--max-wait 0.15
 ```
+
+Parallel-safe runs across worktrees
+- Do not reuse the same `--run-id` concurrently.
+- If `--run-id` is omitted, `llm-quality` auto-generates a worktree-scoped id (`<timestamp>-<namespace>-p<pid>-<rand>`).
+- This default keeps simultaneous runs from different worktrees isolated in `/tmp/booking_quality/*`.
 
 Webhook timeout triage (stop-the-line for invalid runs)
 - Symptom: `/webhook/<client>` returns no bytes for 30-180s and runner logs `curl rc=28`.
