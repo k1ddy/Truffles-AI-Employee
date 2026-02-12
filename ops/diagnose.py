@@ -4381,6 +4381,8 @@ def _llm_quality_evaluate_turn(
             fallback_ok = True
         if not fallback_ok:
             reasons.append("expected_reply_type_mismatch")
+    # Scenario fixtures may carry stale `expected_reply=false` even when runtime
+    # expectations are explicit (state/reply-type/info/booking signals).
     expected_reply_for_check = expected_reply
     if (
         expected_reply is False
