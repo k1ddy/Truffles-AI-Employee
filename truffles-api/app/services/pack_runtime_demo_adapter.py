@@ -6,6 +6,7 @@ from app.services.demo_salon_knowledge import (
     _build_fact_meta,
     _detect_promotion_intent,
     _format_service_not_found_reply,
+    _has_contact_signal,
     _has_duration_signal,
     _has_guest_waiting_signal,
     _has_parking_signal,
@@ -36,6 +37,7 @@ from app.services.demo_salon_knowledge import (
 
 __all__ = [
     "_build_fact_meta",
+    "_has_contact_signal",
     "_detect_promotion_intent",
     "_format_service_not_found_reply",
     "_has_guest_waiting_signal",

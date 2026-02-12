@@ -639,13 +639,13 @@ def _is_booking_slot_signal(message_text: str | None, *, client_slug: str | None
         return False
     from . import _legacy as legacy
 
+    if _looks_like_phone(message_text):
+        return True
     if legacy._looks_like_info_query(message_text, client_slug=client_slug) and not legacy._is_booking_request(
         message_text,
         client_slug=client_slug,
     ):
         return False
-    if _looks_like_phone(message_text):
-        return True
     return _is_booking_related_message(
         message_text,
         client_slug,
@@ -831,6 +831,10 @@ def _next_booking_prompt(booking: dict, *, refusal_flags: dict | None = None) ->
             booking["last_question"] = None
             return booking, None
         booking["last_question"] = "name"
+        datetime_value = booking.get("datetime")
+        if isinstance(datetime_value, str) and datetime_value.strip():
+            prompt = f"Отлично, время {datetime_value.strip()} подходит. {legacy.MSG_BOOKING_ASK_NAME}"
+            return booking, prompt
         return booking, legacy.MSG_BOOKING_ASK_NAME
     booking["last_question"] = None
     return booking, None

@@ -74,6 +74,82 @@ REQUIRED_LLM_TURNS = {
     "name": {"text": "Меня зовут {name}.", "tags": ["name"]},
 }
 
+
+def _clean_api_key(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = str(value).strip().strip('"').strip("'")
+    return cleaned or None
+
+
+def _load_env_file(path: str | None) -> dict[str, str]:
+    if not path:
+        return {}
+    file_path = os.path.abspath(os.path.expanduser(path))
+    if not os.path.exists(file_path):
+        return {}
+    env: dict[str, str] = {}
+    try:
+        with open(file_path, "r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("export "):
+                    line = line[len("export ") :].strip()
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                env[key.strip()] = value.strip().strip('"').strip("'")
+    except Exception:
+        return {}
+    return env
+
+
+def _openai_key_candidate_env_files() -> list[str]:
+    script_file = globals().get("__file__")
+    if script_file:
+        script_dir = os.path.dirname(os.path.abspath(script_file))
+    else:
+        script_dir = os.path.join(os.getcwd(), "scripts")
+    repo_root = os.path.dirname(script_dir)
+    candidates = [
+        os.environ.get("TRUFFLES_API_ENV_FILE"),
+        os.environ.get("ENV_FILE"),
+        os.path.join(os.getcwd(), "truffles-api", ".env"),
+        os.path.join(os.getcwd(), ".env"),
+        os.path.join(repo_root, "truffles-api", ".env"),
+        os.path.join(repo_root, ".env"),
+        "/home/zhan/truffles-main/truffles-api/.env",
+        "/home/zhan/infrastructure/.env",
+    ]
+    unique: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        if not item:
+            continue
+        path = os.path.abspath(os.path.expanduser(str(item)))
+        if path in seen:
+            continue
+        seen.add(path)
+        unique.append(path)
+    return unique
+
+
+def _resolve_openai_api_key(explicit: str | None = None) -> tuple[str | None, str | None]:
+    key = _clean_api_key(explicit)
+    if key:
+        return key, "explicit"
+    env_key = _clean_api_key(os.environ.get("OPENAI_API_KEY"))
+    if env_key:
+        return env_key, "env:OPENAI_API_KEY"
+    for env_path in _openai_key_candidate_env_files():
+        env_map = _load_env_file(env_path)
+        file_key = _clean_api_key(env_map.get("OPENAI_API_KEY"))
+        if file_key:
+            return file_key, f"env_file:{env_path}"
+    return None, None
+
 ASSISTANT_TURN_PATTERNS = [
     re.compile(r"\bвам удобно\b", re.IGNORECASE),
     re.compile(r"\bна какую\b", re.IGNORECASE),
@@ -611,10 +687,37 @@ def _sanitize_expect_state_by_tags(tags: list[str], state: Any) -> Any:
     return token if _allow(token) else None
 
 
+def _sanitize_expect_action_by_tags(tags: list[str], action: Any) -> Any:
+    if action is None:
+        return None
+    tag_set = {tag for tag in tags if isinstance(tag, str)}
+    allow_handoff = bool(tag_set & {"handoff", "human", "pending", "cancel", "reschedule"})
+
+    def _allow(token: str | None) -> bool:
+        if token is None:
+            return True
+        if token in {"booking_escalated", "escalate", "handoff"}:
+            return allow_handoff
+        return False
+
+    if isinstance(action, list):
+        cleaned = []
+        for token in action:
+            value = token if isinstance(token, str) else None
+            if _allow(value):
+                cleaned.append(value)
+        if not cleaned:
+            return None
+        if len(cleaned) == 1:
+            return cleaned[0]
+        return cleaned
+
+    token = action if isinstance(action, str) else None
+    return token if _allow(token) else None
+
+
 def _merge_expectations(tags: list[str], override: Any) -> dict[str, Any]:
     expect = _default_expect()
-    state_overridden = False
-    info_sections_overridden = False
     for tag in tags:
         if tag in EXPECT_INFO_SECTIONS:
             expect["info_sections"].extend(EXPECT_INFO_SECTIONS[tag])
@@ -636,18 +739,15 @@ def _merge_expectations(tags: list[str], override: Any) -> dict[str, Any]:
         for key in ("action", "reply_type", "state", "expected_reply"):
             if override.get(key) is not None:
                 expect[key] = override.get(key)
-                if key == "state":
-                    state_overridden = True
         extra_sections = override.get("info_sections") or []
         if isinstance(extra_sections, str):
             extra_sections = [extra_sections]
         for section in extra_sections:
             if section and section not in expect["info_sections"]:
                 expect["info_sections"].append(section)
-                info_sections_overridden = True
-    if not state_overridden:
-        expect["state"] = _sanitize_expect_state_by_tags(tags, expect.get("state"))
-    if not any(tag in EXPECT_INFO_SECTIONS for tag in tags) and not info_sections_overridden:
+    expect["state"] = _sanitize_expect_state_by_tags(tags, expect.get("state"))
+    expect["action"] = _sanitize_expect_action_by_tags(tags, expect.get("action"))
+    if not any(tag in EXPECT_INFO_SECTIONS for tag in tags):
         expect["info_sections"] = []
     return expect
 
@@ -746,7 +846,14 @@ def _validate_dialog(dialog: dict[str, Any], *, min_turns: int, max_turns: int) 
     return warnings
 
 
-def _call_openai(prompt: str, *, api_key: str, model: str, base_url: str) -> str:
+def _call_openai(
+    prompt: str,
+    *,
+    api_key: str,
+    model: str,
+    base_url: str,
+    max_tokens: int = 1800,
+) -> str:
     payload = {
         "model": model,
         "response_format": {"type": "json_object"},
@@ -755,7 +862,7 @@ def _call_openai(prompt: str, *, api_key: str, model: str, base_url: str) -> str
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.7,
-        "max_tokens": 1800,
+        "max_tokens": max(256, int(max_tokens)),
     }
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
@@ -824,59 +931,102 @@ def _generate_llm_dialogs(
     coverage: list[str],
     seed: int | None,
 ) -> list[dict[str, Any]]:
-    prompt = (
-        "Generate JSON with key 'dialogs' as a list. "
-        "Each dialog: {dialog_id, goal, turns}. "
-        "turns is a list of {kind,text,tags,expect} with 10-15 client messages. "
-        "Tags must be chosen from: booking, interrupt, price, duration, location, hours, parking, "
-        "promo, master, time, time_alt, consult, channel, delay, media, noise, handoff, "
-        "cancel, reschedule, check_booking, confirm, tool. "
-        "expect must include keys: action, info_sections, reply_type, state, expected_reply, allow_booking_stall. "
-        "Use canonical tokens only in expect (no natural language): "
-        "action: null or one of [booking_escalated, escalate, handoff]; "
-        "info_sections: array from [pricing, price, payment_info, payment, address, location, "
-        "hours, working_hours, schedule, discounts, discount, promo, promotion, duration, "
-        "service_duration, parking, master, specialist]; "
-        "reply_type: null or one of [service_choice, time, name]; "
-        "state: null or one of [bot_active, pending, manager_active]; "
-        "expected_reply: true/false/null. "
-        "Include interruptions (price/location/noise), wrong slot answers, time/name swaps, and at least one media reference. "
-        "Include at least one tool-related intent (cancel/reschedule/check booking) and a follow-up confirmation/denial turn. "
-        "Beauty salon domain, Russian language, natural chat. "
-        "All turns must be CLIENT messages only (no assistant/manager lines). "
-        "Do NOT write staff-like statements (e.g., 'Я вас записал', 'Работаем ежедневно', "
-        "'Адрес:', 'Пришлите фото', 'Могу помочь'). "
-        "If you mention sending a photo, tag the turn with 'media' and phrase as the client "
-        "(e.g., 'Могу прислать фото' instead of 'Вот фото'), otherwise avoid photo claims. "
-        f"Count={count}, turns_range={min_turns}-{max_turns}. "
-        f"media_mode={media_mode}, media_kind={media_kind}. "
-        f"coverage_tags={','.join(coverage) if coverage else 'none'}. "
-        f"seed={seed}."
-    )
-    content = _call_openai(prompt, api_key=api_key, model=model, base_url=base_url)
-    payload = _parse_llm_json(
-        content,
-        repair_fn=lambda raw: _repair_llm_json(
-            raw, api_key=api_key, model=model, base_url=base_url
-        ),
-    )
-    dialogs = payload.get("dialogs") or []
-    if not isinstance(dialogs, list):
-        return []
-    for dialog in dialogs:
-        turns = dialog.get("turns") or []
-        for turn in turns:
-            tags = list(turn.get("tags") or [])
-            turn["expect"] = _merge_expectations(tags, turn.get("expect"))
-        ctx = _infer_context_from_dialog(dialog, rng)
-        turns = _ensure_required_tags(turns, ctx, max_turns=max_turns)
-        turns = _sanitize_llm_turns(turns, ctx, rng)
-        dialog["turns"] = turns
-        if include_media and all("media" not in (turn.get("tags") or []) for turn in dialog.get("turns", [])):
-            dialog.setdefault("turns", []).insert(
-                1, _media_turn(ctx, mode=media_mode, kind=media_kind)
-            )
-            dialog["turns"] = _prune_turns(dialog["turns"], max_turns, set(REQUIRED_LLM_TAGS))
+    dialogs: list[dict[str, Any]] = []
+    next_dialog_id = 1
+    batch_size = max(1, int(os.environ.get("BOOKING_SCENARIO_LLM_BATCH_SIZE", "2")))
+    max_attempts = max(1, int(os.environ.get("BOOKING_SCENARIO_LLM_MAX_ATTEMPTS", "3")))
+
+    while len(dialogs) < count:
+        remaining = count - len(dialogs)
+        batch_count = min(batch_size, remaining)
+        prompt = (
+            "Generate JSON with key 'dialogs' as a list. "
+            "Each dialog: {dialog_id, goal, turns}. "
+            "turns is a list of {kind,text,tags,expect} with 10-15 client messages. "
+            "Tags must be chosen from: booking, interrupt, price, duration, location, hours, parking, "
+            "promo, master, time, time_alt, consult, channel, delay, media, noise, handoff, "
+            "cancel, reschedule, check_booking, confirm, tool. "
+            "expect must include keys: action, info_sections, reply_type, state, expected_reply, allow_booking_stall. "
+            "Use canonical tokens only in expect (no natural language): "
+            "action: null or one of [booking_escalated, escalate, handoff]; "
+            "info_sections: array from [pricing, price, payment_info, payment, address, location, "
+            "hours, working_hours, schedule, discounts, discount, promo, promotion, duration, "
+            "service_duration, parking, master, specialist]; "
+            "reply_type: null or one of [service_choice, time, name]; "
+            "state: null or one of [bot_active, pending, manager_active]; "
+            "expected_reply: true/false/null. "
+            "Include interruptions (price/location/noise), wrong slot answers, time/name swaps, and at least one media reference. "
+            "Include at least one tool-related intent (cancel/reschedule/check booking) and a follow-up confirmation/denial turn. "
+            "Beauty salon domain, Russian language, natural chat. "
+            "All turns must be CLIENT messages only (no assistant/manager lines). "
+            "Do NOT write staff-like statements (e.g., 'Я вас записал', 'Работаем ежедневно', "
+            "'Адрес:', 'Пришлите фото', 'Могу помочь'). "
+            "If you mention sending a photo, tag the turn with 'media' and phrase as the client "
+            "(e.g., 'Могу прислать фото' instead of 'Вот фото'), otherwise avoid photo claims. "
+            f"Count={batch_count}, turns_range={min_turns}-{max_turns}. "
+            f"media_mode={media_mode}, media_kind={media_kind}. "
+            f"coverage_tags={','.join(coverage) if coverage else 'none'}. "
+            f"seed={seed}."
+        )
+        max_tokens = max(1800, batch_count * max(min_turns, 10) * 120)
+        payload: dict[str, Any] | None = None
+        last_error: Exception | None = None
+        for _attempt in range(max_attempts):
+            try:
+                content = _call_openai(
+                    prompt,
+                    api_key=api_key,
+                    model=model,
+                    base_url=base_url,
+                    max_tokens=max_tokens,
+                )
+                payload = _parse_llm_json(
+                    content,
+                    repair_fn=lambda raw: _repair_llm_json(
+                        raw, api_key=api_key, model=model, base_url=base_url
+                    ),
+                )
+                raw_dialogs = payload.get("dialogs") if isinstance(payload, dict) else None
+                if isinstance(raw_dialogs, list) and raw_dialogs:
+                    break
+                last_error = ValueError("llm payload has no dialogs")
+            except Exception as exc:
+                payload = None
+                last_error = exc
+                continue
+        raw_dialogs = payload.get("dialogs") if isinstance(payload, dict) else None
+        if not isinstance(raw_dialogs, list) or not raw_dialogs:
+            if last_error:
+                raise last_error
+            raise ValueError("llm payload has no dialogs")
+
+        for raw_dialog in raw_dialogs:
+            if len(dialogs) >= count:
+                break
+            if not isinstance(raw_dialog, dict):
+                continue
+            dialog = dict(raw_dialog)
+            turns = dialog.get("turns") or []
+            for turn in turns:
+                tags = list(turn.get("tags") or [])
+                turn["expect"] = _merge_expectations(tags, turn.get("expect"))
+            ctx = _infer_context_from_dialog(dialog, rng)
+            turns = _ensure_required_tags(turns, ctx, max_turns=max_turns)
+            turns = _sanitize_llm_turns(turns, ctx, rng)
+            dialog["turns"] = turns
+            dialog["dialog_id"] = dialog.get("dialog_id") or next_dialog_id
+            next_dialog_id += 1
+            if include_media and all(
+                "media" not in (turn.get("tags") or []) for turn in dialog.get("turns", [])
+            ):
+                dialog.setdefault("turns", []).insert(
+                    1, _media_turn(ctx, mode=media_mode, kind=media_kind)
+                )
+                dialog["turns"] = _prune_turns(
+                    dialog["turns"], max_turns, set(REQUIRED_LLM_TAGS)
+                )
+            dialogs.append(dialog)
+
     return dialogs
 
 
@@ -896,6 +1046,13 @@ def main() -> None:
     parser.add_argument("--llm-base-url", default=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com"))
     parser.add_argument("--llm-api-key", default=os.environ.get("OPENAI_API_KEY"))
     args = parser.parse_args()
+    llm_api_key_source: str | None = None
+    if args.mode == "llm":
+        resolved_key, resolved_source = _resolve_openai_api_key(args.llm_api_key)
+        if resolved_key:
+            args.llm_api_key = resolved_key
+            llm_api_key_source = resolved_source
+            os.environ.setdefault("OPENAI_API_KEY", resolved_key)
 
     rng = random.Random(args.seed or int(time.time()))
     coverage = []
@@ -907,7 +1064,10 @@ def main() -> None:
     dialogs: list[dict[str, Any]] = []
     if args.mode == "llm":
         if not args.llm_api_key:
-            raise SystemExit("LLM mode requires OPENAI_API_KEY or --llm-api-key")
+            raise SystemExit(
+                "LLM mode requires OPENAI_API_KEY or --llm-api-key "
+                "(checked env and local .env candidates)"
+            )
         dialogs = _generate_llm_dialogs(
             rng,
             count=args.count,
@@ -951,6 +1111,7 @@ def main() -> None:
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "seed": args.seed,
         "mode": args.mode,
+        "llm_api_key_source": llm_api_key_source if args.mode == "llm" else None,
         "count": len(dialogs),
         "turn_range": [args.min_turns, args.max_turns],
         "dialogs": dialogs,

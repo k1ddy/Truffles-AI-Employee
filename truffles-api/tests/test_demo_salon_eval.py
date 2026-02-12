@@ -1006,7 +1006,12 @@ def _run_webhook_conversation_turns(
             "app.services.knowledge_snapshot_consumer.is_consult_snapshot_allowlisted",
             return_value=False,
         ),
+        patch(
+            "app.services.ai_service.generate_consult_controller_output",
+            return_value=SimpleNamespace(ok=False, error="llm_disabled", error_code="llm_disabled", value=None),
+        ),
         patch("app.services.demo_salon_knowledge.get_embedding", side_effect=lambda text, *_args, **_kwargs: demo_knowledge._local_text_embedding(text)),
+        patch("app.services.knowledge_service.get_embedding", side_effect=lambda text, *_args, **_kwargs: demo_knowledge._local_text_embedding(text)),
         patch("app.services.demo_salon_knowledge._search_services_index", return_value=[]),
         *carryover_patches,
     ]
@@ -1351,6 +1356,32 @@ def test_booking_flow_info_interrupt_sections_location_hours_parking_promo():
         assert isinstance(trace_sections, list) and expected_section in trace_sections, (
             f"{case_id}: trace missing section {expected_section}"
         )
+
+
+def test_booking_flow_info_interrupt_parking_colloquial_phrase():
+    case_id = "CA05_BOOKING_INTERRUPT_PARKING_COLLOQUIAL"
+    _response, conversation, saved_message = _run_webhook_conversation(
+        ["хочу записаться", "маникюр", "Подскажите, есть ли паркинг возле салона?"],
+        case_id,
+        None,
+    )
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("booking_info_interrupt") is True, f"{case_id}: booking_info_interrupt mismatch"
+    sections = meta.get("info_sections")
+    assert isinstance(sections, list) and "parking" in sections, (
+        f"{case_id}: missing parking section; meta={meta}"
+    )
+
+    trace = _get_decision_trace(conversation)
+    interrupt_trace = next(
+        (entry for entry in reversed(trace) if entry.get("stage") == "booking_interrupt"),
+        None,
+    )
+    assert interrupt_trace is not None, f"{case_id}: missing booking_interrupt trace"
+    trace_sections = interrupt_trace.get("info_sections")
+    assert isinstance(trace_sections, list) and "parking" in trace_sections, (
+        f"{case_id}: trace missing parking section"
+    )
 
 
 def test_booking_flow_interrupt_after_price_duration_sequence():

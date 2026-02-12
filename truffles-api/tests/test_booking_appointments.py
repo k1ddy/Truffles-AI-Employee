@@ -360,3 +360,74 @@ def test_tool_registry_book_slot_allows_missing_specialist_when_not_explicit():
     assert result.decision_meta.get("specialist_selection") == "none_available"
     _, kwargs = book_slot_mock.call_args
     assert kwargs["specialist_id"] is None
+
+
+def test_tool_registry_catalog_location_includes_parking_section():
+    db = Mock()
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=None):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="catalog.location",
+            tool_args={},
+            conversation_id=uuid4(),
+            branch_id=None,
+            client_slug="demo_salon",
+            service_query=None,
+            message_text="У вас есть парковка?",
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert "parking" in (result.decision_meta.get("info_sections") or [])
+
+
+def test_tool_registry_catalog_location_uses_parking_hint_without_message_text():
+    db = Mock()
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=None):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="catalog.location",
+            tool_args={},
+            conversation_id=uuid4(),
+            branch_id=None,
+            client_slug="demo_salon",
+            service_query=None,
+            info_sections_hint=["parking"],
+            message_text=None,
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert "parking" in (result.decision_meta.get("info_sections") or [])
+
+
+def test_tool_registry_catalog_service_query_avoids_unrelated_semantic_fallback():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service, "_catalog_service_query", return_value=(None, "service_not_found")
+    ), patch(
+        "app.services.demo_salon_knowledge._match_service",
+        return_value={"name": "Окрашивание", "aliases": [["окрашивание"]]},
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="catalog.service_query",
+            tool_args={},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="укладка",
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.decision_meta.get("tool_decision") == "not_found_fallback"

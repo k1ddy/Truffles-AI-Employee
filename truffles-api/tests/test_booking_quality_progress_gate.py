@@ -21,7 +21,10 @@ def _load_progress_gate():
             }
             if names & wanted_assignments:
                 selected_nodes.append(node)
-        if isinstance(node, ast.FunctionDef) and node.name == "_llm_quality_should_expect_booking_progress":
+        if isinstance(node, ast.FunctionDef) and node.name in {
+            "_llm_quality_should_expect_booking_progress",
+            "_llm_quality_normalize_tool_token",
+        }:
             selected_nodes.append(node)
     module = ast.Module(body=selected_nodes, type_ignores=[])
     namespace = {}
@@ -78,6 +81,11 @@ def test_progress_gate_time_requires_time_or_date_signal():
 
 def test_progress_gate_keeps_no_tag_fallback():
     assert _should_expect_progress("time", []) is True
+
+
+def test_progress_gate_skips_slot_progress_for_calendar_missing_slot_reply():
+    meta = {"intent": "calendar.list_slots", "tool_decision": "missing_slot"}
+    assert _should_expect_progress("time", ["time"], meta) is False
 
 
 def test_slots_progress_detects_new_slot_even_when_count_stays_one():

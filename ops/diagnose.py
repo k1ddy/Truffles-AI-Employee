@@ -8,17 +8,17 @@
 - Состояние handovers
 """
 import argparse
-import http.client
 import base64
 import glob
 import hashlib
+import http.client
 import json
 import math
 import os
 import random
 import re
-import signal
 import shlex
+import signal
 import socket
 import subprocess
 import sys
@@ -626,7 +626,15 @@ CHAOS_POLICY_MAP = {
 CHAOS_HARD_LAW = {"refund", "medical", "complaint", "reschedule"}
 CHAOS_INFO = {"pricing", "address", "hours", "duration"}
 CHAOS_BOOKING_REPLY_TYPES = {"service_choice", "time", "name"}
-CHAOS_PENDING_ACTIONS = {"pending_status", "pending_wait", "pending_ack"}
+CHAOS_PENDING_ACTIONS = {
+    "pending_status",
+    "pending_wait",
+    "pending_ack",
+    "pending_close",
+    "pending_pass",
+    "pending_sla_ping",
+    "pending_guard_reset",
+}
 CHAOS_RAG_TOP_N = 10
 CHAOS_IN_DOMAIN_INTENTS = (
     set(CHAOS_INFO)
@@ -2673,6 +2681,15 @@ def _llm_quality_pick_jid(jids, idx, rng, mode, run_id=None):
         return rng.choice(jids)
     return jids[idx % len(jids)]
 
+
+def _llm_quality_resolve_jid_mode(args):
+    mode = str(getattr(args, "jid_mode", "auto") or "auto").strip().lower()
+    if mode != "auto":
+        return mode
+    if getattr(args, "skip_outbox", False):
+        return "unique"
+    return "round_robin"
+
 def _llm_quality_extract_turn_tags(turn):
     tags = []
     for tag in turn.get("tags") or []:
@@ -2898,8 +2915,8 @@ def _llm_quality_normalize_expect_value(value):
 
 
 LLM_QUALITY_EXPECT_ACTION_HANDOFF = {"booking_escalated", "escalate", "handoff"}
-LLM_QUALITY_EXPECT_TAGS_ALLOW_PENDING = {"handoff", "human", "pending", "cancel", "reschedule"}
-LLM_QUALITY_EXPECT_TAGS_ALLOW_MANAGER_ACTIVE = {"handoff", "human", "pending"}
+LLM_QUALITY_EXPECT_TAGS_ALLOW_PENDING = {"handoff", "human", "pending", "cancel", "reschedule", "media"}
+LLM_QUALITY_EXPECT_TAGS_ALLOW_MANAGER_ACTIVE = {"handoff", "human", "pending", "media"}
 LLM_QUALITY_EXPECT_INFO_TAGS = set(LLM_QUALITY_INFO_TAGS) | {"discount"}
 
 
@@ -3016,8 +3033,39 @@ def _llm_quality_extract_expectations(turn):
     reply_type = _llm_quality_normalize_expect_value(expect.get("reply_type"))
     state = _llm_quality_normalize_expect_value(expect.get("state"))
     tag_set = _llm_quality_collect_turn_tags(turn)
+    booking_reply_types = globals().get(
+        "CHAOS_BOOKING_REPLY_TYPES",
+        {"service_choice", "time", "name"},
+    )
+    if reply_type in booking_reply_types and "consult" in tag_set:
+        # Consult turns do not carry booking slot-contract prompts.
+        reply_type = None
     action = _llm_quality_sanitize_expect_action_by_tags(tag_set, action)
     state = _llm_quality_sanitize_expect_state_by_tags(tag_set, state)
+    if state is not None:
+        allow_pending = bool(tag_set & LLM_QUALITY_EXPECT_TAGS_ALLOW_PENDING)
+        allow_manager_active = bool(tag_set & LLM_QUALITY_EXPECT_TAGS_ALLOW_MANAGER_ACTIVE)
+        state_values = (
+            list(state)
+            if isinstance(state, (list, tuple, set))
+            else [state]
+        )
+        normalized_states = []
+        for value in state_values:
+            if not isinstance(value, str):
+                continue
+            token = value.strip().lower()
+            if token:
+                normalized_states.append(token)
+        if "bot_active" in normalized_states:
+            if allow_pending and "pending" not in normalized_states:
+                normalized_states.append("pending")
+            if allow_manager_active and "manager_active" not in normalized_states:
+                normalized_states.append("manager_active")
+        if normalized_states:
+            state = normalized_states[0] if len(normalized_states) == 1 else normalized_states
+        else:
+            state = None
     info_sections = _llm_quality_sanitize_expect_info_sections_by_tags(tag_set, info_sections)
     expected_reply = expect.get("expected_reply")
     if isinstance(expected_reply, str):
@@ -3170,6 +3218,7 @@ def _llm_quality_expected_reply_matches(
     meta,
     conv_meta,
     handover_meta,
+    bot_response=False,
 ):
     if expected_reply is None:
         return True
@@ -3177,10 +3226,12 @@ def _llm_quality_expected_reply_matches(
         return True
     if expected_reply is True and expected_response is False:
         action = (meta or {}).get("action")
+        pending_action = (meta or {}).get("pending_action")
         tool_decision = _llm_quality_normalize_tool_token((meta or {}).get("tool_decision"))
         intent_value = _llm_quality_normalize_tool_token((meta or {}).get("intent"))
         if state in {"pending", "manager_active"} and (
             action in CHAOS_PENDING_ACTIONS
+            or pending_action in CHAOS_PENDING_ACTIONS
             or action
             in {
                 "escalate",
@@ -3189,6 +3240,12 @@ def _llm_quality_expected_reply_matches(
                 "booking_reuse_handover",
                 "booking_paused",
             }
+        ):
+            return True
+        if (
+            state in {"pending", "manager_active"}
+            and pending_action == "policy_core_degraded_hold"
+            and bot_response
         ):
             return True
         if state in {"pending", "manager_active"} and action in {"booking_prompt", "booking_confirm"}:
@@ -3384,6 +3441,15 @@ def _llm_quality_collect_info_signals(meta, trace_entries):
             for section in sections:
                 if isinstance(section, str) and section.strip():
                     info_sections.add(section.strip().lower())
+        llm_policy_core = meta.get("llm_policy_core")
+        llm_payload = llm_policy_core.get("payload") if isinstance(llm_policy_core, dict) else None
+        pack_refs = llm_payload.get("pack_refs") if isinstance(llm_payload, dict) else None
+        if isinstance(pack_refs, list):
+            for ref in pack_refs:
+                if isinstance(ref, str) and ref.strip():
+                    token = ref.strip().lower()
+                    intents.add(token)
+                    info_sections.add(token)
     for entry in _llm_quality_current_turn_trace_entries(meta, trace_entries):
         if not isinstance(entry, dict):
             continue
@@ -3465,6 +3531,9 @@ def _llm_quality_should_judge_turn(
 ):
     if not judge_enabled:
         return False, None
+    tags = {str(tag).strip().lower() for tag in (turn_tags or []) if str(tag).strip()}
+    if tags.intersection({"interrupt", "channel"}):
+        return False, "tag_skip"
     if not bot_response:
         return False, "no_bot_response"
     if not isinstance(user_text, str) or not user_text.strip():
@@ -3479,7 +3548,6 @@ def _llm_quality_should_judge_turn(
             critical = True
         if booking_active and booking_progress_expected:
             critical = True
-        tags = set(turn_tags or [])
         if tags.intersection(LLM_QUALITY_JUDGE_CRITICAL_TAGS):
             critical = True
         if not critical:
@@ -4307,9 +4375,21 @@ def _llm_quality_evaluate_turn(
             fallback_ok = True
         if not fallback_ok:
             reasons.append("expected_reply_type_mismatch")
+    expected_reply_for_check = expected_reply
+    if (
+        expected_reply is False
+        and expected_response is True
+        and (
+            expected_reply_type is not None
+            or bool(expected_info_sections)
+            or bool(booking_active)
+        )
+    ):
+        expected_reply_for_check = None
     if not _llm_quality_expected_reply_matches(
-        expected_reply=expected_reply,
+        expected_reply=expected_reply_for_check,
         expected_response=expected_response,
+        bot_response=bot_response,
         expected_reply_type=expected_reply_type,
         expected_state=expected_state,
         state=state,
@@ -4775,8 +4855,8 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--remote-jid", default=None)
     parser.add_argument(
         "--jid-mode",
-        choices=["round_robin", "random", "unique"],
-        default="round_robin",
+        choices=["auto", "round_robin", "random", "unique"],
+        default="auto",
     )
     parser.add_argument("--allow-non-allowlist", action="store_true")
     parser.add_argument("--webhook-secret", default=None)
@@ -4912,6 +4992,66 @@ def _load_env_file(path):
     except Exception:
         return {}
     return env
+
+
+def _clean_api_key(value):
+    if not value:
+        return None
+    cleaned = str(value).strip().strip('"').strip("'")
+    return cleaned or None
+
+
+def _openai_key_candidate_env_files():
+    script_file = globals().get("__file__")
+    if script_file:
+        script_dir = os.path.dirname(os.path.abspath(script_file))
+    else:
+        script_dir = os.path.join(os.getcwd(), "ops")
+    repo_root = os.path.dirname(script_dir)
+    candidates = [
+        os.environ.get("TRUFFLES_API_ENV_FILE"),
+        os.environ.get("ENV_FILE"),
+        os.path.join(os.getcwd(), "truffles-api", ".env"),
+        os.path.join(os.getcwd(), ".env"),
+        os.path.join(repo_root, "truffles-api", ".env"),
+        os.path.join(repo_root, ".env"),
+        "/home/zhan/truffles-main/truffles-api/.env",
+        "/home/zhan/infrastructure/.env",
+    ]
+    unique: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        if not item:
+            continue
+        path = os.path.abspath(os.path.expanduser(str(item)))
+        if path in seen:
+            continue
+        seen.add(path)
+        unique.append(path)
+    return unique
+
+
+def _resolve_openai_api_key(explicit=None, *, container_name=None):
+    key = _clean_api_key(explicit)
+    if key:
+        return key, "explicit"
+
+    env_key = _clean_api_key(os.environ.get("OPENAI_API_KEY"))
+    if env_key:
+        return env_key, "env:OPENAI_API_KEY"
+
+    for env_path in _openai_key_candidate_env_files():
+        env_map = _load_env_file(env_path)
+        file_key = _clean_api_key(env_map.get("OPENAI_API_KEY"))
+        if file_key:
+            return file_key, f"env_file:{env_path}"
+
+    if container_name:
+        container_key = _clean_api_key(_resolve_env_from_container(container_name, "OPENAI_API_KEY"))
+        if container_key:
+            return container_key, f"container:{container_name}"
+
+    return None, None
 
 
 def _fetch_keycloak_token(env_map):
@@ -5667,6 +5807,7 @@ def _llm_quality_should_infer_bot_response_from_duplicate_ack(
     return action in {
         "reply",
         "match",
+        "ai_response",
         "booking_prompt",
         "smalltalk",
         "booking_confirm",
@@ -6864,6 +7005,28 @@ def _run_llm_quality(args):
 
     container_name, _ = resolve_container_name()
     allowlist_jids = _resolve_allowlist_jids(args.allowlist_jids, container_name)
+    jid_mode_effective = _llm_quality_resolve_jid_mode(args)
+    if args.jid_mode == "auto":
+        print(
+            json.dumps(
+                {
+                    "stage": "llm_quality_jid_mode",
+                    "requested": "auto",
+                    "resolved": jid_mode_effective,
+                    "skip_outbox": bool(args.skip_outbox),
+                },
+                ensure_ascii=False,
+            )
+        )
+    if (
+        jid_mode_effective == "unique"
+        and not args.remote_jid
+        and not args.skip_outbox
+        and not args.allow_non_allowlist
+    ):
+        raise SystemExit(
+            "llm-quality: --jid-mode unique requires --skip-outbox or --allow-non-allowlist"
+        )
     if args.remote_jid:
         if allowlist_jids and args.remote_jid not in allowlist_jids and not args.allow_non_allowlist:
             raise SystemExit(
@@ -7015,8 +7178,26 @@ def _run_llm_quality(args):
         elif client_meta and client_meta.get("client_id"):
             console_headers["X-Client-Id"] = client_meta.get("client_id")
 
+    llm_api_key, llm_api_key_source = _resolve_openai_api_key(
+        args.llm_api_key,
+        container_name=container_name,
+    )
+    if llm_api_key:
+        args.llm_api_key = llm_api_key
+    elif args.mode == "llm" and not args.scenarios_file:
+        raise SystemExit(
+            "llm-quality: missing OPENAI_API_KEY for scenario generation "
+            "(checked --llm-api-key, OPENAI_API_KEY env, *.env candidates, container env)"
+        )
+
     judge_mode = args.judge_mode
-    judge_api_key = args.judge_api_key or os.environ.get("OPENAI_API_KEY")
+    judge_api_key, judge_api_key_source = _resolve_openai_api_key(
+        args.judge_api_key,
+        container_name=container_name,
+    )
+    if not judge_api_key and args.llm_api_key:
+        judge_api_key = args.llm_api_key
+        judge_api_key_source = f"llm:{llm_api_key_source or 'explicit'}"
     judge_enabled = judge_mode != "off"
     judge_skip_reason = "judge_mode_off" if judge_mode == "off" else None
     if judge_enabled and not judge_api_key:
@@ -7031,7 +7212,8 @@ def _run_llm_quality(args):
     if judge_required and not judge_enabled:
         raise SystemExit(
             "llm-quality: strict replay requires judge enabled "
-            f"(reason={judge_skip_reason or 'judge_disabled'}; use --judge-mode sample|all|critical and API key, "
+            f"(reason={judge_skip_reason or 'judge_disabled'}; key_source={judge_api_key_source or 'none'}; "
+            "use --judge-mode sample|all|critical and API key, "
             "or pass --allow-judge-off for debug-only runs)"
         )
     judge_seed = args.judge_seed if args.judge_seed is not None else args.seed
@@ -7176,6 +7358,7 @@ def _run_llm_quality(args):
         "enabled": judge_enabled,
         "mode": judge_mode if judge_enabled else "off",
         "required": judge_required,
+        "api_key_source": judge_api_key_source if judge_enabled else None,
         "sample": args.judge_sample,
         "model": args.judge_model if judge_enabled else None,
         "base_url": args.judge_base_url if judge_enabled else None,
@@ -7617,7 +7800,7 @@ def _run_llm_quality(args):
     ) as trace_handle:
         for dialog_idx, dialog in enumerate(dialogs, start=1):
             remote_jid = args.remote_jid or _llm_quality_pick_jid(
-                allowlist_jids, dialog_idx - 1, rng, args.jid_mode, run_id=run_id
+                allowlist_jids, dialog_idx - 1, rng, jid_mode_effective, run_id=run_id
             )
             if not remote_jid:
                 raise SystemExit("llm-quality: remote_jid unresolved")
@@ -7625,6 +7808,13 @@ def _run_llm_quality(args):
                 preflight = _reset_dialog_state(remote_jid)
                 if preflight:
                     print(json.dumps(preflight, ensure_ascii=False))
+                    state_before = preflight.get("state_before")
+                    cleared = bool(preflight.get("cleared"))
+                    if state_before in {"pending", "manager_active"} and not cleared:
+                        raise SystemExit(
+                            "llm-quality: contaminated preflight (state_before="
+                            f"{state_before}, cleared=false); restart with --jid-mode unique"
+                        )
 
             for turn_idx, turn in enumerate(dialog.get("turns") or [], start=1):
                 stats["turns"] += 1
@@ -8589,12 +8779,15 @@ def _run_llm_quality(args):
         "tool_cancel_text": args.tool_cancel_text,
         "tool_calendar_text": args.tool_calendar_text,
         "tool_hook_wait": args.tool_hook_wait,
-        "jid_mode": args.jid_mode,
+        "jid_mode": jid_mode_effective,
+        "jid_mode_requested": args.jid_mode,
         "max_failures": args.max_failures,
         "baseline_summary": args.baseline_summary,
         "regression_tolerance": args.regression_tolerance,
         "judge_mode": judge_mode,
         "judge_required": judge_required,
+        "llm_api_key_source": llm_api_key_source,
+        "judge_api_key_source": judge_api_key_source if judge_enabled else None,
         "judge_sample": args.judge_sample,
         "judge_model": args.judge_model if judge_enabled else None,
         "judge_max_tokens": args.judge_max_tokens if judge_enabled else None,

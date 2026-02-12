@@ -2,6 +2,8 @@ import json
 import time
 from unittest.mock import patch
 
+import httpx
+
 from app.services.intent_service import (
     ESCALATION_INTENTS,
     REJECTION_INTENTS,
@@ -12,6 +14,7 @@ from app.services.intent_service import (
     is_opt_out_message,
     is_rejection,
     route_dialogue_controller,
+    route_llm_policy_core,
     should_escalate,
 )
 
@@ -211,3 +214,37 @@ class TestAnswerInterpreterSchema:
 
         assert result["ok"] is False
         assert result["error"] == "invalid_schema"
+
+
+class TestPolicyCoreTimeoutRetry:
+    def test_retries_once_after_timeout_and_succeeds(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_RETRY_ON_TIMEOUT",
+            "1",
+        )
+
+        payload = {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "calendar.list_slots",
+            "tool_args": {},
+            "pack_refs": [],
+            "language": "ru",
+            "confidence": 0.8,
+            "reason": "ask_time",
+            "goal": "booking",
+            "slots": {},
+            "open_questions": ["datetime"],
+            "expected_reply_type": "time",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                httpx.TimeoutException("timeout"),
+                DummyResponse(json.dumps(payload)),
+            ]
+            result = route_llm_policy_core("Нужно время", expected_reply_type="time")
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert mock_llm.return_value.generate.call_count == 2

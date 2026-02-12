@@ -1322,11 +1322,18 @@ def _has_parking_signal(normalized: str, *, client_slug: str | None = None) -> b
         return False
     if _signal_contains_any(normalized, client_slug, "parking_direct_phrases"):
         return True
+    # Keep deterministic marker fallback for colloquial parking asks when
+    # tenant lexicon misses a specific phrase (e.g. "паркинг возле салона").
+    if any(marker in normalized for marker in ("парков", "паркинг", "стоян", "тұрақ", "турак")):
+        return True
     machine_prefixes = get_signal_lexicon_list(client_slug, "parking_machine_prefixes")
     if machine_prefixes and any(prefix in normalized for prefix in machine_prefixes):
-        exclude_phrases = get_signal_lexicon_list(client_slug, "parking_exclude_phrases")
-        if exclude_phrases and not _contains_any(normalized, exclude_phrases):
-            return False
+        # Legacy lexicon name kept for backward compatibility.
+        # These markers are used as parking context for ambiguous "машинк*" forms.
+        context_markers = get_signal_lexicon_list(client_slug, "parking_exclude_phrases")
+        if context_markers and _contains_any(normalized, context_markers):
+            return True
+        return False
     vehicle_words = get_signal_lexicon_list(client_slug, "parking_vehicle_words")
     if vehicle_words and _contains_any(normalized, vehicle_words):
         return True
@@ -1357,6 +1364,36 @@ def _has_guest_waiting_signal(normalized: str, *, client_slug: str | None = None
     return _signal_contains_any_words(normalized, client_slug, "guest_waiting_words")
 
 
+def _has_contact_signal(
+    normalized: str,
+    raw_text: str | None = None,
+    *,
+    client_slug: str | None = None,
+) -> bool:
+    if not normalized:
+        return False
+    if _signal_contains_any(normalized, client_slug, "contact_keywords"):
+        return True
+    contact_patterns = (
+        r"\bномер(?:\s+тел(?:ефона)?)?\b",
+        r"\bтел(?:ефон)?\b",
+        r"\bкак\s+связ",
+        r"\bкуда\s+напис",
+        r"\bконтакт",
+        r"\bватсап\b",
+        r"\bwhatsapp\b",
+        r"\bинстаграм\b",
+        r"\binstagram\b",
+        r"\bтелеграм\b",
+        r"\btelegram\b",
+    )
+    if any(re.search(pattern, normalized) for pattern in contact_patterns):
+        return True
+    if raw_text and re.search(r"\+\d[\d\s\-()]{7,}", raw_text):
+        return True
+    return False
+
+
 def _has_price_signal(
     normalized: str,
     raw_text: str | None = None,
@@ -1367,6 +1404,31 @@ def _has_price_signal(
         return True
     if _signal_contains_any(normalized, client_slug, "price_currency_words"):
         return True
+    if normalized and "во сколько" not in normalized:
+        colloquial_price_patterns = (
+            r"\bскольк\w*(?:\s+\w+){0,3}\s+это\s+будет\b",
+            r"\bскольк\w*(?:\s+\w+){0,3}\s+обойд",
+            r"\bскольк\w*(?:\s+\w+){0,3}\s+выйдет\b",
+        )
+        if any(re.search(pattern, normalized) for pattern in colloquial_price_patterns):
+            slug = _normalize_client_slug(client_slug)
+            has_service_context = _message_has_service_token(normalized, slug) or any(
+                marker in normalized
+                for marker in (
+                    "это",
+                    "услуг",
+                    "процед",
+                    "уклад",
+                    "стриж",
+                    "маник",
+                    "педик",
+                    "окраш",
+                    "ресниц",
+                    "бров",
+                )
+            )
+            if has_service_context:
+                return True
     if raw_text and re.search(r"[₸$€₽]", raw_text):
         return True
     return False
@@ -1411,6 +1473,28 @@ def _format_price_reply(item: dict[str, Any]) -> str:
         price = _format_money(item.get("price_from"))
         return f"{name} — от {price} ₸."
     return f"{name} — уточните цену у администратора."
+
+
+def _build_price_preview(truth: dict[str, Any], *, max_items: int = 2) -> str | None:
+    if not isinstance(truth, dict):
+        return None
+    replies: list[str] = []
+    for category in truth.get("price_list", []):
+        if not isinstance(category, dict):
+            continue
+        for item in category.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            if "price" not in item and "price_from" not in item:
+                continue
+            replies.append(_format_price_reply(item))
+            if len(replies) >= max_items:
+                break
+        if len(replies) >= max_items:
+            break
+    if not replies:
+        return None
+    return "Пример по прайсу: " + " ".join(replies)
 
 
 def _format_service_price_items(item_names: list[str], client_slug: str) -> str | None:
@@ -1464,6 +1548,37 @@ def _format_service_not_found_reply(truth: dict) -> str | None:
     if suggestions_text:
         return f"{template} {suggestions_text}."
     return template
+
+
+def _format_contact_reply(
+    *,
+    client_slug: str | None = _DEFAULT_CLIENT_SLUG,
+    truth: dict[str, Any] | None = None,
+) -> str | None:
+    data = truth if isinstance(truth, dict) else load_yaml_truth(client_slug)
+    salon = data.get("salon") if isinstance(data, dict) else None
+    if not isinstance(salon, dict):
+        return None
+    phone = str(salon.get("phone") or "").strip()
+    whatsapp = str(salon.get("whatsapp") or "").strip()
+    telegram = str(salon.get("telegram") or "").strip()
+    instagram = str(salon.get("instagram") or "").strip()
+
+    lines: list[str] = []
+    if phone:
+        lines.append(f"Телефон: {phone}.")
+    if whatsapp:
+        lines.append(f"WhatsApp: {whatsapp}.")
+    if telegram:
+        lines.append(f"Telegram: {telegram}.")
+    if instagram:
+        lines.append(f"Instagram: {instagram}.")
+
+    if not lines:
+        return None
+    if not phone and (whatsapp or telegram or instagram):
+        lines.insert(0, "Телефон в карточке салона не указан.")
+    return " ".join(lines)
 
 
 def _format_service_suggestions_reply(suggestions: list[str], truth: dict) -> str | None:
@@ -3004,6 +3119,7 @@ def get_demo_salon_decision(
     location_signal = _signal_contains_any(normalized, slug, "location_phrases")
     if not location_signal and _has_address_hint(normalized, truth):
         location_signal = True
+    contact_signal = _has_contact_signal(normalized, message, client_slug=slug)
     hygiene_signal = bool(hygiene_keywords) and _contains_any(normalized, hygiene_keywords)
     if not hygiene_signal and _signal_contains_all(normalized, slug, "hygiene_friend_inflammation_terms"):
         hygiene_signal = True
@@ -3186,6 +3302,15 @@ def get_demo_salon_decision(
                 meta={"info_sections": ["master"]},
             )
 
+    if contact_signal and not price_signal:
+        contact_reply = _format_contact_reply(client_slug=slug, truth=truth)
+        if contact_reply:
+            return _build_truth_decision(
+                response=contact_reply,
+                intent="contact",
+                meta={"info_sections": ["contact"]},
+            )
+
     if policy_intent == "policy_discount":
         return None
 
@@ -3205,6 +3330,37 @@ def get_demo_salon_decision(
         reply = format_reply_from_truth("objection_price", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="objection_price")
+
+    if location_signal and duration_signal and not guest_signal and not price_signal:
+        reply, meta = build_info_combined_reply(
+            include_parking=parking_signal,
+            include_guest=guest_signal,
+            client_slug=slug,
+        )
+        travel_hint = format_reply_from_truth("location_travel_time", client_slug=slug, truth=truth)
+        if not travel_hint:
+            travel_hint = (
+                "Время в пути зависит от точки старта и пробок. "
+                "Обычно по городу это около 15-40 минут, точнее лучше смотреть в навигаторе."
+            )
+        parts = [part for part in (reply, travel_hint) if isinstance(part, str) and part.strip()]
+        if parts:
+            response_text = "\n\n".join(parts)
+            decision_meta = dict(meta) if isinstance(meta, dict) else {}
+            info_sections = decision_meta.get("info_sections")
+            if isinstance(info_sections, list):
+                merged_sections = []
+                for section in [*info_sections, "duration"]:
+                    if isinstance(section, str) and section not in merged_sections:
+                        merged_sections.append(section)
+                decision_meta["info_sections"] = merged_sections
+            else:
+                decision_meta["info_sections"] = ["location", "duration"]
+            return _build_truth_decision(
+                response=response_text,
+                intent="location",
+                meta=decision_meta,
+            )
 
     if location_signal and not guest_signal and (not price_signal or (price_signal and not price_item)):
         reply, meta = build_info_combined_reply(
@@ -3334,6 +3490,17 @@ def get_demo_salon_decision(
         if reply:
             return DemoSalonDecision(action="escalate", response=reply, intent="procedure_combo")
 
+    photo_offer_signal = (
+        "фото" in normalized
+        and _contains_any(normalized, ["пришл", "отправл", "скин", "могу"])
+        and not _contains_any(normalized, ["референс", "пример", "образ"])
+    )
+    if photo_offer_signal:
+        reply = format_reply_from_truth("style_reference", client_slug=slug, truth=truth)
+        if not reply:
+            reply = "Да, конечно. Пришлите фото-пример, и я помогу уточнить по услуге и записи."
+        return _build_truth_decision(response=reply, intent="style_reference")
+
     if "style_reference" in phrase_intents:
         reply = format_reply_from_truth("style_reference", client_slug=slug, truth=truth)
         if reply:
@@ -3461,7 +3628,8 @@ def get_demo_salon_decision(
             if reply:
                 return _build_truth_decision(response=reply, intent="off_topic")
         clarify_reply = format_reply_from_truth("duration_or_price_clarify", client_slug=slug, truth=truth)
-        reply_parts = [part for part in [info_reply, clarify_reply] if part]
+        price_preview = _build_price_preview(truth) if price_signal else None
+        reply_parts = [part for part in [info_reply, price_preview, clarify_reply] if part]
         reply_text = " ".join(reply_parts) if reply_parts else clarify_reply
         if reply_text:
             return _build_truth_decision(

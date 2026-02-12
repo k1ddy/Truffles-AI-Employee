@@ -2,7 +2,6 @@ import asyncio
 import os
 import time
 
-from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
@@ -37,8 +36,6 @@ from app.routers import (
     webhook,
 )
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
-
-load_dotenv()
 
 setup_logging()
 
