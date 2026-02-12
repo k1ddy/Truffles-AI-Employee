@@ -1,0 +1,35 @@
+# SESSION 2026-02-12-onboarding-fleet-remediation-a33 — Session 2026-02-12-onboarding-fleet-remediation-a33
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-12-onboarding-fleet-remediation-a33.md
+- branch: feat/2026-02-12-onboarding-fleet-remediation-a33
+- worktree: /home/zhan/worktrees/2026-02-12-onboarding-fleet-remediation-a33
+- base_ref: origin/main
+- scope: onboarding fleet remediation + fleet guard + multi-domain onboarding quality smoke
+- done:
+  - Session created.
+  - Added `ops/diagnose.py` commands:
+    - `onboarding-fleet-check`
+    - `onboarding-fleet-remediate`
+    - `onboarding-quality-smoke`
+  - Added nightly remote workflow gate: `.github/workflows/onboarding-fleet-guard.yml`.
+  - Added deterministic tests: `truffles-api/tests/test_diagnose_onboarding_fleet.py`.
+  - Executed remediation on active branch with:
+    - `--default-domain-slug beauty`
+    - `--confirm-payment`
+    - `--sync-reference-pack-integrity`
+    - `--apply`
+  - Verified active branch is scorecard-ready after remediation.
+- next:
+  - Open PR and run CI.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-12-onboarding-fleet-remediation-a33.md
+  - `python3 -m py_compile ops/diagnose.py`
+  - `pytest -q truffles-api/tests/test_diagnose_onboarding_fleet.py truffles-api/tests/test_console_onboarding_state.py truffles-api/tests/test_onboarding_intake_service.py truffles-api/tests/test_reference_pack_integrity.py truffles-api/tests/test_console_onboarding_contract_api.py`
+  - `pytest -q truffles-api/tests/test_diagnose_run_command.py truffles-api/tests/test_booking_quality_judge_cache.py truffles-api/tests/test_booking_quality_openai_key_resolution.py truffles-api/tests/test_diagnose_onboarding_fleet.py`
+  - `python3 ops/diagnose.py onboarding-fleet-check --json --fail-on-active-missing`
+  - `python3 ops/diagnose.py onboarding-fleet-remediate --default-domain-slug beauty --confirm-payment --sync-reference-pack-integrity --apply --json`
+  - `python3 ops/diagnose.py onboarding-quality-smoke --domains beauty,clinic,legal,ecom --json --save-summary /tmp/onboarding-quality-smoke-current.json`
+  - SQL snapshot (active branch domain/payment/reference pack status) via `docker exec truffles_postgres_1 psql ...`
+- last_updated: 2026-02-12
