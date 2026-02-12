@@ -37,6 +37,12 @@
     - `env -u OPENAI_API_KEY TRUFFLES_API_ENV_FILE=/tmp/openai_test.env ... llm-quality --judge-mode all --scenarios-file /tmp/booking_quality/nonexistent.json` now fails at scenarios-file validation (not key gate).
   - Captured dry-run evidence with judge enabled and key source:
     - run-id `booking-keysource-check3`, summary reports `judge.enabled=true`, `judge.api_key_source=env_file:/tmp/openai_test.env`.
+  - Fixed red PR checks for commit `02d5fb75`:
+    - Removed brittle early `OPENAI_API_KEY` skip in `generate_ai_response` and handled missing-key fallback at provider creation boundary.
+    - Added app-level `.env` bootstrap in `truffles-api/app/__init__.py` to prevent false `OPENAI_API_KEY missing` when key exists in `.env`.
+    - Restored booking slot detection for phone messages (`_is_booking_slot_signal` checks phone before info-query short-circuit).
+    - Hardened `ops/diagnose.py` expectation helpers for AST-loaded unit tests (fallback booking reply types + backward-compatible `bot_response` arg).
+    - Fixed Ruff import-order failures in pack runtime adapter facades.
 - next:
   - Re-run full `count=10` lock with `--jid-mode unique` and publish canonical-valid evidence (`infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`).
   - Run replay against that lock (`--baseline-summary <lock>/summary.json --fail-on-regression --max-failures 20`) and collect top-failures delta.
@@ -59,4 +65,7 @@
     - `pytest -q truffles-api/tests/test_booking_quality_info_sections.py truffles-api/tests/test_booking_quality_progress_gate.py truffles-api/tests/test_intent.py truffles-api/tests/test_master_info_flow.py -q`
     - `python3 -m py_compile ops/diagnose.py scripts/booking_dialog_scenarios.py`
     - `pytest -q truffles-api/tests/test_booking_quality_openai_key_resolution.py truffles-api/tests/test_booking_dialog_scenarios_script.py`
-- last_updated: 2026-02-12T03:47:02Z
+    - `ruff check truffles-api/app/main.py truffles-api/app/services/pack_runtime_demo_adapter.py truffles-api/app/services/pack_runtime_generic_adapter.py truffles-api/app/services/pack_runtime_service.py`
+    - `pytest -q truffles-api/tests/test_ai_service.py truffles-api/tests/test_booking_quality_expectation_sanitizer.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_webhook_booking.py`
+    - `bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD`
+- last_updated: 2026-02-12T08:55:02Z
