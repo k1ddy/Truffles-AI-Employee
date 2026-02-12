@@ -2511,6 +2511,41 @@ def _format_promotions(truth: dict, intent: str | None = None) -> str:
     return "Скидки действуют только по официальным акциям."
 
 
+def _infer_consult_info_sections(
+    *,
+    question: str,
+    topic: str,
+    client_slug: str,
+) -> list[str]:
+    normalized = _normalize_text(question)
+    if not normalized:
+        return []
+    sections: list[str] = []
+
+    if _has_duration_signal(normalized, question, client_slug=client_slug):
+        sections.append("duration")
+    if _has_price_signal(normalized, question, client_slug=client_slug):
+        sections.append("pricing")
+
+    master_markers = (
+        "мастер",
+        "специалист",
+        "кто делает",
+        "к кому",
+        "ким жасайд",
+    )
+    if any(marker in normalized for marker in master_markers):
+        sections.append("master")
+    elif (
+        topic in {"general_consult", "consult", "consult_reply"}
+        and "процедур" in normalized
+        and any(marker in normalized for marker in ("специальн", "особ"))
+    ):
+        sections.append("master")
+
+    return list(dict.fromkeys(sections))
+
+
 def build_consult_reply(
     message: str,
     *,
@@ -2576,6 +2611,17 @@ def build_consult_reply(
         "consult_variant_id": variant_id,
         "source": "pack",
     }
+    consult_sections = _infer_consult_info_sections(
+        question=consult_question_final or message,
+        topic=playbook_id,
+        client_slug=slug,
+    )
+    if consult_sections:
+        meta["info_sections"] = consult_sections
+        meta["fact_intents"] = _normalize_fact_intents(
+            ["consult_reply", playbook_id],
+            consult_sections,
+        )
 
     if action == "escalate":
         escalation_message = str(playbook.get("escalation_message") or "").strip()
@@ -2592,6 +2638,8 @@ def build_consult_reply(
     )
     if not reply:
         return None
+    if "master" in consult_sections and not _contains_any(_normalize_text(reply), ["мастер", "специалист"]):
+        reply = f"{reply} Подберем специалиста под ваш запрос."
     meta["consult_questions"] = consult_questions
     meta["consult_options"] = consult_options
     meta["tips_used"] = consult_options

@@ -49,6 +49,17 @@
     - `interpret_expected_reply`
     so missing API key now returns structured `no_api_key` instead of raising `RuntimeError`.
   - Verified manual CI run `21940015654`: `lint` and `unit-tests` green; remaining failure moved to `core-eval` (no-key path), then mitigated with the intent-service fallback above.
+  - Applied targeted behavior fixes for top replay failures:
+    - `tool_registry`: not-found replies for `calendar.get_booking` / `calendar.reschedule` / `calendar.cancel` now preserve reschedule/cancel intent and request lookup details instead of generic rebook prompt.
+    - `tool_registry`: `catalog.portfolio` now acknowledges photo-offer messages before sharing portfolio link.
+    - `decision`: `service_clarify` collect branches now emit `info_sections`/`fact_intents` hints (including duration/pricing) into decision_meta + trace.
+    - `demo_salon_knowledge`: consult replies now infer and emit `info_sections` (`master`/`duration`/`pricing`) from the consult question and add specialist guidance when needed.
+  - Hardened OpenAI key discovery in `ops/diagnose.py`:
+    - Added parent-directory `.env` traversal and extra canonical candidates (`truffles-main(.deploy)` roots) so `OPENAI_API_KEY` is found reliably when present in env files.
+  - Ran one full realistic replay on frozen scenarios against a local API started from this worktree:
+    - run-id `booking-replay-20260212-a1-fix28-realistic` (base-url `127.0.0.1:18096`, `jid_mode=unique`, `skip_outbox`, `judge_mode=all`).
+    - Result: `infra_valid=true`, `strict_pass_rate=0.968`, `hard_fail_rate=0.0`, `info_answer_rate=0.96`, `turns_strict_failed=4`.
+    - Improvement: previous `expected_info_section_miss/info_section_miss` failures were removed; new remaining strict failures are now concentrated in `judge_fail` and `expected_reply_type_mismatch` for consult/off-topic turns.
 - next:
   - Re-run full `count=10` lock with `--jid-mode unique` and publish canonical-valid evidence (`infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`).
   - Run replay against that lock (`--baseline-summary <lock>/summary.json --fail-on-regression --max-failures 20`) and collect top-failures delta.
@@ -64,6 +75,8 @@
   - /tmp/booking_quality/booking-lock-20260212-a1c5-fast/brief.md
   - /tmp/booking_quality/booking-keysource-check3/summary.json
   - /tmp/booking_quality/booking-keysource-check3/brief.md
+  - /tmp/booking_quality/booking-replay-20260212-a1-fix28-realistic/summary.json
+  - /tmp/booking_quality/booking-replay-20260212-a1-fix28-realistic/brief.md
   - Local checks:
     - `ruff check truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/trace.py`
     - `python3 -m py_compile truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/decision.py`
@@ -75,4 +88,5 @@
     - `pytest -q truffles-api/tests/test_ai_service.py truffles-api/tests/test_booking_quality_expectation_sanitizer.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_webhook_booking.py`
     - `bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD`
     - `env -u OPENAI_API_KEY pytest -q truffles-api/tests/test_demo_salon_eval.py -k "booking_flow_expected_reply_and_interrupt or booking_flow_info_interrupt_sections_location_hours_parking_promo or booking_flow_info_interrupt_parking_colloquial_phrase"`
-- last_updated: 2026-02-12T09:17:40Z
+    - `python3 -m py_compile truffles-api/app/services/tool_registry_service.py truffles-api/app/routers/webhook/decision.py truffles-api/app/services/demo_salon_knowledge.py ops/diagnose.py`
+- last_updated: 2026-02-12T10:05:00Z

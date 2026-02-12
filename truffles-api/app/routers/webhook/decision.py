@@ -3296,6 +3296,20 @@ def _derive_policy_info_refs(
     return derived
 
 
+def _derive_service_clarify_info_sections(*sources: Any) -> list[str]:
+    sections: list[str] = []
+    for source in sources:
+        if not isinstance(source, (list, tuple, set)):
+            continue
+        for item in source:
+            if not isinstance(item, str):
+                continue
+            normalized = item.strip().casefold()
+            if normalized in INFO_INTENTS and normalized not in sections:
+                sections.append(normalized)
+    return sections
+
+
 def _normalize_policy_action_from_tool_action(
     action: str | None,
     tool_action: str | None,
@@ -8462,6 +8476,7 @@ async def _handle_webhook_payload(
             policy_info_set = set(policy_info_intents)
             requires_service = bool({"pricing", "duration"} & policy_info_set)
             if requires_service and not policy_service_query:
+                clarify_sections = _derive_service_clarify_info_sections(policy_info_intents)
                 context = _get_conversation_context(conversation)
                 context = _set_expected_reply_context(
                     conversation=conversation,
@@ -8484,6 +8499,7 @@ async def _handle_webhook_payload(
                         "decision": "llm_policy_core_collect",
                         "state": conversation.state,
                         "missing_slot": "service",
+                        "info_sections": clarify_sections,
                     },
                 )
                 _record_message_decision_meta(
@@ -8493,6 +8509,15 @@ async def _handle_webhook_payload(
                     source="llm_policy_core",
                     fast_intent=False,
                 )
+                if saved_message and clarify_sections:
+                    clarify_fact_intents = list(dict.fromkeys(["service_clarify", *clarify_sections]))
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "info_sections": clarify_sections,
+                            "fact_intents": clarify_fact_intents,
+                        },
+                    )
                 bot_response, sent = _send_and_save(bot_response)
                 result_message = (
                     "LLM policy core collect response sent"
@@ -8861,6 +8886,11 @@ async def _handle_webhook_payload(
                     else "LLM policy core booking prompt failed"
                 )
             else:
+                clarify_sections = _derive_service_clarify_info_sections(
+                    policy_pack_refs,
+                    intent_decomp_set,
+                    info_class_intents,
+                )
                 context = _get_conversation_context(conversation)
                 context = _set_expected_reply_context(
                     conversation=conversation,
@@ -8883,6 +8913,7 @@ async def _handle_webhook_payload(
                         "decision": "llm_policy_core_collect",
                         "state": conversation.state,
                         "missing_slot": policy_collect_slot,
+                        "info_sections": clarify_sections,
                     },
                 )
                 _record_message_decision_meta(
@@ -8892,6 +8923,15 @@ async def _handle_webhook_payload(
                     source="llm_policy_core",
                     fast_intent=False,
                 )
+                if saved_message and clarify_sections:
+                    clarify_fact_intents = list(dict.fromkeys(["service_clarify", *clarify_sections]))
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "info_sections": clarify_sections,
+                            "fact_intents": clarify_fact_intents,
+                        },
+                    )
                 bot_response, sent = _send_and_save(bot_response)
                 result_message = (
                     "LLM policy core collect response sent"

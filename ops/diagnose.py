@@ -5001,6 +5001,23 @@ def _clean_api_key(value):
     return cleaned or None
 
 
+def _parent_env_candidates(start_path):
+    current = os.path.abspath(start_path or os.getcwd())
+    candidates = []
+    seen = set()
+    while True:
+        for rel in ("truffles-api/.env", ".env"):
+            candidate = os.path.join(current, rel)
+            if candidate not in seen:
+                seen.add(candidate)
+                candidates.append(candidate)
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return candidates
+
+
 def _openai_key_candidate_env_files():
     script_file = globals().get("__file__")
     if script_file:
@@ -5008,6 +5025,8 @@ def _openai_key_candidate_env_files():
     else:
         script_dir = os.path.join(os.getcwd(), "ops")
     repo_root = os.path.dirname(script_dir)
+    parent_candidates = _parent_env_candidates(os.getcwd())
+    parent_candidates.extend(_parent_env_candidates(script_dir))
     candidates = [
         os.environ.get("TRUFFLES_API_ENV_FILE"),
         os.environ.get("ENV_FILE"),
@@ -5016,7 +5035,11 @@ def _openai_key_candidate_env_files():
         os.path.join(repo_root, "truffles-api", ".env"),
         os.path.join(repo_root, ".env"),
         "/home/zhan/truffles-main/truffles-api/.env",
+        "/home/zhan/truffles-main/.env",
+        "/home/zhan/truffles-main-deploy/truffles-api/.env",
+        "/home/zhan/truffles-main-deploy/.env",
         "/home/zhan/infrastructure/.env",
+        *parent_candidates,
     ]
     unique: list[str] = []
     seen: set[str] = set()

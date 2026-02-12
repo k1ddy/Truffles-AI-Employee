@@ -651,13 +651,31 @@ def _catalog_location(
     return None, "location_missing", {}
 
 
-def _catalog_portfolio(client_slug: str | None) -> tuple[str | None, str | None]:
+def _catalog_portfolio(
+    client_slug: str | None,
+    *,
+    message_text: str | None = None,
+) -> tuple[str | None, str | None]:
     truth = load_yaml_truth(client_slug)
     instagram = (
         truth.get("salon", {}).get("instagram") if isinstance(truth, dict) else None
     )
     if instagram:
-        return f"Примеры работ: {instagram}", None
+        prefix = "Примеры работ"
+        if isinstance(message_text, str) and message_text.strip():
+            try:
+                from app.services import demo_salon_knowledge as knowledge
+
+                normalized = knowledge._normalize_text(message_text)
+                photo_offer = (
+                    "фото" in normalized
+                    and any(token in normalized for token in ("пришл", "отправл", "скин", "могу"))
+                )
+                if photo_offer:
+                    prefix = "Да, конечно. Пришлите фото, и я помогу сориентировать по услуге.\nПримеры работ"
+            except Exception:
+                pass
+        return f"{prefix}: {instagram}", None
     return None, "portfolio_missing"
 
 
@@ -827,7 +845,10 @@ def execute_tool_action(
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
-                response_text="Запись не найдена. Хотите записаться на новое время?",
+                response_text=(
+                    "Не вижу активной записи. Если нужно перенести, подтвердить или отменить запись, "
+                    "подскажите номер телефона и примерную дату/время, и я помогу найти."
+                ),
                 error_code=error,
                 decision_meta={"tool_action": tool_action, "tool_decision": "not_found"},
                 trace={
@@ -1028,7 +1049,10 @@ def execute_tool_action(
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
-                response_text="Запись не найдена. Хотите записаться на новое время?",
+                response_text=(
+                    "Чтобы перенести запись, сначала нужно найти текущую. "
+                    "Подскажите номер телефона и примерную дату/время записи."
+                ),
                 error_code=error,
                 decision_meta={"tool_action": tool_action, "tool_decision": "not_found"},
                 trace={
@@ -1107,7 +1131,10 @@ def execute_tool_action(
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
-                response_text="Запись не найдена. Хотите записаться на новое время?",
+                response_text=(
+                    "Чтобы отменить запись, сначала нужно найти текущую. "
+                    "Подскажите номер телефона и примерную дату/время записи."
+                ),
                 error_code=error,
                 decision_meta={"tool_action": tool_action, "tool_decision": "not_found"},
                 trace={
@@ -1485,7 +1512,7 @@ def execute_tool_action(
         )
 
     if tool_action == "catalog.portfolio":
-        reply, error = _catalog_portfolio(client_slug)
+        reply, error = _catalog_portfolio(client_slug, message_text=message_text)
         if error:
             return ToolExecutionResult(
                 handled=True,
