@@ -2641,7 +2641,7 @@ def _handle_ai_response_action(
                                 llm_primary_failed=llm_primary_failed,
                                 llm_primary_reason=llm_primary_reason,
                             )
-                        # Defensive fallback: never propagate None result_message to webhook response.
+                        # Defensive fallback: avoid propagating empty response metadata to webhook output.
                         bot_response = legacy.MSG_ESCALATED
                         bot_response, sent = send_and_save(bot_response)
                         fallback_message = (
