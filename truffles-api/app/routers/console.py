@@ -233,6 +233,10 @@ from app.services.pack_compiler_service import (
     extract_compiled_artifacts,
     parse_compiled_at,
 )
+from app.services.reference_pack_integrity import (
+    REFERENCE_PACK_SCHEMA_VERSION,
+    build_reference_pack_metadata,
+)
 from app.services.state_service import manager_resolve as state_manager_resolve
 from app.services.state_service import manager_return as state_manager_return
 from app.services.state_service import manager_take as state_manager_take
@@ -10690,18 +10694,38 @@ async def run_onboarding_autopilot(
             and body.auto_create_reference_pack
             and context.role == "platform_admin"
         ):
+            reference_metadata = build_reference_pack_metadata(
+                domain_slug=effective_domain_slug,
+                metadata={"source": "onboarding_autopilot"},
+            )
             reference_pack = ReferencePack(
                 domain_slug=effective_domain_slug,
                 title=f"Reference pack: {effective_domain_slug}",
                 description="Auto-created by onboarding autopilot",
-                schema_version="v1",
+                schema_version=REFERENCE_PACK_SCHEMA_VERSION,
                 status="active",
-                metadata_json={"source": "onboarding_autopilot"},
+                metadata_json=reference_metadata,
                 created_by=context.agent.id,
             )
             db.add(reference_pack)
             db.flush()
             actions.append("reference_pack_created")
+        elif (
+            reference_pack
+            and body.auto_create_reference_pack
+            and context.role == "platform_admin"
+        ):
+            next_metadata = build_reference_pack_metadata(
+                domain_slug=effective_domain_slug,
+                metadata=reference_pack.metadata_json if isinstance(reference_pack.metadata_json, dict) else None,
+            )
+            if (
+                reference_pack.schema_version != REFERENCE_PACK_SCHEMA_VERSION
+                or reference_pack.metadata_json != next_metadata
+            ):
+                reference_pack.schema_version = REFERENCE_PACK_SCHEMA_VERSION
+                reference_pack.metadata_json = next_metadata
+                actions.append("reference_pack_integrity_synced")
 
     intake_payload = build_intake_payload(
         client_data_json=body.client_data_json or {},
@@ -10911,9 +10935,14 @@ async def upsert_reference_pack(
 
     normalized_domain_slug = _normalize_slug(domain_slug, "domain_slug")
     title = _normalize_required_text(body.title, "title")
-    schema_version = body.schema_version or "v1"
+    schema_version = body.schema_version or REFERENCE_PACK_SCHEMA_VERSION
+    if schema_version != REFERENCE_PACK_SCHEMA_VERSION:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported reference pack schema_version")
     status_value = body.status or "active"
-    metadata_json = body.metadata or {}
+    metadata_json = build_reference_pack_metadata(
+        domain_slug=normalized_domain_slug,
+        metadata=body.metadata or {},
+    )
 
     record = db.query(ReferencePack).filter(ReferencePack.domain_slug == normalized_domain_slug).first()
     if record:
@@ -10933,6 +10962,7 @@ async def upsert_reference_pack(
             created_by=context.agent.id,
         )
         db.add(record)
+        db.flush()
 
     record_audit_event(
         db,

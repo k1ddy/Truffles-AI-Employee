@@ -31,6 +31,8 @@ def _make_inputs(*, capabilities: CapabilitiesPayload, has_capabilities: bool = 
         payment_confirmed_by=overrides.get("payment_confirmed_by", None),
         has_webhook_secret=overrides.get("has_webhook_secret", True),
         has_reference_pack=overrides.get("has_reference_pack", True),
+        has_reference_pack_integrity=overrides.get("has_reference_pack_integrity", True),
+        reference_pack_integrity_missing=overrides.get("reference_pack_integrity_missing", []),
         reference_pack_domain_slug=overrides.get("reference_pack_domain_slug", "beauty"),
         capability_mismatches=overrides.get("capability_mismatches", []),
         has_instance_id=overrides.get("has_instance_id", False),
@@ -120,6 +122,21 @@ def test_go_no_go_requires_reference_pack():
     )
     missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
     assert "reference_pack" in missing
+
+
+def test_go_no_go_requires_reference_pack_integrity():
+    capabilities = CapabilitiesPayload.model_validate({"channels": {"whatsapp": True}})
+    inputs = _make_inputs(
+        capabilities=capabilities,
+        has_instance_id=True,
+        branch_is_active=True,
+        has_reference_pack=True,
+        has_reference_pack_integrity=False,
+        reference_pack_integrity_missing=["reference_pack_schema_version"],
+        reference_pack_domain_slug="beauty",
+    )
+    missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
+    assert "reference_pack_schema_version" in missing
 
 
 def test_go_no_go_includes_capability_mismatches():
