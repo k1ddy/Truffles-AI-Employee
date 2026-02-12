@@ -39,6 +39,45 @@ def test_evaluate_intake_payload_returns_missing_questions():
     assert any("город" in question.casefold() for question in questions)
 
 
+def test_evaluate_intake_payload_skips_booking_for_non_booking_domain():
+    payload = {
+        "client_pack": {
+            "salon": {
+                "name": "Demo Legal",
+                "city": "Almaty",
+                "address": {"full": "Main street, 1"},
+                "hours": {"days": ["mon"], "open": "09:00", "close": "18:00"},
+                "services_summary": "Legal consultations",
+                "communication": {"languages": ["ru", "kk"]},
+            },
+            "services_catalog": {"services": [{"name": "Consultation"}]},
+            "guest_policy": {"allowed_guests": "no"},
+            "safety": {"medical_note": "n/a"},
+            "pricing": {"price_from_reason": "depends on case"},
+            "quality": {"expectations_photo": "n/a"},
+            "price_list": [{"category": "Legal", "items": [{"name": "Consultation", "price": 10000}]}],
+            "policy": {
+                "hard_law": {"intents": ["refund"]},
+                "payment_info": {"intent": "payment", "keywords": ["pay"]},
+                "reschedule": {"intent": "reschedule", "keywords": ["reschedule"]},
+                "cancel": {"intent": "cancel_request", "keywords": ["cancel"]},
+                "medical": {"intent": "medical", "keywords": ["medical"]},
+                "legal": {"intent": "legal", "keywords": ["legal"]},
+                "complaint": {"intent": "complaint", "keywords": ["complaint"]},
+                "discounts": {"intent": "discounts", "keywords": ["discount"]},
+                "guard_topics": {"refund": ["refund"]},
+            },
+        }
+    }
+
+    missing, questions = evaluate_intake_payload(payload, domain_slug="legal")
+
+    assert "client_pack.booking.collect_fields" not in missing
+    assert "client_pack.booking.bot_can_confirm" not in missing
+    assert "client_pack.service_duration_estimates" not in missing
+    assert all("записи" not in question.casefold() for question in questions)
+
+
 def test_build_capabilities_from_purchased_services_maps_flags():
     result = console_router._build_capabilities_from_purchased_services(
         purchased_services=[

@@ -315,7 +315,16 @@ def build_missing_questions(missing_fields: list[str]) -> list[str]:
     return questions
 
 
-def evaluate_intake_payload(payload: dict[str, Any]) -> tuple[list[str], list[str]]:
-    missing = get_missing_required_fields(payload)
+def evaluate_intake_payload(
+    payload: dict[str, Any],
+    *,
+    domain_slug: str | None = None,
+    require_booking: bool | None = None,
+) -> tuple[list[str], list[str]]:
+    missing = get_missing_required_fields(
+        payload,
+        domain_slug=domain_slug,
+        require_booking=require_booking,
+    )
     questions = build_missing_questions(missing)
     return missing, questions

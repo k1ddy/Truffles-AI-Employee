@@ -3,8 +3,8 @@ Calendar and Booking API Router.
 Provides endpoints for slots, bookings, and Google Calendar OAuth.
 """
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
-from uuid import UUID
+from typing import Any, List, Optional
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -16,6 +16,7 @@ from app.database import get_db
 from app.logging_config import get_logger
 from app.models.appointment_service import AppointmentService as AppointmentServiceModel
 from app.models.appointment_sync_state import AppointmentSyncState
+from app.models.branch import Branch
 from app.models.specialist import Specialist
 from app.services.appointment_reminder_service import schedule_default_reminders
 from app.services.appointment_service import (
@@ -28,6 +29,7 @@ from app.services.calendar_sync_service import enqueue_appointment_sync
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_errors import ConsoleAPIError
 from app.services.google_calendar_service import GoogleCalendarService
+from app.services.onboarding_state import OnboardingStep, ensure_onboarding_step
 
 logger = get_logger(__name__)
 
@@ -64,12 +66,40 @@ class SpecialistResponse(BaseModel):
     name: str
     branch_id: Optional[str] = None
     branch_name: Optional[str] = None
-    services: List[dict] = []
+    services: List[dict] = Field(default_factory=list)
     is_active: bool
 
 
 class SpecialistsResponse(BaseModel):
     items: List[SpecialistResponse]
+
+
+class SpecialistServicePayload(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    duration_min: Optional[int] = Field(default=None, ge=5, le=480)
+    price: Optional[int] = Field(default=None, ge=0)
+
+
+class SpecialistCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    branch_id: Optional[str] = None
+    phone: Optional[str] = Field(default=None, max_length=50)
+    email: Optional[str] = Field(default=None, max_length=255)
+    google_calendar_id: Optional[str] = Field(default=None, max_length=255)
+    services: List[SpecialistServicePayload] = Field(default_factory=list)
+    working_hours: Optional[dict[str, dict[str, str]]] = None
+    is_active: bool = True
+
+
+class SpecialistUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=255)
+    branch_id: Optional[str] = None
+    phone: Optional[str] = Field(default=None, max_length=50)
+    email: Optional[str] = Field(default=None, max_length=255)
+    google_calendar_id: Optional[str] = Field(default=None, max_length=255)
+    services: Optional[List[SpecialistServicePayload]] = None
+    working_hours: Optional[dict[str, dict[str, str]]] = None
+    is_active: Optional[bool] = None
 
 
 class BookingCreate(BaseModel):
@@ -108,47 +138,270 @@ class BookingActionResponse(BaseModel):
 
 # ==================== Specialists ====================
 
+def _parse_uuid(raw_value: str, *, field_name: str) -> UUID:
+    try:
+        return UUID(raw_value)
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{field_name} is invalid") from exc
+
+
+def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _normalize_required_text(value: str, *, field_name: str) -> str:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{field_name} is required")
+    return cleaned
+
+
+def _normalize_services_payload(
+    services: Optional[List[SpecialistServicePayload]],
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for service in services or []:
+        service_name = _normalize_required_text(service.name, field_name="services.name")
+        item: dict[str, Any] = {"name": service_name}
+        if service.duration_min is not None:
+            item["duration_min"] = int(service.duration_min)
+        if service.price is not None:
+            item["price"] = int(service.price)
+        normalized.append(item)
+    return normalized
+
+
+def _serialize_specialist(specialist: Specialist, service: SchedulingService) -> SpecialistResponse:
+    return SpecialistResponse(
+        id=str(specialist.id),
+        name=specialist.name,
+        branch_id=str(specialist.branch_id) if specialist.branch_id else None,
+        branch_name=specialist.branch.name if specialist.branch else None,
+        services=service.get_specialist_services(specialist),
+        is_active=specialist.is_active,
+    )
+
+
+def _resolve_specialist_branch(
+    context: ConsoleAuthContext,
+    db: Session,
+    branch_id: Optional[str],
+) -> Branch:
+    target_branch_id = _resolve_calendar_branch(context) if branch_id is None else _parse_uuid(
+        branch_id,
+        field_name="branch_id",
+    )
+    if context.branch_restricted and target_branch_id not in context.allowed_branch_ids:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this branch denied")
+    branch = db.query(Branch).filter(
+        Branch.id == target_branch_id,
+        Branch.client_id == context.client.id,
+    ).first()
+    if not branch:
+        raise ConsoleAPIError(404, "BRANCH_NOT_FOUND", "Branch not found")
+    return branch
+
+
+def _resolve_specialist(
+    context: ConsoleAuthContext,
+    db: Session,
+    specialist_id: str,
+) -> Specialist:
+    specialist_uuid = _parse_uuid(specialist_id, field_name="specialist_id")
+    specialist = db.query(Specialist).filter(
+        Specialist.id == specialist_uuid,
+        Specialist.client_id == context.client.id,
+    ).first()
+    if not specialist:
+        raise ConsoleAPIError(404, "SPECIALIST_NOT_FOUND", "Specialist not found")
+    if specialist.branch_id is None:
+        raise ConsoleAPIError(400, "BRANCH_REQUIRED", "Specialist branch is required")
+    if context.branch_restricted and specialist.branch_id not in context.allowed_branch_ids:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this branch denied")
+    return specialist
+
+
+def _set_specialist_active(*, specialist: Specialist, is_active: bool) -> None:
+    specialist.is_active = is_active
+    specialist.updated_at = datetime.now(timezone.utc)
+
+
 @router.get("/specialists", response_model=SpecialistsResponse)
 async def list_specialists(
     request: Request,
     branch_id: Optional[str] = Query(None),
-    db: Session = Depends(get_db)
+    include_inactive: bool = Query(False),
+    db: Session = Depends(get_db),
 ):
     """Get all specialists for the client."""
     context = get_console_context(request, db)
     require_console_permission(context, "calendar", "read")
-    
-    query = db.query(Specialist).filter(
-        Specialist.client_id == context.client.id,
-        Specialist.is_active == True
-    )
-    
-    allowed_branch_ids = context.allowed_branch_ids
+
+    query = db.query(Specialist).filter(Specialist.client_id == context.client.id)
+    if not include_inactive:
+        query = query.filter(Specialist.is_active.is_(True))
 
     if branch_id:
-        requested_branch = UUID(branch_id)
-        if requested_branch not in allowed_branch_ids:
+        requested_branch = _parse_uuid(branch_id, field_name="branch_id")
+        if requested_branch not in context.allowed_branch_ids:
             raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this branch denied")
         query = query.filter(Specialist.branch_id == requested_branch)
     elif context.branch_restricted:
-        query = query.filter(Specialist.branch_id.in_(allowed_branch_ids))
-    
+        query = query.filter(Specialist.branch_id.in_(context.allowed_branch_ids))
+
     specialists = query.order_by(Specialist.name).all()
     service = SchedulingService(db)
-    
-    return SpecialistsResponse(
-        items=[
-            SpecialistResponse(
-                id=str(s.id),
-                name=s.name,
-                branch_id=str(s.branch_id) if s.branch_id else None,
-                branch_name=s.branch.name if s.branch else None,
-                services=service.get_specialist_services(s),
-                is_active=s.is_active
-            )
-            for s in specialists
-        ]
+    return SpecialistsResponse(items=[_serialize_specialist(s, service) for s in specialists])
+
+
+@router.post("/specialists", response_model=SpecialistResponse)
+async def create_specialist(
+    request: Request,
+    data: SpecialistCreate,
+    db: Session = Depends(get_db),
+):
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "team",
+        "write",
+        message="Only owner/admin can manage specialists",
     )
+    branch = _resolve_specialist_branch(context, db, data.branch_id)
+    ensure_onboarding_step(db, branch, OnboardingStep.BOOKING)
+
+    now = datetime.now(timezone.utc)
+    specialist = Specialist(
+        id=uuid4(),
+        client_id=context.client.id,
+        branch_id=branch.id,
+        name=_normalize_required_text(data.name, field_name="name"),
+        phone=_normalize_optional_text(data.phone),
+        email=_normalize_optional_text(data.email),
+        google_calendar_id=_normalize_optional_text(data.google_calendar_id),
+        services=_normalize_services_payload(data.services),
+        working_hours=data.working_hours or {},
+        is_active=bool(data.is_active),
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(specialist)
+    db.commit()
+    db.refresh(specialist)
+    service = SchedulingService(db)
+    return _serialize_specialist(specialist, service)
+
+
+@router.patch("/specialists/{specialist_id}", response_model=SpecialistResponse)
+async def update_specialist(
+    specialist_id: str,
+    request: Request,
+    data: SpecialistUpdate,
+    db: Session = Depends(get_db),
+):
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "team",
+        "write",
+        message="Only owner/admin can manage specialists",
+    )
+    specialist = _resolve_specialist(context, db, specialist_id)
+
+    if "branch_id" in data.model_fields_set:
+        if data.branch_id is None:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id is required")
+        target_branch = _resolve_specialist_branch(context, db, data.branch_id)
+    else:
+        target_branch = specialist.branch
+        if not target_branch:
+            target_branch = db.query(Branch).filter(
+                Branch.id == specialist.branch_id,
+                Branch.client_id == context.client.id,
+            ).first()
+        if not target_branch:
+            raise ConsoleAPIError(404, "BRANCH_NOT_FOUND", "Branch not found")
+    ensure_onboarding_step(db, target_branch, OnboardingStep.BOOKING)
+
+    if "name" in data.model_fields_set:
+        if data.name is None:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "name is required")
+        specialist.name = _normalize_required_text(data.name, field_name="name")
+    if "branch_id" in data.model_fields_set:
+        specialist.branch_id = target_branch.id
+    if "phone" in data.model_fields_set:
+        specialist.phone = _normalize_optional_text(data.phone)
+    if "email" in data.model_fields_set:
+        specialist.email = _normalize_optional_text(data.email)
+    if "google_calendar_id" in data.model_fields_set:
+        specialist.google_calendar_id = _normalize_optional_text(data.google_calendar_id)
+    if "services" in data.model_fields_set:
+        specialist.services = _normalize_services_payload(data.services)
+    if "working_hours" in data.model_fields_set:
+        specialist.working_hours = data.working_hours or {}
+    if "is_active" in data.model_fields_set:
+        if data.is_active is None:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "is_active must be true or false")
+        specialist.is_active = data.is_active
+    specialist.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(specialist)
+    service = SchedulingService(db)
+    return _serialize_specialist(specialist, service)
+
+
+@router.post("/specialists/{specialist_id}/enable", response_model=SpecialistResponse)
+async def enable_specialist(
+    specialist_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "team",
+        "write",
+        message="Only owner/admin can manage specialists",
+    )
+    specialist = _resolve_specialist(context, db, specialist_id)
+    branch = specialist.branch or db.query(Branch).filter(Branch.id == specialist.branch_id).first()
+    if not branch:
+        raise ConsoleAPIError(404, "BRANCH_NOT_FOUND", "Branch not found")
+    ensure_onboarding_step(db, branch, OnboardingStep.BOOKING)
+    _set_specialist_active(specialist=specialist, is_active=True)
+    db.commit()
+    db.refresh(specialist)
+    service = SchedulingService(db)
+    return _serialize_specialist(specialist, service)
+
+
+@router.post("/specialists/{specialist_id}/disable", response_model=SpecialistResponse)
+async def disable_specialist(
+    specialist_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "team",
+        "write",
+        message="Only owner/admin can manage specialists",
+    )
+    specialist = _resolve_specialist(context, db, specialist_id)
+    branch = specialist.branch or db.query(Branch).filter(Branch.id == specialist.branch_id).first()
+    if not branch:
+        raise ConsoleAPIError(404, "BRANCH_NOT_FOUND", "Branch not found")
+    ensure_onboarding_step(db, branch, OnboardingStep.BOOKING)
+    _set_specialist_active(specialist=specialist, is_active=False)
+    db.commit()
+    db.refresh(specialist)
+    service = SchedulingService(db)
+    return _serialize_specialist(specialist, service)
 
 
 # ==================== Slots ====================
