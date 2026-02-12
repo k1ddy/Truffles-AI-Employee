@@ -5019,14 +5019,32 @@ def _parent_env_candidates(start_path):
 
 
 def _openai_key_candidate_env_files():
+    parent_candidate_builder = globals().get("_parent_env_candidates")
+    if not callable(parent_candidate_builder):
+        def parent_candidate_builder(start_path):
+            current = os.path.abspath(start_path or os.getcwd())
+            candidates = []
+            seen = set()
+            while True:
+                for rel in ("truffles-api/.env", ".env"):
+                    candidate = os.path.join(current, rel)
+                    if candidate not in seen:
+                        seen.add(candidate)
+                        candidates.append(candidate)
+                parent = os.path.dirname(current)
+                if parent == current:
+                    break
+                current = parent
+            return candidates
+
     script_file = globals().get("__file__")
     if script_file:
         script_dir = os.path.dirname(os.path.abspath(script_file))
     else:
         script_dir = os.path.join(os.getcwd(), "ops")
     repo_root = os.path.dirname(script_dir)
-    parent_candidates = _parent_env_candidates(os.getcwd())
-    parent_candidates.extend(_parent_env_candidates(script_dir))
+    parent_candidates = parent_candidate_builder(os.getcwd())
+    parent_candidates.extend(parent_candidate_builder(script_dir))
     candidates = [
         os.environ.get("TRUFFLES_API_ENV_FILE"),
         os.environ.get("ENV_FILE"),
