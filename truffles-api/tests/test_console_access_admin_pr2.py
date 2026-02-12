@@ -14,6 +14,7 @@ from app.schemas.console import (
     ConsoleBranchGoLiveDecisionRequest,
     ConsoleBranchGoLiveWaiverRequest,
     ConsoleBranchUpdateRequest,
+    ConsoleOnboardingAutopilotRequest,
 )
 from app.services.console_errors import ConsoleAPIError
 
@@ -356,6 +357,168 @@ async def test_create_branch_bootstrap_accounts_return_created_agents(monkeypatc
     assert helper_calls[1]["role"] == "manager"
     assert helper_calls[1]["branch_id"] == response.branch.id
     db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_branch_rejects_invalid_timezone(monkeypatch):
+    client_id = uuid4()
+    company_id = uuid4()
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(id=client_id, company_id=company_id)
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=client_id, company_id=company_id)],
+            client_id=client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.create_branch(
+            request=Mock(),
+            body=ConsoleBranchCreateRequest(
+                client_id=client_id,
+                slug="branch-1",
+                name="Branch 1",
+                phone="+77001112233",
+                timezone="Mars/Phobos",
+            ),
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.asyncio
+async def test_update_branch_rejects_invalid_telegram_chat_id(monkeypatch):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        slug="branch-a",
+        name="Branch A",
+        instance_id="inst-1",
+        phone="+77001112233",
+        telegram_chat_id=None,
+        knowledge_tag=None,
+        timezone="Asia/Almaty",
+        working_hours={},
+        booking_settings={},
+        is_active=False,
+        onboarding_state="booking",
+        onboarding_updated_at=None,
+        go_live_state="approved",
+        go_live_reason=None,
+        go_live_reviewed_at=None,
+        go_live_reviewed_by=None,
+        go_live_waiver_until=None,
+        go_live_waiver_reason=None,
+        go_live_waiver_by=None,
+        updated_at=None,
+    )
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = branch
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=branch.client_id, company_id=uuid4())],
+            client_id=branch.client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "ensure_onboarding_step", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.update_branch(
+            branch_id=branch.id,
+            request=Mock(),
+            body=ConsoleBranchUpdateRequest(telegram_chat_id="not-a-chat-id"),
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.asyncio
+async def test_update_branch_normalizes_knowledge_tag_to_lowercase(monkeypatch):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        slug="branch-a",
+        name="Branch A",
+        instance_id="inst-1",
+        phone="+77001112233",
+        telegram_chat_id=None,
+        knowledge_tag=None,
+        timezone="Asia/Almaty",
+        working_hours={},
+        booking_settings={},
+        is_active=False,
+        onboarding_state="booking",
+        onboarding_updated_at=None,
+        go_live_state="approved",
+        go_live_reason=None,
+        go_live_reviewed_at=None,
+        go_live_reviewed_by=None,
+        go_live_waiver_until=None,
+        go_live_waiver_reason=None,
+        go_live_waiver_by=None,
+        updated_at=None,
+    )
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = branch
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=branch.client_id, company_id=uuid4())],
+            client_id=branch.client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "ensure_onboarding_step", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+
+    response = await console_router.update_branch(
+        branch_id=branch.id,
+        request=Mock(),
+        body=ConsoleBranchUpdateRequest(knowledge_tag="Demo_Tag"),
+        db=db,
+    )
+
+    assert response.knowledge_tag == "demo_tag"
+    assert branch.knowledge_tag == "demo_tag"
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_onboarding_autopilot_rejects_blank_phone(monkeypatch):
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(role="platform_admin"),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.run_onboarding_autopilot(
+            request=Mock(),
+            body=ConsoleOnboardingAutopilotRequest(
+                phone="  ",
+                instance_id="inst-1",
+            ),
+            db=Mock(),
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
 
 
 def test_membership_role_guard_rejects_platform_admin():

@@ -1,0 +1,387 @@
+{
+  "started_at": "2026-02-11T06:15:04.084Z",
+  "base_url": "https://console.truffles.kz",
+  "role_expected": "platform_admin",
+  "screenshots": [
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/01-tenants-active-overview.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/02-tenants-archived-mode.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/03-tenants-all-mode.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/04-tenants-active-risk-cockpit.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/05-companies-search-demo.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/06-company-edit-open.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/07-company-invalid-billing-json.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/08-company-empty-name-validation.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/09-clients-search-and-filters.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/10-client-edit-open.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/11-client-save-no-changes.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/12-client-lifecycle-dialog-guard.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/13-branch-edit-open.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/14-branch-instance-required-validation.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/15-branch-draft-validate-result.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/16-provisioning-wizard-autopilot.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/17-provisioning-wizard-manual-overview.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/18-manual-step-1--.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/18-manual-step-2--.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/18-manual-step-3--.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/18-manual-step-4-telegram.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/18-manual-step-5-knowledge.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/18-manual-step-6-booking.png",
+    "/home/zhan/truffles-main/docs/CONSOLE_AUDIT/artifacts/2026-02-11-tenants-admin-full-audit/18-manual-step-7-go-no-go.png"
+  ],
+  "context_values": {
+    "company_id": "6a510116-a633-4ce0-91e2-972e51221b49",
+    "client_id": "c839d5dd-65be-4733-a5d2-72c9f70707f0",
+    "branch_id": null,
+    "url": "https://console.truffles.kz/tenants"
+  },
+  "me_snapshot": {
+    "status": 200,
+    "role": "platform_admin",
+    "selected_company_id": "6a510116-a633-4ce0-91e2-972e51221b49",
+    "selected_branch_id": null,
+    "company_selection_required": false,
+    "branch_selection_required": false
+  },
+  "checks": [
+    {
+      "check": "client_lifecycle_dialog_chain",
+      "dialogs": [
+        {
+          "type": "prompt",
+          "message": "Укажите причину архивации клиента"
+        },
+        {
+          "type": "confirm",
+          "message": "Архивировать клиента? Клиент исчезнет из active-списка."
+        }
+      ]
+    },
+    {
+      "check": "invalid_payload_contracts",
+      "ids": {
+        "companyId": "6a510116-a633-4ce0-91e2-972e51221b49",
+        "clientId": "9b3f0d5a-dacf-5cf9-9f36-ed8306cc0d3d",
+        "branchId": "c14cb393-71af-4dfb-8fd2-088ee7cdb935"
+      },
+      "invalidCompanyName": {
+        "status": 400,
+        "body": {
+          "error": {
+            "code": "INVALID_PARAM",
+            "message": "name is required",
+            "details": null,
+            "trace_id": "f16fddbe8b2ac4c191389b8c169ea8d2"
+          }
+        }
+      },
+      "invalidClientStatusMutation": {
+        "status": 400,
+        "body": {
+          "error": {
+            "code": "INVALID_PARAM",
+            "message": "Use /admin/clients/{client_id}/archive or /restore for lifecycle changes",
+            "details": null,
+            "trace_id": "9df30c7856da6e62650d6d93b93d5deb"
+          }
+        }
+      },
+      "invalidBranchActivateWithoutInstance": {
+        "status": 400,
+        "body": {
+          "error": {
+            "code": "INVALID_PARAM",
+            "message": "instance_id required to activate branch",
+            "details": null,
+            "trace_id": "cfbe52c8488b13d11e8483e30da3a4da"
+          }
+        }
+      }
+    },
+    {
+      "check": "manual_step_access",
+      "step": "Филиал",
+      "disabled": false
+    },
+    {
+      "check": "manual_step_access",
+      "step": "Интеграции",
+      "disabled": false
+    },
+    {
+      "check": "manual_step_access",
+      "step": "Команда",
+      "disabled": false
+    },
+    {
+      "check": "manual_step_access",
+      "step": "Telegram",
+      "disabled": false
+    },
+    {
+      "check": "manual_step_access",
+      "step": "Knowledge",
+      "disabled": false
+    },
+    {
+      "check": "manual_step_access",
+      "step": "Booking",
+      "disabled": false
+    },
+    {
+      "check": "manual_step_access",
+      "step": "Go/No-Go",
+      "disabled": false
+    }
+  ],
+  "events_total": 31,
+  "events": [
+    {
+      "ts": "2026-02-11T06:14:24.551Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/me",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:24.862Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/companies?limit=20",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:25.140Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/clients?limit=20&company_id=6a510116-a633-4ce0-91e2-972e51221b49&lifecycle=active&include_fleet=true&include_summary=true",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:25.193Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/branches?limit=20&client_id=c839d5dd-65be-4733-a5d2-72c9f70707f0&lifecycle=active",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:25.460Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/fleet/attention?limit=12&stale_after_minutes=60&include_low=false",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:26.700Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/branches?limit=20&client_id=c839d5dd-65be-4733-a5d2-72c9f70707f0&lifecycle=archived",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:26.709Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/clients?limit=20&company_id=6a510116-a633-4ce0-91e2-972e51221b49&lifecycle=archived&include_fleet=true&include_summary=true",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:28.141Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/branches?limit=20&client_id=c839d5dd-65be-4733-a5d2-72c9f70707f0&lifecycle=all",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:28.146Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/clients?limit=20&company_id=6a510116-a633-4ce0-91e2-972e51221b49&lifecycle=all&include_fleet=true&include_summary=true",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:31.459Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/companies?limit=20&q=demo",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:39.656Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/clients?limit=20&q=demo&company_id=6a510116-a633-4ce0-91e2-972e51221b49&lifecycle=active&include_fleet=true&include_summary=true",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:40.352Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/clients?limit=20&q=demo&company_id=6a510116-a633-4ce0-91e2-972e51221b49&lifecycle=active&include_fleet=true&include_summary=true&fleet_lifecycle=onboarding",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:40.653Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/clients?limit=20&q=demo&company_id=6a510116-a633-4ce0-91e2-972e51221b49&lifecycle=active&include_fleet=true&include_summary=true&fleet_lifecycle=onboarding&payment_status=pending&service_state=degraded",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:40.656Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/clients?limit=20&q=demo&company_id=6a510116-a633-4ce0-91e2-972e51221b49&lifecycle=active&include_fleet=true&include_summary=true&fleet_lifecycle=onboarding&payment_status=pending",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:41.875Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/clients?limit=20&company_id=6a510116-a633-4ce0-91e2-972e51221b49&lifecycle=active&include_fleet=true&include_summary=true&fleet_lifecycle=onboarding&payment_status=pending&service_state=degraded",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:41.996Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/clients?limit=20&company_id=6a510116-a633-4ce0-91e2-972e51221b49&lifecycle=active&include_fleet=true&include_summary=true&payment_status=pending&service_state=degraded",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:41.998Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/clients?limit=20&company_id=6a510116-a633-4ce0-91e2-972e51221b49&lifecycle=active&include_fleet=true&include_summary=true&service_state=degraded",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:48.101Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/branch-changes?branch_id=b7f75692-951e-421a-aae6-f5db97394799&limit=10",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:49.126Z",
+      "method": "POST",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/branch-changes/draft",
+      "post_data": "{\"branch_id\":\"b7f75692-951e-421a-aae6-f5db97394799\",\"reason\":\"tenants tab audit validation check\",\"patch\":{\"phone\":null}}",
+      "response_body": "{\"change\":{\"id\":\"2ed38e4b-e8b1-48cd-9d5c-13becdf3481a\",\"branch_id\":\"b7f75692-951e-421a-aae6-f5db97394799\",\"status\":\"draft\",\"reason\":\"tenants tab audit validation check\",\"draft_payload\":{\"phone\":null},\"diff_payload\":{\"phone\":{\"after\":null,\"before\":\"+77055740455\"}},\"validation_payload\":{\"ok\":true,\"errors\":[]},\"base_snapshot\":{\"name\":\"Основной филиал\",\"slug\":\"main\",\"phone\":\"+77055740455\",\"timezone\":\"Asia/Almaty\",\"is_active\":true,\"instance_id\":\"eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9fc2Fsb24ifQ==\",\"knowledge_tag\":null,\"working_hours\":{\"fri\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"mon\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"sat\":{\"end\":\"17:00\",\"start\":\"10:00\"},\"thu\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"tue\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"wed\":{\"end\":\"19:00\",\"start\":\"09:00\"}},\"booking_settings\":{\"booking_mode\":\"confirm_slots\",\"slot_duration_min\":60,\"confirmation_policy\":\"client\",\"default_duration_min\":60,\"availability_provider\":\"google_calendar\"},\"telegram_chat_id\":\"-1003412216010\"},\"published_snapshot\":null,\"rollback_snapshot\":null,\"publish_error\":null,\"rollback_error\":null,\"created_at\":\"2026-02-11T06:14:48.999616+00:00\",\"updated_at\":\"2026-02-11T06:14:48.999616+..."
+    },
+    {
+      "ts": "2026-02-11T06:14:49.248Z",
+      "method": "POST",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/branch-changes/2ed38e4b-e8b1-48cd-9d5c-13becdf3481a/validate",
+      "post_data": null,
+      "response_body": "{\"change\":{\"id\":\"2ed38e4b-e8b1-48cd-9d5c-13becdf3481a\",\"branch_id\":\"b7f75692-951e-421a-aae6-f5db97394799\",\"status\":\"validated\",\"reason\":\"tenants tab audit validation check\",\"draft_payload\":{\"phone\":null},\"diff_payload\":{\"phone\":{\"after\":null,\"before\":\"+77055740455\"}},\"validation_payload\":{\"ok\":true,\"errors\":[]},\"base_snapshot\":{\"name\":\"Основной филиал\",\"slug\":\"main\",\"phone\":\"+77055740455\",\"timezone\":\"Asia/Almaty\",\"is_active\":true,\"instance_id\":\"eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9fc2Fsb24ifQ==\",\"knowledge_tag\":null,\"working_hours\":{\"fri\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"mon\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"sat\":{\"end\":\"17:00\",\"start\":\"10:00\"},\"thu\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"tue\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"wed\":{\"end\":\"19:00\",\"start\":\"09:00\"}},\"booking_settings\":{\"booking_mode\":\"confirm_slots\",\"slot_duration_min\":60,\"confirmation_policy\":\"client\",\"default_duration_min\":60,\"availability_provider\":\"google_calendar\"},\"telegram_chat_id\":\"-1003412216010\"},\"published_snapshot\":null,\"rollback_snapshot\":null,\"publish_error\":null,\"rollback_error\":null,\"created_at\":\"2026-02-11T06:14:48.999616+00:00\",\"updated_at\":\"2026-02-11T06:14:49.188..."
+    },
+    {
+      "ts": "2026-02-11T06:14:49.317Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/branch-changes?branch_id=b7f75692-951e-421a-aae6-f5db97394799&limit=10",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:50.546Z",
+      "method": "POST",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/branch-changes/draft",
+      "post_data": "{\"branch_id\":\"b7f75692-951e-421a-aae6-f5db97394799\",\"reason\":\"tenants tab audit draft-validate no publish\",\"patch\":{\"slug\":\"UTC\"}}",
+      "response_body": "{\"change\":{\"id\":\"4a88822a-4291-49f2-9d85-4ba755489fce\",\"branch_id\":\"b7f75692-951e-421a-aae6-f5db97394799\",\"status\":\"draft\",\"reason\":\"tenants tab audit draft-validate no publish\",\"draft_payload\":{\"slug\":\"utc\"},\"diff_payload\":{\"slug\":{\"after\":\"utc\",\"before\":\"main\"}},\"validation_payload\":{\"ok\":true,\"errors\":[]},\"base_snapshot\":{\"name\":\"Основной филиал\",\"slug\":\"main\",\"phone\":\"+77055740455\",\"timezone\":\"Asia/Almaty\",\"is_active\":true,\"instance_id\":\"eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9fc2Fsb24ifQ==\",\"knowledge_tag\":null,\"working_hours\":{\"fri\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"mon\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"sat\":{\"end\":\"17:00\",\"start\":\"10:00\"},\"thu\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"tue\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"wed\":{\"end\":\"19:00\",\"start\":\"09:00\"}},\"booking_settings\":{\"booking_mode\":\"confirm_slots\",\"slot_duration_min\":60,\"confirmation_policy\":\"client\",\"default_duration_min\":60,\"availability_provider\":\"google_calendar\"},\"telegram_chat_id\":\"-1003412216010\"},\"published_snapshot\":null,\"rollback_snapshot\":null,\"publish_error\":null,\"rollback_error\":null,\"created_at\":\"2026-02-11T06:14:50.491166+00:00\",\"updated_at\":\"2026-02-11T06:14:50.491166..."
+    },
+    {
+      "ts": "2026-02-11T06:14:50.659Z",
+      "method": "POST",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/branch-changes/4a88822a-4291-49f2-9d85-4ba755489fce/validate",
+      "post_data": null,
+      "response_body": "{\"change\":{\"id\":\"4a88822a-4291-49f2-9d85-4ba755489fce\",\"branch_id\":\"b7f75692-951e-421a-aae6-f5db97394799\",\"status\":\"validated\",\"reason\":\"tenants tab audit draft-validate no publish\",\"draft_payload\":{\"slug\":\"utc\"},\"diff_payload\":{\"slug\":{\"after\":\"utc\",\"before\":\"main\"}},\"validation_payload\":{\"ok\":true,\"errors\":[]},\"base_snapshot\":{\"name\":\"Основной филиал\",\"slug\":\"main\",\"phone\":\"+77055740455\",\"timezone\":\"Asia/Almaty\",\"is_active\":true,\"instance_id\":\"eyJ1aWQiOiJhTFpMend0d1AzUnBCWHpHNlNzbG1aNWNTOTZib1F5YyIsImNsaWVudF9pZCI6ImRlbW9fc2Fsb24ifQ==\",\"knowledge_tag\":null,\"working_hours\":{\"fri\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"mon\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"sat\":{\"end\":\"17:00\",\"start\":\"10:00\"},\"thu\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"tue\":{\"end\":\"20:00\",\"start\":\"09:00\"},\"wed\":{\"end\":\"19:00\",\"start\":\"09:00\"}},\"booking_settings\":{\"booking_mode\":\"confirm_slots\",\"slot_duration_min\":60,\"confirmation_policy\":\"client\",\"default_duration_min\":60,\"availability_provider\":\"google_calendar\"},\"telegram_chat_id\":\"-1003412216010\"},\"published_snapshot\":null,\"rollback_snapshot\":null,\"publish_error\":null,\"rollback_error\":null,\"created_at\":\"2026-02-11T06:14:50.491166+00:00\",\"updated_at\":\"2026-02-11T06:14:50.60..."
+    },
+    {
+      "ts": "2026-02-11T06:14:50.717Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/branch-changes?branch_id=b7f75692-951e-421a-aae6-f5db97394799&limit=10",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:53.150Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/companies?limit=1",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:53.213Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/clients?limit=1&lifecycle=all",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:53.278Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/admin/branches?limit=1&lifecycle=all",
+      "post_data": null,
+      "response_body": null
+    },
+    {
+      "ts": "2026-02-11T06:14:53.348Z",
+      "method": "PATCH",
+      "status": 400,
+      "url": "https://console.truffles.kz/api/proxy/admin/companies/6a510116-a633-4ce0-91e2-972e51221b49",
+      "post_data": "{\"name\":\"   \"}",
+      "response_body": "{\"error\":{\"code\":\"INVALID_PARAM\",\"message\":\"name is required\",\"details\":null,\"trace_id\":\"f16fddbe8b2ac4c191389b8c169ea8d2\"}}"
+    },
+    {
+      "ts": "2026-02-11T06:14:53.413Z",
+      "method": "PATCH",
+      "status": 400,
+      "url": "https://console.truffles.kz/api/proxy/admin/clients/9b3f0d5a-dacf-5cf9-9f36-ed8306cc0d3d",
+      "post_data": "{\"status\":\"deleted\"}",
+      "response_body": "{\"error\":{\"code\":\"INVALID_PARAM\",\"message\":\"Use /admin/clients/{client_id}/archive or /restore for lifecycle changes\",\"details\":null,\"trace_id\":\"9df30c7856da6e62650d6d93b93d5deb\"}}"
+    },
+    {
+      "ts": "2026-02-11T06:14:53.534Z",
+      "method": "PATCH",
+      "status": 400,
+      "url": "https://console.truffles.kz/api/proxy/admin/branches/c14cb393-71af-4dfb-8fd2-088ee7cdb935",
+      "post_data": "{\"is_active\":true,\"instance_id\":null}",
+      "response_body": "{\"error\":{\"code\":\"INVALID_PARAM\",\"message\":\"instance_id required to activate branch\",\"details\":null,\"trace_id\":\"cfbe52c8488b13d11e8483e30da3a4da\"}}"
+    },
+    {
+      "ts": "2026-02-11T06:15:04.083Z",
+      "method": "GET",
+      "status": 200,
+      "url": "https://console.truffles.kz/api/proxy/me",
+      "post_data": null,
+      "response_body": null
+    }
+  ]
+}

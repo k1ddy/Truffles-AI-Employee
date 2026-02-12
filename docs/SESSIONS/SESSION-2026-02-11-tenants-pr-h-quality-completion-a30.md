@@ -1,0 +1,26 @@
+# SESSION 2026-02-11-tenants-pr-h-quality-completion-a30 — Session 2026-02-11-tenants-pr-h-quality-completion-a30
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-h-quality-completion-a30.md
+- branch: feat/2026-02-11-tenants-pr-h-quality-completion-a30
+- worktree: /home/zhan/worktrees/2026-02-11-tenants-pr-h-quality-completion-a30
+- base_ref: origin/main
+- scope: Tenants PR-H quality completion: lifecycle checklist contract, lifecycle audit history, UX copy hardening, smoke/doc sync.
+- done:
+  - Session created.
+  - Added mandatory pre-submit checklist in client lifecycle modal (context, impact, owner alignment).
+  - Added lifecycle submit guard: disabled until reason + checklist + confirm are complete.
+  - Expanded client lifecycle trace to keep and render recent action history in current session.
+  - Updated lifecycle CTA copy to action-first wording.
+  - Updated Tenants smoke and Tenants audit page for checklist/history contract.
+  - Validation passed: lint, build, Tenants smoke, session_check.
+- next:
+  - Open PR-H and handoff for review/merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-h-quality-completion-a30.md
+  - npm --prefix console-web run lint
+  - npm --prefix console-web run build
+  - PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz E2E_USE_STORAGE_STATE=1 E2E_USERNAME=admin E2E_PASSWORD=admin npx --prefix console-web playwright test console-web/e2e/smoke.spec.ts --project=chromium --grep "Tenants"
+  - SESSION_AGENT=a30 scripts/session_check.sh
+- last_updated: 2026-02-11

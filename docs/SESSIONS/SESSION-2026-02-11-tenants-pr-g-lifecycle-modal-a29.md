@@ -1,0 +1,25 @@
+# SESSION 2026-02-11-tenants-pr-g-lifecycle-modal-a29 — Session 2026-02-11-tenants-pr-g-lifecycle-modal-a29
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-g-lifecycle-modal-a29.md
+- branch: feat/2026-02-11-tenants-pr-g-lifecycle-modal-a29
+- worktree: /home/zhan/worktrees/2026-02-11-tenants-pr-g-lifecycle-modal-a29
+- base_ref: origin/main
+- scope: Tenants Wave G lifecycle modal flow, impact preview, session-level lifecycle audit trail, smoke/docs sync.
+- done:
+  - Session created.
+  - Replaced inline client lifecycle confirmation block with modal flow (`tenants-client-lifecycle-modal`).
+  - Added lifecycle impact preview block and explicit confirmation contract in modal.
+  - Added per-client `Lifecycle trace (текущая сессия)` audit summary after lifecycle actions.
+  - Updated Tenants smoke test for modal selectors and updated tenants audit doc.
+  - Validation passed: lint, build, Tenants smoke, session_check.
+- next:
+  - Open PR and hand over for review/merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-g-lifecycle-modal-a29.md
+  - npm --prefix console-web run lint
+  - npm --prefix console-web run build
+  - PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz E2E_USE_STORAGE_STATE=1 E2E_USERNAME=admin E2E_PASSWORD=admin npx --prefix console-web playwright test console-web/e2e/smoke.spec.ts --project=chromium --grep "Tenants"
+  - SESSION_AGENT=a29 scripts/session_check.sh
+- last_updated: 2026-02-11

@@ -66,7 +66,9 @@ async def test_update_client_updates_fields(monkeypatch):
     existing_query.filter.return_value.first.return_value = None
     company_query = Mock()
     company_query.filter.return_value.first.return_value = company
-    db.query.side_effect = [client_query, existing_query, company_query]
+    branch_exists_query = Mock()
+    branch_exists_query.filter.return_value.first.return_value = None
+    db.query.side_effect = [client_query, existing_query, company_query, branch_exists_query]
 
     monkeypatch.setattr(
         console_router,
@@ -93,6 +95,47 @@ async def test_update_client_updates_fields(monkeypatch):
     assert response.company_id == company_id
     assert response.company_name == "Company"
     db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_update_client_blocks_company_reassignment_after_branch_created(monkeypatch):
+    client_id = uuid4()
+    old_company_id = uuid4()
+    next_company_id = uuid4()
+    client = SimpleNamespace(id=client_id, name="old-slug", status="active", company_id=old_company_id)
+    company = SimpleNamespace(id=next_company_id, name="Company")
+    existing_branch = SimpleNamespace(id=uuid4())
+
+    db = Mock()
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    company_query = Mock()
+    company_query.filter.return_value.first.return_value = company
+    branch_exists_query = Mock()
+    branch_exists_query.filter.return_value.first.return_value = existing_branch
+    db.query.side_effect = [client_query, company_query, branch_exists_query]
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=client_id, company_id=old_company_id)],
+            client_id=client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.update_client(
+            client_id,
+            request=Mock(),
+            body=ConsoleClientUpdateRequest(company_id=next_company_id),
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert "immutable" in exc_info.value.message
 
 
 @pytest.mark.asyncio
@@ -475,3 +518,22 @@ async def test_update_branch_rejects_cross_tenant_client_for_owner(monkeypatch):
         )
 
     assert exc_info.value.code == "ACCESS_DENIED"
+
+
+def test_normalize_branch_patch_payload_rejects_non_string_instance_id():
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        is_active=False,
+        instance_id=None,
+    )
+    db = Mock()
+
+    normalized, errors = console_router._normalize_branch_change_patch(
+        db=db,
+        branch=branch,
+        patch_payload={"instance_id": 12345},
+    )
+
+    assert normalized == {}
+    assert "instance_id must be string" in errors
