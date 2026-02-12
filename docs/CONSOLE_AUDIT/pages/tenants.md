@@ -16,6 +16,10 @@ Sections
   - `Onboarding` (wizard focus),
   - `Change Management` (branch changes focus),
   - `Decommission` (client lifecycle archive/restore focus).
+- View preset:
+  - `Operator` (упрощённый операционный контур),
+  - `Platform` (расширенные technical details / IDs / trace emphasis).
+- `Action Queue` with prioritized operational tasks and direct CTA (`context`, `cases`, `integrations`, workspace switch).
 - Decommission center with quick lifecycle filters (`active` / `archived` / `all`).
 - Companies list with search and inline edit.
 - Clients list with search and inline edit.
@@ -27,7 +31,7 @@ Company section
 - Search input.
 - Rows show name + id.
 - Selected row shows "Выбрана"; "В контекст" sets company context and clears client/branch.
-- Edit mode fields: name, billing_info JSON.
+- Edit mode fields: name (+ optional advanced `billing_info` JSON in expert details).
 - Save/Cancel buttons in inline editor; billing_info validates JSON.
 - "Показать еще" loads next page (cursor-based).
 - Save triggers `PATCH /console/v1/admin/companies/{id}`.
@@ -70,6 +74,7 @@ Branch section
   - `Применить` -> publish validated change.
   - `Откат` -> rollback published change.
   - `Отмена` -> close editor.
+- Branch edit shows impact preview before publish/rollback (activation transition + confirmation requirement hint).
 - Includes diff preview + validation errors + recent change history.
 - "Показать еще" loads next page (cursor-based).
 - Change flow triggers:
@@ -126,6 +131,7 @@ Provisioning Wizard
   - `onboarding_contract.purchased` (channels/providers/features).
 - Go/No-Go includes:
   - `Domain template preset` (beauty/clinic/legal/ecom) to prefill purchased capabilities.
+  - `Readiness Timeline` (step-by-step status + missing requirements).
   - `Readiness score` (required checks completion %) with explicit blockers list.
 - `Advanced JSON (expert)` is available as fallback and can be synced both ways with form state.
 - See `docs/CONSOLE_AUDIT/pages/settings.md` for step-by-step detail.
