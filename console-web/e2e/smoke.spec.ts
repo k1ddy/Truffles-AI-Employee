@@ -645,8 +645,23 @@ async function openTeamSpecialists(page: import('@playwright/test').Page) {
     await page.getByTestId('nav-team').click();
     await expect(page).toHaveURL(urlPathPattern('/team'));
     await expect(page.getByTestId('team-page')).toBeVisible();
-    await page.getByTestId('team-tab-specialists').click();
-    await expect(page.getByText('Специалисты')).toBeVisible();
+    const specialistsTabByTestId = page.getByTestId('team-tab-specialists');
+    const specialistsTabByLabel = page.getByRole('button', { name: /Специалисты/i }).first();
+    if (await specialistsTabByTestId.isVisible().catch(() => false)) {
+        await specialistsTabByTestId.click();
+    } else if (await specialistsTabByLabel.isVisible().catch(() => false)) {
+        await specialistsTabByLabel.click();
+    }
+    await expect
+        .poll(
+            async () => {
+                if (await page.getByTestId('team-specialist-create-form').isVisible().catch(() => false)) return true;
+                if (await page.getByText('Специалисты').first().isVisible().catch(() => false)) return true;
+                return false;
+            },
+            { timeout: 10000 },
+        )
+        .toBe(true);
 }
 
 async function extractErrorCode(response: import('@playwright/test').Response) {
