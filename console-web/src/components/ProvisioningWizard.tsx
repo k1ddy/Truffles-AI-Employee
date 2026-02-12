@@ -82,32 +82,32 @@ const MISSING_LABELS: Record<string, string> = {
     reference_pack_domain: "Niche domain (domain_slug)",
     reference_pack: "Reference pack",
     branch_active: "Филиал активен",
-    "client_pack.salon.name": "Название салона",
-    "client_pack.salon.city": "Город",
-    "client_pack.salon.address.full": "Адрес",
-    "client_pack.salon.hours.days": "Часы работы: дни",
-    "client_pack.salon.hours.open": "Часы работы: открытие",
-    "client_pack.salon.hours.close": "Часы работы: закрытие",
-    "client_pack.salon.services_summary": "Кратко об услугах",
-    "client_pack.salon.communication.languages": "Языки общения (ru + kk)",
-    "client_pack.services_catalog.services": "Каталог услуг",
-    "client_pack.service_duration_estimates": "Длительности услуг",
+    "client_pack.salon.name": "Профиль бизнеса: название",
+    "client_pack.salon.city": "Локация: город",
+    "client_pack.salon.address.full": "Локация: адрес",
+    "client_pack.salon.hours.days": "График работы: дни",
+    "client_pack.salon.hours.open": "График работы: открытие",
+    "client_pack.salon.hours.close": "График работы: закрытие",
+    "client_pack.salon.services_summary": "Каталог: кратко об услугах",
+    "client_pack.salon.communication.languages": "Коммуникация: языки",
+    "client_pack.services_catalog.services": "Каталог: услуги",
+    "client_pack.service_duration_estimates": "Каталог: длительности услуг",
     "client_pack.booking.collect_fields": "Booking: обязательные поля",
     "client_pack.booking.bot_can_confirm": "Booking: подтверждение",
-    "client_pack.guest_policy": "Guest policy",
+    "client_pack.guest_policy": "Политика гостей",
     "client_pack.safety.medical_note": "Дисклеймер: противопоказания",
     "client_pack.pricing.price_from_reason": "Дисклеймер: цена \"от\"",
     "client_pack.quality.expectations_photo": "Дисклеймер: ожидания/референс",
     "client_pack.price_list": "Прайс-лист",
-    "client_pack.policy.hard_law": "Policy: hard_law",
-    "client_pack.policy.payment_info": "Policy: payment",
-    "client_pack.policy.reschedule": "Policy: reschedule",
-    "client_pack.policy.cancel": "Policy: cancel",
-    "client_pack.policy.medical": "Policy: medical",
-    "client_pack.policy.legal": "Policy: legal",
-    "client_pack.policy.complaint": "Policy: complaint",
-    "client_pack.policy.discounts": "Policy: discounts",
-    "client_pack.policy.guard_topics.refund": "Policy: refund keywords",
+    "client_pack.policy.hard_law": "Политика: hard_law",
+    "client_pack.policy.payment_info": "Политика: оплата",
+    "client_pack.policy.reschedule": "Политика: перенос",
+    "client_pack.policy.cancel": "Политика: отмена",
+    "client_pack.policy.medical": "Политика: медицинские ограничения",
+    "client_pack.policy.legal": "Политика: юридические ограничения",
+    "client_pack.policy.complaint": "Политика: жалобы",
+    "client_pack.policy.discounts": "Политика: скидки",
+    "client_pack.policy.guard_topics.refund": "Политика: refund keywords",
 };
 
 const CAPABILITY_FIELD_LABELS: Record<string, string> = {
@@ -402,6 +402,32 @@ function formatMissingRequirement(code: string): string {
         return `Несоответствие договору: ${CAPABILITY_FIELD_LABELS[key] ?? key}`;
     }
     return MISSING_LABELS[code] ?? code;
+}
+
+function onboardingStepStatusLabel(status: "complete" | "available" | "locked" | "skipped"): string {
+    if (status === "complete") {
+        return "выполнен";
+    }
+    if (status === "available") {
+        return "доступен";
+    }
+    if (status === "locked") {
+        return "заблокирован";
+    }
+    return "пропущен";
+}
+
+function onboardingStepStatusClass(status: "complete" | "available" | "locked" | "skipped"): string {
+    if (status === "complete") {
+        return "border-green-200 bg-green-50 text-green-800";
+    }
+    if (status === "available") {
+        return "border-blue-200 bg-blue-50 text-blue-800";
+    }
+    if (status === "locked") {
+        return "border-border/60 bg-muted/40 text-muted-foreground";
+    }
+    return "border-amber-200 bg-amber-50 text-amber-800";
 }
 
 function normalizeCapabilities(payload?: CapabilitiesPayload | null): CapabilitiesPayload {
@@ -1490,6 +1516,22 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             go_no_go: !!capabilitiesSavedAt || !!onboardingContractSavedAt,
         };
     }, [onboardingStatus, branchData, createdAgents.length, capabilitiesSavedAt, onboardingContractSavedAt]);
+    const onboardingTimeline = useMemo(() => {
+        return WIZARD_STEPS.map((step, index) => {
+            const stepState = stepStateById[step.id];
+            const status = stepState?.status
+                ?? (stepStatus[step.id] ? "complete" : "locked");
+            return {
+                id: step.id,
+                index: index + 1,
+                label: step.label,
+                hint: step.hint,
+                status,
+                required: stepState?.required ?? true,
+                missing: stepState?.missing ?? [],
+            };
+        });
+    }, [stepStateById, stepStatus]);
 
     const capabilitiesPreview = useMemo(() => {
         const clientPayload = capabilitiesData?.client_capabilities?.payload ?? null;
@@ -3525,9 +3567,42 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                 <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                                     Проверки Go/No-Go
                                 </h4>
+                                <div className="rounded-lg border border-border/60 bg-background p-3 space-y-2" data-testid="onboarding-readiness-timeline">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                                            Readiness Timeline
+                                        </div>
+                                        <div className="text-[11px] text-muted-foreground">
+                                            updated_at: {onboardingStatus?.updated_at ? new Date(onboardingStatus.updated_at).toLocaleString("ru-RU") : "—"}
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {onboardingTimeline.map((item) => (
+                                            <div
+                                                key={item.id}
+                                                className={`rounded-lg border px-3 py-2 text-xs ${onboardingStepStatusClass(item.status)}`}
+                                            >
+                                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                                    <div className="font-medium">
+                                                        {item.index}. {item.label}
+                                                    </div>
+                                                    <div>{onboardingStepStatusLabel(item.status)}</div>
+                                                </div>
+                                                <div className="mt-1 text-[11px]">
+                                                    hint: {item.hint} · required: {item.required ? "yes" : "no"}
+                                                </div>
+                                                {item.missing.length > 0 ? (
+                                                    <div className="mt-1 text-[11px]">
+                                                        missing: {item.missing.map((code) => formatMissingRequirement(code)).join(", ")}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
                                 <div className={`rounded-lg border px-3 py-3 text-xs ${readinessToneClass}`} data-testid="onboarding-readiness-score">
                                     <div className="flex items-center justify-between gap-3">
-                                        <span className="font-semibold">Readiness score</span>
+                                        <span className="font-semibold">Индекс готовности</span>
                                         <span className="font-mono">{readinessScore}%</span>
                                     </div>
                                     <div className="mt-1">
@@ -3598,7 +3673,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                         rows={2}
                                         value={goLiveDecisionReason}
                                         onChange={(event) => setGoLiveDecisionReason(event.target.value)}
-                                        placeholder="причина для approve / reject / waiver"
+                                        placeholder="причина для approve/reject/waiver (обязательно для действий)"
                                         disabled={!canEdit}
                                     />
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -3618,7 +3693,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             onClick={handleWaiveGoLive}
                                             disabled={!canEdit || waiveGoLiveMutation.isPending}
                                         >
-                                            {waiveGoLiveMutation.isPending ? "Сохранение..." : "Выдать waiver TTL"}
+                                            {waiveGoLiveMutation.isPending ? "Сохранение..." : "Выдать временный waiver"}
                                         </button>
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -3628,7 +3703,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             onClick={handleApproveGoLive}
                                             disabled={!canEdit || approveGoLiveMutation.isPending}
                                         >
-                                            {approveGoLiveMutation.isPending ? "Сохранение..." : "Approve Go-Live"}
+                                            {approveGoLiveMutation.isPending ? "Сохранение..." : "Подтвердить Go-Live"}
                                         </button>
                                         <button
                                             type="button"
@@ -3636,7 +3711,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             onClick={handleRejectGoLive}
                                             disabled={!canEdit || rejectGoLiveMutation.isPending}
                                         >
-                                            {rejectGoLiveMutation.isPending ? "Сохранение..." : "Reject Go-Live"}
+                                            {rejectGoLiveMutation.isPending ? "Сохранение..." : "Отклонить Go-Live"}
                                         </button>
                                     </div>
                                 </div>
@@ -3658,7 +3733,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                     </h5>
                                     <div className="rounded-lg border border-border/60 bg-background p-3 space-y-2" data-testid="onboarding-domain-template">
                                         <div className="text-xs text-muted-foreground">
-                                            Domain template preset: применяет стартовый контракт под нишу.
+                                            Domain template preset: применяет стартовый контракт под выбранный тип бизнеса.
                                         </div>
                                         <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
                                             <select
@@ -3681,7 +3756,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                 disabled={!canEdit}
                                                 data-testid="onboarding-domain-template-apply"
                                             >
-                                                Применить template
+                                                Применить шаблон
                                             </button>
                                         </div>
                                         <p className="text-[11px] text-muted-foreground">
