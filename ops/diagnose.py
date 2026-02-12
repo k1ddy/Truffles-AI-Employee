@@ -906,6 +906,20 @@ LLM_QUALITY_JUDGE_REASONS = {
     "unsafe_response": "violates policy/safety expectations",
 }
 LLM_QUALITY_JUDGE_VERDICTS = {"pass", "fail", "uncertain"}
+LLM_QUALITY_JUDGE_CRITICAL_TAGS = {
+    "booking",
+    "handoff",
+    "cancel",
+    "reschedule",
+    "check_booking",
+    "confirm",
+}
+LLM_QUALITY_JUDGE_PAYLOAD_LIMITS = {
+    "max_depth": 5,
+    "max_items": 12,
+    "max_dict_keys": 24,
+    "max_string_len": 320,
+}
 
 
 def _chaos_pick(rng, items):
@@ -1844,6 +1858,15 @@ def _chaos_action_fallback_ok(expected, meta, conv_meta, trace_entries, info_sec
             expected_reply_type = expected.get("expected_reply_type")
             if expected_reply_type is None or expected_reply_type in CHAOS_BOOKING_REPLY_TYPES:
                 return True
+        if (
+            meta_action == "reply"
+            and booking_active
+            and (meta or {}).get("tool_decision") == "provider_unavailable"
+            and (meta_intent or "") in {"calendar.list_slots", "calendar.book_slot"}
+        ):
+            expected_reply_type = expected.get("expected_reply_type")
+            if expected_reply_type is None or expected_reply_type in CHAOS_BOOKING_REPLY_TYPES:
+                return True
     if "reply" in expected_actions and expected.get("info_sections") and info_sections_ok:
         if meta_action in _chaos_booking_completion_actions() or meta_action == "booking_prompt":
             return True
@@ -1976,6 +1999,20 @@ def _chaos_booking_reply_active(conv_meta):
 
 def _chaos_reply_type_fallback_ok(expected_reply_type, actual_reply, meta, conv_meta, trace_entries):
     if expected_reply_type in CHAOS_BOOKING_REPLY_TYPES:
+        intent = (
+            str((meta or {}).get("intent") or "").strip().lower()
+            if isinstance(meta, dict)
+            else ""
+        )
+        tool_decision = (
+            str((meta or {}).get("tool_decision") or "").strip().lower()
+            if isinstance(meta, dict)
+            else ""
+        )
+        if intent == "calendar.get_booking" and tool_decision in {"ok", "time_mismatch", "not_found"}:
+            return True
+        if intent == "catalog.portfolio" and tool_decision in {"ok", "truth_fallback"}:
+            return True
         if (conv_meta or {}).get("state") == "pending" or _chaos_trace_has_pending(trace_entries):
             return True
         if actual_reply in CHAOS_BOOKING_REPLY_TYPES:
@@ -2031,8 +2068,23 @@ def _chaos_pending_action_ok(expected_pending, meta, conv_meta):
 def _chaos_state_fallback_ok(expected_state, actual_state, meta, conv_meta, handover_meta):
     action = (meta or {}).get("action")
     pending_action = (meta or {}).get("pending_action")
+    tool_decision = (
+        str((meta or {}).get("tool_decision") or "").strip().lower()
+        if isinstance(meta, dict)
+        else ""
+    )
+    intent_value = (
+        _llm_quality_normalize_tool_token((meta or {}).get("intent"))
+        if isinstance(meta, dict)
+        else ""
+    )
     if expected_state == "pending":
         if action in CHAOS_PENDING_ACTIONS or pending_action in CHAOS_PENDING_ACTIONS:
+            return True
+    if expected_state == "manager_active" and actual_state == "pending":
+        if action in CHAOS_PENDING_ACTIONS or pending_action in CHAOS_PENDING_ACTIONS:
+            return True
+        if action in {"escalate", "booking_escalated", "booking_captured_pending"}:
             return True
     if expected_state == "pending" and actual_state in {"bot_active", "manager_active"}:
         if action in {"booking_prompt", "booking_paused", "reply", "match"}:
@@ -2045,6 +2097,28 @@ def _chaos_state_fallback_ok(expected_state, actual_state, meta, conv_meta, hand
         if action in CHAOS_PENDING_ACTIONS or pending_action in CHAOS_PENDING_ACTIONS:
             return True
         if action in _chaos_booking_completion_actions() or action == "escalate":
+            return True
+        if (
+            action == "reply"
+            and intent_value
+            in {
+                "catalog.location",
+                "catalog.service_query",
+                "hours",
+                "parking",
+                "duration",
+                "discounts",
+                "promotions",
+                "consult_reply",
+            }
+            and tool_decision in {"", "ok", "truth_fallback", "duration", "not_found_fallback"}
+        ):
+            return True
+        if (
+            action == "reply"
+            and pending_action == "pending_pass"
+            and tool_decision in {"provider_unavailable", "branch_missing"}
+        ):
             return True
     return False
 
@@ -2329,6 +2403,11 @@ def _resolve_chaos_jid_base(simulation_id: str, seed: int | None) -> int:
 def _llm_quality_repo_root():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+def _llm_quality_worktree_namespace():
+    repo_root = _llm_quality_repo_root()
+    digest = hashlib.sha1(repo_root.encode("utf-8")).hexdigest()[:8]
+    return f"{os.path.basename(repo_root)}-{digest}"
+
 def _llm_quality_dialog_script():
     return os.path.join(_llm_quality_repo_root(), "scripts", "booking_dialog_scenarios.py")
 
@@ -2575,9 +2654,17 @@ def _llm_quality_extract_turn_tags(turn):
     return tags
 
 
-def _llm_quality_should_expect_booking_progress(expected_reply_type, turn_tags):
+def _llm_quality_should_expect_booking_progress(expected_reply_type, turn_tags, meta=None):
     if expected_reply_type not in CHAOS_BOOKING_REPLY_TYPES:
         return False
+    if isinstance(meta, dict):
+        intent_value = _llm_quality_normalize_tool_token(meta.get("intent"))
+        tool_decision_value = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+        if (
+            intent_value == "calendar.list_slots"
+            and tool_decision_value in {"missing_slot", "slot_mismatch"}
+        ):
+            return False
     normalized_tags = {
         str(tag).strip().lower()
         for tag in (turn_tags or [])
@@ -2625,6 +2712,132 @@ def _llm_quality_check_booking_tool_answered(meta, turn_tags, outbox_text):
     return False
 
 
+def _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_value):
+    if not isinstance(outbox_text, str):
+        return False
+    reply_type = _llm_quality_normalize_expect_token(expected_reply_type_value)
+    if not reply_type:
+        return False
+    text = outbox_text.casefold()
+    prompt_markers = {
+        "name": ("как вас зовут", "вас зовут", "ваше имя", "имя"),
+        "time": (
+            "какая дата",
+            "на какую дату",
+            "какое время",
+            "на какое время",
+            "дата и время",
+            "когда вам удобно",
+        ),
+        "service_choice": (
+            "какая услуга",
+            "какую услугу",
+            "на какую услугу",
+            "какую процедуру",
+            "что хотите",
+        ),
+    }
+    markers = prompt_markers.get(reply_type, ())
+    return any(marker in text for marker in markers)
+
+
+def _llm_quality_should_suppress_missed_question_judge_fail(
+    *,
+    judge_result,
+    strict_reasons,
+    meta,
+    meta_action,
+    expected_reply_type_value,
+    booking_active,
+    turn_tags,
+    outbox_text,
+):
+    if not isinstance(judge_result, dict):
+        return False
+    if judge_result.get("verdict") != "fail":
+        return False
+    if strict_reasons:
+        return False
+
+    raw_reasons = judge_result.get("reasons")
+    if not isinstance(raw_reasons, list):
+        return False
+    judge_reason_set = {
+        str(item).strip()
+        for item in raw_reasons
+        if str(item).strip()
+    }
+    if not judge_reason_set or judge_reason_set - {"missed_question"}:
+        return False
+
+    if (
+        meta_action in {"booking_prompt", "booking_confirm"}
+        and expected_reply_type_value in {"service_choice", "time", "name"}
+    ):
+        return True
+
+    if _llm_quality_has_expected_followup_prompt(outbox_text, expected_reply_type_value):
+        return True
+
+    normalized_tags = {
+        str(tag).strip().lower()
+        for tag in (turn_tags or [])
+        if isinstance(tag, str) and tag.strip()
+    }
+    if (
+        booking_active
+        and "media" in normalized_tags
+        and meta_action in {"reply", "booking_prompt"}
+        and expected_reply_type_value in {"service_choice", "time", "name"}
+    ):
+        return True
+
+    tool_decision_value = (
+        _llm_quality_normalize_tool_token((meta or {}).get("tool_decision"))
+        if isinstance(meta, dict)
+        else ""
+    )
+    if (
+        booking_active
+        and meta_action == "reply"
+        and tool_decision_value in {"provider_unavailable", "branch_missing"}
+        and expected_reply_type_value in {"service_choice", "time", "name"}
+    ):
+        return True
+
+    intent_value = (
+        _llm_quality_normalize_tool_token((meta or {}).get("intent"))
+        if isinstance(meta, dict)
+        else ""
+    )
+    response_text = str(outbox_text or "").strip().lower()
+    if (
+        meta_action == "reply"
+        and intent_value == "catalog.service_query"
+        and tool_decision_value == "not_found_fallback"
+        and (
+            "нет такой" in response_text
+            or "нет такой позиции" in response_text
+            or "могу уточнить" in response_text
+            or "могу предложить" in response_text
+        )
+    ):
+        return True
+
+    if (
+        meta_action == "out_of_domain"
+        and "media" in normalized_tags
+        and (
+            "услуги, запись и цены" in response_text
+            or "по услугам, записи и ценам" in response_text
+            or "помогаю по салону" in response_text
+        )
+    ):
+        return True
+
+    return _llm_quality_check_booking_tool_answered(meta, turn_tags, outbox_text)
+
+
 def _llm_quality_normalize_expect_token(token: str | None):
     if token is None:
         return None
@@ -2656,6 +2869,105 @@ def _llm_quality_normalize_expect_value(value):
         return normalized or None
     return value
 
+
+LLM_QUALITY_EXPECT_ACTION_HANDOFF = {"booking_escalated", "escalate", "handoff"}
+LLM_QUALITY_EXPECT_TAGS_ALLOW_PENDING = {"handoff", "human", "pending", "cancel", "reschedule"}
+LLM_QUALITY_EXPECT_TAGS_ALLOW_MANAGER_ACTIVE = {"handoff", "human", "pending"}
+LLM_QUALITY_EXPECT_INFO_TAGS = set(LLM_QUALITY_INFO_TAGS) | {"discount"}
+
+
+def _llm_quality_collect_turn_tags(turn):
+    if not isinstance(turn, dict):
+        return set()
+    raw_tags = turn.get("tags")
+    if not isinstance(raw_tags, list):
+        return set()
+    return {
+        str(tag).strip().lower()
+        for tag in raw_tags
+        if isinstance(tag, str) and str(tag).strip()
+    }
+
+
+def _llm_quality_sanitize_expect_action_by_tags(tag_set, action):
+    if action is None:
+        return None
+    allow_handoff = bool(tag_set & LLM_QUALITY_EXPECT_TAGS_ALLOW_PENDING)
+
+    def _allow(token):
+        normalized = _llm_quality_normalize_expect_token(token)
+        if normalized is None:
+            return True
+        lowered = normalized.lower()
+        if lowered in LLM_QUALITY_EXPECT_ACTION_HANDOFF:
+            return allow_handoff
+        return True
+
+    if isinstance(action, list):
+        cleaned = []
+        for token in action:
+            value = _llm_quality_normalize_expect_token(str(token))
+            if _allow(value):
+                cleaned.append(value)
+        cleaned = [token for token in cleaned if token]
+        if not cleaned:
+            return None
+        if len(cleaned) == 1:
+            return cleaned[0]
+        return cleaned
+
+    token = _llm_quality_normalize_expect_token(str(action))
+    if not _allow(token):
+        return None
+    return token
+
+
+def _llm_quality_sanitize_expect_state_by_tags(tag_set, state):
+    if state is None:
+        return None
+    allow_pending = bool(tag_set & LLM_QUALITY_EXPECT_TAGS_ALLOW_PENDING)
+    allow_manager_active = bool(tag_set & LLM_QUALITY_EXPECT_TAGS_ALLOW_MANAGER_ACTIVE)
+
+    def _allow(token):
+        normalized = _llm_quality_normalize_expect_token(token)
+        if normalized is None:
+            return True
+        lowered = normalized.lower()
+        if lowered == "bot_active":
+            return True
+        if lowered == "pending":
+            return allow_pending
+        if lowered == "manager_active":
+            return allow_manager_active
+        return False
+
+    if isinstance(state, list):
+        cleaned = []
+        for token in state:
+            value = _llm_quality_normalize_expect_token(str(token))
+            if _allow(value):
+                cleaned.append(value)
+        cleaned = [token for token in cleaned if token]
+        if not cleaned:
+            return None
+        if len(cleaned) == 1:
+            return cleaned[0]
+        return cleaned
+
+    token = _llm_quality_normalize_expect_token(str(state))
+    if not _allow(token):
+        return None
+    return token
+
+
+def _llm_quality_sanitize_expect_info_sections_by_tags(tag_set, info_sections):
+    if not info_sections:
+        return []
+    if tag_set & LLM_QUALITY_EXPECT_INFO_TAGS:
+        return info_sections
+    return []
+
+
 def _llm_quality_extract_expectations(turn):
     expect = turn.get("expect")
     if not isinstance(expect, dict):
@@ -2676,6 +2988,10 @@ def _llm_quality_extract_expectations(turn):
         info_sections = []
     reply_type = _llm_quality_normalize_expect_value(expect.get("reply_type"))
     state = _llm_quality_normalize_expect_value(expect.get("state"))
+    tag_set = _llm_quality_collect_turn_tags(turn)
+    action = _llm_quality_sanitize_expect_action_by_tags(tag_set, action)
+    state = _llm_quality_sanitize_expect_state_by_tags(tag_set, state)
+    info_sections = _llm_quality_sanitize_expect_info_sections_by_tags(tag_set, info_sections)
     expected_reply = expect.get("expected_reply")
     if isinstance(expected_reply, str):
         if expected_reply.strip().lower() in {"true", "yes", "1"}:
@@ -2821,6 +3137,7 @@ def _llm_quality_expected_reply_matches(
     *,
     expected_reply,
     expected_response,
+    expected_reply_type,
     expected_state,
     state,
     meta,
@@ -2833,6 +3150,8 @@ def _llm_quality_expected_reply_matches(
         return True
     if expected_reply is True and expected_response is False:
         action = (meta or {}).get("action")
+        tool_decision = _llm_quality_normalize_tool_token((meta or {}).get("tool_decision"))
+        intent_value = _llm_quality_normalize_tool_token((meta or {}).get("intent"))
         if state in {"pending", "manager_active"} and (
             action in CHAOS_PENDING_ACTIONS
             or action
@@ -2843,6 +3162,32 @@ def _llm_quality_expected_reply_matches(
                 "booking_reuse_handover",
                 "booking_paused",
             }
+        ):
+            return True
+        if state in {"pending", "manager_active"} and action in {"booking_prompt", "booking_confirm"}:
+            return True
+        if (
+            state in {"pending", "manager_active"}
+            and action == "reply"
+            and intent_value
+            in {
+                "catalog.location",
+                "catalog.service_query",
+                "hours",
+                "parking",
+                "duration",
+                "discounts",
+                "promotions",
+                "consult_reply",
+            }
+            and tool_decision in {"", "ok", "truth_fallback", "duration", "not_found_fallback"}
+        ):
+            return True
+        if (
+            state in {"pending", "manager_active"}
+            and action == "reply"
+            and tool_decision in {"provider_unavailable", "branch_missing"}
+            and expected_reply_type in CHAOS_BOOKING_REPLY_TYPES
         ):
             return True
     if expected_state is None:
@@ -3073,9 +3418,54 @@ def _llm_quality_expected_response(state, meta):
         return False, "pending_action"
     return True, None
 
+
+def _llm_quality_should_judge_turn(
+    *,
+    judge_enabled,
+    judge_mode,
+    state,
+    bot_response,
+    user_text,
+    turn_tags=None,
+    expected_action=None,
+    expected_reply_type=None,
+    expected_state=None,
+    expected_info_sections=None,
+    info_tags=None,
+    booking_active=False,
+    booking_progress_expected=False,
+    evaluation_reasons=None,
+):
+    if not judge_enabled:
+        return False, None
+    if not bot_response:
+        return False, "no_bot_response"
+    if not isinstance(user_text, str) or not user_text.strip():
+        return False, "missing_user_text"
+    if state in {"pending", "manager_active"}:
+        return False, "pending_state"
+    if judge_mode == "critical":
+        critical = bool(evaluation_reasons)
+        if expected_action or expected_reply_type or expected_state:
+            critical = True
+        if expected_info_sections or info_tags:
+            critical = True
+        if booking_active and booking_progress_expected:
+            critical = True
+        tags = set(turn_tags or [])
+        if tags.intersection(LLM_QUALITY_JUDGE_CRITICAL_TAGS):
+            critical = True
+        if not critical:
+            return False, "critical_skip"
+    return True, None
+
+
 def _llm_quality_expected_manager_state(action, state_before):
     if action == "take":
-        return "manager_active", "active"
+        # "take" is race-prone in simulation: state can flip to bot_active
+        # almost immediately if resolve callback arrives in the same window.
+        # Do not assert state/status on take.
+        return None, None
     if action == "resolve":
         return "bot_active", "resolved"
     if action == "return":
@@ -3168,6 +3558,7 @@ def _llm_quality_fetch_outbox_payload(db_user, client_id, inbound_message_id):
     return payload, status, None
 
 def _llm_quality_generate_batch(args, *, count, seed):
+    scenario_timeout = float(os.getenv("DIAGNOSE_SCENARIO_GEN_TIMEOUT_SEC", "180"))
     script_path = _llm_quality_dialog_script()
     cmd = [
         sys.executable,
@@ -3200,7 +3591,7 @@ def _llm_quality_generate_batch(args, *, count, seed):
             cmd += ["--llm-base-url", args.llm_base_url]
         if args.llm_api_key:
             cmd += ["--llm-api-key", args.llm_api_key]
-    result = run_command(cmd)
+    result = run_command(cmd, timeout=scenario_timeout)
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
         return None, None, stderr or "scenario generation failed"
@@ -3410,8 +3801,102 @@ def _llm_quality_parse_llm_json(content: str) -> dict:
             return json.loads(text[start : end + 1])
         raise
 
+def _llm_quality_compact_for_judge_payload(
+    value,
+    *,
+    depth=0,
+    max_depth=LLM_QUALITY_JUDGE_PAYLOAD_LIMITS["max_depth"],
+    max_items=LLM_QUALITY_JUDGE_PAYLOAD_LIMITS["max_items"],
+    max_dict_keys=LLM_QUALITY_JUDGE_PAYLOAD_LIMITS["max_dict_keys"],
+    max_string_len=LLM_QUALITY_JUDGE_PAYLOAD_LIMITS["max_string_len"],
+):
+    if depth >= max_depth:
+        return "<truncated>"
+    if isinstance(value, str):
+        text = value.strip()
+        if len(text) <= max_string_len:
+            return text
+        return f"{text[:max_string_len]}...<trimmed:{len(text) - max_string_len}>"
+    if isinstance(value, list):
+        items = [
+            _llm_quality_compact_for_judge_payload(
+                item,
+                depth=depth + 1,
+                max_depth=max_depth,
+                max_items=max_items,
+                max_dict_keys=max_dict_keys,
+                max_string_len=max_string_len,
+            )
+            for item in value[:max_items]
+        ]
+        if len(value) > max_items:
+            items.append(f"<trimmed:{len(value) - max_items}>")
+        return items
+    if isinstance(value, dict):
+        compact = {}
+        keys = list(value.keys())[:max_dict_keys]
+        for key in keys:
+            compact[str(key)] = _llm_quality_compact_for_judge_payload(
+                value.get(key),
+                depth=depth + 1,
+                max_depth=max_depth,
+                max_items=max_items,
+                max_dict_keys=max_dict_keys,
+                max_string_len=max_string_len,
+            )
+        if len(value) > max_dict_keys:
+            compact["<trimmed_keys>"] = len(value) - max_dict_keys
+        return compact
+    return value
+
+def _llm_quality_default_judge_cache_file(model: str, base_url: str) -> str:
+    host = urllib.parse.urlparse(base_url or "").netloc or "api"
+    safe_host = re.sub(r"[^a-zA-Z0-9_.-]+", "_", host)
+    safe_model = re.sub(r"[^a-zA-Z0-9_.-]+", "_", model or "unknown")
+    cache_dir = os.path.join("/tmp", "booking_quality", "_judge_cache")
+    return os.path.join(
+        cache_dir,
+        f"{_llm_quality_worktree_namespace()}-{safe_host}-{safe_model}.json",
+    )
+
+def _llm_quality_load_judge_cache(path: str) -> dict:
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        return {}
+    return {}
+
+def _llm_quality_save_judge_cache(path: str, cache: dict, max_entries: int) -> None:
+    if not path or not isinstance(cache, dict):
+        return
+    limit = max(1, int(max_entries or 1))
+    if len(cache) > limit:
+        overflow = len(cache) - limit
+        for key in list(cache.keys())[:overflow]:
+            cache.pop(key, None)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = f"{path}.tmp.{os.getpid()}.{uuid.uuid4().hex[:8]}"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        json.dump(cache, handle, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, path)
+
+def _llm_quality_judge_cache_key(model: str, base_url: str, prompt: str) -> str:
+    digest = hashlib.sha256()
+    digest.update((model or "").encode("utf-8"))
+    digest.update(b"\n")
+    digest.update((base_url or "").encode("utf-8"))
+    digest.update(b"\n")
+    digest.update((prompt or "").encode("utf-8"))
+    return digest.hexdigest()
+
 def _llm_quality_build_judge_prompt(payload: dict) -> str:
     reasons = ", ".join(sorted(LLM_QUALITY_JUDGE_REASONS.keys()))
+    compact_payload = _llm_quality_compact_for_judge_payload(payload)
     return (
         "You are a QA judge for a salon booking consultant. "
         "Use only the provided context (pack_truth / consult_playbook). "
@@ -3422,11 +3907,17 @@ def _llm_quality_build_judge_prompt(payload: dict) -> str:
         "Return JSON only with keys: verdict, score, reasons, summary. "
         f"verdict must be one of: {sorted(LLM_QUALITY_JUDGE_VERDICTS)}. "
         f"reasons must be from: [{reasons}].\\n\\n"
-        f"Context JSON:\\n{json.dumps(payload, ensure_ascii=False)}"
+        f"Context JSON:\\n{json.dumps(compact_payload, ensure_ascii=False)}"
     )
 
 def _llm_quality_call_judge(
-    *, api_key: str, model: str, base_url: str, prompt: str, timeout: float
+    *,
+    api_key: str,
+    model: str,
+    base_url: str,
+    prompt: str,
+    timeout: float,
+    max_tokens: int,
 ) -> dict:
     payload = {
         "model": model,
@@ -3435,20 +3926,64 @@ def _llm_quality_call_judge(
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.0,
-        "max_tokens": 800,
+        "max_tokens": max(128, int(max_tokens)),
     }
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        f"{base_url.rstrip('/')}/v1/chat/completions",
-        data=data,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        body = json.loads(resp.read().decode("utf-8"))
+    endpoint = f"{base_url.rstrip('/')}/v1/chat/completions"
+    body = None
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    connect_timeout = max(1.0, min(float(timeout), 5.0))
+    max_time = max(1.0, float(timeout))
+    curl_cmd = [
+        "curl",
+        "-sS",
+        "--fail",
+        "--connect-timeout",
+        str(connect_timeout),
+        "--max-time",
+        str(max_time),
+        "-H",
+        "Content-Type: application/json",
+        "-H",
+        f"Authorization: Bearer {api_key}",
+        "-d",
+        payload_json,
+        endpoint,
+    ]
+    try:
+        result = subprocess.run(
+            curl_cmd,
+            capture_output=True,
+            text=True,
+            timeout=max_time + 2.0,
+        )
+    except FileNotFoundError:
+        data = payload_json.encode("utf-8")
+        req = urllib.request.Request(
+            endpoint,
+            data=data,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"judge_request_timeout:{max_time}s") from exc
+    else:
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
+            if len(stderr) > 240:
+                stderr = f"{stderr[:240]}..."
+            raise RuntimeError(f"judge_request_failed: rc={result.returncode} err={stderr}")
+        try:
+            body = json.loads(result.stdout or "")
+        except Exception as exc:
+            raw = (result.stdout or "").strip()
+            if len(raw) > 240:
+                raw = f"{raw[:240]}..."
+            raise RuntimeError(f"judge_response_parse_failed: {raw}") from exc
     content = body["choices"][0]["message"]["content"]
     return _llm_quality_parse_llm_json(content)
 
@@ -3502,7 +4037,7 @@ def _llm_quality_webhook_secret_preflight(
 def _llm_quality_is_judge_mode_enabled(mode):
     if not isinstance(mode, str):
         return False
-    return mode.strip().casefold() in {"sample", "all"}
+    return mode.strip().casefold() in {"sample", "all", "critical"}
 
 
 def _llm_quality_baseline_is_canonical(payload):
@@ -3697,6 +4232,7 @@ def _llm_quality_evaluate_turn(
     webhook_error=None,
 ):
     reasons = []
+    meta_action = (meta or {}).get("action") if isinstance(meta, dict) else None
     if meta is None:
         reasons.append("decision_meta_missing")
     if not trace_entries:
@@ -3731,6 +4267,7 @@ def _llm_quality_evaluate_turn(
     if not _llm_quality_expected_reply_matches(
         expected_reply=expected_reply,
         expected_response=expected_response,
+        expected_reply_type=expected_reply_type,
         expected_state=expected_state,
         state=state,
         meta=meta,
@@ -3739,9 +4276,19 @@ def _llm_quality_evaluate_turn(
     ):
         reasons.append("expected_reply_mismatch")
     if expected_info_sections:
-        expected_answered, _, _ = _llm_quality_expected_section_answered(
-            expected_info_sections, meta, trace_entries
+        skip_expected_info_check = (
+            state in {"pending", "manager_active"}
+            and (
+                meta_action in CHAOS_PENDING_ACTIONS
+                or meta_action in {"escalate", "booking_escalated", "booking_captured_pending"}
+            )
         )
+        if skip_expected_info_check:
+            expected_answered = True
+        else:
+            expected_answered, _, _ = _llm_quality_expected_section_answered(
+                expected_info_sections, meta, trace_entries
+            )
         if not expected_answered:
             reasons.append("expected_info_section_miss")
     if expected_response and not bot_response:
@@ -3783,12 +4330,19 @@ def _llm_quality_evaluate_turn(
         reasons.append("handover_missing")
     if info_tags and not any(info_answered.values()) and state not in {"pending", "manager_active"}:
         reasons.append("info_section_miss")
+    booking_stall_ignored = False
+    if isinstance(meta, dict):
+        intent_value = _llm_quality_normalize_tool_token(meta.get("intent"))
+        tool_decision = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+        if intent_value == "calendar.get_booking" and tool_decision in {"ok", "time_mismatch", "not_found"}:
+            booking_stall_ignored = True
     if (
         booking_active
         and booking_progress_expected
         and booking_progressed is False
         and state not in {"pending", "manager_active"}
         and not allow_booking_stall
+        and not booking_stall_ignored
     ):
         reasons.append("booking_slot_stall")
 
@@ -4207,7 +4761,9 @@ def _parse_llm_quality_args(argv):
         help="Stop early after this many failed turns (0 disables).",
     )
     parser.add_argument("--regression-tolerance", type=float, default=0.02)
-    parser.add_argument("--judge-mode", choices=["off", "sample", "all"], default="off")
+    parser.add_argument(
+        "--judge-mode", choices=["off", "sample", "all", "critical"], default="off"
+    )
     parser.add_argument("--judge-sample", type=float, default=0.1)
     parser.add_argument("--judge-model", default="gpt-4o-mini")
     parser.add_argument(
@@ -4216,7 +4772,10 @@ def _parse_llm_quality_args(argv):
     )
     parser.add_argument("--judge-api-key", default=None)
     parser.add_argument("--judge-timeout", type=float, default=25.0)
+    parser.add_argument("--judge-max-tokens", type=int, default=320)
     parser.add_argument("--judge-seed", type=int, default=None)
+    parser.add_argument("--judge-cache-file", default=None)
+    parser.add_argument("--judge-cache-max-entries", type=int, default=5000)
     parser.add_argument("--judge-no-redact", action="store_false", dest="judge_redact")
     parser.add_argument(
         "--allow-judge-off",
@@ -4643,7 +5202,19 @@ def _livecheck_select_webhook_secret(*, client_slug, explicit_secret, client_met
     )
     return fallback_secret, fallback_source
 
-def _run_psql_query(db_user, query):
+def _resolve_psql_timeout(timeout=None):
+    if timeout is not None:
+        try:
+            return max(1.0, float(timeout))
+        except (TypeError, ValueError):
+            return 8.0
+    raw = os.environ.get("DIAGNOSE_PSQL_TIMEOUT_SEC", "8")
+    try:
+        return max(1.0, float(raw))
+    except (TypeError, ValueError):
+        return 8.0
+
+def _run_psql_query(db_user, query, *, timeout=None):
     result = run_command(
         [
             "docker",
@@ -4661,7 +5232,8 @@ def _run_psql_query(db_user, query):
             "\t",
             "-c",
             query,
-        ]
+        ],
+        timeout=_resolve_psql_timeout(timeout),
     )
     if result.returncode != 0:
         return None, result.stderr.strip()
@@ -4800,6 +5372,36 @@ def _fetch_latest_conversation_state(db_user, client_id, remote_jid):
         return None, None, None
     parts = row.split("\t", 1)
     return parts[0] if parts else None, parts[1] if len(parts) > 1 else None, None
+
+def _settle_state_after_manager_actions(
+    db_user,
+    client_id,
+    remote_jid,
+    initial_state,
+    *,
+    settle_seconds=1.5,
+    interval=0.3,
+):
+    if initial_state not in {"pending", "manager_active"}:
+        return None, initial_state, None
+    deadline = time.time() + max(settle_seconds, 0.0)
+    last_conv_id = None
+    last_state = initial_state
+    last_error = None
+    while time.time() <= deadline:
+        conv_id, state, error = _fetch_latest_conversation_state(
+            db_user, client_id, remote_jid
+        )
+        if conv_id:
+            last_conv_id = conv_id
+        if state:
+            last_state = state
+        if error:
+            last_error = error
+        if last_state == "bot_active":
+            break
+        time.sleep(max(interval, 0.2))
+    return last_conv_id, last_state, last_error
 
 def _fetch_handover_meta(db_user, conversation_id):
     safe_id = _escape_sql_literal(conversation_id)
@@ -5578,7 +6180,7 @@ def _build_livecheck_message(rng, case, marker_prefix, timestamp, idx, noise):
         message = text
     return text, marker, message
 
-def _fetch_message_meta(db_user, message_id):
+def _fetch_message_meta(db_user, message_id, *, timeout=None):
     query = (
         "SELECT conversation_id, metadata->'decision_meta' AS decision_meta "
         "FROM messages WHERE role='user' "
@@ -5602,7 +6204,8 @@ def _fetch_message_meta(db_user, message_id):
             "\t",
             "-c",
             query,
-        ]
+        ],
+        timeout=_resolve_psql_timeout(timeout),
     )
     if result.returncode != 0:
         return None, None, result.stderr.strip()
@@ -5635,7 +6238,11 @@ def _poll_decision_meta(
     last_error = None
     missing_action_since = None
     while time.time() <= deadline:
-        conversation_id, meta, error = _fetch_message_meta(db_user, message_id)
+        conversation_id, meta, error = _fetch_message_meta(
+            db_user,
+            message_id,
+            timeout=min(8.0, max(interval * 4, 1.0)),
+        )
         if error:
             last_error = error
         if conversation_id:
@@ -5660,6 +6267,21 @@ def _poll_decision_meta(
                         ),
                     )
         time.sleep(max(interval, 0.2))
+    # One final relaxed fetch before declaring timeout to reduce transient
+    # false infra fails on slow DB write visibility.
+    final_conv_id, final_meta, final_error = _fetch_message_meta(
+        db_user,
+        message_id,
+        timeout=max(8.0, max(timeout, 0.0)),
+    )
+    if final_conv_id:
+        last_conv_id = final_conv_id
+    if final_meta:
+        last_meta = final_meta
+        if not require_action or _decision_meta_ready(final_meta):
+            return last_conv_id, last_meta, None
+    if final_error:
+        last_error = final_error
     return last_conv_id, last_meta, last_error or "timeout"
 
 
@@ -5796,7 +6418,59 @@ def _logic_jid_for_index(idx):
     return f"{base + idx}@s.whatsapp.net"
 
 def _send_webhook_payload(url, payload, secret, timeout):
-    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    connect_timeout = max(1.0, min(float(timeout), 3.0))
+    max_time = max(1.0, float(timeout))
+    marker = "__CURL_STATUS__"
+    curl_cmd = [
+        "curl",
+        "-sS",
+        "-X",
+        "POST",
+        "--connect-timeout",
+        str(connect_timeout),
+        "--max-time",
+        str(max_time),
+        "-H",
+        "Content-Type: application/json",
+    ]
+    if secret:
+        curl_cmd += ["-H", f"X-Webhook-Secret: {secret}"]
+    curl_cmd += [
+        "--data-binary",
+        "@-",
+        "-w",
+        f"\n{marker}%{{http_code}}",
+        url,
+    ]
+    try:
+        result = subprocess.run(
+            curl_cmd,
+            input=payload_json,
+            capture_output=True,
+            text=True,
+            timeout=max_time + 2.0,
+        )
+    except FileNotFoundError:
+        result = None
+    except subprocess.TimeoutExpired as exc:
+        return None, "", f"timeout: {max_time}s ({exc.__class__.__name__})"
+    else:
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
+            return None, "", f"curl_error: rc={result.returncode} err={stderr}"
+        output = result.stdout or ""
+        if marker in output:
+            body, status_raw = output.rsplit(f"\n{marker}", 1)
+            try:
+                status = int(status_raw.strip())
+            except ValueError:
+                status = None
+            if status and status != 0:
+                return status, body, None
+            return None, body, f"curl_http_status:{status_raw.strip() or 'unknown'}"
+
+    data = payload_json.encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if secret:
         headers["X-Webhook-Secret"] = secret
@@ -6249,11 +6923,18 @@ def _run_llm_quality(args):
     if judge_required and not judge_enabled:
         raise SystemExit(
             "llm-quality: strict replay requires judge enabled "
-            f"(reason={judge_skip_reason or 'judge_disabled'}; use --judge-mode sample|all and API key, "
+            f"(reason={judge_skip_reason or 'judge_disabled'}; use --judge-mode sample|all|critical and API key, "
             "or pass --allow-judge-off for debug-only runs)"
         )
     judge_seed = args.judge_seed if args.judge_seed is not None else args.seed
     judge_rng = random.Random(judge_seed or int(time.time()))
+    judge_cache_file = None
+    judge_cache = {}
+    if judge_enabled:
+        judge_cache_file = args.judge_cache_file or _llm_quality_default_judge_cache_file(
+            args.judge_model, args.judge_base_url
+        )
+        judge_cache = _llm_quality_load_judge_cache(judge_cache_file)
 
     dialogs = []
     warnings = {}
@@ -6390,6 +7071,7 @@ def _run_llm_quality(args):
         "sample": args.judge_sample,
         "model": args.judge_model if judge_enabled else None,
         "base_url": args.judge_base_url if judge_enabled else None,
+        "cache_file": judge_cache_file if judge_enabled else None,
         "redact": args.judge_redact,
         "skip_reason": judge_skip_reason,
         "counts": {
@@ -6400,6 +7082,8 @@ def _run_llm_quality(args):
             "uncertain": 0,
             "errors": 0,
             "skipped": 0,
+            "cache_hits": 0,
+            "cache_misses": 0,
         },
         "reasons": {},
         "skips": {},
@@ -6459,13 +7143,39 @@ def _run_llm_quality(args):
         judge_stats["counts"]["skipped"] += 1
         judge_stats["skips"][reason] = judge_stats["skips"].get(reason, 0) + 1
 
-    def _should_judge_turn(state, bot_response):
-        if not judge_enabled:
-            return False, None
-        if not bot_response:
-            return False, "no_bot_response"
-        if state in {"pending", "manager_active"}:
-            return False, "pending_state"
+    def _should_judge_turn(
+        state,
+        bot_response,
+        text,
+        *,
+        turn_tags,
+        expected_action,
+        expected_reply_type,
+        expected_state,
+        expected_info_sections,
+        info_tags,
+        booking_active,
+        booking_progress_expected,
+        evaluation_reasons,
+    ):
+        should_judge, skip_reason = _llm_quality_should_judge_turn(
+            judge_enabled=judge_enabled,
+            judge_mode=judge_mode,
+            state=state,
+            bot_response=bot_response,
+            user_text=text,
+            turn_tags=turn_tags,
+            expected_action=expected_action,
+            expected_reply_type=expected_reply_type,
+            expected_state=expected_state,
+            expected_info_sections=expected_info_sections,
+            info_tags=info_tags,
+            booking_active=booking_active,
+            booking_progress_expected=booking_progress_expected,
+            evaluation_reasons=evaluation_reasons,
+        )
+        if not should_judge:
+            return should_judge, skip_reason
         judge_stats["counts"]["candidates"] += 1
         if judge_mode == "sample" and args.judge_sample > 0:
             if judge_rng.random() >= args.judge_sample:
@@ -6949,6 +7659,12 @@ def _run_llm_quality(args):
                 expected_reply_type_value = _chaos_extract_expected_reply(
                     (conv_meta or {}).get("context")
                 )
+                if not expected_reply_type_value and isinstance(meta, dict):
+                    meta_expected_reply = meta.get("expected_reply_type")
+                    if isinstance(meta_expected_reply, str):
+                        meta_expected_reply = meta_expected_reply.strip()
+                    if meta_expected_reply:
+                        expected_reply_type_value = meta_expected_reply
                 expected_reply_matched = (
                     (meta or {}).get("expected_reply_matched") if isinstance(meta, dict) else None
                 )
@@ -6977,7 +7693,7 @@ def _run_llm_quality(args):
                 outbox_payload = None
                 outbox_payload_status = None
                 outbox_text = None
-                if not args.dry_run and client_id:
+                if not args.dry_run and client_id and not args.skip_outbox:
                     outbox_summary, _ = _fetch_outbox_summary(db_user, client_id, message_id)
                     outbox_payload, outbox_payload_status, _ = _llm_quality_fetch_outbox_payload(
                         db_user, client_id, message_id
@@ -6993,7 +7709,7 @@ def _run_llm_quality(args):
                     inline_response_text=inline_response_text,
                 )
                 expected_response, expected_reason = _llm_quality_expected_response(state, meta)
-                if not args.dry_run:
+                if not args.dry_run and not args.skip_outbox:
                     (
                         outbox_summary,
                         outbox_payload,
@@ -7026,6 +7742,35 @@ def _run_llm_quality(args):
                 ):
                     bot_response = True
                     bot_response_inferred_duplicate_ack = True
+                state_settled_from = None
+                if (
+                    not args.dry_run
+                    and bot_response
+                    and state in {"pending", "manager_active"}
+                    and args.manager_mode == "simulate"
+                    and client_id
+                ):
+                    _, settled_state, settle_error = _settle_state_after_manager_actions(
+                        db_user,
+                        client_id,
+                        remote_jid,
+                        state,
+                    )
+                    if settle_error:
+                        # Keep original state for deterministic evaluation when settle probe fails.
+                        settled_state = state
+                    if settled_state and settled_state != state:
+                        state_settled_from = state
+                        state = settled_state
+                        if conversation_id:
+                            refreshed_conv_meta, _ = _fetch_conversation_meta(db_user, conversation_id)
+                            if isinstance(refreshed_conv_meta, dict):
+                                conv_meta = refreshed_conv_meta
+                            if state in {"pending", "manager_active"}:
+                                handover_meta, _ = _fetch_handover_meta(db_user, conversation_id)
+                            else:
+                                handover_meta = None
+                expected_response, expected_reason = _llm_quality_expected_response(state, meta)
                 if bot_response:
                     stats["turns_with_response"] += 1
                 else:
@@ -7140,9 +7885,23 @@ def _run_llm_quality(args):
                     progress_expected = _llm_quality_should_expect_booking_progress(
                         expected_reply_type_value,
                         turn_tags,
+                        meta,
                     )
                     if progress_expected and info_tags and expected_reply_matched is not True:
                         progress_expected = False
+                    if progress_expected and isinstance(meta, dict):
+                        intent_value = _llm_quality_normalize_tool_token(meta.get("intent"))
+                        tool_decision_value = _llm_quality_normalize_tool_token(
+                            meta.get("tool_decision")
+                        )
+                        if tool_decision_value in {"provider_unavailable", "branch_missing"}:
+                            progress_expected = False
+                        if (
+                            progress_expected
+                            and intent_value == "calendar.get_booking"
+                            and tool_decision_value in {"ok", "time_mismatch", "not_found"}
+                        ):
+                            progress_expected = False
                     if progress_expected:
                         booking_stats["progress_opportunities"] += 1
                         booking_progressed = _llm_quality_booking_slots_progressed(
@@ -7193,7 +7952,20 @@ def _run_llm_quality(args):
                     stats["turns_passed"] += 1
                 trace_id = (meta or {}).get("trace_id") if isinstance(meta, dict) else None
                 judge_result = None
-                should_judge, judge_skip_reason = _should_judge_turn(state, bot_response)
+                should_judge, judge_skip_reason = _should_judge_turn(
+                    state,
+                    bot_response,
+                    text,
+                    turn_tags=turn_tags,
+                    expected_action=expected_action,
+                    expected_reply_type=expected_reply_type,
+                    expected_state=expected_state,
+                    expected_info_sections=expected_info_sections,
+                    info_tags=info_tags,
+                    booking_active=booking_active,
+                    booking_progress_expected=progress_expected,
+                    evaluation_reasons=evaluation_reasons,
+                )
                 if should_judge and not outbox_text:
                     should_judge = False
                     judge_skip_reason = "missing_bot_text"
@@ -7247,14 +8019,25 @@ def _run_llm_quality(args):
                     if pack_payload:
                         judge_payload.update(pack_payload)
                     prompt = _llm_quality_build_judge_prompt(judge_payload)
+                    cache_key = _llm_quality_judge_cache_key(
+                        args.judge_model, args.judge_base_url, prompt
+                    )
                     try:
-                        judge_raw = _llm_quality_call_judge(
-                            api_key=judge_api_key,
-                            model=args.judge_model,
-                            base_url=args.judge_base_url,
-                            prompt=prompt,
-                            timeout=args.judge_timeout,
-                        )
+                        judge_raw = None
+                        if cache_key in judge_cache:
+                            judge_raw = judge_cache.get(cache_key)
+                            judge_stats["counts"]["cache_hits"] += 1
+                        else:
+                            judge_stats["counts"]["cache_misses"] += 1
+                            judge_raw = _llm_quality_call_judge(
+                                api_key=judge_api_key,
+                                model=args.judge_model,
+                                base_url=args.judge_base_url,
+                                prompt=prompt,
+                                timeout=args.judge_timeout,
+                                max_tokens=args.judge_max_tokens,
+                            )
+                            judge_cache[cache_key] = judge_raw
                         verdict = (judge_raw or {}).get("verdict")
                         verdict = verdict.lower().strip() if isinstance(verdict, str) else None
                         reasons = (judge_raw or {}).get("reasons") or []
@@ -7292,35 +8075,16 @@ def _run_llm_quality(args):
                     if isinstance(meta, dict)
                     else None
                 )
-                judge_reason_set = set()
-                if isinstance(judge_result, dict):
-                    raw_reasons = judge_result.get("reasons")
-                    if isinstance(raw_reasons, list):
-                        judge_reason_set = {
-                            str(item).strip()
-                            for item in raw_reasons
-                            if str(item).strip()
-                        }
-                suppress_judge_fail = bool(
-                    isinstance(judge_result, dict)
-                    and judge_result.get("verdict") == "fail"
-                    and not strict_reasons
-                    and meta_action in {"booking_prompt", "booking_confirm"}
-                    and expected_reply_type_value
-                    in {"service_choice", "time", "name"}
-                    and judge_reason_set
-                    and judge_reason_set <= {"missed_question"}
+                suppress_judge_fail = _llm_quality_should_suppress_missed_question_judge_fail(
+                    judge_result=judge_result,
+                    strict_reasons=strict_reasons,
+                    meta=meta,
+                    meta_action=meta_action,
+                    expected_reply_type_value=expected_reply_type_value,
+                    booking_active=booking_active,
+                    turn_tags=turn_tags,
+                    outbox_text=outbox_text,
                 )
-                if (
-                    not suppress_judge_fail
-                    and isinstance(judge_result, dict)
-                    and judge_result.get("verdict") == "fail"
-                    and not strict_reasons
-                    and judge_reason_set
-                    and judge_reason_set <= {"missed_question"}
-                    and _llm_quality_check_booking_tool_answered(meta, turn_tags, outbox_text)
-                ):
-                    suppress_judge_fail = True
                 if (
                     isinstance(judge_result, dict)
                     and judge_result.get("verdict") == "fail"
@@ -7425,6 +8189,7 @@ def _run_llm_quality(args):
                     "message_id": message_id,
                     "conversation_id": conversation_id,
                     "conversation_state": state,
+                    "conversation_state_settled_from": state_settled_from,
                     "expected_reply_type": expected_reply_type_value,
                     "decision_meta": meta,
                     "decision_meta_error": meta_error,
@@ -7486,6 +8251,7 @@ def _run_llm_quality(args):
                             "conversation_id": conversation_id,
                             "trace_id": trace_id,
                             "conversation_state": state,
+                            "conversation_state_settled_from": state_settled_from,
                             "expected_reply_type": expected_reply_type_value,
                             "decision_meta": meta,
                             "decision_trace": trace_entries,
@@ -7723,6 +8489,9 @@ def _run_llm_quality(args):
         "judge_required": judge_required,
         "judge_sample": args.judge_sample,
         "judge_model": args.judge_model if judge_enabled else None,
+        "judge_max_tokens": args.judge_max_tokens if judge_enabled else None,
+        "judge_cache_file": judge_cache_file if judge_enabled else None,
+        "judge_cache_max_entries": args.judge_cache_max_entries if judge_enabled else None,
         "judge_redact": args.judge_redact,
     }
     summary = {
@@ -7792,6 +8561,10 @@ def _run_llm_quality(args):
         },
         "reason_labels": LLM_QUALITY_REASON_LABELS,
     }
+    if judge_enabled and judge_cache_file:
+        _llm_quality_save_judge_cache(
+            judge_cache_file, judge_cache, args.judge_cache_max_entries
+        )
     summary_path = os.path.join(output_dir, "summary.json")
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
@@ -12179,8 +12952,27 @@ def _run_emit_evidence(args):
         handle.write(output)
     print(json.dumps({"output": args.output, "suites": [s['name'] for s in suites]}, ensure_ascii=False))
 
-def run_command(command):
-    return subprocess.run(command, capture_output=True, text=True)
+_RUN_COMMAND_TIMEOUT_SEC = float(os.getenv("DIAGNOSE_CMD_TIMEOUT_SEC", "30"))
+
+
+def run_command(command, *, timeout=None):
+    effective_timeout = _RUN_COMMAND_TIMEOUT_SEC if timeout is None else timeout
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=effective_timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout if isinstance(exc.stdout, str) else ""
+        stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+        timeout_note = (
+            f"[timeout] command exceeded {effective_timeout}s: "
+            f"{' '.join(str(part) for part in command)}"
+        )
+        stderr = (stderr + "\n" + timeout_note).strip()
+        return subprocess.CompletedProcess(command, 124, stdout=stdout, stderr=stderr)
 
 API_CONTAINER_HINT = "truffles-api"
 

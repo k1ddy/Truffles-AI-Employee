@@ -57,6 +57,7 @@ def _load_evaluate_turn():
                 "LLM_QUALITY_OUTBOX_SUCCESS_STATUSES",
                 "LLM_QUALITY_OUTBOX_FAILURE_STATUSES",
                 "LLM_QUALITY_OUTBOX_PENDING_STATUSES",
+                "CHAOS_PENDING_ACTIONS",
             } & names:
                 selected_nodes.append(node)
         if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
@@ -83,12 +84,13 @@ def _load_expectation_helpers():
         "_llm_quality_state_matches_expected",
         "_llm_quality_action_matches_expected",
         "_llm_quality_expected_reply_matches",
+        "_llm_quality_normalize_tool_token",
     }
     selected_nodes = []
     for node in tree.body:
         if isinstance(node, ast.Assign):
             names = {target.id for target in node.targets if isinstance(target, ast.Name)}
-            if {"CHAOS_PENDING_ACTIONS"} & names:
+            if {"CHAOS_PENDING_ACTIONS", "CHAOS_BOOKING_REPLY_TYPES"} & names:
                 selected_nodes.append(node)
         if isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
             selected_nodes.append(node)
@@ -273,6 +275,58 @@ def test_booking_slot_stall_reported_in_bot_active_state():
         allow_booking_stall=False,
     )
     assert "booking_slot_stall" in reasons
+
+
+def test_booking_slot_stall_not_reported_for_calendar_get_booking_reply():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "reply", "intent": "calendar.get_booking", "tool_decision": "ok"},
+        trace_entries=[{"stage": "booking"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=True,
+        booking_progressed=False,
+        allow_booking_stall=False,
+    )
+    assert "booking_slot_stall" not in reasons
+
+
+def test_expected_info_section_miss_not_reported_for_pending_escalation():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "escalate"},
+        trace_entries=[{"stage": "policy_gate"}],
+        state="pending",
+        conv_meta={},
+        handover_meta={"handover_id": "h-1"},
+        bot_response=True,
+        expected_response=False,
+        expected_action=None,
+        expected_info_sections=["promotions"],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+    )
+    assert "expected_info_section_miss" not in reasons
 
 
 def test_missing_bot_reply_marks_outbox_failed_reason():
@@ -517,6 +571,7 @@ def test_expected_reply_fallback_allows_pending_transition():
     assert fn(
         expected_reply=True,
         expected_response=False,
+        expected_reply_type="time",
         expected_state="bot_active",
         state="pending",
         meta={"action": "escalate"},
@@ -531,9 +586,55 @@ def test_expected_reply_fallback_allows_manager_active_booking_escalated():
     assert fn(
         expected_reply=True,
         expected_response=False,
+        expected_reply_type="time",
         expected_state="bot_active",
         state="manager_active",
         meta={"action": "booking_escalated"},
         conv_meta={},
         handover_meta={},
+    )
+
+
+def test_expected_reply_fallback_allows_pending_provider_unavailable_booking_reply():
+    helpers = _load_expectation_helpers()
+    fn = helpers["_llm_quality_expected_reply_matches"]
+    assert fn(
+        expected_reply=True,
+        expected_response=False,
+        expected_reply_type="time",
+        expected_state="pending",
+        state="pending",
+        meta={"action": "reply", "tool_decision": "provider_unavailable"},
+        conv_meta={},
+        handover_meta={},
+    )
+
+
+def test_expected_reply_fallback_allows_pending_booking_prompt():
+    helpers = _load_expectation_helpers()
+    fn = helpers["_llm_quality_expected_reply_matches"]
+    assert fn(
+        expected_reply=True,
+        expected_response=False,
+        expected_reply_type="time",
+        expected_state=None,
+        state="pending",
+        meta={"action": "booking_prompt"},
+        conv_meta={},
+        handover_meta={},
+    )
+
+
+def test_expected_reply_fallback_allows_pending_info_reply():
+    helpers = _load_expectation_helpers()
+    fn = helpers["_llm_quality_expected_reply_matches"]
+    assert fn(
+        expected_reply=True,
+        expected_response=False,
+        expected_reply_type=None,
+        expected_state="bot_active",
+        state="pending",
+        meta={"action": "reply", "intent": "catalog.location", "tool_decision": "ok"},
+        conv_meta={},
+        handover_meta={"status": "active"},
     )
