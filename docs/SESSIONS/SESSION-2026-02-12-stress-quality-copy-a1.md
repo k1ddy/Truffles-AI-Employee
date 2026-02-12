@@ -16,12 +16,22 @@
   - Added digest tooling (`scripts/llm_quality_digest.py`) and regression tests for runner/judge/cache.
   - Collected replay evidence (`booking-replay-20260211-a1copy-v23-critical2`, `booking-replay-20260211-a1copy-v23-all1`).
   - Recorded infra blocker: webhook on `127.0.0.1:18084` timing out (no bytes up to 180s) during new all-run attempts.
+  - Fixed booking interrupt info-section normalization (`duration` now includes `service_duration` alias).
+  - Restored consult-return trace stability for long dialogs by pinning `consult_return` in decision-trace retention.
+  - Hardened consult-return trigger in intent decomposition with lexical booking fallback when LLM intent decomposition is unavailable.
+  - Opened PR #635 with commit `367e03f9` for these runtime/testability fixes.
 - next:
-  - Open PR with staged runner/test/runbook updates from this worktree.
+  - Monitor PR #635 CI (session-gate + deterministic suite) and merge after green.
+  - Continue remaining unstaged stress-quality diff as separate, scoped commits.
   - Keep baseline update blocked until canonical-valid all-run (`infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`).
 - evidence:
   - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-critical2/summary.json
   - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-all1/summary.json
   - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-all1/dialog_samples_last10.md
   - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-all1/digest.md
-- last_updated: 2026-02-12
+  - Local checks:
+    - `ruff check truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/trace.py`
+    - `python3 -m py_compile truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/decision.py`
+    - `pytest -q truffles-api/tests/test_message_endpoint.py truffles-api/tests/test_booking_chaos_dialogs.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_demo_salon_eval.py -q`
+    - `pytest -q truffles-api/tests/test_booking_quality_info_sections.py truffles-api/tests/test_booking_quality_progress_gate.py truffles-api/tests/test_intent.py truffles-api/tests/test_master_info_flow.py -q`
+- last_updated: 2026-02-12T01:20:00Z

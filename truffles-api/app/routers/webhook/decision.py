@@ -463,6 +463,7 @@ def _detect_intent_signals(message_text: str, *, timing_context: dict | None = N
     is_ack = legacy.is_acknowledgement_message(message_text)
     is_low_signal = legacy.is_low_signal_message(message_text)
     is_status_question = legacy.is_bot_status_question(message_text)
+    is_human_request = is_human_request_message(message_text)
 
     if intent_hint == Intent.GREETING:
         intent = Intent.GREETING
@@ -479,6 +480,9 @@ def _detect_intent_signals(message_text: str, *, timing_context: dict | None = N
     elif is_thanks:
         intent = Intent.THANKS
         legacy.logger.info("Intent shortcut: thanks")
+    elif is_human_request:
+        intent = Intent.HUMAN_REQUEST
+        legacy.logger.info("Intent shortcut: human_request (lexicon)")
     elif is_ack or is_low_signal:
         intent = Intent.OTHER
         legacy.logger.info("Intent shortcut: acknowledgement/low-signal -> other")
@@ -1396,11 +1400,24 @@ def _run_intent_decomposition(
     consult_interrupt_intents = (
         intent_decomp_set & legacy.CONSULT_INTERRUPT_INTENTS if intent_decomp_used else set()
     )
+    consult_context_active = bool(
+        isinstance(consult_context, dict)
+        and (
+            consult_context.get("topic")
+            or consult_context.get("question")
+            or consult_context.get("questions")
+        )
+    )
+    consult_booking_signal = bool(booking_signal)
+    if not consult_booking_signal and message_text:
+        consult_booking_signal = _is_booking_request(
+            message_text,
+            client_slug=client_slug,
+        )
     if (
-        current_goal == "consult"
-        and consult_context
+        consult_context_active
         and not consult_intent
-        and (consult_interrupt_intents or booking_signal)
+        and (consult_interrupt_intents or consult_booking_signal)
     ):
         consult_return_pending = True
         consult_return_reason = (
@@ -1936,12 +1953,28 @@ def _run_class_router_stage(
             )
             out_of_domain_signal = class_router_result["out_of_domain_signal"]
             in_signals = class_router_result.get("in_signals") or []
+    controller_booking_hint = False
+    controller_meta_hint = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
+    controller_output_hint = (
+        controller_meta_hint.get("output") if isinstance(controller_meta_hint, dict) else None
+    )
+    if isinstance(controller_output_hint, dict):
+        controller_goal_hint = controller_output_hint.get("goal")
+        controller_class_hint = controller_output_hint.get("class")
+        controller_booking_hint = (
+            isinstance(controller_goal_hint, str)
+            and controller_goal_hint.strip().casefold() in {"booking", "reschedule", "cancel_request"}
+        ) or (
+            isinstance(controller_class_hint, str)
+            and controller_class_hint.strip().casefold() == "booking"
+        )
     if (
         conversation.state == legacy.ConversationState.BOT_ACTIVE.value
         and intent == Intent.OTHER
         and not expected_reply_shortcircuit
         and not in_signals
         and not out_of_domain_signal
+        and not controller_booking_hint
     ):
         out_of_domain_signal = True
         out_signals = list(class_router_result.get("out_signals") or [])
@@ -2930,7 +2963,8 @@ def _has_explicit_service_signal(
 
     if not message_text:
         return False
-    normalized = _normalize_service_text(message_text)
+    cleaned_text = re.sub(r"\[[^\]]+\]", " ", message_text)
+    normalized = _normalize_service_text(cleaned_text)
     if not normalized:
         return False
     if isinstance(intent_decomp_payload, dict):
@@ -2947,7 +2981,15 @@ def _has_explicit_service_signal(
             return True
         if _matches_service_request_lexicon(normalized, client_slug):
             return True
-        if legacy._extract_service_hint(message_text, client_slug):
+        # Guard location/hours/parking info questions from false service-semantic hits.
+        info_intents, _ = _detect_info_class_intents(
+            cleaned_text,
+            intent_decomp_set=set(),
+            client_slug=client_slug,
+        )
+        if {"location", "hours", "parking"} & info_intents:
+            return False
+        if legacy._extract_service_hint(cleaned_text, client_slug):
             return True
     return False
 
@@ -2968,19 +3010,30 @@ def _extract_service_hint(text: str, client_slug: str | None) -> str | None:
     slug = client_slug.strip()
     if not slug:
         return None
-    normalized_text = _normalize_text(text)
-    booking_like = _is_booking_request(text, client_slug=slug)
+    cleaned_text = re.sub(r"\[[^\]]+\]", " ", text).strip()
+    if not cleaned_text:
+        return None
+    normalized_text = _normalize_text(cleaned_text)
+    booking_like = _is_booking_request(cleaned_text, client_slug=slug)
     if not booking_like:
         booking_like = bool(
-            TIME_PATTERN.search(text)
-            or TIME_HOUR_PATTERN.search(text)
-            or DATE_PATTERN.search(text)
-            or DATE_NUMERIC_PATTERN.search(text)
-            or DATE_MONTH_PATTERN.search(text)
+            TIME_PATTERN.search(cleaned_text)
+            or TIME_HOUR_PATTERN.search(cleaned_text)
+            or DATE_PATTERN.search(cleaned_text)
+            or DATE_NUMERIC_PATTERN.search(cleaned_text)
+            or DATE_MONTH_PATTERN.search(cleaned_text)
         )
-    match = semantic_service_match(text, slug)
+    domain_intent, _, _, domain_meta = classify_domain_with_scores(cleaned_text, None)
+    strict_in_hits = int(domain_meta.get("strict_in_hits") or 0)
+    if (
+        domain_intent == DomainIntent.OUT_OF_DOMAIN
+        and strict_in_hits <= 0
+        and not booking_like
+    ):
+        return None
+    match = semantic_service_match(cleaned_text, slug)
     if not match or match.action != "match":
-        fallback = get_pack_service_hint(text, client_slug=slug)
+        fallback = get_pack_service_hint(cleaned_text, client_slug=slug)
         if fallback:
             return fallback
         return None
@@ -7140,7 +7193,7 @@ async def _handle_webhook_payload(
                 in {ConversationState.PENDING.value, ConversationState.MANAGER_ACTIVE.value}
                 and not pending_info_signal
             )
-            or expected_reply_active
+            or (expected_reply_active and not pending_info_signal)
             or (
                 booking_wants_flow
                 and message_text
@@ -7390,6 +7443,21 @@ async def _handle_webhook_payload(
             early_domain_intent, _, _, early_domain_meta = classify_domain_with_scores(
                 message_text, client.config if client else None
             )
+            controller_goal_hint = None
+            controller_class_hint = None
+            if isinstance(router_state, dict):
+                controller_output = router_state.get("output")
+                if isinstance(controller_output, dict):
+                    goal_value = controller_output.get("goal")
+                    if isinstance(goal_value, str):
+                        controller_goal_hint = goal_value.strip().casefold()
+                    class_value = controller_output.get("class")
+                    if isinstance(class_value, str):
+                        controller_class_hint = class_value.strip().casefold()
+            controller_booking_hint = (
+                controller_goal_hint in {"booking", "reschedule", "cancel_request"}
+                or controller_class_hint == "booking"
+            )
             out_hits = int(early_domain_meta.get("out_hits") or 0)
             strict_in_hits = int(early_domain_meta.get("strict_in_hits") or 0)
             early_in_signals = bool(
@@ -7398,6 +7466,7 @@ async def _handle_webhook_payload(
                 or booking_wants_flow
                 or early_info_intents
                 or explicit_service_signal
+                or controller_booking_hint
             )
             early_out_of_domain = bool(out_hits > 0 and not early_in_signals)
             if early_out_of_domain and _is_short_reply(message_text):
@@ -7684,7 +7753,6 @@ async def _handle_webhook_payload(
     booking_promotions_interrupt = bool(booking_wants_flow and routing["allow_booking_flow"])
     if (
         promotions_trigger
-        and not booking_promotions_interrupt
         and routing["allow_bot_reply"]
         and not bypass_domain_flows
         and message_text
@@ -7752,7 +7820,11 @@ async def _handle_webhook_payload(
 
         bot_response = decision.response or MSG_ESCALATED
         followup_intents: list[str] = []
-        booking_followup = bool(booking_signal or "booking" in intent_decomp_set)
+        booking_followup = bool(
+            booking_signal
+            or "booking" in intent_decomp_set
+            or booking_promotions_interrupt
+        )
         if not booking_followup and message_text and _is_booking_request(
             message_text,
             client_slug=payload.client_slug,
@@ -7835,6 +7907,13 @@ async def _handle_webhook_payload(
             "source": policy_source,
             "class_router": class_router_result,
         }
+        discount_info_sections = ["promotions"]
+        booking_interrupt_info = bool(booking_followup)
+        booking_info_intents: list[str] = list(discount_info_sections)
+        for intent_name in ("location", "hours"):
+            if intent_name in info_class_intents and intent_name not in booking_info_intents:
+                booking_info_intents.append(intent_name)
+        trace_payload["info_sections"] = discount_info_sections
         discounts_policy = policy_pack.get("discounts") if isinstance(policy_pack, dict) else None
         risk_level = discounts_policy.get("risk_level") if isinstance(discounts_policy, dict) else None
         if isinstance(risk_level, str) and risk_level:
@@ -7844,6 +7923,18 @@ async def _handle_webhook_payload(
         trace_payload.update(router_gate_meta)
         if followup_intents:
             trace_payload["followup_intents"] = followup_intents
+        if booking_interrupt_info:
+            booking_trace = {
+                "stage": "booking_interrupt",
+                "decision": "info_reply",
+                "state": conversation.state,
+                "booking_interrupt_info": True,
+                "info_intents": list(booking_info_intents),
+                "info_sections": discount_info_sections,
+            }
+            if followup_prompt:
+                booking_trace["booking_prompt"] = followup_prompt
+            _record_decision_trace(conversation, booking_trace)
         _record_decision_trace(conversation, trace_payload)
         _record_message_decision_meta(
             saved_message,
@@ -7858,6 +7949,7 @@ async def _handle_webhook_payload(
                 "policy_gate": "discounts",
                 "policy_section": "discounts",
                 "source": policy_source,
+                "info_sections": discount_info_sections,
             }
             if policy_pack_missing:
                 meta_updates["policy_pack_missing"] = True
@@ -7866,6 +7958,10 @@ async def _handle_webhook_payload(
             if queue_set:
                 meta_updates["intent_queue"] = followup_intents
                 meta_updates["expected_reply_type"] = EXPECTED_REPLY_INTENT_CHOICE
+            if booking_interrupt_info:
+                meta_updates["booking_info_interrupt"] = True
+                meta_updates["booking_interrupt_info"] = True
+                meta_updates["booking_info_intents"] = list(booking_info_intents)
             meta_updates.update(_controller_meta_updates_from_class_router(class_router_result))
             _update_message_decision_metadata(saved_message, meta_updates)
 
@@ -7885,17 +7981,80 @@ async def _handle_webhook_payload(
             _update_message_decision_metadata(
                 saved_message, {"action_source": "llm_policy_core"}
             )
+        def _service_tokens(value: str) -> set[str]:
+            return set(_normalize_text(value).split()) if isinstance(value, str) and value.strip() else set()
+
+        def _prefer_raw_service_query(raw_value: str | None, validated_value: str | None) -> str | None:
+            if policy_tool_action != "catalog.service_query":
+                return validated_value
+            if not isinstance(raw_value, str) or not raw_value.strip():
+                return validated_value
+            raw_text = raw_value.strip()
+            if not isinstance(validated_value, str) or not validated_value.strip():
+                return raw_text
+            validated_text = validated_value.strip()
+            raw_tokens = _service_tokens(raw_text)
+            validated_tokens = _service_tokens(validated_text)
+            if raw_tokens and validated_tokens and not (raw_tokens & validated_tokens):
+                return raw_text
+            return validated_text
+
         policy_service_query = None
+        raw_policy_service_candidate = None
         raw_service_query = policy_tool_args.get("service_query")
+        raw_service_query_text = None
         if isinstance(raw_service_query, str) and raw_service_query.strip():
-            policy_service_query = _validate_plan_slot_value(
+            raw_service_query_text = raw_service_query.strip()
+            raw_policy_service_candidate = raw_service_query_text
+            validated_service_query = _validate_plan_slot_value(
                 "service",
-                raw_service_query.strip(),
+                raw_service_query_text,
                 client_slug=payload.client_slug,
             )
+            policy_service_query = _prefer_raw_service_query(
+                raw_service_query_text,
+                validated_service_query,
+            )
+        if (
+            not policy_service_query
+            and policy_tool_action == "catalog.service_query"
+            and isinstance(raw_service_query_text, str)
+            and raw_service_query_text
+        ):
+            policy_service_query = raw_service_query_text
+        if not policy_service_query and isinstance(policy_payload, dict):
+            raw_slots = policy_payload.get("slots")
+            slot_service_value = raw_slots.get("service") if isinstance(raw_slots, dict) else None
+            if isinstance(slot_service_value, str) and slot_service_value.strip():
+                slot_service_text = slot_service_value.strip()
+                raw_policy_service_candidate = raw_policy_service_candidate or slot_service_text
+                validated_slot_service = _validate_plan_slot_value(
+                    "service",
+                    slot_service_text,
+                    client_slug=payload.client_slug,
+                )
+                preferred_slot_service = _prefer_raw_service_query(
+                    slot_service_text,
+                    validated_slot_service,
+                )
+                if preferred_slot_service:
+                    policy_service_query = preferred_slot_service
+                elif policy_tool_action == "catalog.service_query":
+                    policy_service_query = slot_service_text
         if not policy_service_query:
-            policy_service_query = policy_slot_state_validated.get("service")
-        if not policy_service_query and isinstance(booking, dict):
+            policy_service_query = _prefer_raw_service_query(
+                raw_policy_service_candidate,
+                policy_slot_state_validated.get("service"),
+            )
+        if (
+            not policy_service_query
+            and isinstance(booking, dict)
+            and not (
+                policy_tool_action == "catalog.service_query"
+                and isinstance(raw_policy_service_candidate, str)
+                and raw_policy_service_candidate.strip()
+            )
+        ):
             booking_service = booking.get("service")
             if isinstance(booking_service, str) and booking_service.strip():
                 policy_service_query = _validate_plan_slot_value(
@@ -7914,8 +8073,76 @@ async def _handle_webhook_payload(
                 info_sections_hint = [intent for intent in intent_decomp_set if intent in INFO_INTENTS]
             if not info_sections_hint and info_class_intents:
                 info_sections_hint = [intent for intent in info_class_intents if intent in INFO_INTENTS]
+            if not info_sections_hint and message_text:
+                fallback_info_intents, _fallback_info_meta = _detect_info_class_intents(
+                    message_text,
+                    intent_decomp_set=set(),
+                    client_slug=payload.client_slug,
+                )
+                info_sections_hint = [intent for intent in fallback_info_intents if intent in INFO_INTENTS]
             if not info_sections_hint:
                 info_sections_hint = list(TOOL_INFO_SECTION_MAP.get(policy_tool_action, []))
+            if policy_tool_action == "catalog.location":
+                try:
+                    from app.services import demo_salon_knowledge as knowledge
+
+                    slug = knowledge._normalize_client_slug(payload.client_slug)
+                    policy_intent_hint = (
+                        policy_payload.get("intent")
+                        if isinstance(policy_payload, dict)
+                        else None
+                    )
+                    if (
+                        isinstance(policy_intent_hint, str)
+                        and "parking" in policy_intent_hint.strip().casefold()
+                        and "parking" not in info_sections_hint
+                    ):
+                        info_sections_hint.append("parking")
+                    hint_candidates: list[str] = []
+                    if isinstance(message_text, str) and message_text.strip():
+                        hint_candidates.append(message_text)
+                    if isinstance(policy_payload, dict):
+                        policy_reason = policy_payload.get("reason")
+                        if isinstance(policy_reason, str) and policy_reason.strip():
+                            hint_candidates.append(policy_reason)
+                        policy_slots = policy_payload.get("slots")
+                        slot_service_hint = (
+                            policy_slots.get("service")
+                            if isinstance(policy_slots, dict)
+                            else None
+                        )
+                        if isinstance(slot_service_hint, str) and slot_service_hint.strip():
+                            hint_candidates.append(slot_service_hint)
+                    for candidate in hint_candidates:
+                        normalized = knowledge._normalize_text(candidate)
+                        parking_detected = bool(
+                            normalized
+                            and knowledge._has_parking_signal(
+                                normalized, client_slug=slug
+                            )
+                        )
+                        if not parking_detected:
+                            lowered = candidate.casefold()
+                            parking_detected = any(
+                                marker in lowered
+                                for marker in ("парков", "паркинг", "стоян", "тұрақ")
+                            )
+                        if parking_detected:
+                            if "parking" not in info_sections_hint:
+                                info_sections_hint.append("parking")
+                            break
+                except Exception:
+                    for candidate in (message_text, (policy_payload or {}).get("reason")):
+                        if not isinstance(candidate, str) or not candidate.strip():
+                            continue
+                        lowered = candidate.casefold()
+                        if any(
+                            marker in lowered
+                            for marker in ("парков", "паркинг", "стоян", "тұрақ")
+                        ):
+                            if "parking" not in info_sections_hint:
+                                info_sections_hint.append("parking")
+                            break
             tool_result = execute_tool_action(
                 db,
                 tool_action=policy_tool_action,
@@ -7986,6 +8213,14 @@ async def _handle_webhook_payload(
                         bot_response=bot_response,
                     )
                 info_sections = list(info_sections_hint)
+                if not info_sections:
+                    decision_info_sections = (tool_result.decision_meta or {}).get("info_sections")
+                    if isinstance(decision_info_sections, list):
+                        info_sections = [
+                            section.strip().lower()
+                            for section in decision_info_sections
+                            if isinstance(section, str) and section.strip()
+                        ]
                 slot_snapshot = {
                     key: value
                     for key, value in policy_slot_state_validated.items()
@@ -8021,7 +8256,9 @@ async def _handle_webhook_payload(
                     tool_meta.update(tool_result.decision_meta)
                     _update_message_decision_metadata(saved_message, tool_meta)
                 if merged_slots and (
-                    policy_intent == "booking" or policy_tool_action.startswith("calendar.")
+                    policy_intent == "booking"
+                    or policy_tool_action.startswith("calendar.")
+                    or booking_wants_flow
                 ):
                     booking_state = dict(booking_state) if isinstance(booking_state, dict) else {}
                     if booking_state.get("active") is not True:
@@ -8050,7 +8287,78 @@ async def _handle_webhook_payload(
                         reason="llm_policy_core_tool",
                         now=now,
                     )
+                booking_followup_expected = None
+                if expected_reply_type in {
+                    EXPECTED_REPLY_SERVICE,
+                    EXPECTED_REPLY_TIME,
+                    EXPECTED_REPLY_NAME,
+                }:
+                    booking_followup_expected = expected_reply_type
+                elif memory_expected_reply_type in {
+                    EXPECTED_REPLY_SERVICE,
+                    EXPECTED_REPLY_TIME,
+                    EXPECTED_REPLY_NAME,
+                }:
+                    booking_followup_expected = memory_expected_reply_type
+                elif booking_wants_flow:
+                    booking_for_followup = dict(booking_state) if isinstance(booking_state, dict) else {}
+                    if booking_for_followup.get("active") is not True:
+                        booking_for_followup["active"] = True
+                    for key, value in merged_slots.items():
+                        if not booking_for_followup.get(key):
+                            booking_for_followup[key] = value
+                    booking_for_followup, _ = _next_booking_prompt(booking_for_followup)
+                    derived_reply = _expected_reply_for_booking_question(
+                        booking_for_followup.get("last_question")
+                    )
+                    if derived_reply in {
+                        EXPECTED_REPLY_SERVICE,
+                        EXPECTED_REPLY_TIME,
+                        EXPECTED_REPLY_NAME,
+                    }:
+                        booking_followup_expected = derived_reply
+                booking_interrupt_prompt = None
+                tool_decision = (tool_result.decision_meta or {}).get("tool_decision")
+                booking_followup_allowed = bool(
+                    info_sections
+                    or (
+                        policy_tool_action.startswith("calendar.")
+                        and tool_decision
+                        in {
+                            "provider_unavailable",
+                            "missing_slot",
+                            "not_found",
+                            "conflict",
+                            "time_mismatch",
+                        }
+                    )
+                )
+                if (
+                    booking_wants_flow
+                    and booking_followup_expected
+                    in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
+                    and booking_followup_allowed
+                    and not tool_result.expected_reply_type
+                ):
+                    if info_sections:
+                        if booking_followup_expected == EXPECTED_REPLY_SERVICE:
+                            booking_interrupt_prompt = MSG_BOOKING_ASK_SERVICE
+                        elif booking_followup_expected == EXPECTED_REPLY_TIME:
+                            booking_interrupt_prompt = MSG_BOOKING_ASK_DATETIME
+                        elif booking_followup_expected == EXPECTED_REPLY_NAME:
+                            booking_interrupt_prompt = MSG_BOOKING_ASK_NAME
+                    context = _get_conversation_context(conversation)
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=booking_followup_expected,
+                        reason="booking_interrupt",
+                        now=now,
+                    )
                 bot_response = tool_result.response_text or MSG_FACT_GUARD_CLARIFY
+                if booking_interrupt_prompt:
+                    bot_response = _combine_sidecar(bot_response, booking_interrupt_prompt)
                 _record_message_decision_meta(
                     saved_message,
                     action="reply",
