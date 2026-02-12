@@ -43,6 +43,12 @@
     - Restored booking slot detection for phone messages (`_is_booking_slot_signal` checks phone before info-query short-circuit).
     - Hardened `ops/diagnose.py` expectation helpers for AST-loaded unit tests (fallback booking reply types + backward-compatible `bot_response` arg).
     - Fixed Ruff import-order failures in pack runtime adapter facades.
+  - Added explicit no-key degradation guards in `truffles-api/app/services/intent_service.py` for:
+    - `route_dialogue_controller`
+    - `route_llm_policy_core`
+    - `interpret_expected_reply`
+    so missing API key now returns structured `no_api_key` instead of raising `RuntimeError`.
+  - Verified manual CI run `21940015654`: `lint` and `unit-tests` green; remaining failure moved to `core-eval` (no-key path), then mitigated with the intent-service fallback above.
 - next:
   - Re-run full `count=10` lock with `--jid-mode unique` and publish canonical-valid evidence (`infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`).
   - Run replay against that lock (`--baseline-summary <lock>/summary.json --fail-on-regression --max-failures 20`) and collect top-failures delta.
@@ -68,4 +74,5 @@
     - `ruff check truffles-api/app/main.py truffles-api/app/services/pack_runtime_demo_adapter.py truffles-api/app/services/pack_runtime_generic_adapter.py truffles-api/app/services/pack_runtime_service.py`
     - `pytest -q truffles-api/tests/test_ai_service.py truffles-api/tests/test_booking_quality_expectation_sanitizer.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_webhook_booking.py`
     - `bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD`
-- last_updated: 2026-02-12T08:55:02Z
+    - `env -u OPENAI_API_KEY pytest -q truffles-api/tests/test_demo_salon_eval.py -k "booking_flow_expected_reply_and_interrupt or booking_flow_info_interrupt_sections_location_hours_parking_promo or booking_flow_info_interrupt_parking_colloquial_phrase"`
+- last_updated: 2026-02-12T09:17:40Z

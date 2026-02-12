@@ -729,7 +729,16 @@ def route_dialogue_controller(
         )
         return result
 
-    llm = get_llm_provider()
+    try:
+        llm = get_llm_provider()
+    except RuntimeError as exc:
+        if "OPENAI_API_KEY missing" in str(exc):
+            logger.info("Controller skipped: OPENAI_API_KEY missing")
+            result["error"] = "no_api_key"
+            return result
+        logger.warning(f"Controller provider init failed: {exc}")
+        result["error"] = "error"
+        return result
     messages = [
         {"role": "system", "content": prompt},
         {"role": "user", "content": json.dumps(controller_input, ensure_ascii=False)},
@@ -1043,7 +1052,16 @@ def route_llm_policy_core(
         },
     }
 
-    llm = get_llm_provider()
+    try:
+        llm = get_llm_provider()
+    except RuntimeError as exc:
+        if "OPENAI_API_KEY missing" in str(exc):
+            logger.info("Policy core skipped: OPENAI_API_KEY missing")
+            result["error"] = "no_api_key"
+            return result
+        logger.warning(f"Policy core provider init failed: {exc}")
+        result["error"] = "error"
+        return result
     temperature = 0.0
     model_name = POLICY_CORE_MODEL.strip().lower()
     if model_name.startswith("gpt-5"):
@@ -1200,7 +1218,16 @@ def interpret_expected_reply(
         "carryover": carryover_input,
         "question_context": question_context if isinstance(question_context, dict) else {},
     }
-    llm = get_llm_provider()
+    try:
+        llm = get_llm_provider()
+    except RuntimeError as exc:
+        if "OPENAI_API_KEY missing" in str(exc):
+            logger.info("Answer interpreter skipped: OPENAI_API_KEY missing")
+            result["error"] = "no_api_key"
+            return result
+        logger.warning(f"Answer interpreter provider init failed: {exc}")
+        result["error"] = "error"
+        return result
     messages = [
         {"role": "system", "content": prompt},
         {"role": "user", "content": json.dumps(interpreter_input, ensure_ascii=False)},
