@@ -813,7 +813,11 @@ jobs:
               echo "ERROR: runtime repo not found on host: ${REPO_ROOT}" >&2
               exit 1
             fi
-            git -C "${REPO_ROOT}" fetch origin
+            # Fetch only main and don't fail deploy on stale/permission-broken
+            # refs under origin/* (feature refs can be owned by another user).
+            if ! git -C "${REPO_ROOT}" fetch --quiet origin main; then
+              echo "WARN: runtime repo fetch origin main failed; continuing with clean deploy clone" >&2
+            fi
             DEPLOY_ORIGIN_URL="$(git -C "${REPO_ROOT}" config --get remote.origin.url)"
             if [ -z "${DEPLOY_ORIGIN_URL}" ]; then
               echo "ERROR: cannot resolve remote.origin.url in ${REPO_ROOT}" >&2

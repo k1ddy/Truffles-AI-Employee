@@ -1,0 +1,21 @@
+# SESSION 2026-02-12-deploy-fetch-main-a32 — Deploy Fetch Main Hotfix
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-12-deploy-fetch-main-a32.md
+- branch: fix/2026-02-12-deploy-fetch-main-a32
+- worktree: /home/zhan/truffles-main
+- base_ref: origin/main
+- scope: Устранить deploy failure на VPS, вызванный permission-denied в `git fetch origin` для stale feature refs.
+- done:
+  - Зафиксирована причина падения deploy job по run `21929854541`.
+  - Подготовлен hotfix deploy fetch в `.github/workflows/ci.yml`.
+- next:
+  - Пройти `scripts/session_check.sh`.
+  - Закоммитить и запушить hotfix ветку.
+  - Открыть PR и проверить новый CI run.
+- evidence:
+  - `.github/workflows/ci.yml`
+  - `docs/TASK_PACKAGES/TP-2026-02-12-deploy-fetch-main-a32.md`
+  - `https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21929854541`
+- last_updated: 2026-02-12
