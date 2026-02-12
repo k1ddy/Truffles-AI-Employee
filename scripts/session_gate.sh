@@ -93,4 +93,6 @@ if [[ "$mode" != "ci" && "$target_branch" == "main" ]]; then
   exit 1
 fi
 
+"$repo_root/scripts/doc_truth_gate.sh"
+
 exit 0

@@ -1,0 +1,25 @@
+# SESSION 2026-02-12-mdc-v2-scorecard-ui-a32 — MDC v2 + Scorecard UI
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-12-mdc-v2-scorecard-ui-a32.md
+- branch: fix/2026-02-12-mdc-v2-scorecard-ui-a32
+- worktree: /home/zhan/truffles-main
+- base_ref: origin/main
+- scope: Внедрить Minimum Data Contract v2 (domain-first), strict readiness, scorecard UI и hard-stop в autopilot.
+- done:
+  - `minimum_data_contract.v2` внедрён в `truffles-api/app/services/knowledge_validation.py` с каноническими domain-first полями и legacy alias-совместимостью.
+  - Intake questions синхронизированы с domain-first ключами в `truffles-api/app/services/onboarding_intake_service.py`.
+  - Добавлен server hard-stop в autopilot activate при fail scorecard в `truffles-api/app/routers/console.py`.
+  - В Console UI добавлен server scorecard (query + визуализация + блокировки autopilot/go-live) в `console-web/src/components/ProvisioningWizard.tsx`.
+  - API client расширен методом `/onboarding/scorecard` в `console-web/src/lib/api-client.ts`.
+  - OpenAPI generated types обновлены (`console-web/src/types/api.generated.ts`).
+  - Тесты обновлены и пройдены для backend и frontend компиляции.
+- next:
+  - Открыть PR и пройти ревью/merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-12-mdc-v2-scorecard-ui-a32.md
+  - `pytest -q truffles-api/tests/test_knowledge_validation.py truffles-api/tests/test_minimum_data_contract.py truffles-api/tests/test_onboarding_intake_service.py truffles-api/tests/test_console_onboarding_state.py truffles-api/tests/test_health_service.py truffles-api/tests/test_admin_health.py truffles-api/tests/test_console_access_admin_pr2.py` -> `70 passed`
+  - `npm --prefix console-web run lint` -> no ESLint errors
+  - `npm --prefix console-web run build` -> success
+- last_updated: 2026-02-12T14:20:00Z

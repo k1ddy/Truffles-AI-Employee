@@ -521,6 +521,190 @@ async def test_run_onboarding_autopilot_rejects_blank_phone(monkeypatch):
     assert exc_info.value.code == "INVALID_PARAM"
 
 
+@pytest.mark.asyncio
+async def test_run_onboarding_autopilot_blocks_cross_tenant_company(monkeypatch):
+    allowed_client_id = uuid4()
+    allowed_company_id = uuid4()
+    foreign_company_id = uuid4()
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(id=foreign_company_id)
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="owner",
+            accessible_clients=[SimpleNamespace(id=allowed_client_id, company_id=allowed_company_id)],
+            client_id=allowed_client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.run_onboarding_autopilot(
+            request=Mock(),
+            body=ConsoleOnboardingAutopilotRequest(
+                phone="+77001112233",
+                instance_id="inst-1",
+                company_id=foreign_company_id,
+            ),
+            db=db,
+        )
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_run_onboarding_autopilot_blocks_cross_tenant_client(monkeypatch):
+    allowed_client_id = uuid4()
+    allowed_company_id = uuid4()
+    foreign_client_id = uuid4()
+    db = Mock()
+    db.query.return_value.filter.return_value.first.side_effect = [
+        SimpleNamespace(id=allowed_company_id),
+        SimpleNamespace(id=foreign_client_id),
+    ]
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="owner",
+            accessible_clients=[SimpleNamespace(id=allowed_client_id, company_id=allowed_company_id)],
+            client_id=allowed_client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.run_onboarding_autopilot(
+            request=Mock(),
+            body=ConsoleOnboardingAutopilotRequest(
+                phone="+77001112233",
+                instance_id="inst-1",
+                company_id=allowed_company_id,
+                client_id=foreign_client_id,
+            ),
+            db=db,
+        )
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_run_onboarding_autopilot_activate_requires_scorecard_pass(monkeypatch):
+    now = datetime.now(timezone.utc)
+    company_id = uuid4()
+    client_id = uuid4()
+    branch_id = uuid4()
+    company = SimpleNamespace(id=company_id, name="Company A", billing_info={})
+    client = SimpleNamespace(
+        id=client_id,
+        name="client-a",
+        status="active",
+        config={},
+        company_id=company_id,
+        created_at=now,
+        updated_at=now,
+    )
+    branch = SimpleNamespace(
+        id=branch_id,
+        client_id=client_id,
+        slug="branch-a",
+        name="Branch A",
+        timezone="Asia/Almaty",
+        phone="+77001112233",
+        instance_id="inst-1",
+        telegram_chat_id=None,
+        knowledge_tag="knowledge-a",
+        working_hours={},
+        booking_settings={},
+        is_active=False,
+        onboarding_state="branch_draft",
+        onboarding_updated_at=now,
+        go_live_state="approved",
+        go_live_reason=None,
+        go_live_reviewed_at=None,
+        go_live_reviewed_by=None,
+        go_live_waiver_until=None,
+        go_live_waiver_reason=None,
+        go_live_waiver_by=None,
+        webhook_secret=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+    db = Mock()
+    db.query.return_value.filter.return_value.first.side_effect = [
+        company,
+        client,
+        None,
+        None,
+        branch,
+    ]
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=client_id, company_id=company_id)],
+            client_id=client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_get_latest_capability", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_get_latest_onboarding_contract", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_next_available_branch_slug", lambda *args, **kwargs: "branch-a")
+    monkeypatch.setattr(
+        console_router,
+        "_ensure_client_webhook_secret_from_instance",
+        lambda *args, **kwargs: ("whs_test", "https://example.com/webhook", False),
+    )
+    monkeypatch.setattr(console_router, "build_intake_payload", lambda *args, **kwargs: {"client_pack": {}})
+    monkeypatch.setattr(console_router, "upsert_draft", lambda *args, **kwargs: SimpleNamespace(id=uuid4()))
+    monkeypatch.setattr(console_router, "evaluate_intake_payload", lambda *args, **kwargs: ([], []))
+    monkeypatch.setattr(console_router, "build_onboarding_inputs", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(console_router, "build_onboarding_status", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_scorecard",
+        lambda *args, **kwargs: SimpleNamespace(
+            ready=False,
+            missing=["payment_confirmed"],
+            checks=[
+                SimpleNamespace(
+                    id=console_router.OnboardingStep.GO_NO_GO,
+                    required=True,
+                    passed=False,
+                    missing=["payment_confirmed"],
+                )
+            ],
+        ),
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.run_onboarding_autopilot(
+            request=Mock(),
+            body=ConsoleOnboardingAutopilotRequest(
+                company_id=company_id,
+                client_id=client_id,
+                branch_id=branch_id,
+                phone="+77001112233",
+                instance_id="inst-1",
+                activate_branch=True,
+            ),
+            db=db,
+        )
+
+    assert exc_info.value.code == "GO_LIVE_GATE_REQUIRED"
+    assert exc_info.value.details["operation"] == "onboarding_autopilot_activate"
+    assert exc_info.value.details["scorecard_status"] == "fail"
+    assert exc_info.value.details["missing"] == ["payment_confirmed"]
+    db.rollback.assert_called_once()
+
+
 def test_membership_role_guard_rejects_platform_admin():
     with pytest.raises(ConsoleAPIError) as exc_info:
         console_router._ensure_membership_role_is_assignable("platform_admin")
@@ -739,6 +923,45 @@ async def test_update_branch_blocks_activation_without_go_live_approval(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_get_onboarding_scorecard_returns_fail_payload(monkeypatch):
+    branch = SimpleNamespace(id=uuid4())
+    context = _mock_context(role="owner")
+    context.branches = [branch]
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda *args, **kwargs: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_scorecard",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            ready=False,
+            missing=["payment_confirmed"],
+            checks=[
+                SimpleNamespace(
+                    id=console_router.OnboardingStep.GO_NO_GO,
+                    required=True,
+                    passed=False,
+                    missing=["payment_confirmed"],
+                )
+            ],
+        ),
+    )
+
+    response = await console_router.get_onboarding_scorecard(
+        request=Mock(),
+        branch_id=branch.id,
+        db=Mock(),
+    )
+
+    assert response.branch_id == branch.id
+    assert response.status == "fail"
+    assert response.ready is False
+    assert response.missing == ["payment_confirmed"]
+    assert response.checks[0].id == "go_no_go"
+    assert response.checks[0].passed is False
+
+
+@pytest.mark.asyncio
 async def test_approve_branch_go_live_sets_state_and_clears_waiver(monkeypatch):
     branch = SimpleNamespace(
         id=uuid4(),
@@ -780,8 +1003,15 @@ async def test_approve_branch_go_live_sets_state_and_clears_waiver(monkeypatch):
         ),
     )
     monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
-    monkeypatch.setattr(console_router, "build_onboarding_inputs", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(console_router, "missing_prerequisites", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_scorecard",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            ready=True,
+            missing=[],
+            checks=[SimpleNamespace(id=console_router.OnboardingStep.GO_NO_GO, required=True, passed=True)],
+        ),
+    )
     monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
 
     response = await console_router.approve_branch_go_live(
@@ -827,8 +1057,21 @@ async def test_approve_branch_go_live_requires_prerequisites(monkeypatch):
         ),
     )
     monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
-    monkeypatch.setattr(console_router, "build_onboarding_inputs", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(console_router, "missing_prerequisites", lambda *_args, **_kwargs: ["payment_confirmed"])
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_scorecard",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            ready=False,
+            missing=["payment_confirmed"],
+            checks=[
+                SimpleNamespace(
+                    id=console_router.OnboardingStep.GO_NO_GO,
+                    required=True,
+                    passed=False,
+                )
+            ],
+        ),
+    )
 
     with pytest.raises(ConsoleAPIError) as exc_info:
         await console_router.approve_branch_go_live(
@@ -839,6 +1082,9 @@ async def test_approve_branch_go_live_requires_prerequisites(monkeypatch):
         )
 
     assert exc_info.value.code == "GO_LIVE_GATE_REQUIRED"
+    assert exc_info.value.details["missing"] == ["payment_confirmed"]
+    assert exc_info.value.details["scorecard_status"] == "fail"
+    assert "go_no_go" in exc_info.value.details["failed_checks"]
 
 
 @pytest.mark.asyncio

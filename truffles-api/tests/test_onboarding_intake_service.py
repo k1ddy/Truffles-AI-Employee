@@ -31,12 +31,72 @@ def test_build_intake_payload_parses_text_into_pack_fields():
     assert any(service.get("name") == "Маникюр" for service in services)
 
 
+def test_build_intake_payload_parses_neutral_business_aliases():
+    payload = build_intake_payload(
+        client_data_json=None,
+        client_data_text="""
+        Business name: Demo Clinic
+        Location city: Astana
+        Location address: Abay 10
+        Working hours: mon 09:00-18:00
+        Communication languages: ru, kk
+        """,
+    )
+
+    salon = payload.get("client_pack", {}).get("salon", {})
+    assert salon.get("name") == "Demo Clinic"
+    assert salon.get("city") == "Astana"
+    assert salon.get("address", {}).get("full") == "Abay 10"
+    assert salon.get("hours", {}).get("open") == "09:00"
+    assert salon.get("hours", {}).get("close") == "18:00"
+    assert set(salon.get("communication", {}).get("languages", [])) == {"ru", "kk"}
+
+
 def test_evaluate_intake_payload_returns_missing_questions():
     payload = {"client_pack": {"salon": {"name": "Demo Salon"}}}
     missing, questions = evaluate_intake_payload(payload)
 
-    assert "client_pack.salon.city" in missing
+    assert "client_pack.location.city" in missing
     assert any("город" in question.casefold() for question in questions)
+
+
+def test_evaluate_intake_payload_skips_booking_for_non_booking_domain():
+    payload = {
+        "client_pack": {
+            "salon": {
+                "name": "Demo Legal",
+                "city": "Almaty",
+                "address": {"full": "Main street, 1"},
+                "hours": {"days": ["mon"], "open": "09:00", "close": "18:00"},
+                "services_summary": "Legal consultations",
+                "communication": {"languages": ["ru", "kk"]},
+            },
+            "services_catalog": {"services": [{"name": "Consultation"}]},
+            "guest_policy": {"allowed_guests": "no"},
+            "safety": {"medical_note": "n/a"},
+            "pricing": {"price_from_reason": "depends on case"},
+            "quality": {"expectations_photo": "n/a"},
+            "price_list": [{"category": "Legal", "items": [{"name": "Consultation", "price": 10000}]}],
+            "policy": {
+                "hard_law": {"intents": ["refund"]},
+                "payment_info": {"intent": "payment", "keywords": ["pay"]},
+                "reschedule": {"intent": "reschedule", "keywords": ["reschedule"]},
+                "cancel": {"intent": "cancel_request", "keywords": ["cancel"]},
+                "medical": {"intent": "medical", "keywords": ["medical"]},
+                "legal": {"intent": "legal", "keywords": ["legal"]},
+                "complaint": {"intent": "complaint", "keywords": ["complaint"]},
+                "discounts": {"intent": "discounts", "keywords": ["discount"]},
+                "guard_topics": {"refund": ["refund"]},
+            },
+        }
+    }
+
+    missing, questions = evaluate_intake_payload(payload, domain_slug="legal")
+
+    assert "client_pack.booking.collect_fields" not in missing
+    assert "client_pack.booking.bot_can_confirm" not in missing
+    assert "client_pack.service_duration_estimates" not in missing
+    assert all("записи" not in question.casefold() for question in questions)
 
 
 def test_build_capabilities_from_purchased_services_maps_flags():

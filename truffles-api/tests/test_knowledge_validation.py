@@ -3,6 +3,7 @@ import copy
 from app.services.knowledge_validation import (
     build_diff,
     dump_pack_yaml,
+    get_missing_required_fields,
     parse_draft_text,
     validate_payload,
 )
@@ -67,7 +68,7 @@ def test_validate_payload_missing_required_field():
     payload = _base_payload()
     payload["client_pack"]["salon"].pop("name")
     errors, warnings = validate_payload(payload)
-    assert any("client_pack.salon.name" in err for err in errors)
+    assert any("client_pack.business.name" in err for err in errors)
     assert warnings == []
 
 
@@ -75,7 +76,7 @@ def test_validate_payload_requires_ru_kk_languages():
     payload = _base_payload()
     payload["client_pack"]["salon"]["communication"]["languages"] = ["ru"]
     errors, warnings = validate_payload(payload)
-    assert any("client_pack.salon.communication.languages" in err for err in errors)
+    assert any("client_pack.communication.languages" in err for err in errors)
     assert warnings == []
 
 
@@ -94,3 +95,57 @@ def test_build_diff_returns_text():
     payload["client_pack"]["salon"]["city"] = "Astana"
     diff = build_diff(previous, payload)
     assert "Astana" in diff
+
+
+def test_domain_legal_skips_booking_required_fields_by_default():
+    payload = _base_payload()
+    payload["client_pack"].pop("service_duration_estimates", None)
+    payload["client_pack"].pop("booking", None)
+
+    missing = get_missing_required_fields(payload, domain_slug="legal")
+
+    assert "client_pack.service_duration_estimates" not in missing
+    assert "client_pack.booking.collect_fields" not in missing
+    assert "client_pack.booking.bot_can_confirm" not in missing
+
+
+def test_domain_legal_can_force_booking_required_fields():
+    payload = _base_payload()
+    payload["client_pack"].pop("service_duration_estimates", None)
+    payload["client_pack"].pop("booking", None)
+
+    missing = get_missing_required_fields(
+        payload,
+        domain_slug="legal",
+        require_booking=True,
+    )
+
+    assert "client_pack.service_duration_estimates" in missing
+    assert "client_pack.booking.collect_fields" in missing
+    assert "client_pack.booking.bot_can_confirm" in missing
+
+
+def test_domain_legal_accepts_neutral_business_alias_fields():
+    payload = _base_payload()
+    payload["client_pack"]["business"] = {"name": "Demo Legal"}
+    payload["client_pack"]["location"] = {
+        "city": "Astana",
+        "address": {"full": "Abay 10"},
+    }
+    payload["client_pack"]["operations"] = {
+        "hours": {"days": ["mon"], "open": "09:00", "close": "18:00"},
+    }
+    payload["client_pack"]["communication"] = {"languages": ["ru", "kk"]}
+    payload["client_pack"]["catalog"] = {"summary": "Consulting and documents"}
+    payload["client_pack"].pop("salon", None)
+
+    missing = get_missing_required_fields(payload, domain_slug="legal")
+
+    assert "client_pack.business.name" not in missing
+    assert "client_pack.location.city" not in missing
+    assert "client_pack.location.address.full" not in missing
+    assert "client_pack.operations.hours.days" not in missing
+    assert "client_pack.operations.hours.open" not in missing
+    assert "client_pack.operations.hours.close" not in missing
+    assert "client_pack.communication.languages" not in missing
+    assert "client_pack.catalog.summary" not in missing

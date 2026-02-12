@@ -354,6 +354,7 @@ OnboardingStepId = Literal[
 ]
 
 OnboardingStepStatusValue = Literal["complete", "available", "locked", "skipped"]
+OnboardingScorecardStatusValue = Literal["pass", "fail"]
 
 
 class ConsoleOnboardingStepStatus(BaseModel):
@@ -368,6 +369,22 @@ class ConsoleOnboardingStatusResponse(BaseModel):
     current_step: OnboardingStepId
     steps: list[ConsoleOnboardingStepStatus]
     updated_at: Optional[str] = None
+
+
+class ConsoleOnboardingScorecardCheck(BaseModel):
+    id: OnboardingStepId
+    required: bool
+    passed: bool
+    missing: list[str] = []
+
+
+class ConsoleOnboardingScorecardResponse(BaseModel):
+    branch_id: UUID
+    status: OnboardingScorecardStatusValue
+    ready: bool
+    checks: list[ConsoleOnboardingScorecardCheck]
+    missing: list[str] = []
+    generated_at: str
 
 
 class ConsoleOnboardingAdvanceRequest(BaseModel):

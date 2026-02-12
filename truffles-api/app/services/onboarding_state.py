@@ -108,6 +108,21 @@ class OnboardingStatus:
     steps: list[OnboardingStepInfo]
 
 
+@dataclass(frozen=True)
+class OnboardingScorecardCheck:
+    id: OnboardingStep
+    required: bool
+    passed: bool
+    missing: list[str]
+
+
+@dataclass(frozen=True)
+class OnboardingScorecard:
+    ready: bool
+    checks: list[OnboardingScorecardCheck]
+    missing: list[str]
+
+
 def _parse_onboarding_state(value: Optional[str]) -> Optional[OnboardingStep]:
     if not value:
         return None
@@ -255,8 +270,6 @@ def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
     published_version = get_current_published(db, branch_id=branch.id)
     has_published_knowledge = published_version is not None
     missing_pack_fields: list[str] = []
-    if published_version and isinstance(published_version.payload_json, dict):
-        missing_pack_fields = get_missing_required_fields(published_version.payload_json)
 
     has_specialists = (
         db.query(Specialist)
@@ -294,6 +307,13 @@ def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
         capability_mismatches = find_capability_mismatches(
             purchased=onboarding_contract.payload.purchased,
             effective=capabilities.payload,
+        )
+    booking_required = capabilities.payload.features.booking_mode is not None
+    if published_version and isinstance(published_version.payload_json, dict):
+        missing_pack_fields = get_missing_required_fields(
+            published_version.payload_json,
+            domain_slug=reference_pack_domain_slug,
+            require_booking=booking_required,
         )
 
     return OnboardingInputs(
@@ -433,6 +453,44 @@ def _step_is_ready(step: OnboardingStep, inputs: OnboardingInputs) -> bool:
     if not is_step_required(step, inputs):
         return True
     return len(missing_prerequisites(step, inputs)) == 0
+
+
+def _deduplicate_strings(values: list[str]) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        if item in seen:
+            continue
+        seen.add(item)
+        unique.append(item)
+    return unique
+
+
+def build_onboarding_scorecard_from_inputs(inputs: OnboardingInputs) -> OnboardingScorecard:
+    checks: list[OnboardingScorecardCheck] = []
+    for step in ONBOARDING_STEPS:
+        required = is_step_required(step, inputs)
+        missing = _deduplicate_strings(missing_prerequisites(step, inputs)) if required else []
+        checks.append(
+            OnboardingScorecardCheck(
+                id=step,
+                required=required,
+                passed=len(missing) == 0,
+                missing=missing,
+            )
+        )
+
+    go_no_go_missing = _deduplicate_strings(missing_prerequisites(OnboardingStep.GO_NO_GO, inputs))
+    return OnboardingScorecard(
+        ready=len(go_no_go_missing) == 0,
+        checks=checks,
+        missing=go_no_go_missing,
+    )
+
+
+def build_onboarding_scorecard(db: Session, branch: Branch) -> OnboardingScorecard:
+    inputs = build_onboarding_inputs(db, branch)
+    return build_onboarding_scorecard_from_inputs(inputs)
 
 
 def derive_last_completed_step(inputs: OnboardingInputs) -> OnboardingStep:

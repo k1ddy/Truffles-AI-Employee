@@ -137,6 +137,8 @@ from app.schemas.console import (
     ConsoleOnboardingContractPatchRequest,
     ConsoleOnboardingContractRecord,
     ConsoleOnboardingContractResponse,
+    ConsoleOnboardingScorecardCheck,
+    ConsoleOnboardingScorecardResponse,
     ConsoleOnboardingStatusResponse,
     ConsoleOnboardingStepStatus,
     ConsoleOpsJobCatalogResponse,
@@ -221,9 +223,9 @@ from app.services.onboarding_state import (
     OnboardingStep,
     advance_onboarding_step,
     build_onboarding_inputs,
+    build_onboarding_scorecard,
     build_onboarding_status,
     ensure_onboarding_step,
-    missing_prerequisites,
 )
 from app.services.pack_compiler_service import (
     PackCompilerError,
@@ -828,6 +830,28 @@ def _serialize_onboarding_status(
         updated_at=branch.onboarding_updated_at.isoformat()
         if branch.onboarding_updated_at
         else None,
+    )
+
+
+def _serialize_onboarding_scorecard(
+    branch: Branch,
+    scorecard,
+) -> ConsoleOnboardingScorecardResponse:
+    return ConsoleOnboardingScorecardResponse(
+        branch_id=branch.id,
+        status="pass" if scorecard.ready else "fail",
+        ready=scorecard.ready,
+        checks=[
+            ConsoleOnboardingScorecardCheck(
+                id=check.id.value,
+                required=check.required,
+                passed=check.passed,
+                missing=check.missing,
+            )
+            for check in scorecard.checks
+        ],
+        missing=scorecard.missing,
+        generated_at=datetime.now(timezone.utc).isoformat(),
     )
 
 
@@ -6223,6 +6247,28 @@ async def get_onboarding_status(
     return _serialize_onboarding_status(branch, status)
 
 
+@router.get(
+    "/onboarding/scorecard",
+    response_model=ConsoleOnboardingScorecardResponse,
+    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_onboarding_scorecard(
+    request: Request,
+    branch_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleOnboardingScorecardResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin/support can access onboarding",
+    )
+    branch = _resolve_branch_for_onboarding(context, branch_id=branch_id)
+    scorecard = build_onboarding_scorecard(db, branch)
+    return _serialize_onboarding_scorecard(branch, scorecard)
+
+
 @router.post(
     "/onboarding/advance",
     response_model=ConsoleOnboardingStatusResponse,
@@ -6328,11 +6374,19 @@ async def validate_knowledge(
     )
     branch = _resolve_branch_from_context(context)
     ensure_onboarding_step(db, branch, OnboardingStep.KNOWLEDGE)
+    onboarding_inputs = build_onboarding_inputs(db, branch)
+    require_booking = (
+        onboarding_inputs.capabilities.features.booking_mode is not None
+        if onboarding_inputs.has_capabilities
+        else None
+    )
     current = get_current_published(db, branch_id=branch.id)
     current_payload = current.payload_json if current else None
     payload, errors, warnings, diff = validate_draft(
         body.draft_text,
         current_payload=current_payload,
+        domain_slug=onboarding_inputs.reference_pack_domain_slug,
+        require_booking=require_booking,
     )
     valid = not errors
     if payload:
@@ -6387,12 +6441,20 @@ async def publish_knowledge(
     )
     branch = _resolve_branch_from_context(context)
     ensure_onboarding_step(db, branch, OnboardingStep.KNOWLEDGE)
+    onboarding_inputs = build_onboarding_inputs(db, branch)
+    require_booking = (
+        onboarding_inputs.capabilities.features.booking_mode is not None
+        if onboarding_inputs.has_capabilities
+        else None
+    )
 
     current = get_current_published(db, branch_id=branch.id)
     current_payload = current.payload_json if current else None
     payload, errors, warnings, _diff = validate_draft(
         body.draft_text,
         current_payload=current_payload,
+        domain_slug=onboarding_inputs.reference_pack_domain_slug,
+        require_booking=require_booking,
     )
     if not payload or errors:
         raise ConsoleAPIError(
@@ -8834,9 +8896,13 @@ async def approve_branch_go_live(
     _require_client_access(context, branch.client_id)
 
     reason = _normalize_access_reason(body.reason, required=True)
-    inputs = build_onboarding_inputs(db, branch)
-    missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
-    if missing:
+    scorecard = build_onboarding_scorecard(db, branch)
+    if not scorecard.ready:
+        failed_checks = [
+            check.id.value
+            for check in scorecard.checks
+            if check.required and not check.passed
+        ]
         raise ConsoleAPIError(
             409,
             "GO_LIVE_GATE_REQUIRED",
@@ -8845,7 +8911,9 @@ async def approve_branch_go_live(
                 "operation": "branch_go_live_approve",
                 "go_live_state": _normalize_branch_go_live_state(branch.go_live_state),
                 "required_step": OnboardingStep.GO_NO_GO.value,
-                "missing": missing,
+                "missing": scorecard.missing,
+                "scorecard_status": "fail",
+                "failed_checks": failed_checks,
             },
         )
 
@@ -10374,6 +10442,8 @@ async def run_onboarding_autopilot(
         company = db.query(Company).filter(Company.id == body.company_id).first()
         if not company:
             raise ConsoleAPIError(404, "NOT_FOUND", "Company not found")
+        if context.role != "platform_admin":
+            _require_company_access(context, company.id)
     else:
         company_name = _normalize_optional_text(body.company_name)
         if company_name:
@@ -10389,6 +10459,8 @@ async def run_onboarding_autopilot(
                 db.add(company)
                 db.flush()
                 actions.append("company_created")
+            elif context.role != "platform_admin":
+                _require_company_access(context, company.id)
         elif context.client and context.client.company_id:
             company = db.query(Company).filter(Company.id == context.client.company_id).first()
 
@@ -10406,12 +10478,16 @@ async def run_onboarding_autopilot(
             db.add(company)
             db.flush()
             actions.append("company_created")
+        elif context.role != "platform_admin":
+            _require_company_access(context, company.id)
 
     client: Optional[Client] = None
     if body.client_id:
         client = db.query(Client).filter(Client.id == body.client_id).first()
         if not client:
             raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+        if context.role != "platform_admin":
+            _require_client_access(context, client.id)
     else:
         slug_seed = _normalize_optional_text(body.client_slug) or _normalize_optional_text(body.company_name)
         client_slug = _slugify_seed(slug_seed, fallback_prefix="client", fallback_suffix=phone)
@@ -10429,6 +10505,8 @@ async def run_onboarding_autopilot(
             db.add(client)
             db.flush()
             actions.append("client_created")
+        elif context.role != "platform_admin":
+            _require_client_access(context, client.id)
 
     if not client:
         raise ConsoleAPIError(400, "INVALID_PARAM", "Unable to resolve client")
@@ -10629,6 +10707,7 @@ async def run_onboarding_autopilot(
         client_data_json=body.client_data_json or {},
         client_data_text=body.client_data_text,
     )
+    booking_required = purchased_capabilities.features.booking_mode is not None
     if isinstance(intake_payload.get("client_pack"), dict):
         salon = intake_payload["client_pack"].setdefault("salon", {})
         if isinstance(salon, dict) and not salon.get("name"):
@@ -10650,7 +10729,11 @@ async def run_onboarding_autopilot(
         payload_json=intake_payload,
         actor_id=context.agent.id,
     )
-    missing_fields, missing_questions = evaluate_intake_payload(intake_payload)
+    missing_fields, missing_questions = evaluate_intake_payload(
+        intake_payload,
+        domain_slug=effective_domain_slug,
+        require_booking=booking_required,
+    )
     actions.append("knowledge_draft_saved")
 
     published = False
@@ -10693,13 +10776,37 @@ async def run_onboarding_autopilot(
                 )
             published = True
             published_version_id = published_version.id
-            missing_fields, missing_questions = evaluate_intake_payload(published_version.payload_json)
+            missing_fields, missing_questions = evaluate_intake_payload(
+                published_version.payload_json,
+                domain_slug=effective_domain_slug,
+                require_booking=booking_required,
+            )
             actions.append("knowledge_published")
         except Exception:
             actions.append("knowledge_publish_failed")
 
     inputs = build_onboarding_inputs(db, branch)
-    go_no_go_missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
+    scorecard = build_onboarding_scorecard(db, branch)
+    go_no_go_missing = scorecard.missing
+    if body.activate_branch and not scorecard.ready:
+        failed_checks = [
+            check.id.value
+            for check in scorecard.checks
+            if check.required and not check.passed
+        ]
+        db.rollback()
+        raise ConsoleAPIError(
+            409,
+            "GO_LIVE_GATE_REQUIRED",
+            "Onboarding scorecard failed",
+            {
+                "operation": "onboarding_autopilot_activate",
+                "required_step": OnboardingStep.GO_NO_GO.value,
+                "missing": scorecard.missing,
+                "scorecard_status": "fail",
+                "failed_checks": failed_checks,
+            },
+        )
     onboarding_status = build_onboarding_status(db, branch)
 
     record_audit_event(

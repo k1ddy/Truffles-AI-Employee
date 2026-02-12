@@ -6814,8 +6814,7 @@ def _write_failure_bundle(output_dir, record, container_name):
     with open(log_path, "w", encoding="utf-8") as handle:
         handle.write(log_result.stdout)
 
-def _post_admin_outbox(url, admin_token, timeout):
-    headers = {"X-Admin-Token": admin_token} if admin_token else {}
+def _post_outbox_once(url, headers, timeout):
     req = urllib.request.Request(url, data=b"", method="POST", headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -6830,6 +6829,39 @@ def _post_admin_outbox(url, admin_token, timeout):
         return None, "", f"timeout: {exc}"
     except Exception as exc:
         return None, "", str(exc)
+
+
+def _build_outbox_process_candidates(url):
+    normalized = url.rstrip("/")
+    if normalized.endswith("/admin/outbox/process"):
+        base = normalized[: -len("/admin/outbox/process")]
+        # Service-first path keeps legacy endpoint as compatibility fallback.
+        return [f"{base}/outbox/process", normalized]
+    return [normalized]
+
+
+def _post_admin_outbox(url, admin_token, timeout):
+    outbox_service_token = os.environ.get("OUTBOX_SERVICE_TOKEN")
+    candidates = _build_outbox_process_candidates(url)
+    last_result = (None, "", "unknown outbox error")
+
+    for candidate in candidates:
+        headers = {}
+        if candidate.endswith("/outbox/process") and outbox_service_token:
+            headers["X-Outbox-Service-Token"] = outbox_service_token
+        elif admin_token:
+            headers["X-Admin-Token"] = admin_token
+
+        status, body, error = _post_outbox_once(candidate, headers, timeout)
+        last_result = (status, body, error)
+        if status is None:
+            continue
+        if status in (401, 403, 404) and candidate != candidates[-1]:
+            continue
+        return status, body, error
+
+    return last_result
+
 
 def _post_admin_outbox_with_wait(url, admin_token, timeout, wait_seconds):
     if wait_seconds and wait_seconds > 0:

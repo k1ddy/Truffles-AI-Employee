@@ -65,7 +65,7 @@ def test_minimum_data_contract_missing_language_variant():
     payload["client_pack"]["salon"]["communication"]["languages"] = ["ru"]
     status = evaluate_minimum_data_contract(payload)
     assert status.ready is False
-    assert "client_pack.salon.communication.languages" in status.missing_fields
+    assert "client_pack.communication.languages" in status.missing_fields
 
 
 def test_minimum_data_contract_missing_guest_policy():

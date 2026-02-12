@@ -579,6 +579,245 @@ async function openInbox(page: import('@playwright/test').Page) {
     await expectRowsOrEmpty(page, 'cases-row', 'cases-empty');
 }
 
+async function readTenantHeaders(page: import('@playwright/test').Page) {
+    const context = await page.evaluate(() => ({
+        companyId: window.localStorage.getItem('console:company_id'),
+        clientId: window.localStorage.getItem('console:client_id'),
+    }));
+    const headers: Record<string, string> = {};
+    if (context.companyId) {
+        headers['x-company-id'] = context.companyId;
+    }
+    if (context.clientId) {
+        headers['x-client-id'] = context.clientId;
+    }
+    return headers;
+}
+
+async function openTeamSpecialists(page: import('@playwright/test').Page) {
+    await openInbox(page);
+    await page.getByTestId('nav-team').click();
+    await expect(page).toHaveURL(urlPathPattern('/team'));
+    await expect(page.getByTestId('team-page')).toBeVisible();
+    const specialistsTabByTestId = page.getByTestId('team-tab-specialists');
+    const specialistsTabByLabel = page.getByRole('button', { name: /Специалисты/i }).first();
+    if (await specialistsTabByTestId.isVisible().catch(() => false)) {
+        await specialistsTabByTestId.click();
+    } else if (await specialistsTabByLabel.isVisible().catch(() => false)) {
+        await specialistsTabByLabel.click();
+    }
+    await expect
+        .poll(
+            async () => {
+                if (await page.getByTestId('team-specialist-create-form').isVisible().catch(() => false)) return true;
+                if (await page.getByText('Специалисты').first().isVisible().catch(() => false)) return true;
+                return false;
+            },
+            { timeout: 10000 },
+        )
+        .toBe(true);
+}
+
+type ProxyCallResult = {
+    ok: boolean;
+    status: number;
+    bodyText: string;
+    bodyJson: unknown;
+};
+
+type TeamSpecialistsScope = {
+    clientId: string;
+    branchId: string;
+};
+
+async function callProxy(
+    page: import('@playwright/test').Page,
+    options: {
+        method: 'GET' | 'POST' | 'PATCH';
+        path: string;
+        headers?: Record<string, string>;
+        data?: unknown;
+    },
+): Promise<ProxyCallResult> {
+    const { method, path, headers, data } = options;
+    return page.evaluate(
+        async ({ method, path, headers, data }) => {
+            const mergedHeaders: Record<string, string> = { ...(headers || {}) };
+            const init: RequestInit = { method, headers: mergedHeaders, credentials: 'include' };
+            if (data !== undefined) {
+                mergedHeaders['content-type'] = 'application/json';
+                init.body = JSON.stringify(data);
+            }
+            const response = await fetch(path, init);
+            const bodyText = await response.text();
+            let bodyJson: unknown = null;
+            try {
+                bodyJson = JSON.parse(bodyText);
+            } catch {
+                bodyJson = null;
+            }
+            return {
+                ok: response.ok,
+                status: response.status,
+                bodyText,
+                bodyJson,
+            };
+        },
+        { method, path, headers, data },
+    );
+}
+
+async function resolveTeamSpecialistsScope(
+    page: import('@playwright/test').Page,
+): Promise<TeamSpecialistsScope> {
+    const tenantHeaders = await readTenantHeaders(page);
+    const clientId = tenantHeaders['x-client-id'];
+    if (!clientId) {
+        throw new Error('Missing x-client-id in console context');
+    }
+
+    const selectedBranchId = tenantHeaders['x-branch-id'];
+    if (selectedBranchId) {
+        return {
+            clientId,
+            branchId: selectedBranchId,
+        };
+    }
+
+    const meResponse = await callProxy(page, {
+        method: 'GET',
+        path: '/api/proxy/me',
+        headers: { 'x-client-id': clientId },
+    });
+    if (!meResponse.ok) {
+        throw new Error(`Failed to read /me (${meResponse.status}): ${meResponse.bodyText}`);
+    }
+    const mePayload = (meResponse.bodyJson as {
+        selected_branch_id?: string | null;
+        branches?: Array<{ id?: string }>;
+    } | null) ?? {};
+    const branchId = mePayload.selected_branch_id
+        ?? mePayload.branches?.find((branch) => Boolean(branch.id))?.id
+        ?? '';
+    if (!branchId) {
+        throw new Error('Missing branch_id in console context and /me response');
+    }
+    return {
+        clientId,
+        branchId,
+    };
+}
+
+async function patchTeamSpecialistsBranchCapabilities(
+    page: import('@playwright/test').Page,
+    scope: TeamSpecialistsScope,
+    payload: Record<string, unknown>,
+) {
+    const patchResponse = await callProxy(page, {
+        method: 'PATCH',
+        path: '/api/proxy/admin/capabilities',
+        headers: {
+            'x-client-id': scope.clientId,
+        },
+        data: {
+            scope: 'branch',
+            branch_id: scope.branchId,
+            payload,
+        },
+    });
+    if (!patchResponse.ok) {
+        throw new Error(`Failed to patch branch capabilities (${patchResponse.status}): ${patchResponse.bodyText}`);
+    }
+}
+
+async function provisionBlockedTeamSpecialistsBranch(
+    page: import('@playwright/test').Page,
+    scope: TeamSpecialistsScope,
+): Promise<string> {
+    await patchTeamSpecialistsBranchCapabilities(page, scope, {
+        channels: {
+            whatsapp: true,
+            telegram: false,
+        },
+        features: {
+            booking_mode: 'confirm_slots',
+            knowledge_upload: false,
+        },
+    });
+    return scope.branchId;
+}
+
+async function provisionReadyTeamSpecialistsBranch(
+    page: import('@playwright/test').Page,
+    scope: TeamSpecialistsScope,
+): Promise<string> {
+    await patchTeamSpecialistsBranchCapabilities(page, scope, {
+        channels: {
+            whatsapp: false,
+            telegram: false,
+        },
+        features: {
+            knowledge_upload: false,
+        },
+    });
+    return scope.branchId;
+}
+
+async function reopenTeamSpecialists(page: import('@playwright/test').Page) {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await openTeamSpecialists(page);
+}
+
+async function listSpecialistsForBranch(
+    page: import('@playwright/test').Page,
+    clientId: string,
+    branchId: string,
+) {
+    const response = await callProxy(page, {
+        method: 'GET',
+        path: `/api/proxy/calendar/specialists?branch_id=${encodeURIComponent(branchId)}&include_inactive=true`,
+        headers: {
+            'x-client-id': clientId,
+            'x-branch-id': branchId,
+        },
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to list specialists (${response.status}): ${response.bodyText}`);
+    }
+    const payload = (response.bodyJson as {
+        items?: Array<{ id?: string; name?: string; is_active?: boolean; services?: Array<{ name?: string }> }>;
+    } | null) ?? {};
+    return payload.items ?? [];
+}
+
+async function supportsTeamSpecialistsMutations(
+    page: import('@playwright/test').Page,
+    scope: TeamSpecialistsScope,
+): Promise<boolean> {
+    const probeResponse = await callProxy(page, {
+        method: 'PATCH',
+        path: '/api/proxy/calendar/specialists/00000000-0000-0000-0000-000000000000',
+        headers: {
+            'x-client-id': scope.clientId,
+            'x-branch-id': scope.branchId,
+        },
+        data: {
+            name: 'probe',
+            branch_id: scope.branchId,
+        },
+    });
+    if (probeResponse.status === 405) {
+        return false;
+    }
+    if (probeResponse.status === 404) {
+        const errorCode = (
+            probeResponse.bodyJson as { error?: { code?: string } } | null
+        )?.error?.code;
+        return Boolean(errorCode);
+    }
+    return true;
+}
+
 // =========================================
 // INBOX FILTERS & NAVIGATION
 // =========================================
@@ -1012,6 +1251,120 @@ test.describe('Case Actions @mutating', () => {
                 }
             }
         }
+    });
+});
+
+test.describe('Team Specialists @mutating', () => {
+    test.skip(!runMutations, 'Mutating tests are disabled');
+
+    test.beforeEach(async ({ page }) => {
+        await openTeamSpecialists(page);
+    });
+
+    test('should block specialist create when booking onboarding step is not ready @mutating', async ({ page }) => {
+        const scope = await resolveTeamSpecialistsScope(page);
+        const mutationsSupported = await supportsTeamSpecialistsMutations(page, scope);
+        test.skip(!mutationsSupported, 'Calendar specialist mutating endpoints are unavailable in this runtime');
+        const blockedBranchId = await provisionBlockedTeamSpecialistsBranch(page, scope);
+        const createResponse = await callProxy(page, {
+            method: 'POST',
+            path: '/api/proxy/calendar/specialists',
+            headers: {
+                'x-client-id': scope.clientId,
+                'x-branch-id': blockedBranchId,
+            },
+            data: {
+                name: `E2E Gate ${Date.now()}`,
+                branch_id: blockedBranchId,
+            },
+        });
+
+        expect(createResponse.status).toBe(409);
+        const errorCode = ((createResponse.bodyJson as { error?: { code?: string }; code?: string } | null)?.error?.code)
+            || ((createResponse.bodyJson as { error?: { code?: string }; code?: string } | null)?.code)
+            || null;
+        expect(errorCode).toBe('ONBOARDING_STEP_REQUIRED');
+    });
+
+    test('should create, update services, disable and enable specialist @mutating', async ({ page }) => {
+        const scope = await resolveTeamSpecialistsScope(page);
+        const mutationsSupported = await supportsTeamSpecialistsMutations(page, scope);
+        test.skip(!mutationsSupported, 'Calendar specialist mutating endpoints are unavailable in this runtime');
+        const readyBranchId = await provisionReadyTeamSpecialistsBranch(page, scope);
+
+        const createdName = `E2E Specialist ${Date.now()}`;
+        const createResponse = await callProxy(page, {
+            method: 'POST',
+            path: '/api/proxy/calendar/specialists',
+            headers: {
+                'x-client-id': scope.clientId,
+                'x-branch-id': readyBranchId,
+            },
+            data: {
+                name: createdName,
+                branch_id: readyBranchId,
+                services: [{ name: 'Маникюр', duration_min: 45, price: 12000 }],
+            },
+        });
+        expect(createResponse.ok).toBe(true);
+        const createdPayload = (createResponse.bodyJson as { id?: string; name?: string; is_active?: boolean } | null) ?? {};
+        const specialistId = createdPayload.id ?? '';
+        expect(specialistId).not.toBe('');
+        expect(createdPayload.is_active).toBe(true);
+
+        const updatedName = `${createdName} Updated`;
+        const updateResponse = await callProxy(page, {
+            method: 'PATCH',
+            path: `/api/proxy/calendar/specialists/${specialistId}`,
+            headers: {
+                'x-client-id': scope.clientId,
+                'x-branch-id': readyBranchId,
+            },
+            data: {
+                name: updatedName,
+                branch_id: readyBranchId,
+                services: [{ name: 'Маникюр + гель', duration_min: 60, price: 15000 }],
+            },
+        });
+        expect(updateResponse.ok).toBe(true);
+        const updatedPayload = (updateResponse.bodyJson as { name?: string; services?: Array<{ name?: string }> } | null) ?? {};
+        expect(updatedPayload.name).toBe(updatedName);
+        expect(updatedPayload.services?.some((service) => service.name === 'Маникюр + гель')).toBe(true);
+
+        const disableResponse = await callProxy(page, {
+            method: 'POST',
+            path: `/api/proxy/calendar/specialists/${specialistId}/disable`,
+            headers: {
+                'x-client-id': scope.clientId,
+                'x-branch-id': readyBranchId,
+            },
+        });
+        expect(disableResponse.ok).toBe(true);
+        const disabledPayload = (disableResponse.bodyJson as { is_active?: boolean } | null) ?? {};
+        expect(disabledPayload.is_active).toBe(false);
+
+        const enableResponse = await callProxy(page, {
+            method: 'POST',
+            path: `/api/proxy/calendar/specialists/${specialistId}/enable`,
+            headers: {
+                'x-client-id': scope.clientId,
+                'x-branch-id': readyBranchId,
+            },
+        });
+        expect(enableResponse.ok).toBe(true);
+        const enabledPayload = (enableResponse.bodyJson as { is_active?: boolean } | null) ?? {};
+        expect(enabledPayload.is_active).toBe(true);
+
+        const branchSpecialists = await listSpecialistsForBranch(page, scope.clientId, readyBranchId);
+        const specialist = branchSpecialists.find((item) => item.id === specialistId);
+        expect(specialist).toBeTruthy();
+        expect(specialist?.name).toBe(updatedName);
+        expect(specialist?.is_active).toBe(true);
+        expect(specialist?.services?.some((service) => service.name === 'Маникюр + гель')).toBe(true);
+
+        await reopenTeamSpecialists(page);
+        const createdNameVisible = await page.getByText(updatedName).first().isVisible().catch(() => false);
+        expect(createdNameVisible).toBe(true);
     });
 });
 

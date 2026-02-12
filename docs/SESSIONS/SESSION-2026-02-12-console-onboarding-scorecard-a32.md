@@ -1,0 +1,40 @@
+# SESSION 2026-02-12-console-onboarding-scorecard-a32 — Console Onboarding Scorecard
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-12-console-onboarding-scorecard-a32.md
+- branch: fix/2026-02-12-console-onboarding-scorecard-a32
+- worktree: /home/zhan/truffles-main
+- base_ref: origin/main
+- scope: Реализовать пункты 1/2/3: calendar OpenAPI contract coverage, generic runtime adapter decoupling, onboarding scorecard go-live gate.
+- done:
+  - Добавлены calendar paths/schemas и onboarding scorecard schema в `contracts/console_api/openapi.v1.yaml`.
+  - Обновлен `truffles-api/scripts/generate_openapi.py`: drift-check теперь включает `calendar.router`.
+  - Добавлен `truffles-api/tests/test_console_openapi_calendar_contract.py`.
+  - Добавлен `truffles-api/app/services/pack_runtime_fallback_adapter.py`.
+  - `pack_runtime_generic_adapter` переведен на fallback adapter, без прямого `demo_salon_knowledge` импорта.
+  - Добавлен scorecard сервисный слой в `onboarding_state`.
+  - Добавлены API schema + endpoint `GET /console/v1/onboarding/scorecard`.
+  - `approve_branch_go_live` переключен на scorecard fail-closed.
+  - Добавлены/обновлены тесты в `test_pack_runtime_service.py`, `test_console_onboarding_state.py`, `test_console_access_admin_pr2.py`.
+  - Проверки:
+    - `cd truffles-api && python3 scripts/generate_openapi.py --check` -> OK
+    - `ruff check ...` -> `All checks passed!`
+    - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py truffles-api/tests/test_pack_runtime_service.py truffles-api/tests/test_console_onboarding_state.py truffles-api/tests/test_console_access_admin_pr2.py` -> `48 passed`
+    - `pytest -q truffles-api/tests/test_calendar_specialists_router.py` -> `4 passed`
+    - `bash scripts/doc_truth_gate.sh` -> `doc-truth: OK`
+- next:
+  - Открыть PR и передать на ревью.
+- evidence:
+  - `contracts/console_api/openapi.v1.yaml`
+  - `truffles-api/scripts/generate_openapi.py`
+  - `truffles-api/app/services/pack_runtime_fallback_adapter.py`
+  - `truffles-api/app/services/pack_runtime_generic_adapter.py`
+  - `truffles-api/app/services/onboarding_state.py`
+  - `truffles-api/app/schemas/console.py`
+  - `truffles-api/app/routers/console.py`
+  - `truffles-api/tests/test_console_openapi_calendar_contract.py`
+  - `truffles-api/tests/test_pack_runtime_service.py`
+  - `truffles-api/tests/test_console_onboarding_state.py`
+  - `truffles-api/tests/test_console_access_admin_pr2.py`
+- last_updated: 2026-02-12T09:05:00Z

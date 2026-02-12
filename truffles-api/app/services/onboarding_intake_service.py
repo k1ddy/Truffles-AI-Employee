@@ -30,12 +30,19 @@ _LANGUAGE_TOKENS: dict[str, tuple[str, ...]] = {
 
 _FIELD_ALIASES: list[tuple[tuple[str, ...], str]] = [
     (("название", "салон", "name"), "client_pack.salon.name"),
+    (("business name", "company name", "название бизнеса", "компания"), "client_pack.salon.name"),
     (("город", "city"), "client_pack.salon.city"),
+    (("location city", "город локации"), "client_pack.salon.city"),
     (("адрес", "address"), "client_pack.salon.address.full"),
+    (("location address", "business address", "адрес локации"), "client_pack.salon.address.full"),
     (("часы", "график", "hours"), "client_pack.salon.hours"),
+    (("working hours", "operations hours", "режим работы"), "client_pack.salon.hours"),
     (("язык", "languages", "language"), "client_pack.salon.communication.languages"),
+    (("communication languages", "языки общения"), "client_pack.salon.communication.languages"),
     (("услуги", "services summary"), "client_pack.salon.services_summary"),
+    (("offerings summary", "products summary", "кратко о продуктах"), "client_pack.salon.services_summary"),
     (("каталог услуг", "services catalog"), "client_pack.services_catalog.services"),
+    (("catalog", "service catalog", "products catalog"), "client_pack.services_catalog.services"),
     (("длительность", "duration"), "client_pack.service_duration_estimates"),
     (("booking fields", "collect fields", "поля записи"), "client_pack.booking.collect_fields"),
     (("bot can confirm", "confirm booking", "подтверждение"), "client_pack.booking.bot_can_confirm"),
@@ -56,6 +63,14 @@ _FIELD_ALIASES: list[tuple[tuple[str, ...], str]] = [
 ]
 
 _MISSING_QUESTIONS: dict[str, str] = {
+    "client_pack.business.name": "Как называется бизнес/филиал для клиентов?",
+    "client_pack.location.city": "В каком городе работает филиал?",
+    "client_pack.location.address.full": "Какой полный адрес филиала?",
+    "client_pack.operations.hours.days": "В какие дни работает филиал?",
+    "client_pack.operations.hours.open": "Во сколько филиал открывается?",
+    "client_pack.operations.hours.close": "Во сколько филиал закрывается?",
+    "client_pack.catalog.summary": "Кратко перечислите основные услуги.",
+    "client_pack.communication.languages": "Какие языки общения доступны? Обязательно ru и kk.",
     "client_pack.salon.name": "Как называется бизнес/филиал для клиентов?",
     "client_pack.salon.city": "В каком городе работает филиал?",
     "client_pack.salon.address.full": "Какой полный адрес филиала?",
@@ -315,7 +330,16 @@ def build_missing_questions(missing_fields: list[str]) -> list[str]:
     return questions
 
 
-def evaluate_intake_payload(payload: dict[str, Any]) -> tuple[list[str], list[str]]:
-    missing = get_missing_required_fields(payload)
+def evaluate_intake_payload(
+    payload: dict[str, Any],
+    *,
+    domain_slug: str | None = None,
+    require_booking: bool | None = None,
+) -> tuple[list[str], list[str]]:
+    missing = get_missing_required_fields(
+        payload,
+        domain_slug=domain_slug,
+        require_booking=require_booking,
+    )
     questions = build_missing_questions(missing)
     return missing, questions
