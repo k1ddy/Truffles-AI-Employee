@@ -2622,20 +2622,37 @@ def _handle_ai_response_action(
                                 "clarify_limit": True,
                             },
                         )
+                        clarify_limit_response = legacy._handle_clarify_limit_escalation(
+                            db=db,
+                            conversation=conversation,
+                            user=user,
+                            message_text=message_text,
+                            saved_message=saved_message,
+                            source="ai_response",
+                            allow_handover=routing.get("allow_handover_create", False),
+                            send_response=send_response,
+                            finalize_response=finalize_response,
+                        )
+                        if clarify_limit_response is not None:
+                            return AiResponseOutcome(
+                                response=clarify_limit_response,
+                                bot_response=None,
+                                result_message="Clarify limit escalation handled",
+                                llm_primary_failed=llm_primary_failed,
+                                llm_primary_reason=llm_primary_reason,
+                            )
+                        # Defensive fallback: never propagate None result_message to webhook response.
+                        bot_response = legacy.MSG_ESCALATED
+                        bot_response, sent = send_and_save(bot_response)
+                        fallback_message = (
+                            "Clarify limit fallback sent"
+                            if sent
+                            else "Clarify limit fallback failed"
+                        )
                         return AiResponseOutcome(
-                            response=legacy._handle_clarify_limit_escalation(
-                                db=db,
-                                conversation=conversation,
-                                user=user,
-                                message_text=message_text,
-                                saved_message=saved_message,
-                                source="ai_response",
-                                allow_handover=routing.get("allow_handover_create", False),
-                                send_response=send_response,
-                                finalize_response=finalize_response,
-                            ),
-                            bot_response=None,
-                            result_message=None,
+                            response=None,
+                            bot_response=bot_response,
+                            result_message=fallback_message,
                             llm_primary_failed=llm_primary_failed,
                             llm_primary_reason=llm_primary_reason,
                         )

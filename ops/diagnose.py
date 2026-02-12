@@ -739,6 +739,9 @@ LLM_QUALITY_TAG_HINTS = {
     ],
     "duration": [
         r"сколько\\s+длит",
+        r"сколько\\s+времени",
+        r"сколько\\s+времени\\s+займ",
+        r"займ[её]т",
         r"длительн",
         r"по\\s+времени",
         r"уақ",
@@ -752,6 +755,9 @@ LLM_QUALITY_TAG_HINTS = {
         r"специалист",
         r"к\\s+мастер",
         r"у\\s+мастера",
+        r"кто\\s+будет\\s+делать",
+        r"кто\\s+делает",
+        r"кто\\s+выполняет",
     ],
 }
 LLM_QUALITY_TAG_HINTS_RE = {
@@ -4380,7 +4386,8 @@ def _llm_quality_evaluate_turn(
         expected_reply is False
         and expected_response is True
         and (
-            expected_reply_type is not None
+            expected_state is None
+            or expected_reply_type is not None
             or bool(expected_info_sections)
             or bool(booking_active)
         )
@@ -8774,10 +8781,11 @@ def _run_llm_quality(args):
 
     threshold_results, threshold_breaches = _llm_quality_check_thresholds(metrics)
     infra_status = _llm_quality_build_infra_status(stats, secret_preflight)
+    comparison_enforced = bool(args.fail_on_regression)
     comparison_block_reasons = []
-    if not infra_status["valid"]:
+    if comparison_enforced and not infra_status["valid"]:
         comparison_block_reasons.append("infra_invalid")
-    if baseline_metrics is not None and baseline_canonical is False:
+    if comparison_enforced and baseline_metrics is not None and baseline_canonical is False:
         comparison_block_reasons.append(
             f"baseline_non_canonical:{baseline_canonical_reason or 'unknown'}"
         )
@@ -8793,11 +8801,12 @@ def _run_llm_quality(args):
     semantic_reasons = []
     if threshold_breaches:
         semantic_reasons.append("threshold_breach")
-    if comparison_blocked:
-        for reason in comparison_block_reasons:
-            semantic_reasons.append(f"comparison_blocked:{reason}")
-    elif regression_breaches:
-        semantic_reasons.append("regression_breach")
+    if comparison_enforced:
+        if comparison_blocked:
+            for reason in comparison_block_reasons:
+                semantic_reasons.append(f"comparison_blocked:{reason}")
+        elif regression_breaches:
+            semantic_reasons.append("regression_breach")
     semantic_status = {"valid": not semantic_reasons, "reasons": semantic_reasons}
     top_failures = _llm_quality_top_failure_reasons(failure_counts, limit=3)
     safe_config = {

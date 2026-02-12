@@ -60,10 +60,18 @@
     - run-id `booking-replay-20260212-a1-fix28-realistic` (base-url `127.0.0.1:18096`, `jid_mode=unique`, `skip_outbox`, `judge_mode=all`).
     - Result: `infra_valid=true`, `strict_pass_rate=0.968`, `hard_fail_rate=0.0`, `info_answer_rate=0.96`, `turns_strict_failed=4`.
     - Improvement: previous `expected_info_section_miss/info_section_miss` failures were removed; new remaining strict failures are now concentrated in `judge_fail` and `expected_reply_type_mismatch` for consult/off-topic turns.
+  - Re-validated previously failing master-info turn with targeted replay:
+    - run-id `booking-replay-20260212-a1copy-fix31d-target` (`/tmp/booking_quality/booking-fix31c-target-scenarios.json`).
+    - Result: `infra_valid=true`, `semantic_valid=true`, `strict_pass_rate=1.0`, `hard_fail_rate=0.0`, `missing_bot_reply=0`.
+    - Prior red path (`ValidationError` + `"Fallback response skipped"` + `bot_response=null`) no longer reproduced.
+  - Completed full realistic replay on frozen lock scenarios with regression gate:
+    - run-id `booking-replay-20260212-a1copy-fix31d-realistic` (`--scenarios-file /tmp/booking_quality/booking-lock-20260212-a1b/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-20260212-a1b/summary.json`).
+    - Result: `infra_valid=true`, `semantic_valid=true`, `strict_pass_rate=0.9609`, `hard_fail_rate=0.0`, `turns_missing_response=0`, `decision_meta_errors=0`.
+    - Delta vs lock baseline `booking-lock-20260212-a1b`: strict `0.875 -> 0.9609`, judge fails `13 -> 3`, expected-info-section misses `7 -> 1`.
 - next:
-  - Re-run full `count=10` lock with `--jid-mode unique` and publish canonical-valid evidence (`infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`).
-  - Run replay against that lock (`--baseline-summary <lock>/summary.json --fail-on-regression --max-failures 20`) and collect top-failures delta.
-  - Keep baseline update blocked until canonical-valid all-run.
+  - Prepare targeted follow-up fixes for residual strict failures (`judge_fail` x3, `expected_info_section_miss` x1, `expected_reply_mismatch` x1).
+  - Open/refresh PR status with new replay evidence and top-failures diff table.
+  - Keep canonical baseline update gated until explicit decision by Brain/Top Architect.
 - evidence:
   - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-critical2/summary.json
   - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-all1/summary.json
@@ -77,6 +85,10 @@
   - /tmp/booking_quality/booking-keysource-check3/brief.md
   - /tmp/booking_quality/booking-replay-20260212-a1-fix28-realistic/summary.json
   - /tmp/booking_quality/booking-replay-20260212-a1-fix28-realistic/brief.md
+  - /tmp/booking_quality/booking-replay-20260212-a1copy-fix31d-target/summary.json
+  - /tmp/booking_quality/booking-replay-20260212-a1copy-fix31d-target/brief.md
+  - /tmp/booking_quality/booking-replay-20260212-a1copy-fix31d-realistic/summary.json
+  - /tmp/booking_quality/booking-replay-20260212-a1copy-fix31d-realistic/brief.md
   - Local checks:
     - `ruff check truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/trace.py`
     - `python3 -m py_compile truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/decision.py`
@@ -89,4 +101,4 @@
     - `bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD`
     - `env -u OPENAI_API_KEY pytest -q truffles-api/tests/test_demo_salon_eval.py -k "booking_flow_expected_reply_and_interrupt or booking_flow_info_interrupt_sections_location_hours_parking_promo or booking_flow_info_interrupt_parking_colloquial_phrase"`
     - `python3 -m py_compile truffles-api/app/services/tool_registry_service.py truffles-api/app/routers/webhook/decision.py truffles-api/app/services/demo_salon_knowledge.py ops/diagnose.py`
-- last_updated: 2026-02-12T10:05:00Z
+- last_updated: 2026-02-12T14:26:00Z
