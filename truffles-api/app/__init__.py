@@ -8,7 +8,7 @@ from dotenv import find_dotenv, load_dotenv
 
 
 def _load_environment() -> None:
-    # Load service-local .env first, then fallback to cwd discovery.
+    # Keep deterministic load order: service-local .env, then cwd discovery.
     app_root = Path(__file__).resolve().parents[1]
     local_env = app_root / ".env"
     if local_env.exists():
@@ -19,4 +19,3 @@ def _load_environment() -> None:
 
 
 _load_environment()
-
