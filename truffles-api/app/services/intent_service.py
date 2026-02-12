@@ -82,8 +82,13 @@ PLAN_MODEL = os.environ.get("LLM_PLAN_MODEL", CONTROLLER_MODEL).strip()
 PLAN_CONFIDENCE_THRESHOLD = float(os.environ.get("LLM_PLAN_CONFIDENCE_THRESHOLD", "0.3"))
 POLICY_CORE_PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "llm_policy_core.md"
 POLICY_CORE_TIMEOUT_SECONDS = float(
-    os.environ.get("LLM_POLICY_CORE_TIMEOUT_SECONDS", "3.0")
+    os.environ.get("LLM_POLICY_CORE_TIMEOUT_SECONDS", "5.0")
 )
+POLICY_CORE_RETRY_TIMEOUT_SECONDS = max(
+    float(os.environ.get("LLM_POLICY_CORE_TIMEOUT_RETRY_SECONDS", "8.0")),
+    POLICY_CORE_TIMEOUT_SECONDS,
+)
+POLICY_CORE_RETRY_ON_TIMEOUT = os.environ.get("LLM_POLICY_CORE_RETRY_ON_TIMEOUT")
 POLICY_CORE_MAX_TOKENS = int(os.environ.get("LLM_POLICY_CORE_MAX_TOKENS", "240"))
 POLICY_CORE_MODEL = os.environ.get("LLM_POLICY_CORE_MODEL", PLAN_MODEL).strip()
 POLICY_CORE_CONFIDENCE_THRESHOLD = float(
@@ -1048,22 +1053,53 @@ def route_llm_policy_core(
         {"role": "system", "content": prompt},
         {"role": "user", "content": json.dumps(policy_input, ensure_ascii=False)},
     ]
+    retry_on_timeout = _is_env_enabled(POLICY_CORE_RETRY_ON_TIMEOUT, default=True)
+    timeout_attempts = [POLICY_CORE_TIMEOUT_SECONDS]
+    if retry_on_timeout:
+        timeout_attempts.append(POLICY_CORE_RETRY_TIMEOUT_SECONDS)
+
     llm_start = time.monotonic()
     response = None
     error = None
-    try:
-        response = llm.generate(
-            messages=messages,
-            max_tokens=POLICY_CORE_MAX_TOKENS,
-            model=POLICY_CORE_MODEL,
-            timeout_seconds=POLICY_CORE_TIMEOUT_SECONDS,
-            temperature=temperature,
-        )
-    except httpx.TimeoutException:
-        error = "timeout"
-    except Exception as exc:
-        logger.warning(f"LLM policy core failed: {exc}")
-        error = "error"
+    attempt_count = 0
+    timeout_seconds_used = POLICY_CORE_TIMEOUT_SECONDS
+    for attempt_idx, timeout_seconds in enumerate(timeout_attempts):
+        attempt_count = attempt_idx + 1
+        timeout_seconds_used = timeout_seconds
+        if attempt_idx > 0 and not _should_attempt_llm(
+            timing_context,
+            timeout_seconds=timeout_seconds,
+            stage="policy_core_llm_retry",
+        ):
+            error = "deadline_exceeded"
+            break
+        try:
+            response = llm.generate(
+                messages=messages,
+                max_tokens=POLICY_CORE_MAX_TOKENS,
+                model=POLICY_CORE_MODEL,
+                timeout_seconds=timeout_seconds,
+                temperature=temperature,
+            )
+            error = None
+            break
+        except httpx.TimeoutException:
+            error = "timeout"
+            if attempt_idx + 1 < len(timeout_attempts):
+                logger.warning(
+                    "LLM policy core timeout; retrying",
+                    extra={
+                        "context": {
+                            "attempt": attempt_count,
+                            "retry_timeout_seconds": POLICY_CORE_RETRY_TIMEOUT_SECONDS,
+                        }
+                    },
+                )
+            continue
+        except Exception as exc:
+            logger.warning(f"LLM policy core failed: {exc}")
+            error = "error"
+            break
 
     elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
     result["attempted"] = True
@@ -1076,7 +1112,9 @@ def route_llm_policy_core(
             "model_name": POLICY_CORE_MODEL,
             "model_tier": "fast",
             "timeout": error == "timeout",
-            "timeout_seconds": POLICY_CORE_TIMEOUT_SECONDS,
+            "timeout_seconds": timeout_seconds_used,
+            "attempt_count": attempt_count,
+            "retry_on_timeout": retry_on_timeout,
             "max_tokens": POLICY_CORE_MAX_TOKENS,
             "temperature": temperature,
         },

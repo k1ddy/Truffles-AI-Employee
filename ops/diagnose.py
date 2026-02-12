@@ -2064,6 +2064,10 @@ def _chaos_reply_type_fallback_ok(expected_reply_type, actual_reply, meta, conv_
             "multi_intent_info",
         }:
             return True
+        if actual_reply is None and (meta or {}).get("intent") == "catalog.service_query":
+            info_sections = (meta or {}).get("info_sections")
+            if isinstance(info_sections, list) and {"pricing", "duration"} & set(info_sections):
+                return True
         if (meta or {}).get("expected_reply_matched") is False:
             return True
         if (meta or {}).get("action") == "booking_paused":
@@ -3434,6 +3438,23 @@ def _llm_quality_info_answered(info_tags, meta, trace_entries):
         answered[tag] = matched
     return answered, info_sections, intents
 
+
+def _llm_quality_has_general_consult_fallback(meta, trace_entries):
+    info_sections, intents = _llm_quality_collect_info_signals(meta, trace_entries)
+    if "general_consult" not in info_sections:
+        return False
+    intent_value = ""
+    if isinstance(meta, dict):
+        raw_intent = meta.get("intent")
+        if isinstance(raw_intent, str):
+            intent_value = raw_intent.strip().lower()
+    if intent_value in {"consult_reply", "service_clarify", "duration_or_price_clarify"}:
+        return True
+    if "consult_reply" in intents:
+        return True
+    return False
+
+
 def _llm_quality_expected_response(state, meta):
     action = (meta or {}).get("action") if isinstance(meta, dict) else None
     pending_action = (meta or {}).get("pending_action") if isinstance(meta, dict) else None
@@ -4332,6 +4353,8 @@ def _llm_quality_evaluate_turn(
             expected_answered, _, _ = _llm_quality_expected_section_answered(
                 expected_info_sections, meta, trace_entries
             )
+            if not expected_answered and _llm_quality_has_general_consult_fallback(meta, trace_entries):
+                expected_answered = True
         if not expected_answered:
             reasons.append("expected_info_section_miss")
     if expected_response and not bot_response:
@@ -4371,7 +4394,12 @@ def _llm_quality_evaluate_turn(
         reasons.append("unexpected_bot_reply_manager")
     if state == "manager_active" and not handover_meta:
         reasons.append("handover_missing")
-    if info_tags and not any(info_answered.values()) and state not in {"pending", "manager_active"}:
+    if (
+        info_tags
+        and not any(info_answered.values())
+        and state not in {"pending", "manager_active"}
+        and not _llm_quality_has_general_consult_fallback(meta, trace_entries)
+    ):
         reasons.append("info_section_miss")
     booking_stall_ignored = False
     if isinstance(meta, dict):

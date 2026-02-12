@@ -746,7 +746,14 @@ def _validate_dialog(dialog: dict[str, Any], *, min_turns: int, max_turns: int) 
     return warnings
 
 
-def _call_openai(prompt: str, *, api_key: str, model: str, base_url: str) -> str:
+def _call_openai(
+    prompt: str,
+    *,
+    api_key: str,
+    model: str,
+    base_url: str,
+    max_tokens: int = 1800,
+) -> str:
     payload = {
         "model": model,
         "response_format": {"type": "json_object"},
@@ -755,7 +762,7 @@ def _call_openai(prompt: str, *, api_key: str, model: str, base_url: str) -> str
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.7,
-        "max_tokens": 1800,
+        "max_tokens": max(256, int(max_tokens)),
     }
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
@@ -824,59 +831,102 @@ def _generate_llm_dialogs(
     coverage: list[str],
     seed: int | None,
 ) -> list[dict[str, Any]]:
-    prompt = (
-        "Generate JSON with key 'dialogs' as a list. "
-        "Each dialog: {dialog_id, goal, turns}. "
-        "turns is a list of {kind,text,tags,expect} with 10-15 client messages. "
-        "Tags must be chosen from: booking, interrupt, price, duration, location, hours, parking, "
-        "promo, master, time, time_alt, consult, channel, delay, media, noise, handoff, "
-        "cancel, reschedule, check_booking, confirm, tool. "
-        "expect must include keys: action, info_sections, reply_type, state, expected_reply, allow_booking_stall. "
-        "Use canonical tokens only in expect (no natural language): "
-        "action: null or one of [booking_escalated, escalate, handoff]; "
-        "info_sections: array from [pricing, price, payment_info, payment, address, location, "
-        "hours, working_hours, schedule, discounts, discount, promo, promotion, duration, "
-        "service_duration, parking, master, specialist]; "
-        "reply_type: null or one of [service_choice, time, name]; "
-        "state: null or one of [bot_active, pending, manager_active]; "
-        "expected_reply: true/false/null. "
-        "Include interruptions (price/location/noise), wrong slot answers, time/name swaps, and at least one media reference. "
-        "Include at least one tool-related intent (cancel/reschedule/check booking) and a follow-up confirmation/denial turn. "
-        "Beauty salon domain, Russian language, natural chat. "
-        "All turns must be CLIENT messages only (no assistant/manager lines). "
-        "Do NOT write staff-like statements (e.g., 'Я вас записал', 'Работаем ежедневно', "
-        "'Адрес:', 'Пришлите фото', 'Могу помочь'). "
-        "If you mention sending a photo, tag the turn with 'media' and phrase as the client "
-        "(e.g., 'Могу прислать фото' instead of 'Вот фото'), otherwise avoid photo claims. "
-        f"Count={count}, turns_range={min_turns}-{max_turns}. "
-        f"media_mode={media_mode}, media_kind={media_kind}. "
-        f"coverage_tags={','.join(coverage) if coverage else 'none'}. "
-        f"seed={seed}."
-    )
-    content = _call_openai(prompt, api_key=api_key, model=model, base_url=base_url)
-    payload = _parse_llm_json(
-        content,
-        repair_fn=lambda raw: _repair_llm_json(
-            raw, api_key=api_key, model=model, base_url=base_url
-        ),
-    )
-    dialogs = payload.get("dialogs") or []
-    if not isinstance(dialogs, list):
-        return []
-    for dialog in dialogs:
-        turns = dialog.get("turns") or []
-        for turn in turns:
-            tags = list(turn.get("tags") or [])
-            turn["expect"] = _merge_expectations(tags, turn.get("expect"))
-        ctx = _infer_context_from_dialog(dialog, rng)
-        turns = _ensure_required_tags(turns, ctx, max_turns=max_turns)
-        turns = _sanitize_llm_turns(turns, ctx, rng)
-        dialog["turns"] = turns
-        if include_media and all("media" not in (turn.get("tags") or []) for turn in dialog.get("turns", [])):
-            dialog.setdefault("turns", []).insert(
-                1, _media_turn(ctx, mode=media_mode, kind=media_kind)
-            )
-            dialog["turns"] = _prune_turns(dialog["turns"], max_turns, set(REQUIRED_LLM_TAGS))
+    dialogs: list[dict[str, Any]] = []
+    next_dialog_id = 1
+    batch_size = max(1, int(os.environ.get("BOOKING_SCENARIO_LLM_BATCH_SIZE", "2")))
+    max_attempts = max(1, int(os.environ.get("BOOKING_SCENARIO_LLM_MAX_ATTEMPTS", "3")))
+
+    while len(dialogs) < count:
+        remaining = count - len(dialogs)
+        batch_count = min(batch_size, remaining)
+        prompt = (
+            "Generate JSON with key 'dialogs' as a list. "
+            "Each dialog: {dialog_id, goal, turns}. "
+            "turns is a list of {kind,text,tags,expect} with 10-15 client messages. "
+            "Tags must be chosen from: booking, interrupt, price, duration, location, hours, parking, "
+            "promo, master, time, time_alt, consult, channel, delay, media, noise, handoff, "
+            "cancel, reschedule, check_booking, confirm, tool. "
+            "expect must include keys: action, info_sections, reply_type, state, expected_reply, allow_booking_stall. "
+            "Use canonical tokens only in expect (no natural language): "
+            "action: null or one of [booking_escalated, escalate, handoff]; "
+            "info_sections: array from [pricing, price, payment_info, payment, address, location, "
+            "hours, working_hours, schedule, discounts, discount, promo, promotion, duration, "
+            "service_duration, parking, master, specialist]; "
+            "reply_type: null or one of [service_choice, time, name]; "
+            "state: null or one of [bot_active, pending, manager_active]; "
+            "expected_reply: true/false/null. "
+            "Include interruptions (price/location/noise), wrong slot answers, time/name swaps, and at least one media reference. "
+            "Include at least one tool-related intent (cancel/reschedule/check booking) and a follow-up confirmation/denial turn. "
+            "Beauty salon domain, Russian language, natural chat. "
+            "All turns must be CLIENT messages only (no assistant/manager lines). "
+            "Do NOT write staff-like statements (e.g., 'Я вас записал', 'Работаем ежедневно', "
+            "'Адрес:', 'Пришлите фото', 'Могу помочь'). "
+            "If you mention sending a photo, tag the turn with 'media' and phrase as the client "
+            "(e.g., 'Могу прислать фото' instead of 'Вот фото'), otherwise avoid photo claims. "
+            f"Count={batch_count}, turns_range={min_turns}-{max_turns}. "
+            f"media_mode={media_mode}, media_kind={media_kind}. "
+            f"coverage_tags={','.join(coverage) if coverage else 'none'}. "
+            f"seed={seed}."
+        )
+        max_tokens = max(1800, batch_count * max(min_turns, 10) * 120)
+        payload: dict[str, Any] | None = None
+        last_error: Exception | None = None
+        for _attempt in range(max_attempts):
+            try:
+                content = _call_openai(
+                    prompt,
+                    api_key=api_key,
+                    model=model,
+                    base_url=base_url,
+                    max_tokens=max_tokens,
+                )
+                payload = _parse_llm_json(
+                    content,
+                    repair_fn=lambda raw: _repair_llm_json(
+                        raw, api_key=api_key, model=model, base_url=base_url
+                    ),
+                )
+                raw_dialogs = payload.get("dialogs") if isinstance(payload, dict) else None
+                if isinstance(raw_dialogs, list) and raw_dialogs:
+                    break
+                last_error = ValueError("llm payload has no dialogs")
+            except Exception as exc:
+                payload = None
+                last_error = exc
+                continue
+        raw_dialogs = payload.get("dialogs") if isinstance(payload, dict) else None
+        if not isinstance(raw_dialogs, list) or not raw_dialogs:
+            if last_error:
+                raise last_error
+            raise ValueError("llm payload has no dialogs")
+
+        for raw_dialog in raw_dialogs:
+            if len(dialogs) >= count:
+                break
+            if not isinstance(raw_dialog, dict):
+                continue
+            dialog = dict(raw_dialog)
+            turns = dialog.get("turns") or []
+            for turn in turns:
+                tags = list(turn.get("tags") or [])
+                turn["expect"] = _merge_expectations(tags, turn.get("expect"))
+            ctx = _infer_context_from_dialog(dialog, rng)
+            turns = _ensure_required_tags(turns, ctx, max_turns=max_turns)
+            turns = _sanitize_llm_turns(turns, ctx, rng)
+            dialog["turns"] = turns
+            dialog["dialog_id"] = dialog.get("dialog_id") or next_dialog_id
+            next_dialog_id += 1
+            if include_media and all(
+                "media" not in (turn.get("tags") or []) for turn in dialog.get("turns", [])
+            ):
+                dialog.setdefault("turns", []).insert(
+                    1, _media_turn(ctx, mode=media_mode, kind=media_kind)
+                )
+                dialog["turns"] = _prune_turns(
+                    dialog["turns"], max_turns, set(REQUIRED_LLM_TAGS)
+                )
+            dialogs.append(dialog)
+
     return dialogs
 
 

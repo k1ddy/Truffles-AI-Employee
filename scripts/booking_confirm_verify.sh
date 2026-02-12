@@ -209,11 +209,27 @@ jid_is_blocked() {
   return 1
 }
 
+jid_is_preferred_test() {
+  local jid="$1"
+  local digits
+  digits="$(normalize_digits "$jid")"
+  [[ "$digits" =~ ^7700000000[0-9]+$ ]]
+}
+
 if [[ -z "$JID_COMMIT" ]]; then
-  for jid in "${allowlist_arr[@]}"; do
-    jid="${jid//[[:space:]]/}"
-    if [[ -n "$jid" ]] && ! jid_is_blocked "$jid"; then
+  for prefer_test in 1 0; do
+    for jid in "${allowlist_arr[@]}"; do
+      jid="${jid//[[:space:]]/}"
+      if [[ -z "$jid" ]] || jid_is_blocked "$jid"; then
+        continue
+      fi
+      if [[ "$prefer_test" -eq 1 ]] && ! jid_is_preferred_test "$jid"; then
+        continue
+      fi
       JID_COMMIT="$jid"
+      break
+    done
+    if [[ -n "$JID_COMMIT" ]]; then
       break
     fi
   done
@@ -226,13 +242,19 @@ if [[ -z "$JID_COMMIT" ]]; then
   die "No safe allowlist JID found for jid_commit"
 fi
 if [[ -z "$JID_FULL" ]]; then
-  for jid in "${allowlist_arr[@]}"; do
-    jid="${jid//[[:space:]]/}"
-    if [[ -z "$jid" ]] || [[ "$jid" == "$JID_COMMIT" ]]; then
-      continue
-    fi
-    if ! jid_is_blocked "$jid"; then
+  for prefer_test in 1 0; do
+    for jid in "${allowlist_arr[@]}"; do
+      jid="${jid//[[:space:]]/}"
+      if [[ -z "$jid" ]] || [[ "$jid" == "$JID_COMMIT" ]] || jid_is_blocked "$jid"; then
+        continue
+      fi
+      if [[ "$prefer_test" -eq 1 ]] && ! jid_is_preferred_test "$jid"; then
+        continue
+      fi
       JID_FULL="$jid"
+      break
+    done
+    if [[ -n "$JID_FULL" ]]; then
       break
     fi
   done

@@ -11,8 +11,10 @@ from typing import TYPE_CHECKING, Any, Callable
 from app.schemas.webhook import WebhookResponse
 from app.services.pack_runtime_service import (
     _build_fact_meta,
+    _has_duration_signal,
     _has_guest_waiting_signal,
     _has_parking_signal,
+    _has_price_signal,
     build_info_combined_reply,
     compose_multi_truth_reply,
     format_reply_from_truth,
@@ -122,6 +124,13 @@ def _detect_info_class_intents(
     )
     hours_phrases = _signal_phrase_list(client_slug, "hours_keywords")
     hours_signal = bool(hours_phrases) and any(phrase in normalized for phrase in hours_phrases)
+    pricing_signal = _has_price_signal(normalized, message_text, client_slug=client_slug)
+    duration_signal = _has_duration_signal(normalized, message_text, client_slug=client_slug)
+    if not duration_signal:
+        duration_signal = bool(
+            ("займет" in normalized or "занимает" in normalized)
+            and ("врем" in normalized or "сколько" in normalized)
+        )
     master_signal = False
     if normalized and any(
         keyword in normalized
@@ -129,10 +138,19 @@ def _detect_info_class_intents(
             "мастер",
             "специалист",
             "кто делает",
+            "кто будет делать",
+            "кто будет проводить",
             "шебер",
             "маман",
             "ким жасайд",
         )
+    ):
+        master_signal = True
+    if (
+        not master_signal
+        and "кто" in normalized
+        and ("дела" in normalized or "провод" in normalized)
+        and any(token in normalized for token in ("процедур", "услуг", "сеанс", "маникюр", "стриж"))
     ):
         master_signal = True
     if not master_signal and message_text and client_slug:
@@ -147,6 +165,10 @@ def _detect_info_class_intents(
         location_signal = True
     if "hours" in anchor_intents and (question_like or short_query or intent_decomp_set):
         hours_signal = True
+    if "pricing" in anchor_intents and (question_like or short_query or intent_decomp_set):
+        pricing_signal = True
+    if "duration" in anchor_intents and (question_like or short_query or intent_decomp_set):
+        duration_signal = True
 
     if parking_signal:
         intents.add("parking")
@@ -154,6 +176,10 @@ def _detect_info_class_intents(
         intents.add("location")
     if hours_signal:
         intents.add("hours")
+    if pricing_signal:
+        intents.add("pricing")
+    if duration_signal:
+        intents.add("duration")
     if master_signal:
         intents.add("master")
     question_type = None
@@ -176,6 +202,8 @@ def _detect_info_class_intents(
         "guest": guest_signal,
         "location": location_signal,
         "hours": hours_signal,
+        "pricing": pricing_signal,
+        "duration": duration_signal,
         "master": master_signal,
     }
     return intents, meta
@@ -290,7 +318,12 @@ def _build_info_intent_reply(
             and any(
                 marker in normalized
                 for marker in (
+                    "есть ли мастер",
+                    "есть мастер",
                     "кто делает",
+                    "кто будет делать",
+                    "кто будет проводить",
+                    "кто проведет",
                     "какой мастер",
                     "какой специалист",
                     "кто из мастеров",
@@ -342,6 +375,18 @@ def _build_info_intent_reply(
             info_sections=["master"],
         )
         return fallback, meta
+    if intent == "promotions":
+        reply = format_reply_from_truth("promotions", client_slug=client_slug)
+        if not reply:
+            reply = format_reply_from_truth("promotions_rules", client_slug=client_slug)
+        if not reply:
+            return None, None
+        meta = _build_fact_meta(
+            fact_source="truth",
+            fact_intents=["promotions"],
+            info_sections=["promotions"],
+        )
+        return reply, meta
     if intent in {"pricing", "duration"} and not service_query and message_text:
         service_query = get_pack_service_hint(message_text, client_slug=client_slug)
         if not service_query:
@@ -368,6 +413,7 @@ def _build_info_intent_reply(
             include_guest=guest_signal,
             client_slug=client_slug,
         )
+    duration_info_sections = ["duration", "service_duration"] if intent == "duration" else None
     decision = get_pack_decision(question, client_slug=client_slug)
     if decision and decision.action == "reply" and decision.response:
         meta = decision.meta if isinstance(decision.meta, dict) else {}
@@ -380,6 +426,7 @@ def _build_info_intent_reply(
             meta=meta,
             fact_source="truth",
             fact_intents=[intent],
+            info_sections=duration_info_sections,
         )
         return reply_text, meta or None
     fallback = format_reply_from_truth("duration_or_price_clarify", client_slug=client_slug)
@@ -389,6 +436,7 @@ def _build_info_intent_reply(
         meta=info_meta,
         fact_source="truth",
         fact_intents=[intent],
+        info_sections=duration_info_sections,
     )
     return fallback, meta or None
 
@@ -1092,8 +1140,25 @@ def _handle_info_flow(
 
     if message_text:
         normalized_message = legacy.normalize_for_matching(message_text)
+        info_signal_override = False
+        if isinstance(info_signals, dict):
+            info_signal_override = any(
+                bool(info_signals.get(key))
+                for key in ("parking", "location", "hours", "guest", "pricing", "duration")
+            )
+        force_truth_gate_intents = {
+            "pricing",
+            "duration",
+            "parking",
+            "location",
+            "hours",
+            "guest_policy",
+            "master",
+            "promotions",
+        }
         force_truth_gate = bool(
-            info_class_intents & {"pricing", "duration"}
+            info_class_intents_for_reply & force_truth_gate_intents
+            or info_signal_override
             or legacy._has_price_signal(normalized_message, message_text)
             or legacy._has_duration_signal(normalized_message, message_text)
         )

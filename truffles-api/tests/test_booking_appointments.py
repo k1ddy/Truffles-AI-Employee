@@ -245,6 +245,66 @@ def test_resolve_booking_info_intents_prefers_info_class_over_intent_decomp():
     assert resolved == ["location", "pricing"]
 
 
+def test_resolve_booking_info_intents_uses_anchor_fallback_when_empty():
+    resolved = booking_router._resolve_booking_info_intents(
+        intent_decomp_used=False,
+        intent_decomp_set=set(),
+        info_class_intents=set(),
+        expected_reply_type=legacy.EXPECTED_REPLY_TIME,
+        booking_time_service_candidate=False,
+        expected_reply_shortcircuit=False,
+        booking_interrupt_text="Можно ли оставить машину у вас на парковке?",
+        client_slug="demo_salon",
+    )
+
+    assert "parking" in resolved
+
+
+def test_resolve_booking_info_intents_uses_duration_signal_when_empty():
+    resolved = booking_router._resolve_booking_info_intents(
+        intent_decomp_used=False,
+        intent_decomp_set=set(),
+        info_class_intents=set(),
+        expected_reply_type=legacy.EXPECTED_REPLY_TIME,
+        booking_time_service_candidate=False,
+        expected_reply_shortcircuit=False,
+        booking_interrupt_text="Какое время займет маникюр?",
+        client_slug="demo_salon",
+    )
+
+    assert "duration" in resolved
+
+
+def test_resolve_booking_info_intents_uses_duration_signal_with_expected_reply_shortcircuit():
+    resolved = booking_router._resolve_booking_info_intents(
+        intent_decomp_used=True,
+        intent_decomp_set={"other"},
+        info_class_intents=set(),
+        expected_reply_type=legacy.EXPECTED_REPLY_TIME,
+        booking_time_service_candidate=False,
+        expected_reply_shortcircuit=True,
+        booking_interrupt_text="Сколько времени занимает маникюр?",
+        client_slug="demo_salon",
+    )
+
+    assert "duration" in resolved
+
+
+def test_resolve_booking_info_intents_uses_parking_signal_with_expected_reply_shortcircuit():
+    resolved = booking_router._resolve_booking_info_intents(
+        intent_decomp_used=True,
+        intent_decomp_set={"other"},
+        info_class_intents=set(),
+        expected_reply_type=legacy.EXPECTED_REPLY_TIME,
+        booking_time_service_candidate=False,
+        expected_reply_shortcircuit=True,
+        booking_interrupt_text="У вас есть парковка?",
+        client_slug="demo_salon",
+    )
+
+    assert "parking" in resolved
+
+
 @pytest.mark.parametrize(
     "tool_action",
     ["calendar.get_booking", "calendar.reschedule", "calendar.cancel"],
@@ -360,3 +420,44 @@ def test_tool_registry_book_slot_allows_missing_specialist_when_not_explicit():
     assert result.decision_meta.get("specialist_selection") == "none_available"
     _, kwargs = book_slot_mock.call_args
     assert kwargs["specialist_id"] is None
+
+
+def test_tool_registry_catalog_location_includes_parking_section():
+    db = Mock()
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=None):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="catalog.location",
+            tool_args={},
+            conversation_id=uuid4(),
+            branch_id=None,
+            client_slug="demo_salon",
+            service_query=None,
+            message_text="У вас есть парковка?",
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert "parking" in (result.decision_meta.get("info_sections") or [])
+
+
+def test_tool_registry_catalog_location_uses_parking_hint_without_message_text():
+    db = Mock()
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=None):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="catalog.location",
+            tool_args={},
+            conversation_id=uuid4(),
+            branch_id=None,
+            client_slug="demo_salon",
+            service_query=None,
+            info_sections_hint=["parking"],
+            message_text=None,
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert "parking" in (result.decision_meta.get("info_sections") or [])

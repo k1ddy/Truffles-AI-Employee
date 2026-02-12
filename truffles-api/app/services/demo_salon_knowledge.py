@@ -65,6 +65,11 @@ CONSULT_CLARIFY_TEXT = "Я могу помочь по услугам салон�
 logger = get_logger("demo_salon_knowledge")
 
 
+def _use_local_embeddings() -> bool:
+    value = str(os.environ.get("TEST_MODE", "")).strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class SemanticServiceMatch:
     action: str
@@ -1324,9 +1329,12 @@ def _has_parking_signal(normalized: str, *, client_slug: str | None = None) -> b
         return True
     machine_prefixes = get_signal_lexicon_list(client_slug, "parking_machine_prefixes")
     if machine_prefixes and any(prefix in normalized for prefix in machine_prefixes):
-        exclude_phrases = get_signal_lexicon_list(client_slug, "parking_exclude_phrases")
-        if exclude_phrases and not _contains_any(normalized, exclude_phrases):
-            return False
+        # Legacy lexicon name kept for backward compatibility.
+        # These markers are used as parking context for ambiguous "машинк*" forms.
+        context_markers = get_signal_lexicon_list(client_slug, "parking_exclude_phrases")
+        if context_markers and _contains_any(normalized, context_markers):
+            return True
+        return False
     vehicle_words = get_signal_lexicon_list(client_slug, "parking_vehicle_words")
     if vehicle_words and _contains_any(normalized, vehicle_words):
         return True
@@ -1619,20 +1627,22 @@ def semantic_question_type(
             return SemanticQuestionType(kind="duration", score=1.0, second_score=0.0)
 
     query_vector = None
-    use_fallback = False
+    use_fallback = _use_local_embeddings()
     error_detail = None
-    try:
-        query_vector = _coerce_embedding(get_embedding(text))
-    except Exception as exc:
-        error_detail = str(exc)
-        query_vector = None
-    if not query_vector:
+    if not use_fallback:
+        try:
+            query_vector = _coerce_embedding(get_embedding(text))
+        except Exception as exc:
+            error_detail = str(exc)
+            query_vector = None
+    if use_fallback or not query_vector:
         use_fallback = True
         query_vector = _local_text_embedding(text)
-        logger.warning(
-            "question_type fallback to local embedding",
-            extra={"context": {"error": error_detail or "embedding_unavailable"}},
-        )
+        if error_detail:
+            logger.warning(
+                "question_type fallback to local embedding",
+                extra={"context": {"error": error_detail}},
+            )
 
     examples = _question_type_embeddings(slug, use_fallback)
     if not examples and not use_fallback:
@@ -1864,6 +1874,8 @@ def _should_attempt_semantic_match(text: str) -> bool:
 
 def _search_services_index(text: str, client_slug: str, limit: int) -> list[dict[str, Any]]:
     if not text or not client_slug:
+        return []
+    if _use_local_embeddings():
         return []
     try:
         embedding = get_embedding(text)
@@ -3206,6 +3218,37 @@ def get_demo_salon_decision(
         if reply:
             return _build_truth_decision(response=reply, intent="objection_price")
 
+    if location_signal and duration_signal and not guest_signal and not price_signal:
+        reply, meta = build_info_combined_reply(
+            include_parking=parking_signal,
+            include_guest=guest_signal,
+            client_slug=slug,
+        )
+        travel_hint = format_reply_from_truth("location_travel_time", client_slug=slug, truth=truth)
+        if not travel_hint:
+            travel_hint = (
+                "Время в пути зависит от точки старта и пробок. "
+                "Обычно по городу это около 15-40 минут, точнее лучше смотреть в навигаторе."
+            )
+        parts = [part for part in (reply, travel_hint) if isinstance(part, str) and part.strip()]
+        if parts:
+            response_text = "\n\n".join(parts)
+            decision_meta = dict(meta) if isinstance(meta, dict) else {}
+            info_sections = decision_meta.get("info_sections")
+            if isinstance(info_sections, list):
+                merged_sections = []
+                for section in [*info_sections, "duration"]:
+                    if isinstance(section, str) and section not in merged_sections:
+                        merged_sections.append(section)
+                decision_meta["info_sections"] = merged_sections
+            else:
+                decision_meta["info_sections"] = ["location", "duration"]
+            return _build_truth_decision(
+                response=response_text,
+                intent="location",
+                meta=decision_meta,
+            )
+
     if location_signal and not guest_signal and (not price_signal or (price_signal and not price_item)):
         reply, meta = build_info_combined_reply(
             include_parking=parking_signal,
@@ -3333,6 +3376,17 @@ def get_demo_salon_decision(
         reply = format_reply_from_truth("procedure_combo", client_slug=slug, truth=truth)
         if reply:
             return DemoSalonDecision(action="escalate", response=reply, intent="procedure_combo")
+
+    photo_offer_signal = (
+        "фото" in normalized
+        and _contains_any(normalized, ["пришл", "отправл", "скин", "могу"])
+        and not _contains_any(normalized, ["референс", "пример", "образ"])
+    )
+    if photo_offer_signal:
+        reply = format_reply_from_truth("style_reference", client_slug=slug, truth=truth)
+        if not reply:
+            reply = "Да, конечно. Пришлите фото-пример, и я помогу уточнить по услуге и записи."
+        return _build_truth_decision(response=reply, intent="style_reference")
 
     if "style_reference" in phrase_intents:
         reply = format_reply_from_truth("style_reference", client_slug=slug, truth=truth)

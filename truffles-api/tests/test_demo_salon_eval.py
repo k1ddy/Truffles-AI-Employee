@@ -861,6 +861,7 @@ def _run_webhook_case(
         patch("app.routers.webhook._legacy._get_debounce_redis", return_value=None),
         patch("app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)),
         patch("app.routers.webhook._legacy.send_bot_response", return_value=True),
+        patch("app.routers.webhook.decision.LLM_POLICY_CORE_ENABLED", False),
         patch("app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message),
         patch("app.routers.webhook._legacy._get_user_branch_preference", return_value=None),
         patch(
@@ -988,6 +989,7 @@ def _run_webhook_conversation_turns(
         patch("app.routers.webhook._legacy._get_debounce_redis", return_value=None),
         patch("app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)),
         patch("app.routers.webhook._legacy.send_bot_response", return_value=True),
+        patch("app.routers.webhook.decision.LLM_POLICY_CORE_ENABLED", False),
         patch("app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message),
         patch("app.routers.webhook._legacy._get_user_branch_preference", return_value=None),
         patch(
@@ -1006,7 +1008,12 @@ def _run_webhook_conversation_turns(
             "app.services.knowledge_snapshot_consumer.is_consult_snapshot_allowlisted",
             return_value=False,
         ),
+        patch(
+            "app.services.ai_service.generate_consult_controller_output",
+            return_value=SimpleNamespace(ok=False, error="llm_disabled", error_code="llm_disabled", value=None),
+        ),
         patch("app.services.demo_salon_knowledge.get_embedding", side_effect=lambda text, *_args, **_kwargs: demo_knowledge._local_text_embedding(text)),
+        patch("app.services.knowledge_service.get_embedding", side_effect=lambda text, *_args, **_kwargs: demo_knowledge._local_text_embedding(text)),
         patch("app.services.demo_salon_knowledge._search_services_index", return_value=[]),
         *carryover_patches,
     ]

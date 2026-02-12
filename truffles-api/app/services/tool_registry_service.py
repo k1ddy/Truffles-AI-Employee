@@ -601,12 +601,20 @@ def _catalog_service_query(
 
 
 def _catalog_location(
-    client_slug: str | None, *, message_text: str | None = None
+    client_slug: str | None,
+    *,
+    message_text: str | None = None,
+    info_sections_hint: list[str] | None = None,
 ) -> tuple[str | None, str | None, dict[str, Any]]:
     if not client_slug:
         return None, "location_missing", {}
 
-    include_parking = False
+    include_parking = bool(
+        any(
+            isinstance(item, str) and item.strip().lower() == "parking"
+            for item in (info_sections_hint or [])
+        )
+    )
     if message_text:
         try:
             from app.services import demo_salon_knowledge as knowledge
@@ -614,11 +622,14 @@ def _catalog_location(
             slug = knowledge._normalize_client_slug(client_slug)
             normalized = knowledge._normalize_text(message_text)
             include_parking = bool(
+                include_parking
+                or (
                 normalized
                 and knowledge._has_parking_signal(normalized, client_slug=slug)
+                )
             )
         except Exception:
-            include_parking = False
+            include_parking = include_parking
 
     try:
         from app.services import demo_salon_knowledge as knowledge
@@ -1433,7 +1444,11 @@ def execute_tool_action(
         )
 
     if tool_action == "catalog.location":
-        reply, error, meta = _catalog_location(client_slug, message_text=message_text)
+        reply, error, meta = _catalog_location(
+            client_slug,
+            message_text=message_text,
+            info_sections_hint=info_sections_hint,
+        )
         if error:
             return ToolExecutionResult(
                 handled=True,

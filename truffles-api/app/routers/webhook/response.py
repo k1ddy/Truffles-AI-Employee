@@ -1095,53 +1095,57 @@ def _handle_consult_flow(
             )
             if consult_snapshot_result.playbook:
                 playbook = consult_snapshot_result.playbook
-            elif consult_snapshot_mode == "fallback":
-                playbook, _pack_error = load_consult_playbook(client_slug)
-                consult_snapshot_source = "fallback" if playbook else "missing"
-                consult_snapshot_meta["consult_snapshot_source"] = consult_snapshot_source
             else:
-                consult_snapshot_source = "missing"
-                consult_snapshot_meta["consult_snapshot_source"] = consult_snapshot_source
-                consult_guard = {"reason": "snapshot_missing"}
-                if message_text:
-                    clarify_prompt = legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC
-                    clarify_count = legacy._register_clarify_attempt(
-                        conversation=conversation,
-                        saved_message=saved_message,
-                        intent="consult",
-                        now=now,
-                        reason="snapshot_missing",
-                    )
-                    consult_meta = {
-                        "consult_intent": True,
-                        "consult_question": consult_question or message_text,
-                        "consult_guard": consult_guard,
-                        "clarify_attempt": {"intent": "consult", "count": clarify_count},
-                        "clarify_reason": "snapshot_missing",
-                        "consult_source": "pack",
-                        "source": "pack",
-                    }
-                    if not booking_goal_locked or consult_intent_signal:
-                        context = legacy._get_conversation_context(conversation)
-                        context = legacy._set_expected_reply_context(
+                playbook, _pack_error = load_consult_playbook(client_slug)
+                if playbook:
+                    consult_snapshot_source = "fallback"
+                    consult_snapshot_meta["consult_snapshot_source"] = consult_snapshot_source
+                elif consult_snapshot_mode == "fallback":
+                    consult_snapshot_source = "missing"
+                    consult_snapshot_meta["consult_snapshot_source"] = consult_snapshot_source
+                else:
+                    consult_snapshot_source = "missing"
+                    consult_snapshot_meta["consult_snapshot_source"] = consult_snapshot_source
+                    consult_guard = {"reason": "snapshot_missing"}
+                    if message_text:
+                        clarify_prompt = legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC
+                        clarify_count = legacy._register_clarify_attempt(
                             conversation=conversation,
                             saved_message=saved_message,
-                            context=context,
-                            expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
-                            reason="snapshot_missing",
+                            intent="consult",
                             now=now,
+                            reason="snapshot_missing",
                         )
-                        consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
-                    consult_decision = PackDecision(
-                        action="reply",
-                        response=clarify_prompt,
-                        intent="consult_reply",
-                        meta=consult_meta,
-                    )
-                    consult_flow_override = "consult_clarify"
-                    consult_signal = True
-                    consult_intent = True
-                    consult_pack_used = True
+                        consult_meta = {
+                            "consult_intent": True,
+                            "consult_question": consult_question or message_text,
+                            "consult_guard": consult_guard,
+                            "clarify_attempt": {"intent": "consult", "count": clarify_count},
+                            "clarify_reason": "snapshot_missing",
+                            "consult_source": "pack",
+                            "source": "pack",
+                        }
+                        if not booking_goal_locked or consult_intent_signal:
+                            context = legacy._get_conversation_context(conversation)
+                            context = legacy._set_expected_reply_context(
+                                conversation=conversation,
+                                saved_message=saved_message,
+                                context=context,
+                                expected_reply_type=legacy.EXPECTED_REPLY_SERVICE,
+                                reason="snapshot_missing",
+                                now=now,
+                            )
+                            consult_meta["expected_reply_type"] = legacy.EXPECTED_REPLY_SERVICE
+                        consult_decision = PackDecision(
+                            action="reply",
+                            response=clarify_prompt,
+                            intent="consult_reply",
+                            meta=consult_meta,
+                        )
+                        consult_flow_override = "consult_clarify"
+                        consult_signal = True
+                        consult_intent = True
+                        consult_pack_used = True
         elif is_snapshot_consumer_enabled():
             consult_snapshot_result = build_consult_snapshot_shadow(
                 db,
@@ -2940,6 +2944,9 @@ def _handle_ai_response_action(
                 if sent
                 else "No response: handover confirmation send failed"
             )
+
+    if result_message is None:
+        result_message = "AI fallback response skipped"
 
     if saved_message:
         llm_used = bool(timing_context.get("llm_used")) if timing_context else False
