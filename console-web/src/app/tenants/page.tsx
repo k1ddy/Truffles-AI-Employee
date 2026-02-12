@@ -113,6 +113,28 @@ type FleetPaymentFilter = "all" | "pending" | "confirmed" | "rejected" | "unknow
 type FleetServiceFilter = "all" | "ok" | "degraded" | "attention";
 type FleetAttentionLevel = "high" | "medium" | "low";
 type TenantsWorkspaceMode = "all" | "portfolio" | "onboarding" | "changes" | "decommission";
+type TenantsViewPreset = "operator" | "platform";
+
+type ActionQueueIntent =
+    | "set_context"
+    | "open_cases"
+    | "open_integrations"
+    | "workspace_portfolio"
+    | "workspace_onboarding"
+    | "workspace_changes"
+    | "workspace_decommission"
+    | "none";
+
+type ActionQueueItem = {
+    id: string;
+    priority: FleetAttentionLevel;
+    title: string;
+    detail: string;
+    intent: ActionQueueIntent;
+    actionLabel: string;
+    clientId?: string;
+    companyId?: string | null;
+};
 type OperationalKpiId =
     | "onboardingCoverage"
     | "goLiveReadiness"
@@ -279,6 +301,16 @@ function attentionLevelClass(level?: FleetAttentionLevel): string {
         return "bg-amber-100 text-amber-700";
     }
     return "bg-blue-100 text-blue-700";
+}
+
+function priorityLabel(level: FleetAttentionLevel): string {
+    if (level === "high") {
+        return "критично";
+    }
+    if (level === "medium") {
+        return "важно";
+    }
+    return "планово";
 }
 
 const FLEET_LIFECYCLE_LABELS: Record<string, string> = {
@@ -767,6 +799,7 @@ export default function TenantsPage() {
     const [companyQuery, setCompanyQuery] = useState("");
     const [tenantLifecycle, setTenantLifecycle] = useState<TenantLifecycleMode>("active");
     const [workspaceMode, setWorkspaceMode] = useState<TenantsWorkspaceMode>("all");
+    const [viewPreset, setViewPreset] = useState<TenantsViewPreset>("operator");
     const [fleetLifecycleFilter, setFleetLifecycleFilter] = useState<FleetLifecycleFilter>("all");
     const [fleetPaymentFilter, setFleetPaymentFilter] = useState<FleetPaymentFilter>("all");
     const [fleetServiceFilter, setFleetServiceFilter] = useState<FleetServiceFilter>("all");
@@ -797,6 +830,9 @@ export default function TenantsPage() {
     });
 
     const role = meData?.agent?.role ?? "manager";
+    const isPlatformAdmin = role === "platform_admin";
+    const canSwitchViewPreset = isPlatformAdmin;
+    const isPlatformPreset = viewPreset === "platform";
     const canReadTenants = canAccessConsole(role, "tenants", "read");
     const canWriteTenants = canAccessConsole(role, "tenants", "write");
 
@@ -1218,6 +1254,36 @@ export default function TenantsPage() {
         }
         setClientContext(clientId, companyId);
         router.push(target);
+    };
+
+    const runActionQueueIntent = (item: ActionQueueItem) => {
+        if (item.intent === "set_context") {
+            setClientContext(item.clientId, item.companyId);
+            return;
+        }
+        if (item.intent === "open_cases") {
+            openClientContextTarget("/", item.clientId, item.companyId);
+            return;
+        }
+        if (item.intent === "open_integrations") {
+            openClientContextTarget("/integrations", item.clientId, item.companyId);
+            return;
+        }
+        if (item.intent === "workspace_portfolio") {
+            setWorkspaceMode("portfolio");
+            return;
+        }
+        if (item.intent === "workspace_onboarding") {
+            setWorkspaceMode("onboarding");
+            return;
+        }
+        if (item.intent === "workspace_changes") {
+            setWorkspaceMode("changes");
+            return;
+        }
+        if (item.intent === "workspace_decommission") {
+            setWorkspaceMode("decommission");
+        }
     };
 
     const runKpiAction = (action: OperationalKpiAction) => {
@@ -1772,6 +1838,101 @@ export default function TenantsPage() {
         }
     };
 
+    const actionQueue = useMemo<ActionQueueItem[]>(() => {
+        if (tenantLifecycle !== "active") {
+            return [
+                {
+                    id: "lifecycle-mode-tip",
+                    priority: "low",
+                    title: "Фокус на архиве",
+                    detail: "Для операционной очереди переключите режим списка на «Активные».",
+                    intent: "workspace_portfolio",
+                    actionLabel: "Открыть портфель",
+                },
+            ];
+        }
+
+        const items: ActionQueueItem[] = [];
+        const attentionItems = fleetAttention?.items ?? [];
+        const attentionTop = attentionItems.slice(0, 4);
+
+        attentionTop.forEach((item) => {
+            const defaultIntent: ActionQueueIntent = item.pending_handovers > 0 ? "open_cases" : "open_integrations";
+            const defaultActionLabel = item.pending_handovers > 0 ? "Открыть заявки" : "Открыть интеграции";
+            items.push({
+                id: `attention-${item.client_id}`,
+                priority: item.attention_level as FleetAttentionLevel,
+                title: `${item.client_name ?? item.client_slug} · score ${item.attention_score}`,
+                detail: `Следующее действие: ${item.next_action}. Причины: ${item.reasons?.slice(0, 2).join(", ") || "—"}`,
+                intent: defaultIntent,
+                actionLabel: defaultActionLabel,
+                clientId: item.client_id,
+                companyId: item.company_id ?? null,
+            });
+        });
+
+        const pendingHandoversTotal = fleetAttention?.summary?.pending_handovers_total ?? 0;
+        if (pendingHandoversTotal > 0) {
+            items.push({
+                id: "summary-pending-handovers",
+                priority: pendingHandoversTotal > 10 ? "high" : "medium",
+                title: `Ожидают передачи менеджеру: ${pendingHandoversTotal}`,
+                detail: "Проверьте очередь HANDOFF и обработайте блокирующие кейсы.",
+                intent: "workspace_portfolio",
+                actionLabel: "Открыть риск-панель",
+            });
+        }
+
+        if (operationalKpi.publishFailedChanges > 0) {
+            items.push({
+                id: "summary-publish-failed",
+                priority: operationalKpi.publishFailedChanges >= 3 ? "high" : "medium",
+                title: `Ошибки публикации изменений: ${operationalKpi.publishFailedChanges}`,
+                detail: "Нужен разбор причин перед следующими publish/rollback.",
+                intent: "workspace_changes",
+                actionLabel: "Открыть Change Management",
+            });
+        }
+
+        if ((clientsSummary?.onboarding_clients ?? 0) > 0 && operationalKpi.goLiveReadinessPct < 80) {
+            items.push({
+                id: "summary-go-live-readiness",
+                priority: operationalKpi.goLiveReadinessPct < 60 ? "high" : "medium",
+                title: `Go-Live readiness: ${operationalKpi.goLiveReadinessPct}%`,
+                detail: "Есть филиалы в онбординге без закрытых обязательных критериев.",
+                intent: "workspace_onboarding",
+                actionLabel: "Открыть Onboarding",
+            });
+        }
+
+        if ((clientsSummary?.archived_clients ?? 0) > 0 && operationalKpi.decommissionSharePct > 20) {
+            items.push({
+                id: "summary-decommission-share",
+                priority: "low",
+                title: `Доля decommission: ${operationalKpi.decommissionSharePct}%`,
+                detail: "Проверьте архивные клиенты и восстановите тех, кто готов вернуться в актив.",
+                intent: "workspace_decommission",
+                actionLabel: "Открыть Decommission",
+            });
+        }
+
+        if (items.length === 0) {
+            items.push({
+                id: "queue-healthy",
+                priority: "low",
+                title: "Операционная очередь пуста",
+                detail: "Критичных/важных блокеров не найдено. Можно продолжать плановый онбординг.",
+                intent: "workspace_onboarding",
+                actionLabel: "Открыть Onboarding",
+            });
+        }
+
+        const priorityOrder: Record<FleetAttentionLevel, number> = { high: 0, medium: 1, low: 2 };
+        return items
+            .sort((left, right) => priorityOrder[left.priority] - priorityOrder[right.priority])
+            .slice(0, 8);
+    }, [tenantLifecycle, fleetAttention, operationalKpi, clientsSummary]);
+
     const showPortfolio = workspaceMode === "all" || workspaceMode === "portfolio";
     const showOnboarding = workspaceMode === "all" || workspaceMode === "onboarding";
     const showChangeManagement = workspaceMode === "all" || workspaceMode === "changes";
@@ -1806,7 +1967,13 @@ export default function TenantsPage() {
             <div className="flex flex-col gap-2 mb-6">
                 <h1 className="text-2xl font-bold" data-testid="tenants-title">Тенанты</h1>
                 <div className="text-xs text-muted-foreground">
-                    Контекст: {selectedCompanyName ?? selectedCompanyId ?? "—"} / {meData?.client?.name ?? selectedClientId ?? "—"} / {selectedBranchName ?? selectedBranchId ?? "—"}
+                    Контекст: {selectedCompanyName ?? "—"} / {meData?.client?.name ?? "—"} / {selectedBranchName ?? "—"}
+                    {isPlatformPreset ? (
+                        <span>
+                            {" · IDs: "}
+                            {selectedCompanyId ?? "—"} / {selectedClientId ?? "—"} / {selectedBranchId ?? "—"}
+                        </span>
+                    ) : null}
                 </div>
                 <div className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-workspace-modes">
                     <div className="text-xs text-muted-foreground mb-2">Рабочая зона Tenants:</div>
@@ -1823,21 +1990,21 @@ export default function TenantsPage() {
                             onClick={() => setWorkspaceMode("portfolio")}
                             data-testid="tenants-mode-portfolio"
                         >
-                            Portfolio
+                            Портфель
                         </button>
                         <button
                             className={workspaceMode === "onboarding" ? "btn-primary" : "btn-ghost"}
                             onClick={() => setWorkspaceMode("onboarding")}
                             data-testid="tenants-mode-onboarding"
                         >
-                            Onboarding
+                            Онбординг
                         </button>
                         <button
                             className={workspaceMode === "changes" ? "btn-primary" : "btn-ghost"}
                             onClick={() => setWorkspaceMode("changes")}
                             data-testid="tenants-mode-changes"
                         >
-                            Change Management
+                            Изменения
                         </button>
                         <button
                             className={workspaceMode === "decommission" ? "btn-primary" : "btn-ghost"}
@@ -1847,20 +2014,97 @@ export default function TenantsPage() {
                             Decommission
                         </button>
                     </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="tenants-view-preset">
+                        <span className="text-xs text-muted-foreground">Профиль интерфейса:</span>
+                        <button
+                            className={viewPreset === "operator" ? "btn-primary" : "btn-ghost"}
+                            onClick={() => setViewPreset("operator")}
+                            data-testid="tenants-view-preset-operator"
+                        >
+                            Operator
+                        </button>
+                        <button
+                            className={viewPreset === "platform" ? "btn-primary" : "btn-ghost"}
+                            onClick={() => setViewPreset("platform")}
+                            disabled={!canSwitchViewPreset}
+                            data-testid="tenants-view-preset-platform"
+                        >
+                            Platform
+                        </button>
+                    </div>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="tenants-workspace-guide">
                     <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground mb-2">
                         Операционный guide
                     </div>
                     <div className="text-xs text-muted-foreground">
-                        Portfolio: риск-панель и состав портфеля. Onboarding: запуск нового филиала. Change Management:
-                        controlled change + draft/validate/publish. Decommission: archive/restore по подтверждению.
+                        Портфель: риск-панель и состав клиентов. Онбординг: запуск нового филиала. Изменения:
+                        controlled change + draft/validate/publish. Decommission: архив/восстановление с подтверждением.
                     </div>
                     <div className="mt-2 text-xs text-muted-foreground">
                         Перед Go-Live проверьте: `instance_id`, `phone`, `timezone`, `telegram_chat_id`, `knowledge_tag`,
-                        `payment_status`, active reference pack.
+                        `payment_status`, активный reference pack.
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                        Порядок работы: `Action Queue`, затем контекст клиента, затем профильная зона, затем подтверждение результата через trace/audit.
                     </div>
                 </div>
+                <section className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-action-queue">
+                    <div className="flex items-start justify-between gap-3">
+                        <div>
+                            <h2 className="text-sm font-semibold">Action Queue</h2>
+                            <p className="text-xs text-muted-foreground">
+                                Приоритетные действия для текущего среза активных тенантов.
+                            </p>
+                        </div>
+                        <button
+                            className="btn-ghost"
+                            onClick={() => {
+                                fleetAttentionQuery.refetch();
+                                recentBranchChangesKpiQuery.refetch();
+                                clientsQuery.refetch();
+                            }}
+                            disabled={fleetAttentionQuery.isFetching || recentBranchChangesKpiQuery.isFetching || clientsQuery.isFetching}
+                        >
+                            Обновить
+                        </button>
+                    </div>
+                    <div className="mt-3 grid gap-2">
+                        {actionQueue.map((item) => (
+                            <div
+                                key={item.id}
+                                className="rounded-lg border border-border/60 bg-background px-3 py-2"
+                                data-testid="tenants-action-queue-item"
+                            >
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="text-xs font-medium">{item.title}</div>
+                                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${attentionLevelClass(item.priority)}`}>
+                                        {priorityLabel(item.priority)}
+                                    </span>
+                                </div>
+                                <div className="mt-1 text-xs text-muted-foreground">{item.detail}</div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <button
+                                        className="btn-ghost"
+                                        onClick={() => runActionQueueIntent(item)}
+                                        data-testid="tenants-action-queue-run"
+                                    >
+                                        {item.actionLabel}
+                                    </button>
+                                    {item.clientId ? (
+                                        <button
+                                            className="btn-ghost"
+                                            onClick={() => setClientContext(item.clientId, item.companyId)}
+                                            data-testid="tenants-action-queue-context"
+                                        >
+                                            В контекст клиента
+                                        </button>
+                                    ) : null}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </section>
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                     <span className="text-xs text-muted-foreground">Режим списка:</span>
                     <button
@@ -2225,7 +2469,9 @@ export default function TenantsPage() {
                                     >
                                         <div>
                                             <div className="font-medium">{company.name ?? "Без названия"}</div>
-                                            <div className="text-xs text-muted-foreground">{company.id}</div>
+                                            {isPlatformPreset ? (
+                                                <div className="text-xs text-muted-foreground">{company.id}</div>
+                                            ) : null}
                                         </div>
                                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                             <span>{company.id === selectedCompanyId ? "Выбрана" : ""}</span>
@@ -2248,6 +2494,10 @@ export default function TenantsPage() {
                                         {isEditing && companyEditor ? (
                                             <div className="w-full mt-3 rounded-lg border border-border/60 bg-muted/30 p-3">
                                                 <div className="grid gap-3">
+                                                    <div className="rounded-lg border border-border/60 bg-background p-3 text-[11px] text-muted-foreground">
+                                                        Контракт ввода: `name` обязателен. `billing_info` опционален и принимается как JSON-объект.
+                                                        Основной сценарий: меняйте только название. JSON нужен только для расширенных атрибутов.
+                                                    </div>
                                                     <label className="text-xs text-muted-foreground">
                                                         Название
                                                         <input
@@ -2263,22 +2513,27 @@ export default function TenantsPage() {
                                                             disabled={!canWriteTenants || savingCompany}
                                                         />
                                                     </label>
-                                                    <label className="text-xs text-muted-foreground">
-                                                        billing_info (JSON, опционально)
-                                                        <textarea
-                                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
-                                                            rows={3}
-                                                            value={companyEditor.billingInfo}
-                                                            onChange={(event) =>
-                                                                setCompanyEditor((prev) =>
-                                                                    prev
-                                                                        ? { ...prev, billingInfo: event.target.value }
-                                                                        : prev
-                                                                )
-                                                            }
-                                                            disabled={!canWriteTenants || savingCompany}
-                                                        />
-                                                    </label>
+                                                    <details className="rounded-lg border border-border/60 bg-background p-3">
+                                                        <summary className="cursor-pointer text-xs text-muted-foreground">
+                                                            Advanced JSON (expert): billing_info
+                                                        </summary>
+                                                        <label className="mt-2 block text-xs text-muted-foreground">
+                                                            billing_info (JSON, опционально)
+                                                            <textarea
+                                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
+                                                                rows={3}
+                                                                value={companyEditor.billingInfo}
+                                                                onChange={(event) =>
+                                                                    setCompanyEditor((prev) =>
+                                                                        prev
+                                                                            ? { ...prev, billingInfo: event.target.value }
+                                                                            : prev
+                                                                    )
+                                                                }
+                                                                disabled={!canWriteTenants || savingCompany}
+                                                            />
+                                                        </label>
+                                                    </details>
                                                     <div className="flex items-center gap-2">
                                                         <button
                                                             className="btn-primary"
@@ -2462,7 +2717,9 @@ export default function TenantsPage() {
                                     >
                                         <div>
                                             <div className="font-medium">{client.name ?? client.slug ?? "Без названия"}</div>
-                                            <div className="text-xs text-muted-foreground">{client.id}</div>
+                                            {isPlatformPreset ? (
+                                                <div className="text-xs text-muted-foreground">{client.id}</div>
+                                            ) : null}
                                             {client.company_name ? (
                                                 <div className="text-xs text-muted-foreground">{client.company_name}</div>
                                             ) : null}
@@ -2555,7 +2812,7 @@ export default function TenantsPage() {
                                                                     </div>
                                                                     <div className={entry.status === "success" ? "text-emerald-700" : "text-red-700"}>
                                                                         {entry.status === "success" ? "OK" : "ERROR"}: {entry.message}
-                                                                        {entry.traceId ? ` (trace_id: ${entry.traceId})` : ""}
+                                                                        {isPlatformPreset && entry.traceId ? ` (trace_id: ${entry.traceId})` : ""}
                                                                     </div>
                                                                 </div>
                                                             ))
@@ -2726,7 +2983,9 @@ export default function TenantsPage() {
                                     >
                                         <div>
                                             <div className="font-medium">{branch.name ?? branch.slug ?? "Без названия"}</div>
-                                            <div className="text-xs text-muted-foreground">{branch.id}</div>
+                                            {isPlatformPreset ? (
+                                                <div className="text-xs text-muted-foreground">{branch.id}</div>
+                                            ) : null}
                                             <div className="text-xs text-muted-foreground">
                                                 {branch.instance_id ? `instance_id: ${branch.instance_id}` : "instance_id: —"}
                                             </div>
@@ -2923,6 +3182,29 @@ export default function TenantsPage() {
                                                             />
                                                         </label>
                                                     ) : null}
+                                                    <div className="rounded-lg border border-border/60 bg-background p-3 text-xs" data-testid="tenants-branch-impact-preview">
+                                                        <div className="font-medium">Impact preview</div>
+                                                        <div className="mt-1 text-muted-foreground">
+                                                            branch: {branchEditor.name || branchEditor.slug || branchEditor.id}
+                                                        </div>
+                                                        <div className="text-muted-foreground">
+                                                            activation: {branchEditor.original.isActive ? "active" : "inactive"} {"-> "} {branchEditor.isActive ? "active" : "inactive"}
+                                                        </div>
+                                                        {!branchEditor.original.isActive && branchEditor.isActive && !branchEditor.instanceId.trim() ? (
+                                                            <div className="text-destructive">
+                                                                Нельзя активировать без `instance_id`.
+                                                            </div>
+                                                        ) : null}
+                                                        {confirmationNeeded ? (
+                                                            <div className="text-amber-700">
+                                                                Изменение требует подтверждения (`branch_deactivate`).
+                                                            </div>
+                                                        ) : (
+                                                            <div className="text-muted-foreground">
+                                                                Подтверждение не требуется для текущего изменения.
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                     <div className="flex items-center gap-2">
                                                         <button
                                                             className="btn-primary"

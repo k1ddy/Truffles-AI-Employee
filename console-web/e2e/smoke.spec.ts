@@ -732,6 +732,12 @@ test.describe('Navigation', () => {
             await page.getByTestId('tenants-mode-portfolio').click();
         }
 
+        const actionQueue = page.getByTestId('tenants-action-queue');
+        if (await actionQueue.isVisible().catch(() => false)) {
+            await expect(actionQueue).toBeVisible();
+            await expect(page.getByTestId('tenants-action-queue-item').first()).toBeVisible();
+        }
+
         const kpiPanel = page.getByTestId('tenants-operational-kpi');
         if (await kpiPanel.isVisible().catch(() => false)) {
             await expect(page.getByTestId('tenants-kpi-onboarding-coverage')).toBeVisible();
@@ -887,6 +893,10 @@ test.describe('Navigation', () => {
             const readinessScore = page.getByTestId('onboarding-readiness-score');
             if (await readinessScore.isVisible().catch(() => false)) {
                 await expect(readinessScore).toBeVisible();
+                const timeline = page.getByTestId('onboarding-readiness-timeline');
+                if (await timeline.isVisible().catch(() => false)) {
+                    await expect(timeline).toBeVisible();
+                }
             } else {
                 // Backward-compatible path for environments where readiness score UI is not deployed yet.
                 await expect(page.getByRole('heading', { name: /Проверки Go\/No-Go/i })).toBeVisible();
