@@ -579,6 +579,88 @@ async function openInbox(page: import('@playwright/test').Page) {
     await expectRowsOrEmpty(page, 'cases-row', 'cases-empty');
 }
 
+type BranchBookingState = {
+    branchId: string;
+    bookingRequired: boolean;
+    bookingStatus: string | null;
+    bookingMissing: string[];
+};
+
+async function readTenantHeaders(page: import('@playwright/test').Page) {
+    const context = await page.evaluate(() => ({
+        companyId: window.localStorage.getItem('console:company_id'),
+        clientId: window.localStorage.getItem('console:client_id'),
+    }));
+    const headers: Record<string, string> = {};
+    if (context.companyId) {
+        headers['x-company-id'] = context.companyId;
+    }
+    if (context.clientId) {
+        headers['x-client-id'] = context.clientId;
+    }
+    return headers;
+}
+
+async function fetchBranchBookingStates(
+    page: import('@playwright/test').Page,
+): Promise<BranchBookingState[]> {
+    const tenantHeaders = await readTenantHeaders(page);
+    const meResponse = await page.request.get('/api/proxy/me', { headers: tenantHeaders });
+    if (!meResponse.ok()) {
+        return [];
+    }
+    const meData = (await meResponse.json()) as {
+        branches?: Array<{ id?: string }>;
+    };
+    const branchIds = (meData.branches ?? [])
+        .map((branch) => branch.id)
+        .filter((id): id is string => Boolean(id));
+    const states: BranchBookingState[] = [];
+    for (const branchId of branchIds) {
+        const statusResponse = await page.request.get('/api/proxy/onboarding/status', {
+            headers: {
+                ...tenantHeaders,
+                'x-branch-id': branchId,
+            },
+        });
+        if (!statusResponse.ok()) {
+            continue;
+        }
+        const statusData = (await statusResponse.json()) as {
+            steps?: Array<{ id?: string; status?: string; required?: boolean; missing?: string[] }>;
+        };
+        const bookingStep = (statusData.steps ?? []).find((step) => step.id === 'booking');
+        states.push({
+            branchId,
+            bookingRequired: Boolean(bookingStep?.required),
+            bookingStatus: bookingStep?.status ?? null,
+            bookingMissing: Array.isArray(bookingStep?.missing) ? bookingStep.missing : [],
+        });
+    }
+    return states;
+}
+
+async function openTeamSpecialists(page: import('@playwright/test').Page) {
+    await openInbox(page);
+    await page.getByTestId('nav-team').click();
+    await expect(page).toHaveURL(urlPathPattern('/team'));
+    await expect(page.getByTestId('team-page')).toBeVisible();
+    await page.getByTestId('team-tab-specialists').click();
+    await expect(page.getByText('Специалисты')).toBeVisible();
+}
+
+async function extractErrorCode(response: import('@playwright/test').Response) {
+    try {
+        const payload = await response.json() as {
+            code?: string;
+            error?: { code?: string };
+        };
+        return payload.error?.code ?? payload.code ?? null;
+    } catch {
+        return null;
+    }
+}
+
 // =========================================
 // INBOX FILTERS & NAVIGATION
 // =========================================
@@ -1012,6 +1094,108 @@ test.describe('Case Actions @mutating', () => {
                 }
             }
         }
+    });
+});
+
+test.describe('Team Specialists @mutating', () => {
+    test.skip(!runMutations, 'Mutating tests are disabled');
+
+    test.beforeEach(async ({ page }) => {
+        await openTeamSpecialists(page);
+        const createForm = page.getByTestId('team-specialist-create-form');
+        test.skip(!(await createForm.isVisible().catch(() => false)), 'team:write permission is required');
+    });
+
+    test('should block specialist create when booking onboarding step is not ready @mutating', async ({ page }) => {
+        const states = await fetchBranchBookingStates(page);
+        const blockedBranch = states.find(
+            (state) => state.bookingRequired && state.bookingStatus !== 'complete',
+        );
+        test.skip(!blockedBranch, 'No branch with blocked booking onboarding step found');
+
+        await page.getByTestId('team-specialist-create-branch').selectOption(blockedBranch!.branchId);
+        await page.getByTestId('team-specialist-create-name').fill(`E2E Gate ${Date.now()}`);
+
+        const createResponsePromise = page.waitForResponse(
+            (response) => response.request().method() === 'POST' && response.url().includes('/api/proxy/calendar/specialists'),
+        );
+        await page.getByTestId('team-specialist-create-submit').click();
+        const createResponse = await createResponsePromise;
+
+        expect(createResponse.status()).toBe(409);
+        expect(await extractErrorCode(createResponse)).toBe('ONBOARDING_STEP_REQUIRED');
+    });
+
+    test('should create, update services, disable and enable specialist @mutating', async ({ page }) => {
+        const states = await fetchBranchBookingStates(page);
+        const readyBranch = states.find(
+            (state) => !state.bookingRequired || state.bookingStatus === 'complete',
+        );
+        test.skip(!readyBranch, 'No branch with booking-ready onboarding state found');
+
+        const createdName = `E2E Specialist ${Date.now()}`;
+        await page.getByTestId('team-specialist-create-branch').selectOption(readyBranch!.branchId);
+        await page.getByTestId('team-specialist-create-name').fill(createdName);
+        await page.getByTestId('team-specialist-create-service-name').first().fill('Маникюр');
+        await page.getByTestId('team-specialist-create-service-duration').first().fill('45');
+        await page.getByTestId('team-specialist-create-service-price').first().fill('12000');
+
+        const createResponsePromise = page.waitForResponse(
+            (response) => response.request().method() === 'POST' && response.url().includes('/api/proxy/calendar/specialists'),
+        );
+        await page.getByTestId('team-specialist-create-submit').click();
+        const createResponse = await createResponsePromise;
+        expect(createResponse.ok()).toBe(true);
+        const createdPayload = (await createResponse.json()) as { id?: string; name?: string };
+        const specialistId = createdPayload.id ?? '';
+        expect(specialistId).not.toBe('');
+
+        const specialistCard = page.locator(`[data-testid="team-specialist-card"][data-specialist-id="${specialistId}"]`);
+        await expect(specialistCard).toBeVisible({ timeout: 10000 });
+        await expect(specialistCard.getByTestId('team-specialist-name')).toContainText(createdName);
+
+        await specialistCard.getByTestId('team-specialist-edit-toggle').click();
+        const editForm = specialistCard.getByTestId('team-specialist-edit-form');
+        await expect(editForm).toBeVisible();
+        const updatedName = `${createdName} Updated`;
+        await editForm.getByTestId('team-specialist-edit-name').fill(updatedName);
+        await editForm.getByTestId('team-specialist-edit-service-name').first().fill('Маникюр + гель');
+        await editForm.getByTestId('team-specialist-edit-service-duration').first().fill('60');
+        await editForm.getByTestId('team-specialist-edit-service-price').first().fill('15000');
+
+        const updateResponsePromise = page.waitForResponse(
+            (response) => (
+                response.request().method() === 'PATCH'
+                && response.url().includes(`/api/proxy/calendar/specialists/${specialistId}`)
+            ),
+        );
+        await editForm.getByTestId('team-specialist-edit-save').click();
+        const updateResponse = await updateResponsePromise;
+        expect(updateResponse.ok()).toBe(true);
+        await expect(specialistCard.getByTestId('team-specialist-name')).toContainText(updatedName);
+        await expect(specialistCard.getByText('Маникюр + гель')).toBeVisible();
+
+        const disableResponsePromise = page.waitForResponse(
+            (response) => (
+                response.request().method() === 'POST'
+                && response.url().includes(`/api/proxy/calendar/specialists/${specialistId}/disable`)
+            ),
+        );
+        await specialistCard.getByTestId('team-specialist-status-toggle').click();
+        const disableResponse = await disableResponsePromise;
+        expect(disableResponse.ok()).toBe(true);
+        await expect(specialistCard.getByTestId('team-specialist-status')).toContainText('Неактивен');
+
+        const enableResponsePromise = page.waitForResponse(
+            (response) => (
+                response.request().method() === 'POST'
+                && response.url().includes(`/api/proxy/calendar/specialists/${specialistId}/enable`)
+            ),
+        );
+        await specialistCard.getByTestId('team-specialist-status-toggle').click();
+        const enableResponse = await enableResponsePromise;
+        expect(enableResponse.ok()).toBe(true);
+        await expect(specialistCard.getByTestId('team-specialist-status')).toContainText('Активен');
     });
 });
 

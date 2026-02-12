@@ -154,7 +154,56 @@ async function fetchSpecialistsAdmin(branchId?: string): Promise<SpecialistsResp
 type SpecialistMutationPayload = {
     name: string;
     branch_id?: string;
+    services?: Array<{ name: string; duration_min?: number; price?: number }>;
 };
+
+type SpecialistServiceDraft = {
+    name: string;
+    duration_min: string;
+    price: string;
+};
+
+function makeEmptyServiceDraft(): SpecialistServiceDraft {
+    return { name: "", duration_min: "", price: "" };
+}
+
+function mapSpecialistServicesToDraft(services?: Specialist["services"]): SpecialistServiceDraft[] {
+    if (!services || services.length === 0) {
+        return [makeEmptyServiceDraft()];
+    }
+    return services.map((service) => ({
+        name: service.name ?? "",
+        duration_min: service.duration_min != null ? String(service.duration_min) : "",
+        price: service.price != null ? String(service.price) : "",
+    }));
+}
+
+function parseServicesFromDraft(
+    drafts: SpecialistServiceDraft[],
+): Array<{ name: string; duration_min?: number; price?: number }> {
+    return drafts
+        .map((draft) => {
+            const name = draft.name.trim();
+            if (!name) {
+                return null;
+            }
+            const parsedDuration = draft.duration_min.trim()
+                ? Number.parseInt(draft.duration_min.trim(), 10)
+                : undefined;
+            const parsedPrice = draft.price.trim()
+                ? Number.parseInt(draft.price.trim(), 10)
+                : undefined;
+            const payload: { name: string; duration_min?: number; price?: number } = { name };
+            if (Number.isFinite(parsedDuration) && parsedDuration && parsedDuration > 0) {
+                payload.duration_min = parsedDuration;
+            }
+            if (Number.isFinite(parsedPrice) && parsedPrice != null && parsedPrice >= 0) {
+                payload.price = parsedPrice;
+            }
+            return payload;
+        })
+        .filter((service): service is { name: string; duration_min?: number; price?: number } => Boolean(service));
+}
 
 async function createSpecialist(data: SpecialistMutationPayload): Promise<Specialist> {
     const response = await api.post("/calendar/specialists", data);
@@ -1415,9 +1464,11 @@ function SpecialistsPanel({
     );
     const [createName, setCreateName] = useState("");
     const [createBranchId, setCreateBranchId] = useState("");
+    const [createServices, setCreateServices] = useState<SpecialistServiceDraft[]>([makeEmptyServiceDraft()]);
     const [editingSpecialistId, setEditingSpecialistId] = useState<string | null>(null);
     const [editName, setEditName] = useState("");
     const [editBranchId, setEditBranchId] = useState("");
+    const [editServices, setEditServices] = useState<SpecialistServiceDraft[]>([makeEmptyServiceDraft()]);
     const [statusTarget, setStatusTarget] = useState<string | null>(null);
 
     const specialistsQuery = useQuery({
@@ -1447,6 +1498,7 @@ function SpecialistsPanel({
         onSuccess: () => {
             toast.success("Специалист добавлен");
             setCreateName("");
+            setCreateServices([makeEmptyServiceDraft()]);
             queryClient.invalidateQueries({ queryKey: ["calendar-specialists"] });
         },
         onError: (error) => {
@@ -1462,6 +1514,7 @@ function SpecialistsPanel({
             setEditingSpecialistId(null);
             setEditName("");
             setEditBranchId("");
+            setEditServices([makeEmptyServiceDraft()]);
             queryClient.invalidateQueries({ queryKey: ["calendar-specialists"] });
         },
         onError: (error) => {
@@ -1515,13 +1568,18 @@ function SpecialistsPanel({
             toast.error("Выберите филиал");
             return;
         }
-        createMutation.mutate({ name, branch_id: branchId });
+        createMutation.mutate({
+            name,
+            branch_id: branchId,
+            services: parseServicesFromDraft(createServices),
+        });
     };
 
     const startEditSpecialist = (specialist: Specialist) => {
         setEditingSpecialistId(specialist.id);
         setEditName(specialist.name ?? "");
         setEditBranchId(specialist.branch_id ?? "");
+        setEditServices(mapSpecialistServicesToDraft(specialist.services));
     };
 
     const handleSaveSpecialist = (specialistId: string) => {
@@ -1540,8 +1598,66 @@ function SpecialistsPanel({
         }
         updateMutation.mutate({
             specialistId,
-            data: { name, branch_id: branchId },
+            data: {
+                name,
+                branch_id: branchId,
+                services: parseServicesFromDraft(editServices),
+            },
         });
+    };
+
+    const addCreateService = () => {
+        setCreateServices((current) => [...current, makeEmptyServiceDraft()]);
+    };
+
+    const removeCreateService = (index: number) => {
+        setCreateServices((current) => {
+            if (current.length <= 1) {
+                return [makeEmptyServiceDraft()];
+            }
+            return current.filter((_, itemIndex) => itemIndex !== index);
+        });
+    };
+
+    const patchCreateService = (
+        index: number,
+        field: keyof SpecialistServiceDraft,
+        value: string,
+    ) => {
+        setCreateServices((current) =>
+            current.map((service, itemIndex) => (
+                itemIndex === index
+                    ? { ...service, [field]: value }
+                    : service
+            ))
+        );
+    };
+
+    const addEditService = () => {
+        setEditServices((current) => [...current, makeEmptyServiceDraft()]);
+    };
+
+    const removeEditService = (index: number) => {
+        setEditServices((current) => {
+            if (current.length <= 1) {
+                return [makeEmptyServiceDraft()];
+            }
+            return current.filter((_, itemIndex) => itemIndex !== index);
+        });
+    };
+
+    const patchEditService = (
+        index: number,
+        field: keyof SpecialistServiceDraft,
+        value: string,
+    ) => {
+        setEditServices((current) =>
+            current.map((service, itemIndex) => (
+                itemIndex === index
+                    ? { ...service, [field]: value }
+                    : service
+            ))
+        );
     };
 
     const specialists = specialistsQuery.data?.items ?? [];
@@ -1560,6 +1676,7 @@ function SpecialistsPanel({
                     </div>
                     {branches.length > 1 && (
                         <select
+                            data-testid="team-specialists-branch-filter"
                             className="rounded-full border border-border/60 bg-background px-4 py-2 text-sm"
                             value={selectedBranchId}
                             onChange={(event) => onSelectBranch(event.target.value)}
@@ -1596,7 +1713,11 @@ function SpecialistsPanel({
             </div>
 
             {canWriteTeam && (
-                <form onSubmit={handleCreateSpecialist} className="card-surface p-6 space-y-4">
+                <form
+                    onSubmit={handleCreateSpecialist}
+                    className="card-surface p-6 space-y-4"
+                    data-testid="team-specialist-create-form"
+                >
                     <div>
                         <h3 className="text-base font-semibold">Добавить специалиста</h3>
                         <p className="text-sm text-muted-foreground mt-1">
@@ -1605,12 +1726,14 @@ function SpecialistsPanel({
                     </div>
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                         <input
+                            data-testid="team-specialist-create-name"
                             className="rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
                             placeholder="Имя специалиста"
                             value={createName}
                             onChange={(event) => setCreateName(event.target.value)}
                         />
                         <select
+                            data-testid="team-specialist-create-branch"
                             className="rounded-xl border border-border/60 bg-background px-3 py-2 text-sm"
                             value={createBranchId}
                             onChange={(event) => setCreateBranchId(event.target.value)}
@@ -1623,12 +1746,65 @@ function SpecialistsPanel({
                             ))}
                         </select>
                         <button
+                            data-testid="team-specialist-create-submit"
                             type="submit"
                             className="btn-primary"
                             disabled={createMutation.isPending}
                         >
                             {createMutation.isPending ? "Добавление..." : "Добавить"}
                         </button>
+                    </div>
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-medium">Услуги специалиста</p>
+                            <button
+                                data-testid="team-specialist-create-service-add"
+                                type="button"
+                                className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted"
+                                onClick={addCreateService}
+                            >
+                                + Услуга
+                            </button>
+                        </div>
+                        {createServices.map((service, index) => (
+                            <div
+                                key={`create-service-${index}`}
+                                className="grid grid-cols-1 gap-2 md:grid-cols-4"
+                                data-testid="team-specialist-create-service-row"
+                            >
+                                <input
+                                    data-testid="team-specialist-create-service-name"
+                                    className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                                    placeholder="Название услуги"
+                                    value={service.name}
+                                    onChange={(event) => patchCreateService(index, "name", event.target.value)}
+                                />
+                                <input
+                                    data-testid="team-specialist-create-service-duration"
+                                    className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                                    placeholder="Длительность, мин"
+                                    inputMode="numeric"
+                                    value={service.duration_min}
+                                    onChange={(event) => patchCreateService(index, "duration_min", event.target.value)}
+                                />
+                                <input
+                                    data-testid="team-specialist-create-service-price"
+                                    className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                                    placeholder="Цена, ₸"
+                                    inputMode="numeric"
+                                    value={service.price}
+                                    onChange={(event) => patchCreateService(index, "price", event.target.value)}
+                                />
+                                <button
+                                    data-testid="team-specialist-create-service-remove"
+                                    type="button"
+                                    className="rounded-lg border border-border/60 px-3 py-2 text-sm hover:bg-muted"
+                                    onClick={() => removeCreateService(index)}
+                                >
+                                    Удалить
+                                </button>
+                            </div>
+                        ))}
                     </div>
                 </form>
             )}
@@ -1645,15 +1821,21 @@ function SpecialistsPanel({
                     </div>
                 )}
                 {!specialistsQuery.isLoading && specialists.map((specialist) => (
-                    <div key={specialist.id} className="card-surface p-5">
+                    <div
+                        key={specialist.id}
+                        className="card-surface p-5"
+                        data-testid="team-specialist-card"
+                        data-specialist-id={specialist.id}
+                    >
                         <div className="flex items-start justify-between">
                             <div>
                                 <p className="text-sm text-muted-foreground">
                                     {specialist.branch_name ?? formatBranchLabel(specialist.branch_id ?? null, branches)}
                                 </p>
-                                <p className="text-lg font-semibold mt-1">{specialist.name}</p>
+                                <p className="text-lg font-semibold mt-1" data-testid="team-specialist-name">{specialist.name}</p>
                             </div>
                             <span
+                                data-testid="team-specialist-status"
                                 className={`px-2 py-1 rounded text-xs font-medium ${specialist.is_active
                                     ? "bg-green-100 text-green-800"
                                     : "bg-muted text-muted-foreground"}`}
@@ -1664,6 +1846,7 @@ function SpecialistsPanel({
                         {canWriteTeam && (
                             <div className="mt-3 flex flex-wrap items-center gap-2">
                                 <button
+                                    data-testid="team-specialist-edit-toggle"
                                     type="button"
                                     className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
                                     onClick={() => (
@@ -1675,6 +1858,7 @@ function SpecialistsPanel({
                                     {editingSpecialistId === specialist.id ? "Скрыть редактирование" : "Редактировать"}
                                 </button>
                                 <button
+                                    data-testid="team-specialist-status-toggle"
                                     type="button"
                                     className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
                                     onClick={() => statusMutation.mutate({
@@ -1692,14 +1876,19 @@ function SpecialistsPanel({
                             </div>
                         )}
                         {canWriteTeam && editingSpecialistId === specialist.id && (
-                            <div className="mt-4 rounded-xl border border-border/60 bg-muted/20 p-3 space-y-3">
+                            <div
+                                className="mt-4 rounded-xl border border-border/60 bg-muted/20 p-3 space-y-3"
+                                data-testid="team-specialist-edit-form"
+                            >
                                 <input
+                                    data-testid="team-specialist-edit-name"
                                     className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
                                     value={editName}
                                     onChange={(event) => setEditName(event.target.value)}
                                     placeholder="Имя специалиста"
                                 />
                                 <select
+                                    data-testid="team-specialist-edit-branch"
                                     className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
                                     value={editBranchId}
                                     onChange={(event) => setEditBranchId(event.target.value)}
@@ -1711,7 +1900,60 @@ function SpecialistsPanel({
                                         </option>
                                     ))}
                                 </select>
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">Услуги</p>
+                                        <button
+                                            data-testid="team-specialist-edit-service-add"
+                                            type="button"
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted"
+                                            onClick={addEditService}
+                                        >
+                                            + Услуга
+                                        </button>
+                                    </div>
+                                    {editServices.map((service, index) => (
+                                        <div
+                                            key={`edit-service-${index}`}
+                                            className="grid grid-cols-1 gap-2 md:grid-cols-4"
+                                            data-testid="team-specialist-edit-service-row"
+                                        >
+                                            <input
+                                                data-testid="team-specialist-edit-service-name"
+                                                className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                                                placeholder="Название услуги"
+                                                value={service.name}
+                                                onChange={(event) => patchEditService(index, "name", event.target.value)}
+                                            />
+                                            <input
+                                                data-testid="team-specialist-edit-service-duration"
+                                                className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                                                placeholder="Длительность, мин"
+                                                inputMode="numeric"
+                                                value={service.duration_min}
+                                                onChange={(event) => patchEditService(index, "duration_min", event.target.value)}
+                                            />
+                                            <input
+                                                data-testid="team-specialist-edit-service-price"
+                                                className="rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                                                placeholder="Цена, ₸"
+                                                inputMode="numeric"
+                                                value={service.price}
+                                                onChange={(event) => patchEditService(index, "price", event.target.value)}
+                                            />
+                                            <button
+                                                data-testid="team-specialist-edit-service-remove"
+                                                type="button"
+                                                className="rounded-lg border border-border/60 px-3 py-2 text-sm hover:bg-muted"
+                                                onClick={() => removeEditService(index)}
+                                            >
+                                                Удалить
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
                                 <button
+                                    data-testid="team-specialist-edit-save"
                                     type="button"
                                     className="btn-secondary"
                                     onClick={() => handleSaveSpecialist(specialist.id)}
@@ -1820,6 +2062,7 @@ export default function TeamPage() {
             <div className="flex flex-wrap gap-2">
                 {TEAM_TABS.map((tab) => (
                     <button
+                        data-testid={`team-tab-${tab.id}`}
                         key={tab.id}
                         type="button"
                         className={`rounded-full px-4 py-2 text-sm font-medium transition ${
