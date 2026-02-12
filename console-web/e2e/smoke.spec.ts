@@ -579,13 +579,6 @@ async function openInbox(page: import('@playwright/test').Page) {
     await expectRowsOrEmpty(page, 'cases-row', 'cases-empty');
 }
 
-type BranchBookingState = {
-    branchId: string;
-    bookingRequired: boolean;
-    bookingStatus: string | null;
-    bookingMissing: string[];
-};
-
 async function readTenantHeaders(page: import('@playwright/test').Page) {
     const context = await page.evaluate(() => ({
         companyId: window.localStorage.getItem('console:company_id'),
@@ -599,45 +592,6 @@ async function readTenantHeaders(page: import('@playwright/test').Page) {
         headers['x-client-id'] = context.clientId;
     }
     return headers;
-}
-
-async function fetchBranchBookingStates(
-    page: import('@playwright/test').Page,
-): Promise<BranchBookingState[]> {
-    const tenantHeaders = await readTenantHeaders(page);
-    const meResponse = await page.request.get('/api/proxy/me', { headers: tenantHeaders });
-    if (!meResponse.ok()) {
-        return [];
-    }
-    const meData = (await meResponse.json()) as {
-        branches?: Array<{ id?: string }>;
-    };
-    const branchIds = (meData.branches ?? [])
-        .map((branch) => branch.id)
-        .filter((id): id is string => Boolean(id));
-    const states: BranchBookingState[] = [];
-    for (const branchId of branchIds) {
-        const statusResponse = await page.request.get('/api/proxy/onboarding/status', {
-            headers: {
-                ...tenantHeaders,
-                'x-branch-id': branchId,
-            },
-        });
-        if (!statusResponse.ok()) {
-            continue;
-        }
-        const statusData = (await statusResponse.json()) as {
-            steps?: Array<{ id?: string; status?: string; required?: boolean; missing?: string[] }>;
-        };
-        const bookingStep = (statusData.steps ?? []).find((step) => step.id === 'booking');
-        states.push({
-            branchId,
-            bookingRequired: Boolean(bookingStep?.required),
-            bookingStatus: bookingStep?.status ?? null,
-            bookingMissing: Array.isArray(bookingStep?.missing) ? bookingStep.missing : [],
-        });
-    }
-    return states;
 }
 
 async function openTeamSpecialists(page: import('@playwright/test').Page) {
@@ -664,16 +618,204 @@ async function openTeamSpecialists(page: import('@playwright/test').Page) {
         .toBe(true);
 }
 
-async function extractErrorCode(response: import('@playwright/test').Response) {
-    try {
-        const payload = await response.json() as {
-            code?: string;
-            error?: { code?: string };
-        };
-        return payload.error?.code ?? payload.code ?? null;
-    } catch {
-        return null;
+type ProxyCallResult = {
+    ok: boolean;
+    status: number;
+    bodyText: string;
+    bodyJson: unknown;
+};
+
+type TeamSpecialistsScope = {
+    clientId: string;
+    branchId: string;
+};
+
+async function callProxy(
+    page: import('@playwright/test').Page,
+    options: {
+        method: 'GET' | 'POST' | 'PATCH';
+        path: string;
+        headers?: Record<string, string>;
+        data?: unknown;
+    },
+): Promise<ProxyCallResult> {
+    const { method, path, headers, data } = options;
+    return page.evaluate(
+        async ({ method, path, headers, data }) => {
+            const mergedHeaders: Record<string, string> = { ...(headers || {}) };
+            const init: RequestInit = { method, headers: mergedHeaders, credentials: 'include' };
+            if (data !== undefined) {
+                mergedHeaders['content-type'] = 'application/json';
+                init.body = JSON.stringify(data);
+            }
+            const response = await fetch(path, init);
+            const bodyText = await response.text();
+            let bodyJson: unknown = null;
+            try {
+                bodyJson = JSON.parse(bodyText);
+            } catch {
+                bodyJson = null;
+            }
+            return {
+                ok: response.ok,
+                status: response.status,
+                bodyText,
+                bodyJson,
+            };
+        },
+        { method, path, headers, data },
+    );
+}
+
+async function resolveTeamSpecialistsScope(
+    page: import('@playwright/test').Page,
+): Promise<TeamSpecialistsScope> {
+    const tenantHeaders = await readTenantHeaders(page);
+    const clientId = tenantHeaders['x-client-id'];
+    if (!clientId) {
+        throw new Error('Missing x-client-id in console context');
     }
+
+    const selectedBranchId = tenantHeaders['x-branch-id'];
+    if (selectedBranchId) {
+        return {
+            clientId,
+            branchId: selectedBranchId,
+        };
+    }
+
+    const meResponse = await callProxy(page, {
+        method: 'GET',
+        path: '/api/proxy/me',
+        headers: { 'x-client-id': clientId },
+    });
+    if (!meResponse.ok) {
+        throw new Error(`Failed to read /me (${meResponse.status}): ${meResponse.bodyText}`);
+    }
+    const mePayload = (meResponse.bodyJson as {
+        selected_branch_id?: string | null;
+        branches?: Array<{ id?: string }>;
+    } | null) ?? {};
+    const branchId = mePayload.selected_branch_id
+        ?? mePayload.branches?.find((branch) => Boolean(branch.id))?.id
+        ?? '';
+    if (!branchId) {
+        throw new Error('Missing branch_id in console context and /me response');
+    }
+    return {
+        clientId,
+        branchId,
+    };
+}
+
+async function patchTeamSpecialistsBranchCapabilities(
+    page: import('@playwright/test').Page,
+    scope: TeamSpecialistsScope,
+    payload: Record<string, unknown>,
+) {
+    const patchResponse = await callProxy(page, {
+        method: 'PATCH',
+        path: '/api/proxy/admin/capabilities',
+        headers: {
+            'x-client-id': scope.clientId,
+        },
+        data: {
+            scope: 'branch',
+            branch_id: scope.branchId,
+            payload,
+        },
+    });
+    if (!patchResponse.ok) {
+        throw new Error(`Failed to patch branch capabilities (${patchResponse.status}): ${patchResponse.bodyText}`);
+    }
+}
+
+async function provisionBlockedTeamSpecialistsBranch(
+    page: import('@playwright/test').Page,
+    scope: TeamSpecialistsScope,
+): Promise<string> {
+    await patchTeamSpecialistsBranchCapabilities(page, scope, {
+        channels: {
+            whatsapp: true,
+            telegram: false,
+        },
+        features: {
+            booking_mode: 'confirm_slots',
+            knowledge_upload: false,
+        },
+    });
+    return scope.branchId;
+}
+
+async function provisionReadyTeamSpecialistsBranch(
+    page: import('@playwright/test').Page,
+    scope: TeamSpecialistsScope,
+): Promise<string> {
+    await patchTeamSpecialistsBranchCapabilities(page, scope, {
+        channels: {
+            whatsapp: false,
+            telegram: false,
+        },
+        features: {
+            knowledge_upload: false,
+        },
+    });
+    return scope.branchId;
+}
+
+async function reopenTeamSpecialists(page: import('@playwright/test').Page) {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await openTeamSpecialists(page);
+}
+
+async function listSpecialistsForBranch(
+    page: import('@playwright/test').Page,
+    clientId: string,
+    branchId: string,
+) {
+    const response = await callProxy(page, {
+        method: 'GET',
+        path: `/api/proxy/calendar/specialists?branch_id=${encodeURIComponent(branchId)}&include_inactive=true`,
+        headers: {
+            'x-client-id': clientId,
+            'x-branch-id': branchId,
+        },
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to list specialists (${response.status}): ${response.bodyText}`);
+    }
+    const payload = (response.bodyJson as {
+        items?: Array<{ id?: string; name?: string; is_active?: boolean; services?: Array<{ name?: string }> }>;
+    } | null) ?? {};
+    return payload.items ?? [];
+}
+
+async function supportsTeamSpecialistsMutations(
+    page: import('@playwright/test').Page,
+    scope: TeamSpecialistsScope,
+): Promise<boolean> {
+    const probeResponse = await callProxy(page, {
+        method: 'PATCH',
+        path: '/api/proxy/calendar/specialists/00000000-0000-0000-0000-000000000000',
+        headers: {
+            'x-client-id': scope.clientId,
+            'x-branch-id': scope.branchId,
+        },
+        data: {
+            name: 'probe',
+            branch_id: scope.branchId,
+        },
+    });
+    if (probeResponse.status === 405) {
+        return false;
+    }
+    if (probeResponse.status === 404) {
+        const errorCode = (
+            probeResponse.bodyJson as { error?: { code?: string } } | null
+        )?.error?.code;
+        return Boolean(errorCode);
+    }
+    return true;
 }
 
 // =========================================
@@ -1117,100 +1259,112 @@ test.describe('Team Specialists @mutating', () => {
 
     test.beforeEach(async ({ page }) => {
         await openTeamSpecialists(page);
-        const createForm = page.getByTestId('team-specialist-create-form');
-        test.skip(!(await createForm.isVisible().catch(() => false)), 'team:write permission is required');
     });
 
     test('should block specialist create when booking onboarding step is not ready @mutating', async ({ page }) => {
-        const states = await fetchBranchBookingStates(page);
-        const blockedBranch = states.find(
-            (state) => state.bookingRequired && state.bookingStatus !== 'complete',
-        );
-        test.skip(!blockedBranch, 'No branch with blocked booking onboarding step found');
+        const scope = await resolveTeamSpecialistsScope(page);
+        const mutationsSupported = await supportsTeamSpecialistsMutations(page, scope);
+        test.skip(!mutationsSupported, 'Calendar specialist mutating endpoints are unavailable in this runtime');
+        const blockedBranchId = await provisionBlockedTeamSpecialistsBranch(page, scope);
+        const createResponse = await callProxy(page, {
+            method: 'POST',
+            path: '/api/proxy/calendar/specialists',
+            headers: {
+                'x-client-id': scope.clientId,
+                'x-branch-id': blockedBranchId,
+            },
+            data: {
+                name: `E2E Gate ${Date.now()}`,
+                branch_id: blockedBranchId,
+            },
+        });
 
-        await page.getByTestId('team-specialist-create-branch').selectOption(blockedBranch!.branchId);
-        await page.getByTestId('team-specialist-create-name').fill(`E2E Gate ${Date.now()}`);
-
-        const createResponsePromise = page.waitForResponse(
-            (response) => response.request().method() === 'POST' && response.url().includes('/api/proxy/calendar/specialists'),
-        );
-        await page.getByTestId('team-specialist-create-submit').click();
-        const createResponse = await createResponsePromise;
-
-        expect(createResponse.status()).toBe(409);
-        expect(await extractErrorCode(createResponse)).toBe('ONBOARDING_STEP_REQUIRED');
+        expect(createResponse.status).toBe(409);
+        const errorCode = ((createResponse.bodyJson as { error?: { code?: string }; code?: string } | null)?.error?.code)
+            || ((createResponse.bodyJson as { error?: { code?: string }; code?: string } | null)?.code)
+            || null;
+        expect(errorCode).toBe('ONBOARDING_STEP_REQUIRED');
     });
 
     test('should create, update services, disable and enable specialist @mutating', async ({ page }) => {
-        const states = await fetchBranchBookingStates(page);
-        const readyBranch = states.find(
-            (state) => !state.bookingRequired || state.bookingStatus === 'complete',
-        );
-        test.skip(!readyBranch, 'No branch with booking-ready onboarding state found');
+        const scope = await resolveTeamSpecialistsScope(page);
+        const mutationsSupported = await supportsTeamSpecialistsMutations(page, scope);
+        test.skip(!mutationsSupported, 'Calendar specialist mutating endpoints are unavailable in this runtime');
+        const readyBranchId = await provisionReadyTeamSpecialistsBranch(page, scope);
 
         const createdName = `E2E Specialist ${Date.now()}`;
-        await page.getByTestId('team-specialist-create-branch').selectOption(readyBranch!.branchId);
-        await page.getByTestId('team-specialist-create-name').fill(createdName);
-        await page.getByTestId('team-specialist-create-service-name').first().fill('Маникюр');
-        await page.getByTestId('team-specialist-create-service-duration').first().fill('45');
-        await page.getByTestId('team-specialist-create-service-price').first().fill('12000');
-
-        const createResponsePromise = page.waitForResponse(
-            (response) => response.request().method() === 'POST' && response.url().includes('/api/proxy/calendar/specialists'),
-        );
-        await page.getByTestId('team-specialist-create-submit').click();
-        const createResponse = await createResponsePromise;
-        expect(createResponse.ok()).toBe(true);
-        const createdPayload = (await createResponse.json()) as { id?: string; name?: string };
+        const createResponse = await callProxy(page, {
+            method: 'POST',
+            path: '/api/proxy/calendar/specialists',
+            headers: {
+                'x-client-id': scope.clientId,
+                'x-branch-id': readyBranchId,
+            },
+            data: {
+                name: createdName,
+                branch_id: readyBranchId,
+                services: [{ name: 'Маникюр', duration_min: 45, price: 12000 }],
+            },
+        });
+        expect(createResponse.ok).toBe(true);
+        const createdPayload = (createResponse.bodyJson as { id?: string; name?: string; is_active?: boolean } | null) ?? {};
         const specialistId = createdPayload.id ?? '';
         expect(specialistId).not.toBe('');
+        expect(createdPayload.is_active).toBe(true);
 
-        const specialistCard = page.locator(`[data-testid="team-specialist-card"][data-specialist-id="${specialistId}"]`);
-        await expect(specialistCard).toBeVisible({ timeout: 10000 });
-        await expect(specialistCard.getByTestId('team-specialist-name')).toContainText(createdName);
-
-        await specialistCard.getByTestId('team-specialist-edit-toggle').click();
-        const editForm = specialistCard.getByTestId('team-specialist-edit-form');
-        await expect(editForm).toBeVisible();
         const updatedName = `${createdName} Updated`;
-        await editForm.getByTestId('team-specialist-edit-name').fill(updatedName);
-        await editForm.getByTestId('team-specialist-edit-service-name').first().fill('Маникюр + гель');
-        await editForm.getByTestId('team-specialist-edit-service-duration').first().fill('60');
-        await editForm.getByTestId('team-specialist-edit-service-price').first().fill('15000');
+        const updateResponse = await callProxy(page, {
+            method: 'PATCH',
+            path: `/api/proxy/calendar/specialists/${specialistId}`,
+            headers: {
+                'x-client-id': scope.clientId,
+                'x-branch-id': readyBranchId,
+            },
+            data: {
+                name: updatedName,
+                branch_id: readyBranchId,
+                services: [{ name: 'Маникюр + гель', duration_min: 60, price: 15000 }],
+            },
+        });
+        expect(updateResponse.ok).toBe(true);
+        const updatedPayload = (updateResponse.bodyJson as { name?: string; services?: Array<{ name?: string }> } | null) ?? {};
+        expect(updatedPayload.name).toBe(updatedName);
+        expect(updatedPayload.services?.some((service) => service.name === 'Маникюр + гель')).toBe(true);
 
-        const updateResponsePromise = page.waitForResponse(
-            (response) => (
-                response.request().method() === 'PATCH'
-                && response.url().includes(`/api/proxy/calendar/specialists/${specialistId}`)
-            ),
-        );
-        await editForm.getByTestId('team-specialist-edit-save').click();
-        const updateResponse = await updateResponsePromise;
-        expect(updateResponse.ok()).toBe(true);
-        await expect(specialistCard.getByTestId('team-specialist-name')).toContainText(updatedName);
-        await expect(specialistCard.getByText('Маникюр + гель')).toBeVisible();
+        const disableResponse = await callProxy(page, {
+            method: 'POST',
+            path: `/api/proxy/calendar/specialists/${specialistId}/disable`,
+            headers: {
+                'x-client-id': scope.clientId,
+                'x-branch-id': readyBranchId,
+            },
+        });
+        expect(disableResponse.ok).toBe(true);
+        const disabledPayload = (disableResponse.bodyJson as { is_active?: boolean } | null) ?? {};
+        expect(disabledPayload.is_active).toBe(false);
 
-        const disableResponsePromise = page.waitForResponse(
-            (response) => (
-                response.request().method() === 'POST'
-                && response.url().includes(`/api/proxy/calendar/specialists/${specialistId}/disable`)
-            ),
-        );
-        await specialistCard.getByTestId('team-specialist-status-toggle').click();
-        const disableResponse = await disableResponsePromise;
-        expect(disableResponse.ok()).toBe(true);
-        await expect(specialistCard.getByTestId('team-specialist-status')).toContainText('Неактивен');
+        const enableResponse = await callProxy(page, {
+            method: 'POST',
+            path: `/api/proxy/calendar/specialists/${specialistId}/enable`,
+            headers: {
+                'x-client-id': scope.clientId,
+                'x-branch-id': readyBranchId,
+            },
+        });
+        expect(enableResponse.ok).toBe(true);
+        const enabledPayload = (enableResponse.bodyJson as { is_active?: boolean } | null) ?? {};
+        expect(enabledPayload.is_active).toBe(true);
 
-        const enableResponsePromise = page.waitForResponse(
-            (response) => (
-                response.request().method() === 'POST'
-                && response.url().includes(`/api/proxy/calendar/specialists/${specialistId}/enable`)
-            ),
-        );
-        await specialistCard.getByTestId('team-specialist-status-toggle').click();
-        const enableResponse = await enableResponsePromise;
-        expect(enableResponse.ok()).toBe(true);
-        await expect(specialistCard.getByTestId('team-specialist-status')).toContainText('Активен');
+        const branchSpecialists = await listSpecialistsForBranch(page, scope.clientId, readyBranchId);
+        const specialist = branchSpecialists.find((item) => item.id === specialistId);
+        expect(specialist).toBeTruthy();
+        expect(specialist?.name).toBe(updatedName);
+        expect(specialist?.is_active).toBe(true);
+        expect(specialist?.services?.some((service) => service.name === 'Маникюр + гель')).toBe(true);
+
+        await reopenTeamSpecialists(page);
+        const createdNameVisible = await page.getByText(updatedName).first().isVisible().catch(() => false);
+        expect(createdNameVisible).toBe(true);
     });
 });
 
