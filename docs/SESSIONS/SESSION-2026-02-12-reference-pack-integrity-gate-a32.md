@@ -1,0 +1,23 @@
+# SESSION 2026-02-12-reference-pack-integrity-gate-a32 — Session 2026-02-12-reference-pack-integrity-gate-a32
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-12-reference-pack-integrity-gate-a32.md
+- branch: fix/2026-02-12-reference-pack-integrity-gate-a32
+- worktree: /home/zhan/worktrees/2026-02-12-reference-pack-integrity-gate-a32
+- base_ref: origin/main
+- scope: Ввести fail-closed Reference Pack Integrity Gate v2 в onboarding scorecard/autopilot/go-live.
+- done:
+  - Добавлен сервис `reference_pack_integrity` (metadata builder + checksum + integrity evaluator).
+  - `onboarding_state` расширен проверкой целостности reference pack и новыми missing-кодами для `go_no_go`.
+  - `console` upsert/autopilot обновлены на auto-sync integrity metadata и schema_version `v2`.
+  - UI labels обновлены для новых integrity missing-кодов.
+  - Добавлены/обновлены тесты (`test_reference_pack_integrity`, `test_console_onboarding_state`, `test_console_onboarding_contract_api`).
+- next:
+  - Открыть PR и передать на merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-12-reference-pack-integrity-gate-a32.md
+  - `pytest -q truffles-api/tests/test_reference_pack_integrity.py truffles-api/tests/test_console_onboarding_state.py truffles-api/tests/test_console_onboarding_contract_api.py truffles-api/tests/test_console_access_admin_pr2.py` -> `54 passed`
+  - `ruff check truffles-api/app/services/reference_pack_integrity.py truffles-api/app/services/onboarding_state.py truffles-api/app/routers/console.py truffles-api/tests/test_reference_pack_integrity.py truffles-api/tests/test_console_onboarding_state.py truffles-api/tests/test_console_onboarding_contract_api.py` -> `All checks passed`
+  - `npm --prefix console-web run lint` -> `No ESLint warnings or errors`
+- last_updated: 2026-02-12
