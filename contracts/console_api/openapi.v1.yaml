@@ -29,6 +29,8 @@ tags:
     description: Agent directory and identity linking
   - name: settings
     description: Client/branch settings
+  - name: calendar
+    description: Specialists, slots, bookings, and calendar integrations
   - name: knowledge
     description: Knowledge Studio pipeline
   - name: ops
@@ -918,6 +920,30 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /onboarding/scorecard:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    get:
+      operationId: getOnboardingScorecard
+      tags: [settings]
+      summary: Get onboarding scorecard
+      parameters:
+        - $ref: "#/components/parameters/branch_id_query"
+      responses:
+        "200":
+          description: Onboarding scorecard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingScorecardResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /onboarding/advance:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
@@ -977,6 +1003,417 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  # ──────────────────────────────────────────────────────────────────
+  # CALENDAR
+  # ──────────────────────────────────────────────────────────────────
+  /calendar/specialists:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    get:
+      operationId: listCalendarSpecialists
+      tags: [calendar]
+      summary: List specialists
+      parameters:
+        - name: branch_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: include_inactive
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Specialists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpecialistsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    post:
+      operationId: createCalendarSpecialist
+      tags: [calendar]
+      summary: Create specialist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpecialistCreate"
+      responses:
+        "200":
+          description: Specialist created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpecialistResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/OnboardingStepRequired"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /calendar/specialists/{specialist_id}:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+      - name: specialist_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      operationId: updateCalendarSpecialist
+      tags: [calendar]
+      summary: Update specialist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpecialistUpdate"
+      responses:
+        "200":
+          description: Specialist updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpecialistResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/OnboardingStepRequired"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /calendar/specialists/{specialist_id}/enable:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+      - name: specialist_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: enableCalendarSpecialist
+      tags: [calendar]
+      summary: Enable specialist
+      responses:
+        "200":
+          description: Specialist enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpecialistResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/OnboardingStepRequired"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /calendar/specialists/{specialist_id}/disable:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+      - name: specialist_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: disableCalendarSpecialist
+      tags: [calendar]
+      summary: Disable specialist
+      responses:
+        "200":
+          description: Specialist disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpecialistResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/OnboardingStepRequired"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /calendar/slots:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    get:
+      operationId: getCalendarSlots
+      tags: [calendar]
+      summary: Get specialist slots
+      parameters:
+        - name: specialist_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            description: YYYY-MM-DD
+        - name: duration
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 15
+            maximum: 240
+            default: 60
+      responses:
+        "200":
+          description: Slots
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SlotsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /calendar/bookings:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    post:
+      operationId: createCalendarBooking
+      tags: [calendar]
+      summary: Create booking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookingCreate"
+      responses:
+        "200":
+          description: Booking created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    get:
+      operationId: listCalendarBookings
+      tags: [calendar]
+      summary: List bookings
+      parameters:
+        - name: specialist_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: date_from
+          in: query
+          required: false
+          schema:
+            type: string
+            description: YYYY-MM-DD
+        - name: date_to
+          in: query
+          required: false
+          schema:
+            type: string
+            description: YYYY-MM-DD
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Bookings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingsListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /calendar/bookings/{booking_id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+      - name: booking_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: cancelCalendarBooking
+      tags: [calendar]
+      summary: Cancel booking
+      parameters:
+        - name: reason
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Booking cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /calendar/google/connect:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    get:
+      operationId: startCalendarGoogleConnect
+      tags: [calendar]
+      summary: Start Google Calendar OAuth
+      responses:
+        "307":
+          description: Redirect to Google OAuth consent screen
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /calendar/google/callback:
+    get:
+      operationId: handleCalendarGoogleCallback
+      tags: [calendar]
+      summary: Handle Google Calendar OAuth callback
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "307":
+          description: Redirect to Console settings with callback status
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /calendar/google/status:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    get:
+      operationId: getCalendarGoogleStatus
+      tags: [calendar]
+      summary: Get Google Calendar connection status
+      responses:
+        "200":
+          description: Integration status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoogleStatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   # ──────────────────────────────────────────────────────────────────
   # KNOWLEDGE
@@ -3784,6 +4221,46 @@ components:
           format: date-time
           nullable: true
 
+    OnboardingScorecardCheck:
+      type: object
+      required: [id, required, passed]
+      properties:
+        id:
+          type: string
+          enum: [branch_draft, integrations, team, telegram, knowledge, booking, go_no_go]
+        required:
+          type: boolean
+        passed:
+          type: boolean
+        missing:
+          type: array
+          items:
+            type: string
+
+    OnboardingScorecardResponse:
+      type: object
+      required: [branch_id, status, ready, checks, missing, generated_at]
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pass, fail]
+        ready:
+          type: boolean
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/OnboardingScorecardCheck"
+        missing:
+          type: array
+          items:
+            type: string
+        generated_at:
+          type: string
+          format: date-time
+
     OnboardingAdvanceRequest:
       type: object
       required: [branch_id, step_id]
@@ -5653,6 +6130,95 @@ components:
           format: date-time
 
     # ── Calendar ──
+    SpecialistServicePayload:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        duration_min:
+          type: integer
+          minimum: 5
+          maximum: 480
+          nullable: true
+        price:
+          type: integer
+          minimum: 0
+          nullable: true
+
+    SpecialistCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        phone:
+          type: string
+          maxLength: 50
+          nullable: true
+        email:
+          type: string
+          maxLength: 255
+          nullable: true
+        google_calendar_id:
+          type: string
+          maxLength: 255
+          nullable: true
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpecialistServicePayload"
+          default: []
+        working_hours:
+          type: object
+          nullable: true
+        is_active:
+          type: boolean
+          default: true
+
+    SpecialistUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          nullable: true
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        phone:
+          type: string
+          maxLength: 50
+          nullable: true
+        email:
+          type: string
+          maxLength: 255
+          nullable: true
+        google_calendar_id:
+          type: string
+          maxLength: 255
+          nullable: true
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpecialistServicePayload"
+          nullable: true
+        working_hours:
+          type: object
+          nullable: true
+        is_active:
+          type: boolean
+          nullable: true
+
     BookingCreate:
       type: object
       required: [specialist_id, start_at, end_at]

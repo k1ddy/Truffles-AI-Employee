@@ -137,6 +137,8 @@ from app.schemas.console import (
     ConsoleOnboardingContractPatchRequest,
     ConsoleOnboardingContractRecord,
     ConsoleOnboardingContractResponse,
+    ConsoleOnboardingScorecardCheck,
+    ConsoleOnboardingScorecardResponse,
     ConsoleOnboardingStatusResponse,
     ConsoleOnboardingStepStatus,
     ConsoleOpsJobCatalogResponse,
@@ -221,6 +223,7 @@ from app.services.onboarding_state import (
     OnboardingStep,
     advance_onboarding_step,
     build_onboarding_inputs,
+    build_onboarding_scorecard,
     build_onboarding_status,
     ensure_onboarding_step,
     missing_prerequisites,
@@ -828,6 +831,28 @@ def _serialize_onboarding_status(
         updated_at=branch.onboarding_updated_at.isoformat()
         if branch.onboarding_updated_at
         else None,
+    )
+
+
+def _serialize_onboarding_scorecard(
+    branch: Branch,
+    scorecard,
+) -> ConsoleOnboardingScorecardResponse:
+    return ConsoleOnboardingScorecardResponse(
+        branch_id=branch.id,
+        status="pass" if scorecard.ready else "fail",
+        ready=scorecard.ready,
+        checks=[
+            ConsoleOnboardingScorecardCheck(
+                id=check.id.value,
+                required=check.required,
+                passed=check.passed,
+                missing=check.missing,
+            )
+            for check in scorecard.checks
+        ],
+        missing=scorecard.missing,
+        generated_at=datetime.now(timezone.utc).isoformat(),
     )
 
 
@@ -6223,6 +6248,28 @@ async def get_onboarding_status(
     return _serialize_onboarding_status(branch, status)
 
 
+@router.get(
+    "/onboarding/scorecard",
+    response_model=ConsoleOnboardingScorecardResponse,
+    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_onboarding_scorecard(
+    request: Request,
+    branch_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleOnboardingScorecardResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin/support can access onboarding",
+    )
+    branch = _resolve_branch_for_onboarding(context, branch_id=branch_id)
+    scorecard = build_onboarding_scorecard(db, branch)
+    return _serialize_onboarding_scorecard(branch, scorecard)
+
+
 @router.post(
     "/onboarding/advance",
     response_model=ConsoleOnboardingStatusResponse,
@@ -8850,9 +8897,13 @@ async def approve_branch_go_live(
     _require_client_access(context, branch.client_id)
 
     reason = _normalize_access_reason(body.reason, required=True)
-    inputs = build_onboarding_inputs(db, branch)
-    missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
-    if missing:
+    scorecard = build_onboarding_scorecard(db, branch)
+    if not scorecard.ready:
+        failed_checks = [
+            check.id.value
+            for check in scorecard.checks
+            if check.required and not check.passed
+        ]
         raise ConsoleAPIError(
             409,
             "GO_LIVE_GATE_REQUIRED",
@@ -8861,7 +8912,9 @@ async def approve_branch_go_live(
                 "operation": "branch_go_live_approve",
                 "go_live_state": _normalize_branch_go_live_state(branch.go_live_state),
                 "required_step": OnboardingStep.GO_NO_GO.value,
-                "missing": missing,
+                "missing": scorecard.missing,
+                "scorecard_status": "fail",
+                "failed_checks": failed_checks,
             },
         )
 

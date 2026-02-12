@@ -108,6 +108,21 @@ class OnboardingStatus:
     steps: list[OnboardingStepInfo]
 
 
+@dataclass(frozen=True)
+class OnboardingScorecardCheck:
+    id: OnboardingStep
+    required: bool
+    passed: bool
+    missing: list[str]
+
+
+@dataclass(frozen=True)
+class OnboardingScorecard:
+    ready: bool
+    checks: list[OnboardingScorecardCheck]
+    missing: list[str]
+
+
 def _parse_onboarding_state(value: Optional[str]) -> Optional[OnboardingStep]:
     if not value:
         return None
@@ -438,6 +453,44 @@ def _step_is_ready(step: OnboardingStep, inputs: OnboardingInputs) -> bool:
     if not is_step_required(step, inputs):
         return True
     return len(missing_prerequisites(step, inputs)) == 0
+
+
+def _deduplicate_strings(values: list[str]) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        if item in seen:
+            continue
+        seen.add(item)
+        unique.append(item)
+    return unique
+
+
+def build_onboarding_scorecard_from_inputs(inputs: OnboardingInputs) -> OnboardingScorecard:
+    checks: list[OnboardingScorecardCheck] = []
+    for step in ONBOARDING_STEPS:
+        required = is_step_required(step, inputs)
+        missing = _deduplicate_strings(missing_prerequisites(step, inputs)) if required else []
+        checks.append(
+            OnboardingScorecardCheck(
+                id=step,
+                required=required,
+                passed=len(missing) == 0,
+                missing=missing,
+            )
+        )
+
+    go_no_go_missing = _deduplicate_strings(missing_prerequisites(OnboardingStep.GO_NO_GO, inputs))
+    return OnboardingScorecard(
+        ready=len(go_no_go_missing) == 0,
+        checks=checks,
+        missing=go_no_go_missing,
+    )
+
+
+def build_onboarding_scorecard(db: Session, branch: Branch) -> OnboardingScorecard:
+    inputs = build_onboarding_inputs(db, branch)
+    return build_onboarding_scorecard_from_inputs(inputs)
 
 
 def derive_last_completed_step(inputs: OnboardingInputs) -> OnboardingStep:
