@@ -9,6 +9,11 @@ from app.routers import console as console_router
 from app.schemas.console import ConsoleOnboardingContractPatchRequest, ConsoleReferencePackUpsertRequest
 from app.schemas.onboarding_contract import OnboardingContractPayload
 from app.services.console_errors import ConsoleAPIError
+from app.services.reference_pack_integrity import (
+    REFERENCE_PACK_INTEGRITY_VERSION,
+    REFERENCE_PACK_SCHEMA_VERSION,
+    build_required_fields_checksum,
+)
 
 
 def _mock_context(*, role: str = "platform_admin", client_id=None, agent_id=None):
@@ -166,6 +171,73 @@ async def test_upsert_reference_pack_requires_platform_admin(monkeypatch):
         )
 
     assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_upsert_reference_pack_enforces_integrity_metadata(monkeypatch):
+    context = _mock_context(role="platform_admin")
+    db = Mock()
+    body = ConsoleReferencePackUpsertRequest(
+        title="Beauty base",
+        metadata={"source": "manual"},
+    )
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda request, db, require_selection=False: context,
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+
+    def _assign_id(record):
+        if getattr(record, "id", None) is None:
+            record.id = uuid4()
+
+    db.add.side_effect = _assign_id
+    db.query.return_value.filter.return_value.first.return_value = None
+
+    response = await console_router.upsert_reference_pack(
+        domain_slug="beauty",
+        body=body,
+        request=Mock(),
+        db=db,
+    )
+
+    assert response.schema_version == REFERENCE_PACK_SCHEMA_VERSION
+    assert response.metadata["source"] == "manual"
+    assert response.metadata["integrity"]["version"] == REFERENCE_PACK_INTEGRITY_VERSION
+    assert response.metadata["integrity"]["required_fields_checksum"] == build_required_fields_checksum(
+        response.metadata["integrity"]["required_fields"]
+    )
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_upsert_reference_pack_rejects_unsupported_schema_version(monkeypatch):
+    context = _mock_context(role="platform_admin")
+    db = Mock()
+    body = ConsoleReferencePackUpsertRequest(
+        title="Beauty base",
+        schema_version="v1",
+    )
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda request, db, require_selection=False: context,
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.upsert_reference_pack(
+            domain_slug="beauty",
+            body=body,
+            request=Mock(),
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
 
 
 @pytest.mark.asyncio
