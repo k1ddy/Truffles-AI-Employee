@@ -8,17 +8,17 @@
 - Состояние handovers
 """
 import argparse
-import http.client
 import base64
 import glob
 import hashlib
+import http.client
 import json
 import math
 import os
 import random
 import re
-import signal
 import shlex
+import signal
 import socket
 import subprocess
 import sys
@@ -3033,7 +3033,11 @@ def _llm_quality_extract_expectations(turn):
     reply_type = _llm_quality_normalize_expect_value(expect.get("reply_type"))
     state = _llm_quality_normalize_expect_value(expect.get("state"))
     tag_set = _llm_quality_collect_turn_tags(turn)
-    if reply_type in CHAOS_BOOKING_REPLY_TYPES and "consult" in tag_set:
+    booking_reply_types = globals().get(
+        "CHAOS_BOOKING_REPLY_TYPES",
+        {"service_choice", "time", "name"},
+    )
+    if reply_type in booking_reply_types and "consult" in tag_set:
         # Consult turns do not carry booking slot-contract prompts.
         reply_type = None
     action = _llm_quality_sanitize_expect_action_by_tags(tag_set, action)
@@ -3208,13 +3212,13 @@ def _llm_quality_expected_reply_matches(
     *,
     expected_reply,
     expected_response,
-    bot_response,
     expected_reply_type,
     expected_state,
     state,
     meta,
     conv_meta,
     handover_meta,
+    bot_response=False,
 ):
     if expected_reply is None:
         return True

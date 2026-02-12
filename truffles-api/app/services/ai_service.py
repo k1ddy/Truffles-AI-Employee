@@ -2163,11 +2163,6 @@ def generate_ai_response(
         if timing_context is not None:
             timing_context["llm_degradation_reason"] = "llm_skip"
         return Result.success((None, "low_confidence"))
-    if not _current_openai_api_key():
-        if timing_context is not None:
-            timing_context["llm_degradation_reason"] = "llm_skip"
-        logger.warning("AI generation skipped: OPENAI_API_KEY missing")
-        return Result.success((None, "low_confidence"))
 
     logger.info(f"generate_ai_response: client_id={client_id}, client_slug={client_slug}")
     if timing_context is not None:
@@ -2378,7 +2373,15 @@ def generate_ai_response(
                 messages.append({"role": "user", "content": user_message})
 
         # 7. Generate response
-        llm = get_llm_provider()
+        try:
+            llm = get_llm_provider()
+        except RuntimeError as exc:
+            if "OPENAI_API_KEY missing" in str(exc):
+                if timing_context is not None:
+                    timing_context.setdefault("llm_degradation_reason", "llm_skip")
+                logger.warning("AI generation skipped: OPENAI_API_KEY missing")
+                return Result.success((None, "low_confidence"))
+            raise
         logger.debug(f"Calling LLM with {len(messages)} messages")
         llm_start = time.monotonic()
         try:

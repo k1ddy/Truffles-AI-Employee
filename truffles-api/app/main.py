@@ -2,15 +2,11 @@ import asyncio
 import os
 import time
 
-from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-
-# Load .env before importing app modules that read env at import-time.
-load_dotenv()
 
 from app.database import SessionLocal, engine, get_db
 from app.logging_config import (
