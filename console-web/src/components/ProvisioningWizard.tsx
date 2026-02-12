@@ -30,6 +30,8 @@ type OnboardingPurchasedService = components["schemas"]["OnboardingPurchasedServ
 type ReferencePackListResponse = components["schemas"]["ReferencePackListResponse"];
 type OnboardingStatus = components["schemas"]["OnboardingStatusResponse"];
 type OnboardingStepStatus = components["schemas"]["OnboardingStepStatus"];
+type OnboardingScorecard = components["schemas"]["OnboardingScorecardResponse"];
+type OnboardingScorecardCheck = components["schemas"]["OnboardingScorecardCheck"];
 
 type AgentRole = ConsoleRole;
 type OnboardingMode = "autopilot" | "manual";
@@ -82,6 +84,14 @@ const MISSING_LABELS: Record<string, string> = {
     reference_pack_domain: "Niche domain (domain_slug)",
     reference_pack: "Reference pack",
     branch_active: "Филиал активен",
+    "client_pack.business.name": "Профиль бизнеса: название",
+    "client_pack.location.city": "Локация: город",
+    "client_pack.location.address.full": "Локация: адрес",
+    "client_pack.operations.hours.days": "График работы: дни",
+    "client_pack.operations.hours.open": "График работы: открытие",
+    "client_pack.operations.hours.close": "График работы: закрытие",
+    "client_pack.catalog.summary": "Каталог: кратко об услугах",
+    "client_pack.communication.languages": "Коммуникация: языки",
     "client_pack.salon.name": "Профиль бизнеса: название",
     "client_pack.salon.city": "Локация: город",
     "client_pack.salon.address.full": "Локация: адрес",
@@ -1088,6 +1098,18 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         enabled: !!session && !!branchData?.id,
     });
 
+    const { data: onboardingScorecard, refetch: refetchOnboardingScorecard } = useQuery({
+        queryKey: ["onboarding-scorecard", branchData?.id],
+        queryFn: async () => {
+            if (!branchData?.id) {
+                return null;
+            }
+            const response = await onboardingApi.scorecard(branchData.id);
+            return response.data as OnboardingScorecard;
+        },
+        enabled: !!session && !!branchData?.id,
+    });
+
     useEffect(() => {
         if (capabilitiesTouched || !capabilitiesData) {
             return;
@@ -1205,6 +1227,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 queryClient.invalidateQueries({ queryKey: ["agents"] });
             }
             refetchOnboarding();
+            refetchOnboardingScorecard();
             toast.success(
                 bootstrapAgents.length > 0
                     ? `Филиал создан, добавлено аккаунтов: ${bootstrapAgents.length}`
@@ -1227,6 +1250,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         onSuccess: (data) => {
             setBranchData(data as ProvisioningBranch);
             refetchOnboarding();
+            refetchOnboardingScorecard();
             toast.success("Филиал обновлён");
         },
         onError: (error) => {
@@ -1249,6 +1273,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         onSuccess: (data) => {
             setBranchData(data as ProvisioningBranch);
             refetchOnboarding();
+            refetchOnboardingScorecard();
             toast.success("Go-live одобрен");
         },
         onError: (error) => {
@@ -1271,6 +1296,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         onSuccess: (data) => {
             setBranchData(data as ProvisioningBranch);
             refetchOnboarding();
+            refetchOnboardingScorecard();
             toast.success("Go-live отклонен");
         },
         onError: (error) => {
@@ -1293,6 +1319,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         onSuccess: (data) => {
             setBranchData(data as ProvisioningBranch);
             refetchOnboarding();
+            refetchOnboardingScorecard();
             toast.success("Go-live waiver сохранен");
         },
         onError: (error) => {
@@ -1313,6 +1340,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             setCreatedAgents((prev) => [data.agent as ProvisioningAgent, ...prev]);
             queryClient.invalidateQueries({ queryKey: ["agents"] });
             refetchOnboarding();
+            refetchOnboardingScorecard();
             toast.success("Пользователь добавлен");
         },
         onError: (error) => {
@@ -1329,6 +1357,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             setCapabilitiesSavedAt(data.updated_at ?? new Date().toISOString());
             refetchCapabilities();
             refetchOnboarding();
+            refetchOnboardingScorecard();
             toast.success("Capabilities сохранены");
         },
         onError: (error) => {
@@ -1345,6 +1374,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             setOnboardingContractSavedAt(data.updated_at ?? new Date().toISOString());
             refetchOnboardingContract();
             refetchOnboarding();
+            refetchOnboardingScorecard();
             toast.success("Onboarding contract сохранён");
         },
         onError: (error) => {
@@ -1364,6 +1394,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             refetchReferencePacks();
             refetchOnboardingContract();
             refetchOnboarding();
+            refetchOnboardingScorecard();
             toast.success("Reference pack обновлён");
         },
         onError: (error) => {
@@ -1414,12 +1445,14 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             }
             setAutoStepSync(true);
             queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
+            queryClient.invalidateQueries({ queryKey: ["onboarding-scorecard"] });
             queryClient.invalidateQueries({ queryKey: ["admin-capabilities"] });
             queryClient.invalidateQueries({ queryKey: ["admin-onboarding-contract"] });
             refetchCapabilities();
             refetchOnboardingContract();
             refetchReferencePacks();
             refetchOnboarding();
+            refetchOnboardingScorecard();
             toast.success("Авто-онбординг выполнен");
         },
         onError: (error) => {
@@ -1468,6 +1501,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             setStepIndex(resolveNextStepIndex(data));
             setAutoStepSync(false);
             refetchOnboarding();
+            refetchOnboardingScorecard();
         },
         onError: (error) => {
             if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
@@ -1631,11 +1665,25 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     ]);
 
     const missingRequirements = readinessItems.filter((item) => item.required && !item.ok);
-    const goNoGoMissing = useMemo(
-        () => stepStateById.go_no_go?.missing ?? [],
-        [stepStateById.go_no_go?.missing],
+    const scorecardStatus = onboardingScorecard?.status ?? null;
+    const scorecardFailed = scorecardStatus === "fail";
+    const scorecardMissing = useMemo(
+        () => onboardingScorecard?.missing ?? [],
+        [onboardingScorecard?.missing],
     );
-    const goNoGoReady = missingRequirements.length === 0 && goNoGoMissing.length === 0;
+    const scorecardFailedChecks = useMemo(
+        () => (
+            onboardingScorecard?.checks?.filter(
+                (check: OnboardingScorecardCheck) => check.required && !check.passed,
+            ) ?? []
+        ),
+        [onboardingScorecard?.checks],
+    );
+    const goNoGoMissing = useMemo(
+        () => (scorecardMissing.length > 0 ? scorecardMissing : (stepStateById.go_no_go?.missing ?? [])),
+        [scorecardMissing, stepStateById.go_no_go?.missing],
+    );
+    const goNoGoReady = missingRequirements.length === 0 && goNoGoMissing.length === 0 && !scorecardFailed;
     const requiredReadinessItems = readinessItems.filter((item) => item.required);
     const readinessCompletedCount = requiredReadinessItems.filter((item) => item.ok).length;
     const readinessScore = requiredReadinessItems.length > 0
@@ -1660,9 +1708,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         const blockers: string[] = [];
         missingRequirements.forEach((item) => blockers.push(item.label));
         goNoGoMissing.forEach((item) => blockers.push(formatMissingRequirement(item)));
+        scorecardFailedChecks.forEach((check) => blockers.push(`Scorecard step: ${check.id}`));
         capabilityMismatches.forEach((item) => blockers.push(`Договор: ${CAPABILITY_FIELD_LABELS[item] ?? item}`));
         return Array.from(new Set(blockers));
-    }, [missingRequirements, goNoGoMissing, capabilityMismatches]);
+    }, [missingRequirements, goNoGoMissing, scorecardFailedChecks, capabilityMismatches]);
     const branchGoLiveStateRaw = (branchData as Record<string, unknown> | null)?.go_live_state;
     const branchGoLiveState: "pending" | "approved" | "rejected" = (
         branchGoLiveStateRaw === "pending" || branchGoLiveStateRaw === "approved" || branchGoLiveStateRaw === "rejected"
@@ -1708,7 +1757,13 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     if (!autopilotClientDataText) {
         autopilotMissingInputs.push("client_data_text");
     }
-    const canRunAutopilot = canEdit && !runAutopilotMutation.isPending && autopilotMissingInputs.length === 0;
+    const autopilotBlockedByScorecard = Boolean(branchData?.id && scorecardFailed);
+    const canRunAutopilot = (
+        canEdit
+        && !runAutopilotMutation.isPending
+        && autopilotMissingInputs.length === 0
+        && !autopilotBlockedByScorecard
+    );
 
     const handleToggleAutopilotService = (serviceId: OnboardingPurchasedService) => {
         setAutopilotServices((prev) => (
@@ -1722,6 +1777,11 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         const reason = goLiveDecisionReason.trim();
         if (!branchData?.id) {
             toast.error("Сначала создайте филиал");
+            return;
+        }
+        if (scorecardFailed) {
+            const missing = goNoGoMissing.map((item) => formatMissingRequirement(item));
+            toast.error(`Go-live заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
             return;
         }
         if (!reason) {
@@ -1765,6 +1825,11 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.error("Сначала создайте филиал");
             return;
         }
+        if (scorecardFailed) {
+            const missing = goNoGoMissing.map((item) => formatMissingRequirement(item));
+            toast.error(`Go-live заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
+            return;
+        }
         if (!reason) {
             toast.error("Укажите reason для waiver");
             return;
@@ -1786,6 +1851,11 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const handleRunAutopilot = () => {
         if (autopilotMissingInputs.length > 0) {
             toast.error(`Не хватает данных: ${autopilotMissingInputs.join(", ")}`);
+            return;
+        }
+        if (autopilotBlockedByScorecard) {
+            const missing = goNoGoMissing.map((item) => formatMissingRequirement(item));
+            toast.error(`Автопроцесс заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
             return;
         }
         const payload: OnboardingAutopilotRequest = {
@@ -2297,6 +2367,14 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                             ? `не готово (${autopilotMissingInputs.join(", ")})`
                             : "готово"}
                     </div>
+                    {branchData?.id && (
+                        <div className="mt-1 text-xs text-muted-foreground">
+                            Server scorecard: {scorecardStatus ?? "—"}
+                            {scorecardFailed && goNoGoMissing.length > 0
+                                ? ` (${goNoGoMissing.map((item) => formatMissingRequirement(item)).join(", ")})`
+                                : ""}
+                        </div>
+                    )}
                 </div>
 
                 <div className="rounded-lg border border-border/60 bg-background p-3">
@@ -2439,6 +2517,14 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                         Payment статус: {canManagePayment ? "управляется в этом блоке" : "pending (не platform_admin)"}
                     </span>
                 </div>
+                {autopilotBlockedByScorecard && (
+                    <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                        Автопроцесс заблокирован: scorecard=fail.
+                        {goNoGoMissing.length > 0
+                            ? ` Missing: ${goNoGoMissing.map((item) => formatMissingRequirement(item)).join(", ")}`
+                            : ""}
+                    </div>
+                )}
 
                 {autopilotResult && (
                     <div className="rounded-lg border border-border/60 bg-background p-3 space-y-2 text-xs">
@@ -3600,6 +3686,31 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                         ))}
                                     </div>
                                 </div>
+                                <div className={`rounded-lg border px-3 py-3 text-xs ${
+                                    scorecardFailed
+                                        ? "border-destructive/30 bg-destructive/10 text-destructive"
+                                        : "border-green-200 bg-green-50 text-green-800"
+                                }`} data-testid="onboarding-scorecard">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="font-semibold">Server Scorecard</span>
+                                        <span className="font-mono">{scorecardStatus ?? "—"}</span>
+                                    </div>
+                                    <div className="mt-1">
+                                        generated_at: {onboardingScorecard?.generated_at
+                                            ? new Date(onboardingScorecard.generated_at).toLocaleString("ru-RU")
+                                            : "—"}
+                                    </div>
+                                    {scorecardMissing.length > 0 && (
+                                        <div className="mt-2">
+                                            missing: {scorecardMissing.map((item) => formatMissingRequirement(item)).join(", ")}
+                                        </div>
+                                    )}
+                                    {scorecardFailedChecks.length > 0 && (
+                                        <div className="mt-2">
+                                            failed checks: {scorecardFailedChecks.map((item) => item.id).join(", ")}
+                                        </div>
+                                    )}
+                                </div>
                                 <div className={`rounded-lg border px-3 py-3 text-xs ${readinessToneClass}`} data-testid="onboarding-readiness-score">
                                     <div className="flex items-center justify-between gap-3">
                                         <span className="font-semibold">Индекс готовности</span>
@@ -3668,6 +3779,14 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             {branchGoLiveWaiverActive ? "активен" : "истек"}
                                         </p>
                                     )}
+                                    {scorecardFailed && (
+                                        <p className="text-xs text-destructive">
+                                            Go-live заблокирован: scorecard=fail
+                                            {goNoGoMissing.length > 0
+                                                ? ` (${goNoGoMissing.map((item) => formatMissingRequirement(item)).join(", ")})`
+                                                : ""}
+                                        </p>
+                                    )}
                                     <textarea
                                         className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs"
                                         rows={2}
@@ -3691,7 +3810,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             type="button"
                                             className="btn-ghost"
                                             onClick={handleWaiveGoLive}
-                                            disabled={!canEdit || waiveGoLiveMutation.isPending}
+                                            disabled={!canEdit || waiveGoLiveMutation.isPending || scorecardFailed}
                                         >
                                             {waiveGoLiveMutation.isPending ? "Сохранение..." : "Выдать временный waiver"}
                                         </button>
@@ -3701,7 +3820,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             type="button"
                                             className="btn-primary"
                                             onClick={handleApproveGoLive}
-                                            disabled={!canEdit || approveGoLiveMutation.isPending}
+                                            disabled={!canEdit || approveGoLiveMutation.isPending || scorecardFailed}
                                         >
                                             {approveGoLiveMutation.isPending ? "Сохранение..." : "Подтвердить Go-Live"}
                                         </button>

@@ -226,7 +226,6 @@ from app.services.onboarding_state import (
     build_onboarding_scorecard,
     build_onboarding_status,
     ensure_onboarding_step,
-    missing_prerequisites,
 )
 from app.services.pack_compiler_service import (
     PackCompilerError,
@@ -10787,7 +10786,27 @@ async def run_onboarding_autopilot(
             actions.append("knowledge_publish_failed")
 
     inputs = build_onboarding_inputs(db, branch)
-    go_no_go_missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
+    scorecard = build_onboarding_scorecard(db, branch)
+    go_no_go_missing = scorecard.missing
+    if body.activate_branch and not scorecard.ready:
+        failed_checks = [
+            check.id.value
+            for check in scorecard.checks
+            if check.required and not check.passed
+        ]
+        db.rollback()
+        raise ConsoleAPIError(
+            409,
+            "GO_LIVE_GATE_REQUIRED",
+            "Onboarding scorecard failed",
+            {
+                "operation": "onboarding_autopilot_activate",
+                "required_step": OnboardingStep.GO_NO_GO.value,
+                "missing": scorecard.missing,
+                "scorecard_status": "fail",
+                "failed_checks": failed_checks,
+            },
+        )
     onboarding_status = build_onboarding_status(db, branch)
 
     record_audit_event(

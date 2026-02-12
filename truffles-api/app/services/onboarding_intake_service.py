@@ -63,6 +63,14 @@ _FIELD_ALIASES: list[tuple[tuple[str, ...], str]] = [
 ]
 
 _MISSING_QUESTIONS: dict[str, str] = {
+    "client_pack.business.name": "Как называется бизнес/филиал для клиентов?",
+    "client_pack.location.city": "В каком городе работает филиал?",
+    "client_pack.location.address.full": "Какой полный адрес филиала?",
+    "client_pack.operations.hours.days": "В какие дни работает филиал?",
+    "client_pack.operations.hours.open": "Во сколько филиал открывается?",
+    "client_pack.operations.hours.close": "Во сколько филиал закрывается?",
+    "client_pack.catalog.summary": "Кратко перечислите основные услуги.",
+    "client_pack.communication.languages": "Какие языки общения доступны? Обязательно ru и kk.",
     "client_pack.salon.name": "Как называется бизнес/филиал для клиентов?",
     "client_pack.salon.city": "В каком городе работает филиал?",
     "client_pack.salon.address.full": "Какой полный адрес филиала?",

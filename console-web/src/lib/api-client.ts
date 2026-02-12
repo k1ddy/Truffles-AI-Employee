@@ -750,6 +750,10 @@ export const onboardingApi = {
         apiClient.get<components["schemas"]["OnboardingStatusResponse"]>("/onboarding/status", {
             params: branchId ? { branch_id: branchId } : undefined,
         }),
+    scorecard: (branchId?: string) =>
+        apiClient.get<components["schemas"]["OnboardingScorecardResponse"]>("/onboarding/scorecard", {
+            params: branchId ? { branch_id: branchId } : undefined,
+        }),
     advance: (data: components["schemas"]["OnboardingAdvanceRequest"]) =>
         apiClient.post<components["schemas"]["OnboardingStatusResponse"]>("/onboarding/advance", data),
 };
