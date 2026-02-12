@@ -1,0 +1,27 @@
+# SESSION 2026-02-12-stress-quality-copy-a1 — Stress quality copy worktree
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-10-stress-quality-hardening.md
+- branch: feat/2026-02-10-stress-quality-a1-copy
+- worktree: /home/zhan/worktrees/2026-02-10-stress-quality-a1-copy
+- base_ref: origin/main
+- scope: LLM-quality hardening in copy worktree (runner reliability, judge path, replay runbook, evidence tooling)
+- done:
+  - Added `judge_mode=critical` and worktree-scoped judge cache in `ops/diagnose.py`.
+  - Optimized judge payload/token usage and added `--judge-max-tokens`.
+  - Added resilient network calls (`curl` with hard timeouts) for webhook + judge.
+  - Added final relaxed `decision_meta` fetch and manager-action race stabilization.
+  - Updated runbook with realistic timeout profile and webhook timeout triage.
+  - Added digest tooling (`scripts/llm_quality_digest.py`) and regression tests for runner/judge/cache.
+  - Collected replay evidence (`booking-replay-20260211-a1copy-v23-critical2`, `booking-replay-20260211-a1copy-v23-all1`).
+  - Recorded infra blocker: webhook on `127.0.0.1:18084` timing out (no bytes up to 180s) during new all-run attempts.
+- next:
+  - Open PR with staged runner/test/runbook updates from this worktree.
+  - Keep baseline update blocked until canonical-valid all-run (`infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`).
+- evidence:
+  - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-critical2/summary.json
+  - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-all1/summary.json
+  - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-all1/dialog_samples_last10.md
+  - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-all1/digest.md
+- last_updated: 2026-02-12

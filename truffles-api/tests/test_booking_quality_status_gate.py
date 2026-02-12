@@ -92,6 +92,10 @@ def test_baseline_canonical_requires_judge_on():
     assert canonical is True
     assert reason is None
 
+    canonical, reason = baseline_is_canonical({"config": {"judge_mode": "critical"}})
+    assert canonical is True
+    assert reason is None
+
     canonical, reason = baseline_is_canonical({"config": {"judge_mode": "off"}})
     assert canonical is False
     assert reason == "judge_mode_off"
