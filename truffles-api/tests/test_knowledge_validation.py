@@ -123,3 +123,29 @@ def test_domain_legal_can_force_booking_required_fields():
     assert "client_pack.service_duration_estimates" in missing
     assert "client_pack.booking.collect_fields" in missing
     assert "client_pack.booking.bot_can_confirm" in missing
+
+
+def test_domain_legal_accepts_neutral_business_alias_fields():
+    payload = _base_payload()
+    payload["client_pack"]["business"] = {"name": "Demo Legal"}
+    payload["client_pack"]["location"] = {
+        "city": "Astana",
+        "address": {"full": "Abay 10"},
+    }
+    payload["client_pack"]["operations"] = {
+        "hours": {"days": ["mon"], "open": "09:00", "close": "18:00"},
+    }
+    payload["client_pack"]["communication"] = {"languages": ["ru", "kk"]}
+    payload["client_pack"]["catalog"] = {"summary": "Consulting and documents"}
+    payload["client_pack"].pop("salon", None)
+
+    missing = get_missing_required_fields(payload, domain_slug="legal")
+
+    assert "client_pack.salon.name" not in missing
+    assert "client_pack.salon.city" not in missing
+    assert "client_pack.salon.address.full" not in missing
+    assert "client_pack.salon.hours.days" not in missing
+    assert "client_pack.salon.hours.open" not in missing
+    assert "client_pack.salon.hours.close" not in missing
+    assert "client_pack.salon.communication.languages" not in missing
+    assert "client_pack.salon.services_summary" not in missing
