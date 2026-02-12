@@ -1,0 +1,32 @@
+# SESSION 2026-02-11-tenants-pr-jkl-ops-reporting-a32 — Session 2026-02-11-tenants-pr-jkl-ops-reporting-a32
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-jkl-ops-reporting-a32.md
+- branch: feat/2026-02-11-tenants-pr-jkl-ops-reporting-a32
+- worktree: /home/zhan/worktrees/2026-02-11-tenants-pr-jkl-ops-reporting-a32
+- base_ref: origin/main
+- scope: Tenants PR-JKL (persistent lifecycle audit + KPI thresholds/drilldown + export/snapshot/alert hooks).
+- done:
+  - Session created.
+  - Implemented persistent lifecycle timeline in client rows:
+    - session lifecycle actions persisted to localStorage,
+    - selected client timeline enriched via `/audit` API feed,
+    - all/success/error filter + manual API refresh.
+  - Added KPI threshold model (`ok/warn/critical`) and drill-down with per-KPI CTA to workspace zones.
+  - Added operational report controls:
+    - export JSON/CSV,
+    - weekly snapshots (localStorage history with delta),
+    - alert hook payload copy + metrics snapshot dry-run/execute actions.
+  - Updated Tenants smoke checks for J/K/L controls with backward-compatible fallback.
+  - Synced Tenants audit doc for J/K/L semantics and contracts.
+  - Validation passed: lint, build, Tenants smoke, session_check.
+- next:
+  - Open PR and handoff for review/merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-jkl-ops-reporting-a32.md
+  - npm --prefix console-web run lint
+  - npm --prefix console-web run build
+  - PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz E2E_USE_STORAGE_STATE=1 E2E_USERNAME=admin E2E_PASSWORD=admin npx --prefix console-web playwright test console-web/e2e/smoke.spec.ts --grep "Tenants"
+  - SESSION_AGENT=a32 scripts/session_check.sh
+- last_updated: 2026-02-11

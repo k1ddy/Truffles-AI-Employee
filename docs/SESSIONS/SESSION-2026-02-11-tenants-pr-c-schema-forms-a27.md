@@ -1,0 +1,30 @@
+# SESSION 2026-02-11-tenants-pr-c-schema-forms-a27 — Session 2026-02-11-tenants-pr-c-schema-forms-a27
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-c-schema-forms-a27.md
+- branch: feat/2026-02-11-tenants-pr-c-schema-forms-a27
+- worktree: /home/zhan/worktrees/2026-02-11-tenants-pr-c-schema-forms-a27
+- base_ref: origin/main
+- scope: Schema-driven onboarding формы в Tenants Wizard + pre-submit validation + smoke coverage.
+- done:
+  - Добавлен schema-driven слой для `onboarding_contract.purchased` (channels/providers/features) с двухсторонней синхронизацией с `Advanced JSON`.
+  - Добавлены pre-submit проверки:
+    - `billing_info.currency` -> ISO-код (например KZT),
+    - `working_hours` -> `end > start`,
+    - `booking_settings` -> целые диапазоны (`default_duration_min` 5..480, `buffer_min` 0..240),
+    - `purchased` -> `domain_slug` формат + зависимость `confirm_slots` -> `availability_provider`.
+  - Обновлены UX-хинты и input constraints в wizard (`billing`, `working_hours`, `booking_settings`).
+  - Добавлен smoke test `should expose schema-driven onboarding controls on Tenants @smoke` с backward-compatible fallback.
+  - Обновлена документация страницы `Tenants`.
+- next:
+  - Открыть PR-C и дождаться CI.
+- evidence:
+  - console-web/src/components/ProvisioningWizard.tsx
+  - console-web/e2e/smoke.spec.ts
+  - docs/CONSOLE_AUDIT/pages/tenants.md
+  - Checks:
+    - `npm run lint`
+    - `npm run build`
+    - `PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=http://localhost:3100 E2E_USE_STORAGE_STATE=0 npx playwright test e2e/smoke.spec.ts --project=chromium --grep "Tenants"`
+- last_updated: 2026-02-11

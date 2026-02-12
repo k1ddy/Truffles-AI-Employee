@@ -1,0 +1,7 @@
+base_url=https://console.truffles.kz
+role=platform_admin
+events_total=31
+screenshots_total=24
+company_id=6a510116-a633-4ce0-91e2-972e51221b49
+client_id=c839d5dd-65be-4733-a5d2-72c9f70707f0
+branch_id=

@@ -5,6 +5,7 @@
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
 | 2026-02-12-stress-quality-copy-a1 | active | feat/2026-02-10-stress-quality-a1-copy | /home/zhan/worktrees/2026-02-10-stress-quality-a1-copy | docs/TASK_PACKAGES/TP-2026-02-10-stress-quality-hardening.md | 2026-02-12 |
+| 2026-02-11-tenants-pr-ef-validators-ia-a28 | done | feat/2026-02-11-tenants-pr-ef-validators-ia-a28 | /home/zhan/worktrees/2026-02-11-tenants-pr-ef-validators-ia-a28 | docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-ef-validators-ia-a27.md | 2026-02-11 |
 | 2026-02-10-sso-provisioning-env-alias-a26 | active | fix/2026-02-10-sso-provisioning-env-alias-a26 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-10-sso-provisioning-env-alias-a26.md | 2026-02-10 |
 | 2026-02-10-console-contract-live-flake-a26 | active | fix/2026-02-10-console-contract-live-flake-a26 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-10-console-contract-live-flake-a26.md | 2026-02-10 |
 | 2026-02-10-team-platform-admin-ux-sso-a26 | active | feat/2026-02-10-team-platform-admin-ux-sso-a26 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-10-team-platform-admin-ux-sso-a26.md | 2026-02-10 |
@@ -356,3 +357,10 @@
 | 2026-02-10-knowledge-fleet-ux-a27 | active | feat/2026-02-10-knowledge-fleet-ux-a27 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-10-knowledge-fleet-ux-a27.md | 2026-02-10 |
 | 2026-02-11-deploy-ephemeral-source-a27 | active | fix/2026-02-11-deploy-ephemeral-source-a27 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-11-deploy-ephemeral-source-a27.md | 2026-02-11 |
 | 2026-02-11-knowledge-ux-hotfix-a27 | active | fix/2026-02-11-knowledge-ux-hotfix-a27 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-11-knowledge-ux-hotfix-a27.md | 2026-02-11 |
+| 2026-02-11-knowledge-gate-context-a27 | active | fix/2026-02-11-knowledge-gate-context-a27 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-11-knowledge-gate-context-a27.md | 2026-02-11 (sync) |
+| 2026-02-11-tenants-pr-c-schema-forms-a27 | active | feat/2026-02-11-tenants-pr-c-schema-forms-a27 | /home/zhan/worktrees/2026-02-11-tenants-pr-c-schema-forms-a27 | docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-c-schema-forms-a27.md | 2026-02-11 (sync) |
+| 2026-02-11-tenants-pr-d-templates-readiness-a27 | done | feat/2026-02-11-tenants-pr-d-templates-readiness-a27 | /home/zhan/worktrees/2026-02-11-tenants-pr-d-templates-readiness-a27 | docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-d-templates-readiness-a27.md | 2026-02-11 |
+| 2026-02-11-tenants-pr-g-lifecycle-modal-a29 | done | feat/2026-02-11-tenants-pr-g-lifecycle-modal-a29 | /home/zhan/worktrees/2026-02-11-tenants-pr-g-lifecycle-modal-a29 | docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-g-lifecycle-modal-a29.md | 2026-02-11 |
+| 2026-02-11-tenants-pr-h-quality-completion-a30 | done | feat/2026-02-11-tenants-pr-h-quality-completion-a30 | /home/zhan/worktrees/2026-02-11-tenants-pr-h-quality-completion-a30 | docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-h-quality-completion-a30.md | 2026-02-11 |
+| 2026-02-11-tenants-pr-i-operational-kpi-a31 | done | feat/2026-02-11-tenants-pr-i-operational-kpi-a31 | /home/zhan/worktrees/2026-02-11-tenants-pr-i-operational-kpi-a31 | docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-i-operational-kpi-a31.md | 2026-02-11 |
+| 2026-02-11-tenants-pr-jkl-ops-reporting-a32 | done | feat/2026-02-11-tenants-pr-jkl-ops-reporting-a32 | /home/zhan/worktrees/2026-02-11-tenants-pr-jkl-ops-reporting-a32 | docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-jkl-ops-reporting-a32.md | 2026-02-11 |

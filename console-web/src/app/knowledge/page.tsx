@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -33,6 +33,24 @@ type GuidedHours = {
 type GuidedService = {
     id: string;
     name: string;
+};
+type GuidedSalonProfile = {
+    salonName: string;
+    city: string;
+    addressFull: string;
+    servicesSummary: string;
+    languages: string;
+    guestPolicy: string;
+};
+type GuidedBooking = {
+    collectFields: string;
+    botCanConfirm: boolean;
+};
+type GuidedPolicy = {
+    paymentInfo: string;
+    reschedule: string;
+    cancel: string;
+    discounts: string;
 };
 type SpecialistSummary = {
     id: string;
@@ -264,10 +282,107 @@ function extractGuidedServices(payload: Record<string, unknown> | null): GuidedS
         .filter((item): item is GuidedService => Boolean(item));
 }
 
+function normalizeString(value: unknown): string {
+    return typeof value === "string" ? value : "";
+}
+
+function parseCsvLikeList(value: string): string[] {
+    return value
+        .split(/[,\n;]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
+function extractGuidedSalonProfile(payload: Record<string, unknown> | null): GuidedSalonProfile {
+    const root = ensureObject(payload);
+    const clientPack = ensureObject(root.client_pack);
+    const salon = ensureObject(clientPack.salon);
+    const address = ensureObject(salon.address);
+    const communication = ensureObject(salon.communication);
+    const languages = Array.isArray(communication.languages)
+        ? communication.languages.filter((item): item is string => typeof item === "string")
+        : [];
+    return {
+        salonName: normalizeString(salon.name),
+        city: normalizeString(salon.city),
+        addressFull: normalizeString(address.full),
+        servicesSummary: normalizeString(salon.services_summary),
+        languages: languages.join(", "),
+        guestPolicy: normalizeString(clientPack.guest_policy),
+    };
+}
+
+function extractGuidedBooking(payload: Record<string, unknown> | null): GuidedBooking {
+    const root = ensureObject(payload);
+    const clientPack = ensureObject(root.client_pack);
+    const booking = ensureObject(clientPack.booking);
+    const collectFields = Array.isArray(booking.collect_fields)
+        ? booking.collect_fields.filter((item): item is string => typeof item === "string")
+        : [];
+    return {
+        collectFields: collectFields.join(", "),
+        botCanConfirm: Boolean(booking.bot_can_confirm),
+    };
+}
+
+function extractGuidedPolicy(payload: Record<string, unknown> | null): GuidedPolicy {
+    const root = ensureObject(payload);
+    const clientPack = ensureObject(root.client_pack);
+    const policy = ensureObject(clientPack.policy);
+    return {
+        paymentInfo: normalizeString(policy.payment_info),
+        reschedule: normalizeString(policy.reschedule),
+        cancel: normalizeString(policy.cancel),
+        discounts: normalizeString(policy.discounts),
+    };
+}
+
+function flattenClientPackPaths(
+    value: unknown,
+    prefix = "client_pack",
+    result: Array<{ path: string; preview: string }> = [],
+) {
+    if (result.length >= 200) {
+        return result;
+    }
+    if (value === null || value === undefined) {
+        result.push({ path: prefix, preview: "null" });
+        return result;
+    }
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        result.push({ path: prefix, preview: String(value) });
+        return result;
+    }
+    if (Array.isArray(value)) {
+        if (value.length === 0) {
+            result.push({ path: prefix, preview: "[]" });
+            return result;
+        }
+        value.slice(0, 8).forEach((item, index) => {
+            flattenClientPackPaths(item, `${prefix}[${index}]`, result);
+        });
+        return result;
+    }
+    if (typeof value === "object") {
+        const entries = Object.entries(value as Record<string, unknown>);
+        if (entries.length === 0) {
+            result.push({ path: prefix, preview: "{}" });
+            return result;
+        }
+        entries.forEach(([key, item]) => {
+            flattenClientPackPaths(item, `${prefix}.${key}`, result);
+        });
+    }
+    return result;
+}
+
 function buildStructuredDraftPayload(
     basePayload: Record<string, unknown> | null,
     hours: GuidedHours,
     services: GuidedService[],
+    salonProfile: GuidedSalonProfile,
+    bookingProfile: GuidedBooking,
+    policyProfile: GuidedPolicy,
 ): Record<string, unknown> {
     const root = {
         ...(basePayload ?? createDefaultPayload()),
@@ -275,6 +390,10 @@ function buildStructuredDraftPayload(
     const clientPack = ensureObject(root.client_pack);
     const salon = ensureObject(clientPack.salon);
     const salonHours = ensureObject(salon.hours);
+    const salonAddress = ensureObject(salon.address);
+    const salonCommunication = ensureObject(salon.communication);
+    const booking = ensureObject(clientPack.booking);
+    const policy = ensureObject(clientPack.policy);
     const servicesCatalog = ensureObject(clientPack.services_catalog);
     const currentServices = Array.isArray(servicesCatalog.services) ? servicesCatalog.services : [];
 
@@ -312,13 +431,40 @@ function buildStructuredDraftPayload(
         open: hours.open.trim(),
         close: hours.close.trim(),
     };
+    const nextSalon: Record<string, unknown> = {
+        ...salon,
+        name: salonProfile.salonName.trim(),
+        city: salonProfile.city.trim(),
+        services_summary: salonProfile.servicesSummary.trim(),
+        hours: nextHours,
+        address: {
+            ...salonAddress,
+            full: salonProfile.addressFull.trim(),
+        },
+        communication: {
+            ...salonCommunication,
+            languages: parseCsvLikeList(salonProfile.languages),
+        },
+    };
+    const nextBooking: Record<string, unknown> = {
+        ...booking,
+        collect_fields: parseCsvLikeList(bookingProfile.collectFields),
+        bot_can_confirm: bookingProfile.botCanConfirm,
+    };
+    const nextPolicy: Record<string, unknown> = {
+        ...policy,
+        payment_info: policyProfile.paymentInfo.trim(),
+        reschedule: policyProfile.reschedule.trim(),
+        cancel: policyProfile.cancel.trim(),
+        discounts: policyProfile.discounts.trim(),
+    };
 
     root.client_pack = {
         ...clientPack,
-        salon: {
-            ...salon,
-            hours: nextHours,
-        },
+        salon: nextSalon,
+        guest_policy: salonProfile.guestPolicy.trim(),
+        booking: nextBooking,
+        policy: nextPolicy,
         services_catalog: {
             ...servicesCatalog,
             services: nextServices,
@@ -351,6 +497,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     const [isApplyingFleetContext, setIsApplyingFleetContext] = useState(false);
     const [fleetAttentionEnabled, setFleetAttentionEnabled] = useState(false);
     const [fleetAttentionError, setFleetAttentionError] = useState<string | null>(null);
+    const fleetAutoApplyRef = useRef<string | null>(null);
     const [branchKnowledgeTagDraft, setBranchKnowledgeTagDraft] = useState("");
     const [branchWorkingHoursDraft, setBranchWorkingHoursDraft] = useState("{}");
     const [branchChangeReason, setBranchChangeReason] = useState("");
@@ -360,6 +507,25 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         close: "",
     });
     const [guidedServices, setGuidedServices] = useState<GuidedService[]>([]);
+    const [guidedSalonProfile, setGuidedSalonProfile] = useState<GuidedSalonProfile>({
+        salonName: "",
+        city: "",
+        addressFull: "",
+        servicesSummary: "",
+        languages: "",
+        guestPolicy: "",
+    });
+    const [guidedBooking, setGuidedBooking] = useState<GuidedBooking>({
+        collectFields: "",
+        botCanConfirm: false,
+    });
+    const [guidedPolicy, setGuidedPolicy] = useState<GuidedPolicy>({
+        paymentInfo: "",
+        reschedule: "",
+        cancel: "",
+        discounts: "",
+    });
+    const [packInspectorQuery, setPackInspectorQuery] = useState("");
     const [validation, setValidation] = useState<ValidationState>({
         ran: false,
         errors: [],
@@ -676,6 +842,43 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         }
         return null;
     }, [currentQuery.data]);
+    const clientPackObject = useMemo(() => {
+        if (!currentPayloadObject) {
+            return {} as Record<string, unknown>;
+        }
+        return ensureObject(currentPayloadObject.client_pack);
+    }, [currentPayloadObject]);
+    const flatClientPackPaths = useMemo(
+        () => flattenClientPackPaths(clientPackObject),
+        [clientPackObject]
+    );
+    const filteredPackPaths = useMemo(() => {
+        const query = packInspectorQuery.trim().toLowerCase();
+        if (!query) {
+            return flatClientPackPaths.slice(0, 14);
+        }
+        return flatClientPackPaths
+            .filter((item) => item.path.toLowerCase().includes(query) || item.preview.toLowerCase().includes(query))
+            .slice(0, 14);
+    }, [flatClientPackPaths, packInspectorQuery]);
+    const inspectorSummary = useMemo(() => {
+        const servicesCatalog = ensureObject(clientPackObject.services_catalog);
+        const services = Array.isArray(servicesCatalog.services) ? servicesCatalog.services : [];
+        const priceList = Array.isArray(clientPackObject.price_list) ? clientPackObject.price_list : [];
+        const booking = ensureObject(clientPackObject.booking);
+        const policy = ensureObject(clientPackObject.policy);
+        const collectFields = Array.isArray(booking.collect_fields) ? booking.collect_fields : [];
+        const policyFilledCount = ["payment_info", "reschedule", "cancel", "discounts"]
+            .map((key) => policy[key])
+            .filter((value) => typeof value === "string" && value.trim().length > 0).length;
+        return {
+            servicesCount: services.length,
+            priceRowsCount: priceList.length,
+            collectFieldsCount: collectFields.length,
+            policyFilledCount,
+            flattenedFieldsCount: flatClientPackPaths.length,
+        };
+    }, [clientPackObject, flatClientPackPaths.length]);
 
     const currentText = useMemo(() => {
         if (!currentQuery.data) {
@@ -803,6 +1006,9 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         } else {
             setGuidedServices([{ id: `svc-${Date.now()}`, name: "" }]);
         }
+        setGuidedSalonProfile(extractGuidedSalonProfile(currentPayloadObject));
+        setGuidedBooking(extractGuidedBooking(currentPayloadObject));
+        setGuidedPolicy(extractGuidedPolicy(currentPayloadObject));
     }, [currentPayloadObject, selectedBranchId]);
 
     useEffect(() => {
@@ -1005,7 +1211,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         || fleetBranchesQuery.isFetching
         || (fleetAttentionEnabled && fleetAttentionQuery.isFetching);
 
-    const applyConsoleContext = async ({
+    const applyConsoleContext = useCallback(async ({
         companyId,
         clientId,
         branchId: nextBranchId,
@@ -1035,7 +1241,17 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         } finally {
             setIsApplyingFleetContext(false);
         }
-    };
+    }, [queryClient]);
+
+    const resolveFleetCompanyId = useCallback((clientId?: string | null): string | null => {
+        if (clientId) {
+            const matchedClient = fleetClients.find((client) => client.id === clientId);
+            if (matchedClient?.company_id) {
+                return matchedClient.company_id;
+            }
+        }
+        return fleetCompanyId || selectedFleetClient?.company_id || selectedCompanyId || null;
+    }, [fleetClients, fleetCompanyId, selectedFleetClient?.company_id, selectedCompanyId]);
 
     const openRouteWithFleetContext = async (
         path: string,
@@ -1048,11 +1264,37 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             return;
         }
         await applyConsoleContext({
-            companyId: companyId ?? fleetCompanyId ?? selectedFleetClient?.company_id ?? null,
+            companyId: companyId ?? resolveFleetCompanyId(clientId),
             clientId,
             branchId: branchId ?? null,
         });
         router.push(path);
+    };
+
+    const resolveBranchContextForClient = (clientId?: string | null): string | null => {
+        if (!clientId) {
+            return selectedBranchId || fleetBranchId || null;
+        }
+        if (selectedClientId === clientId && selectedBranchId) {
+            return selectedBranchId;
+        }
+        if (fleetClientId === clientId && fleetBranchId) {
+            return fleetBranchId;
+        }
+        return null;
+    };
+
+    const handleFleetBranchSelect = (nextBranchId: string) => {
+        setFleetBranchId(nextBranchId);
+        if (!fleetClientId || !nextBranchId || isApplyingFleetContext) {
+            return;
+        }
+        void applyConsoleContext({
+            companyId: resolveFleetCompanyId(fleetClientId),
+            clientId: fleetClientId,
+            branchId: nextBranchId,
+            successMessage: branchSelectionRequired ? "Контекст филиала применен автоматически" : undefined,
+        });
     };
 
     const selectKnowledgeBranch = async () => {
@@ -1061,12 +1303,47 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             return;
         }
         await applyConsoleContext({
-            companyId: fleetCompanyId || selectedFleetClient?.company_id || null,
+            companyId: resolveFleetCompanyId(fleetClientId),
             clientId: fleetClientId,
             branchId: fleetBranchId,
             successMessage: "Контекст Knowledge обновлен",
         });
     };
+
+    useEffect(() => {
+        if (!isPlatformAdmin || !branchSelectionRequired || isApplyingFleetContext) {
+            return;
+        }
+        if (!fleetClientId || !fleetBranchId) {
+            return;
+        }
+        const autoKey = `${fleetClientId}:${fleetBranchId}`;
+        if (fleetAutoApplyRef.current === autoKey) {
+            return;
+        }
+        fleetAutoApplyRef.current = autoKey;
+        void applyConsoleContext({
+            companyId: resolveFleetCompanyId(fleetClientId),
+            clientId: fleetClientId,
+            branchId: fleetBranchId,
+            successMessage: "Контекст филиала применен автоматически",
+        });
+    }, [
+        isPlatformAdmin,
+        branchSelectionRequired,
+        isApplyingFleetContext,
+        fleetClientId,
+        fleetBranchId,
+        applyConsoleContext,
+        resolveFleetCompanyId,
+    ]);
+
+    useEffect(() => {
+        if (branchSelectionRequired) {
+            return;
+        }
+        fleetAutoApplyRef.current = null;
+    }, [branchSelectionRequired]);
 
     const addGuidedService = () => {
         setGuidedServices((prev) => [
@@ -1096,7 +1373,14 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             toast.error("Добавьте хотя бы одну услугу");
             return;
         }
-        const payload = buildStructuredDraftPayload(currentPayloadObject, guidedHours, normalizedServices);
+        const payload = buildStructuredDraftPayload(
+            currentPayloadObject,
+            guidedHours,
+            normalizedServices,
+            guidedSalonProfile,
+            guidedBooking,
+            guidedPolicy,
+        );
         setDraftText(JSON.stringify(payload, null, 2));
         setValidation((prev) => (prev.ran ? { ...prev, ran: false } : prev));
         toast.success("Structured draft обновлен");
@@ -1179,7 +1463,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                             value={fleetBranchId}
-                            onChange={(event) => setFleetBranchId(event.target.value)}
+                            onChange={(event) => handleFleetBranchSelect(event.target.value)}
                             disabled={!fleetClientId || fleetBranchesQuery.isLoading}
                         >
                             <option value="">Выберите филиал</option>
@@ -1195,27 +1479,43 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                             type="button"
                             className="btn-primary"
                             onClick={() => void selectKnowledgeBranch()}
-                            disabled={!fleetClientId || !fleetBranchId || isFleetBusy}
+                            disabled={!fleetClientId || !fleetBranchId || isApplyingFleetContext}
                         >
-                            Открыть филиал
+                            {isApplyingFleetContext ? "Применение..." : "Применить контекст"}
                         </button>
                         <button
                             type="button"
                             className="btn-ghost"
-                            onClick={() => void openRouteWithFleetContext("/integrations", fleetClientId, fleetCompanyId)}
-                            disabled={!fleetClientId || isFleetBusy}
+                            onClick={() => void openRouteWithFleetContext(
+                                "/integrations",
+                                fleetClientId,
+                                fleetCompanyId,
+                                resolveBranchContextForClient(fleetClientId),
+                            )}
+                            disabled={!fleetClientId || isApplyingFleetContext}
                         >
                             Интеграции
                         </button>
                         <button
                             type="button"
                             className="btn-ghost"
-                            onClick={() => void openRouteWithFleetContext("/", fleetClientId, fleetCompanyId)}
-                            disabled={!fleetClientId || isFleetBusy}
+                            onClick={() => void openRouteWithFleetContext(
+                                "/",
+                                fleetClientId,
+                                fleetCompanyId,
+                                resolveBranchContextForClient(fleetClientId),
+                            )}
+                            disabled={!fleetClientId || isApplyingFleetContext}
                         >
                             Заявки
                         </button>
                     </div>
+                </div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                    Контекст филиала применяется автоматически после выбора в поле `Филиал`.
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                    Переходы в `Интеграции` и `Заявки` сохраняют branch context, если выбран филиал клиента.
                 </div>
                 {!fleetAttentionEnabled && (
                     <div className="mt-4 text-xs text-muted-foreground">
@@ -1287,7 +1587,12 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                             <button
                                                 type="button"
                                                 className="btn-ghost"
-                                                onClick={() => void openRouteWithFleetContext("/integrations", item.client_id, item.company_id)}
+                                                onClick={() => void openRouteWithFleetContext(
+                                                    "/integrations",
+                                                    item.client_id,
+                                                    item.company_id,
+                                                    resolveBranchContextForClient(item.client_id),
+                                                )}
                                                 disabled={isFleetBusy}
                                             >
                                                 Интеграции
@@ -1322,13 +1627,18 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             && isBranchPatchDirty
             && hasBranchChangeReason
             && !parsedBranchWorkingHours.error;
+        const branchPatchHint = !isBranchPatchDirty
+            ? "Нет несохраненных изменений: измените тег знаний или часы работы."
+            : !hasBranchChangeReason
+            ? "Добавьте причину изменения для audit trail."
+            : null;
         return (
             <div className="card-surface p-5" data-testid="knowledge-branch-readiness">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                         <h2 className="text-lg font-semibold">Branch Knowledge Readiness</h2>
                         <p className="text-sm text-muted-foreground">
-                            Управление branch-override: `knowledge_tag` и `working_hours` для текущего филиала.
+                            Оперативные настройки branch knowledge для текущего филиала.
                         </p>
                     </div>
                     <div className="text-xs text-muted-foreground">
@@ -1358,20 +1668,24 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                         source: {effectiveHoursSource} · version: {currentQuery.data?.version_id ?? "не опубликована"}
                     </div>
                 </div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                    Поля ниже изменяют данные только после кнопки `Сохранить branch change`.
+                </div>
 
                 {canEdit && (
                     <div className="mt-4 grid gap-3">
                         <label className="text-xs text-muted-foreground">
-                            `knowledge_tag` (идентификатор branch pack)
+                            Тег знаний филиала (`knowledge_tag`, опционально)
                             <input
                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                 value={branchKnowledgeTagDraft}
                                 onChange={(event) => setBranchKnowledgeTagDraft(event.target.value)}
                                 disabled={applyBranchKnowledgePatchMutation.isPending}
+                                placeholder="Например: demo_salon_main"
                             />
                         </label>
                         <label className="text-xs text-muted-foreground">
-                            `working_hours` JSON (override для branch)
+                            Часы работы филиала (`working_hours`, JSON override)
                             <textarea
                                 className="mt-1 min-h-[140px] w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
                                 value={branchWorkingHoursDraft}
@@ -1419,16 +1733,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                 placeholder="Например: обновление часов после смены графика"
                             />
                         </label>
-                        {!isBranchPatchDirty && (
-                            <div className="text-xs text-muted-foreground">
-                                Нет изменений: скорректируйте `knowledge_tag` или `working_hours`.
-                            </div>
-                        )}
-                        {isBranchPatchDirty && !hasBranchChangeReason && (
-                            <div className="text-xs text-muted-foreground">
-                                Укажите причину изменения, чтобы опубликовать branch change.
-                            </div>
-                        )}
+                        {branchPatchHint && <div className="text-xs text-muted-foreground">{branchPatchHint}</div>}
                         <div className="flex flex-wrap items-center gap-2">
                             <button
                                 type="button"
@@ -1447,7 +1752,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                     selectedCompanyId || fleetCompanyId,
                                     selectedBranchId || null,
                                 )}
-                                disabled={isFleetBusy}
+                                disabled={isApplyingFleetContext}
                             >
                                 Команда и мастера
                             </button>
@@ -1460,7 +1765,7 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                     selectedCompanyId || fleetCompanyId,
                                     selectedBranchId || null,
                                 )}
-                                disabled={isFleetBusy}
+                                disabled={isApplyingFleetContext}
                             >
                                 Календарь
                             </button>
@@ -1476,6 +1781,48 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
     }
 
     if (branchSelectionRequired) {
+        if (isPlatformAdmin) {
+            const fallbackBranchId = branchOptions[0]?.id ?? "";
+            return (
+                <div className="space-y-4">
+                    {renderPlatformAdminFleetPanel()}
+                    <div className="card-surface max-w-xl p-8" data-testid="knowledge-branch-gate-platform">
+                        <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Требуется контекст</p>
+                        <h2 className="text-2xl font-semibold mt-3 mb-4">Выберите филиал во Fleet Control</h2>
+                        <p className="text-sm text-muted-foreground mb-4">
+                            Для Platform Admin контекст филиала применяется автоматически после выбора клиента и филиала.
+                            Кнопка `Применить контекст` нужна как резервный шаг.
+                        </p>
+                        <div className="rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground">
+                            client_id: {selectedClientId || "—"} · branch_id: {selectedBranchId || "не выбран"}
+                        </div>
+                        {fallbackBranchId && (
+                            <div className="mt-4">
+                                <button
+                                    className="btn-ghost"
+                                    onClick={async () => {
+                                        setIsSelectingBranch(true);
+                                        try {
+                                            await applyConsoleContext({
+                                                companyId: selectedCompanyId || null,
+                                                clientId: selectedClientId || null,
+                                                branchId: fallbackBranchId,
+                                                successMessage: "Филиал выбран из текущего клиента",
+                                            });
+                                        } finally {
+                                            setIsSelectingBranch(false);
+                                        }
+                                    }}
+                                    disabled={isSelectingBranch || !selectedClientId}
+                                >
+                                    {isSelectingBranch ? "Загрузка..." : "Открыть первый филиал (резерв)"}
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
         return (
             <div className="space-y-4">
                 {renderPlatformAdminFleetPanel()}
@@ -1678,6 +2025,49 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                     </button>
                                 </div>
 
+                                <div className="mt-4 rounded-lg border border-border/60 bg-background p-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <p className="text-sm font-medium">Client Pack Inspector</p>
+                                        <span className="text-xs text-muted-foreground">
+                                            полей {inspectorSummary.flattenedFieldsCount}
+                                        </span>
+                                    </div>
+                                    <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
+                                        <div className="rounded-lg border border-border/60 px-2 py-1">
+                                            services_catalog: {inspectorSummary.servicesCount}
+                                        </div>
+                                        <div className="rounded-lg border border-border/60 px-2 py-1">
+                                            price_list: {inspectorSummary.priceRowsCount}
+                                        </div>
+                                        <div className="rounded-lg border border-border/60 px-2 py-1">
+                                            booking.collect_fields: {inspectorSummary.collectFieldsCount}
+                                        </div>
+                                        <div className="rounded-lg border border-border/60 px-2 py-1">
+                                            policy заполнено: {inspectorSummary.policyFilledCount}/4
+                                        </div>
+                                    </div>
+                                    <label className="mt-3 block text-xs text-muted-foreground">
+                                        Поиск по ключам Client_Pack
+                                        <input
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={packInspectorQuery}
+                                            onChange={(event) => setPackInspectorQuery(event.target.value)}
+                                            placeholder="Например: client_pack.booking.collect_fields"
+                                        />
+                                    </label>
+                                    <div className="mt-2 max-h-44 overflow-auto rounded-lg border border-border/60 bg-muted/30 p-2 text-xs">
+                                        {filteredPackPaths.length === 0 && (
+                                            <div className="text-muted-foreground">Совпадений не найдено.</div>
+                                        )}
+                                        {filteredPackPaths.map((item) => (
+                                            <div key={`${item.path}-${item.preview}`} className="mb-1">
+                                                <span className="font-mono text-foreground">{item.path}</span>
+                                                <span className="text-muted-foreground"> = {item.preview}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
                                 <div className="mt-4 grid gap-3 sm:grid-cols-3">
                                     <label className="text-xs text-muted-foreground">
                                         Дни работы
@@ -1713,6 +2103,155 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                                             }
                                             disabled={!canEdit}
                                             placeholder="21:00"
+                                        />
+                                    </label>
+                                </div>
+
+                                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                    <label className="text-xs text-muted-foreground">
+                                        Название салона
+                                        <input
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={guidedSalonProfile.salonName}
+                                            onChange={(event) =>
+                                                setGuidedSalonProfile((prev) => ({ ...prev, salonName: event.target.value }))
+                                            }
+                                            disabled={!canEdit}
+                                            placeholder="Например: Truffles Beauty"
+                                        />
+                                    </label>
+                                    <label className="text-xs text-muted-foreground">
+                                        Город
+                                        <input
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={guidedSalonProfile.city}
+                                            onChange={(event) =>
+                                                setGuidedSalonProfile((prev) => ({ ...prev, city: event.target.value }))
+                                            }
+                                            disabled={!canEdit}
+                                            placeholder="Алматы"
+                                        />
+                                    </label>
+                                    <label className="text-xs text-muted-foreground sm:col-span-2">
+                                        Полный адрес
+                                        <input
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={guidedSalonProfile.addressFull}
+                                            onChange={(event) =>
+                                                setGuidedSalonProfile((prev) => ({ ...prev, addressFull: event.target.value }))
+                                            }
+                                            disabled={!canEdit}
+                                            placeholder="ул. Пример, 10"
+                                        />
+                                    </label>
+                                    <label className="text-xs text-muted-foreground">
+                                        Языки общения (через запятую)
+                                        <input
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={guidedSalonProfile.languages}
+                                            onChange={(event) =>
+                                                setGuidedSalonProfile((prev) => ({ ...prev, languages: event.target.value }))
+                                            }
+                                            disabled={!canEdit}
+                                            placeholder="ru, kk"
+                                        />
+                                    </label>
+                                    <label className="text-xs text-muted-foreground">
+                                        Guest policy
+                                        <input
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={guidedSalonProfile.guestPolicy}
+                                            onChange={(event) =>
+                                                setGuidedSalonProfile((prev) => ({ ...prev, guestPolicy: event.target.value }))
+                                            }
+                                            disabled={!canEdit}
+                                            placeholder="например: работаем только по записи"
+                                        />
+                                    </label>
+                                    <label className="text-xs text-muted-foreground sm:col-span-2">
+                                        Кратко об услугах
+                                        <textarea
+                                            className="mt-1 min-h-[68px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={guidedSalonProfile.servicesSummary}
+                                            onChange={(event) =>
+                                                setGuidedSalonProfile((prev) => ({ ...prev, servicesSummary: event.target.value }))
+                                            }
+                                            disabled={!canEdit}
+                                            placeholder="Короткое описание специализации салона"
+                                        />
+                                    </label>
+                                </div>
+
+                                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                    <label className="text-xs text-muted-foreground">
+                                        Booking: collect_fields (через запятую)
+                                        <input
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={guidedBooking.collectFields}
+                                            onChange={(event) =>
+                                                setGuidedBooking((prev) => ({ ...prev, collectFields: event.target.value }))
+                                            }
+                                            disabled={!canEdit}
+                                            placeholder="service, date, time, name, phone"
+                                        />
+                                    </label>
+                                    <label className="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground">
+                                        <input
+                                            type="checkbox"
+                                            checked={guidedBooking.botCanConfirm}
+                                            onChange={(event) =>
+                                                setGuidedBooking((prev) => ({ ...prev, botCanConfirm: event.target.checked }))
+                                            }
+                                            disabled={!canEdit}
+                                        />
+                                        Booking: bot_can_confirm
+                                    </label>
+                                    <label className="text-xs text-muted-foreground">
+                                        Policy: payment_info
+                                        <textarea
+                                            className="mt-1 min-h-[68px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={guidedPolicy.paymentInfo}
+                                            onChange={(event) =>
+                                                setGuidedPolicy((prev) => ({ ...prev, paymentInfo: event.target.value }))
+                                            }
+                                            disabled={!canEdit}
+                                            placeholder="Как проходит оплата"
+                                        />
+                                    </label>
+                                    <label className="text-xs text-muted-foreground">
+                                        Policy: reschedule
+                                        <textarea
+                                            className="mt-1 min-h-[68px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={guidedPolicy.reschedule}
+                                            onChange={(event) =>
+                                                setGuidedPolicy((prev) => ({ ...prev, reschedule: event.target.value }))
+                                            }
+                                            disabled={!canEdit}
+                                            placeholder="Правила переноса"
+                                        />
+                                    </label>
+                                    <label className="text-xs text-muted-foreground">
+                                        Policy: cancel
+                                        <textarea
+                                            className="mt-1 min-h-[68px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={guidedPolicy.cancel}
+                                            onChange={(event) =>
+                                                setGuidedPolicy((prev) => ({ ...prev, cancel: event.target.value }))
+                                            }
+                                            disabled={!canEdit}
+                                            placeholder="Правила отмены"
+                                        />
+                                    </label>
+                                    <label className="text-xs text-muted-foreground">
+                                        Policy: discounts
+                                        <textarea
+                                            className="mt-1 min-h-[68px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={guidedPolicy.discounts}
+                                            onChange={(event) =>
+                                                setGuidedPolicy((prev) => ({ ...prev, discounts: event.target.value }))
+                                            }
+                                            disabled={!canEdit}
+                                            placeholder="Скидки и акции"
                                         />
                                     </label>
                                 </div>

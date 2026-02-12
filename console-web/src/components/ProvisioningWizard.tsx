@@ -33,8 +33,18 @@ type OnboardingStepStatus = components["schemas"]["OnboardingStepStatus"];
 
 type AgentRole = ConsoleRole;
 type OnboardingMode = "autopilot" | "manual";
+type DomainTemplateId = "beauty" | "clinic" | "legal" | "ecom";
+
+type DomainTemplatePreset = {
+    id: DomainTemplateId;
+    label: string;
+    summary: string;
+    payload: CapabilitiesPayload;
+};
 
 const DEFAULT_TIMEZONE = "Asia/Almaty";
+const DOMAIN_SLUG_RE = /^[a-z0-9_]+$/;
+const ISO_CURRENCY_RE = /^[A-Z]{3}$/;
 const WORKING_DAYS = [
     { id: "mon", label: "Пн" },
     { id: "tue", label: "Вт" },
@@ -46,13 +56,13 @@ const WORKING_DAYS = [
 ] as const;
 
 const WIZARD_STEPS = [
-    { id: "branch_draft", label: "Филиал", hint: "Draft" },
+    { id: "branch_draft", label: "Филиал", hint: "Черновик" },
     { id: "integrations", label: "Интеграции", hint: "instance_id" },
-    { id: "team", label: "Команда", hint: "Owner/Admin" },
+    { id: "team", label: "Команда", hint: "владелец/админ" },
     { id: "telegram", label: "Telegram", hint: "chat_id" },
-    { id: "knowledge", label: "Knowledge", hint: "pack" },
-    { id: "booking", label: "Booking", hint: "calendar" },
-    { id: "go_no_go", label: "Go/No-Go", hint: "capabilities" },
+    { id: "knowledge", label: "Знания", hint: "pack" },
+    { id: "booking", label: "Бронирование", hint: "calendar" },
+    { id: "go_no_go", label: "Go/No-Go", hint: "готовность" },
 ] as const;
 
 const MISSING_LABELS: Record<string, string> = {
@@ -130,6 +140,53 @@ const AUTOPILOT_SERVICE_OPTIONS: Array<{
     { id: "provider_manual", label: "Manual provider" },
     { id: "provider_amocrm", label: "amoCRM" },
     { id: "provider_bitrix", label: "Bitrix" },
+];
+
+const DOMAIN_TEMPLATE_PRESETS: DomainTemplatePreset[] = [
+    {
+        id: "beauty",
+        label: "Beauty / Salon",
+        summary: "WhatsApp+Telegram, запись, knowledge upload",
+        payload: {
+            domain_slug: "beauty",
+            channels: { whatsapp: true, telegram: true, instagram: null },
+            providers: { availability_provider: "google_calendar", crm_provider: "amocrm", calendar_provider: "google_calendar" },
+            features: { booking_mode: "confirm_slots", knowledge_upload: true, analytics: true, auto_learn: false },
+        },
+    },
+    {
+        id: "clinic",
+        label: "Clinic",
+        summary: "WhatsApp, запись через календарь, строгий ручной контроль",
+        payload: {
+            domain_slug: "clinic",
+            channels: { whatsapp: true, telegram: false, instagram: null },
+            providers: { availability_provider: "google_calendar", crm_provider: "custom", calendar_provider: "google_calendar" },
+            features: { booking_mode: "confirm_slots", knowledge_upload: true, analytics: true, auto_learn: false },
+        },
+    },
+    {
+        id: "legal",
+        label: "Legal",
+        summary: "Консультационный режим без слот-подтверждения",
+        payload: {
+            domain_slug: "legal",
+            channels: { whatsapp: true, telegram: true, instagram: false },
+            providers: { availability_provider: "manual", crm_provider: "none", calendar_provider: "local" },
+            features: { booking_mode: "collect_preferences", knowledge_upload: true, analytics: true, auto_learn: false },
+        },
+    },
+    {
+        id: "ecom",
+        label: "E-commerce",
+        summary: "Мультиканал и аналитика, без confirm-slots по умолчанию",
+        payload: {
+            domain_slug: "ecom",
+            channels: { whatsapp: true, telegram: true, instagram: true },
+            providers: { availability_provider: "none", crm_provider: "bitrix", calendar_provider: "none" },
+            features: { booking_mode: "collect_preferences", knowledge_upload: true, analytics: true, auto_learn: true },
+        },
+    },
 ];
 
 type WizardStepId = (typeof WIZARD_STEPS)[number]["id"];
@@ -471,6 +528,26 @@ function isNonEmptyRecord(value: unknown): value is Record<string, unknown> {
     return Object.keys(value as Record<string, unknown>).length > 0;
 }
 
+function hasCapabilityValue(value: boolean | string | null | undefined): boolean {
+    return value !== null && value !== undefined && value !== "";
+}
+
+function hasPurchasedSignal(payload: CapabilitiesPayload): boolean {
+    return [
+        payload.domain_slug,
+        payload.channels.whatsapp,
+        payload.channels.telegram,
+        payload.channels.instagram,
+        payload.providers.availability_provider,
+        payload.providers.crm_provider,
+        payload.providers.calendar_provider,
+        payload.features.booking_mode,
+        payload.features.knowledge_upload,
+        payload.features.analytics,
+        payload.features.auto_learn,
+    ].some((value) => hasCapabilityValue(value));
+}
+
 type ProvisioningWizardProps = {
     session: SessionData;
     accessSection?: ConsoleSection;
@@ -547,7 +624,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     ));
     const [onboardingContractTouched, setOnboardingContractTouched] = useState(false);
     const [onboardingContractSavedAt, setOnboardingContractSavedAt] = useState<string | null>(null);
+    const [purchasedCapabilitiesDraft, setPurchasedCapabilitiesDraft] = useState<CapabilitiesPayload>(() => normalizeCapabilities());
     const [purchasedJsonDraft, setPurchasedJsonDraft] = useState("{}");
+    const [purchasedJsonDirty, setPurchasedJsonDirty] = useState(false);
+    const [selectedDomainTemplate, setSelectedDomainTemplate] = useState<DomainTemplateId>("beauty");
     const [paymentStatusDraft, setPaymentStatusDraft] = useState<"pending" | "confirmed" | "rejected">("pending");
     const [referencePackTitle, setReferencePackTitle] = useState("");
     const [specialistsConfirmed, setSpecialistsConfirmed] = useState(false);
@@ -685,22 +765,32 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         setReferencePackTitle("");
     }, [branchData?.id]);
 
-    const buildBillingInfoPayload = () => {
+    const buildBillingInfoPayload = (): { value?: Record<string, unknown>; error?: string } => {
         const payload: Record<string, unknown> = {};
         const contract = billingContract.trim();
-        const currency = billingCurrency.trim();
+        const currency = billingCurrency.trim().toUpperCase();
+        if (contract && contract.length < 2) {
+            return { error: "billing_info.contract: минимум 2 символа" };
+        }
+        if (currency && !ISO_CURRENCY_RE.test(currency)) {
+            return { error: "billing_info.currency: используйте ISO-код (например KZT)" };
+        }
         if (contract) {
             payload.contract = contract;
         }
         if (currency) {
             payload.currency = currency;
         }
-        return Object.keys(payload).length ? payload : undefined;
+        return { value: Object.keys(payload).length ? payload : undefined };
     };
 
     const applyBillingToJson = () => {
-        const payload = buildBillingInfoPayload();
-        setBillingInfo(payload ? JSON.stringify(payload, null, 2) : "");
+        const built = buildBillingInfoPayload();
+        if (built.error) {
+            toast.error(built.error);
+            return;
+        }
+        setBillingInfo(built.value ? JSON.stringify(built.value, null, 2) : "");
     };
 
     const loadBillingFromJson = () => {
@@ -713,7 +803,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         const contract = payload.contract;
         const currency = payload.currency;
         setBillingContract(typeof contract === "string" ? contract : "");
-        setBillingCurrency(typeof currency === "string" ? currency : "");
+        setBillingCurrency(typeof currency === "string" ? currency.toUpperCase() : "");
     };
 
     const buildWorkingHoursPayload = (): { value?: Record<string, unknown>; error?: string } => {
@@ -728,6 +818,9 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         }
         if (!start || !end) {
             return { error: "Укажите время открытия и закрытия" };
+        }
+        if (start >= end) {
+            return { error: "working_hours: время закрытия должно быть позже открытия" };
         }
         const payload: Record<string, unknown> = {};
         selectedDays.forEach((day) => {
@@ -783,15 +876,21 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         const payload: Record<string, unknown> = {};
         if (defaultDurationRaw) {
             const parsed = Number(defaultDurationRaw);
-            if (Number.isNaN(parsed)) {
-                return { error: "default_duration_min: укажите число" };
+            if (!Number.isInteger(parsed)) {
+                return { error: "default_duration_min: укажите целое число" };
+            }
+            if (parsed < 5 || parsed > 480) {
+                return { error: "default_duration_min: допустимо от 5 до 480" };
             }
             payload.default_duration_min = parsed;
         }
         if (bufferMinRaw) {
             const parsed = Number(bufferMinRaw);
-            if (Number.isNaN(parsed)) {
-                return { error: "buffer_min: укажите число" };
+            if (!Number.isInteger(parsed)) {
+                return { error: "buffer_min: укажите целое число" };
+            }
+            if (parsed < 0 || parsed > 240) {
+                return { error: "buffer_min: допустимо от 0 до 240" };
             }
             payload.buffer_min = parsed;
         }
@@ -823,6 +922,82 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         setBookingBufferMin((typeof bufferMin === "number" || typeof bufferMin === "string")
             ? String(bufferMin)
             : "");
+    };
+
+    const validatePurchasedPayload = (payload: CapabilitiesPayload): string | null => {
+        if (payload.domain_slug && !DOMAIN_SLUG_RE.test(payload.domain_slug)) {
+            return "purchased.domain_slug: допустимы a-z, 0-9, _";
+        }
+        if (
+            payload.features.booking_mode === "confirm_slots"
+            && (!payload.providers.availability_provider || payload.providers.availability_provider === "none")
+        ) {
+            return "purchased.providers.availability_provider обязателен при booking_mode=confirm_slots";
+        }
+        if (!hasPurchasedSignal(payload)) {
+            return "Добавьте минимум один purchased capability или domain_slug";
+        }
+        return null;
+    };
+
+    const buildPurchasedPayload = (): { value?: CapabilitiesPayload; error?: string } => {
+        const normalized = normalizeCapabilities(purchasedCapabilitiesDraft);
+        normalized.domain_slug = normalized.domain_slug?.trim() || null;
+        const validationError = validatePurchasedPayload(normalized);
+        if (validationError) {
+            return { error: validationError };
+        }
+        return { value: normalized };
+    };
+
+    const applyPurchasedToJson = () => {
+        const built = buildPurchasedPayload();
+        if (built.error) {
+            toast.error(built.error);
+            return;
+        }
+        setPurchasedJsonDraft(built.value ? JSON.stringify(built.value, null, 2) : "{}");
+        setPurchasedJsonDirty(false);
+    };
+
+    const loadPurchasedFromJson = () => {
+        const parsed = parseOptionalJson(purchasedJsonDraft, "purchased");
+        if (parsed.error) {
+            toast.error(parsed.error);
+            return;
+        }
+        const normalized = normalizeCapabilities((parsed.value as CapabilitiesPayload | undefined) ?? null);
+        const validationError = validatePurchasedPayload(normalized);
+        if (validationError) {
+            toast.error(validationError);
+            return;
+        }
+        setOnboardingContractTouched(true);
+        setPurchasedCapabilitiesDraft(normalized);
+        setPurchasedJsonDirty(false);
+    };
+
+    const handleApplyDomainTemplate = () => {
+        const selected = DOMAIN_TEMPLATE_PRESETS.find((template) => template.id === selectedDomainTemplate);
+        if (!selected) {
+            toast.error("Выберите валидный template");
+            return;
+        }
+        const normalized = normalizeCapabilities(selected.payload);
+        const validationError = validatePurchasedPayload(normalized);
+        if (validationError) {
+            toast.error(validationError);
+            return;
+        }
+        setOnboardingContractTouched(true);
+        setOnboardingContractDraft((prev) => ({
+            ...normalizeOnboardingContractPayload(prev),
+            domain_slug: normalized.domain_slug,
+        }));
+        setPurchasedCapabilitiesDraft(normalized);
+        setPurchasedJsonDraft(JSON.stringify(normalized, null, 2));
+        setPurchasedJsonDirty(false);
+        toast.success(`Template применён: ${selected.label}`);
     };
 
     const { data: capabilitiesData, isLoading: capabilitiesLoading, error: capabilitiesError, refetch: refetchCapabilities } = useQuery({
@@ -901,10 +1076,21 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         }
         const basePayload = onboardingContractData.branch_contract?.payload ?? onboardingContractData.effective ?? null;
         const normalized = normalizeOnboardingContractPayload(basePayload);
+        const normalizedPurchased = normalizeCapabilities(normalized.purchased);
         setOnboardingContractDraft(normalized);
-        setPurchasedJsonDraft(JSON.stringify(normalized.purchased ?? normalizeCapabilities(), null, 2));
+        setPurchasedCapabilitiesDraft(normalizedPurchased);
+        setPurchasedJsonDraft(JSON.stringify(normalizedPurchased, null, 2));
+        setPurchasedJsonDirty(false);
         setPaymentStatusDraft(onboardingContractData.payment_status ?? "pending");
     }, [onboardingContractData, onboardingContractTouched]);
+
+    useEffect(() => {
+        if (purchasedJsonDirty) {
+            return;
+        }
+        const normalized = normalizeCapabilities(purchasedCapabilitiesDraft);
+        setPurchasedJsonDraft(JSON.stringify(normalized, null, 2));
+    }, [purchasedCapabilitiesDraft, purchasedJsonDirty]);
 
     useEffect(() => {
         if (referencePackTitle.trim()) {
@@ -1183,13 +1369,13 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 setCapabilitiesTouched(false);
             }
             if (data.onboarding_contract?.payload) {
-                setOnboardingContractDraft(normalizeOnboardingContractPayload(data.onboarding_contract.payload));
+                const normalizedContract = normalizeOnboardingContractPayload(data.onboarding_contract.payload);
+                const normalizedPurchased = normalizeCapabilities(normalizedContract.purchased);
+                setOnboardingContractDraft(normalizedContract);
+                setPurchasedCapabilitiesDraft(normalizedPurchased);
                 setOnboardingContractTouched(false);
-                setPurchasedJsonDraft(JSON.stringify(
-                    normalizeCapabilities(data.onboarding_contract.payload.purchased),
-                    null,
-                    2,
-                ));
+                setPurchasedJsonDraft(JSON.stringify(normalizedPurchased, null, 2));
+                setPurchasedJsonDirty(false);
             }
             if (data.payment_status) {
                 setPaymentStatusDraft(data.payment_status);
@@ -1314,7 +1500,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const canManageReferencePacks = role === "platform_admin";
     const hasOnboardingContractRecord = !!onboardingContractData?.client_contract || !!onboardingContractData?.branch_contract;
     const paymentStatusEffective = onboardingContractData?.payment_status ?? "pending";
-    const capabilityMismatches = onboardingContractData?.capability_mismatches ?? [];
+    const capabilityMismatches = useMemo(
+        () => onboardingContractData?.capability_mismatches ?? [],
+        [onboardingContractData?.capability_mismatches],
+    );
     const referencePacks = referencePackData?.items ?? [];
     const hasActiveReferencePack = referencePacks.some((item) => item.status === "active");
 
@@ -1400,8 +1589,38 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     ]);
 
     const missingRequirements = readinessItems.filter((item) => item.required && !item.ok);
-    const goNoGoMissing = stepStateById.go_no_go?.missing ?? [];
+    const goNoGoMissing = useMemo(
+        () => stepStateById.go_no_go?.missing ?? [],
+        [stepStateById.go_no_go?.missing],
+    );
     const goNoGoReady = missingRequirements.length === 0 && goNoGoMissing.length === 0;
+    const requiredReadinessItems = readinessItems.filter((item) => item.required);
+    const readinessCompletedCount = requiredReadinessItems.filter((item) => item.ok).length;
+    const readinessScore = requiredReadinessItems.length > 0
+        ? Math.round((readinessCompletedCount / requiredReadinessItems.length) * 100)
+        : 100;
+    const readinessLevel: "high" | "medium" | "low" = readinessScore >= 85
+        ? "high"
+        : readinessScore >= 60
+            ? "medium"
+            : "low";
+    const readinessStatusLabel = readinessLevel === "high"
+        ? "Готово к Go/No-Go"
+        : readinessLevel === "medium"
+            ? "Есть блокеры"
+            : "Критические блокеры";
+    const readinessToneClass = readinessLevel === "high"
+        ? "border-green-200 bg-green-50 text-green-800"
+        : readinessLevel === "medium"
+            ? "border-amber-200 bg-amber-50 text-amber-800"
+            : "border-destructive/30 bg-destructive/10 text-destructive";
+    const readinessBlockers = useMemo(() => {
+        const blockers: string[] = [];
+        missingRequirements.forEach((item) => blockers.push(item.label));
+        goNoGoMissing.forEach((item) => blockers.push(formatMissingRequirement(item)));
+        capabilityMismatches.forEach((item) => blockers.push(`Договор: ${CAPABILITY_FIELD_LABELS[item] ?? item}`));
+        return Array.from(new Set(blockers));
+    }, [missingRequirements, goNoGoMissing, capabilityMismatches]);
     const branchGoLiveStateRaw = (branchData as Record<string, unknown> | null)?.go_live_state;
     const branchGoLiveState: "pending" | "approved" | "rejected" = (
         branchGoLiveStateRaw === "pending" || branchGoLiveStateRaw === "approved" || branchGoLiveStateRaw === "rejected"
@@ -1555,6 +1774,11 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.error("Укажите название компании");
             return;
         }
+        const builtBilling = buildBillingInfoPayload();
+        if (builtBilling.error) {
+            toast.error(builtBilling.error);
+            return;
+        }
         const billing = parseOptionalJson(billingInfo, "billing_info");
         if (billing.error) {
             toast.error(billing.error);
@@ -1562,7 +1786,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         }
         let billingPayload = billing.value;
         if (!billingPayload) {
-            billingPayload = buildBillingInfoPayload();
+            billingPayload = builtBilling.value;
             if (billingPayload) {
                 setBillingInfo(JSON.stringify(billingPayload, null, 2));
             }
@@ -1823,14 +2047,37 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.error("Нужны client_id и branch_id");
             return;
         }
-        const parsedPurchased = parseOptionalJson(purchasedJsonDraft, "purchased");
-        if (parsedPurchased.error) {
-            toast.error(parsedPurchased.error);
+        const builtPurchased = buildPurchasedPayload();
+        if (builtPurchased.error || !builtPurchased.value) {
+            toast.error(builtPurchased.error ?? "purchased: добавьте данные");
             return;
+        }
+        let purchasedPayload = builtPurchased.value;
+        if (purchasedJsonDirty) {
+            const parsedPurchased = parseOptionalJson(purchasedJsonDraft, "purchased");
+            if (parsedPurchased.error) {
+                toast.error(parsedPurchased.error);
+                return;
+            }
+            if (parsedPurchased.value) {
+                const normalizedFromJson = normalizeCapabilities(parsedPurchased.value as CapabilitiesPayload);
+                const validationError = validatePurchasedPayload(normalizedFromJson);
+                if (validationError) {
+                    toast.error(validationError);
+                    return;
+                }
+                purchasedPayload = normalizedFromJson;
+                setPurchasedCapabilitiesDraft(normalizedFromJson);
+            } else {
+                setPurchasedJsonDraft(JSON.stringify(purchasedPayload, null, 2));
+            }
+            setPurchasedJsonDirty(false);
+        } else {
+            setPurchasedJsonDraft(JSON.stringify(purchasedPayload, null, 2));
         }
         const payload: OnboardingContractPayload = {
             domain_slug: onboardingContractDraft.domain_slug?.trim() || null,
-            purchased: normalizeCapabilities((parsedPurchased.value as CapabilitiesPayload) ?? null),
+            purchased: purchasedPayload,
         };
         const requestPayload: components["schemas"]["OnboardingContractPatchRequest"] = {
             scope: "branch",
@@ -1884,7 +2131,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         setOnboardingContractDraft(normalizeOnboardingContractPayload());
         setOnboardingContractTouched(false);
         setOnboardingContractSavedAt(null);
+        setPurchasedCapabilitiesDraft(normalizeCapabilities());
         setPurchasedJsonDraft("{}");
+        setPurchasedJsonDirty(false);
+        setSelectedDomainTemplate("beauty");
         setPaymentStatusDraft("pending");
         setReferencePackTitle("");
         setSpecialistsConfirmed(false);
@@ -2151,15 +2401,15 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 {autopilotResult && (
                     <div className="rounded-lg border border-border/60 bg-background p-3 space-y-2 text-xs">
                         <div>
-                            Company: <span className="font-mono">{autopilotResult.company.id}</span> | Client:{" "}
-                            <span className="font-mono">{autopilotResult.client.id}</span> | Branch:{" "}
+                            Компания: <span className="font-mono">{autopilotResult.company.id}</span> | Клиент:{" "}
+                            <span className="font-mono">{autopilotResult.client.id}</span> | Филиал:{" "}
                             <span className="font-mono">{autopilotResult.branch.id}</span>
                         </div>
                         <div>
-                            Go/No-Go missing:{" "}
+                            Не выполнены критерии Go/No-Go:{" "}
                             {autopilotResult.go_no_go_missing.length
                                 ? autopilotResult.go_no_go_missing.map((item) => formatMissingRequirement(item)).join(", ")
-                                : "none"}
+                                : "нет"}
                         </div>
                         <div>
                             Webhook secret: <span className="font-mono">{autopilotResult.webhook_secret}</span>
@@ -2168,10 +2418,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                             Webhook URL: <span className="font-mono">{autopilotResult.webhook_url}</span>
                         </div>
                         <div>
-                            Intake missing fields:{" "}
+                            Не заполнены поля intake:{" "}
                             {autopilotResult.intake.missing_fields.length
                                 ? autopilotResult.intake.missing_fields.map((item) => formatMissingRequirement(item)).join(", ")
-                                : "none"}
+                                : "нет"}
                         </div>
                         {autopilotResult.intake.missing_questions.length > 0 && (
                             <div>
@@ -2197,7 +2447,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-card border border-border/60 rounded-lg p-4">
                     <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground mb-3">
-                        Company
+                        Компания
                     </h3>
                     <label className="text-xs text-muted-foreground">Company ID (existing)</label>
                     <input
@@ -2224,21 +2474,38 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                     className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                     value={billingContract}
                                     onChange={(event) => setBillingContract(event.target.value)}
+                                    list="billing-contract-options"
                                     placeholder="B2B"
+                                    maxLength={32}
                                     disabled={!canEdit}
+                                    data-testid="onboarding-billing-contract"
                                 />
+                                <datalist id="billing-contract-options">
+                                    <option value="B2B" />
+                                    <option value="B2C" />
+                                    <option value="Enterprise" />
+                                    <option value="Partner" />
+                                </datalist>
                             </div>
                             <div>
                                 <label className="text-xs text-muted-foreground">Валюта</label>
                                 <input
                                     className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                     value={billingCurrency}
-                                    onChange={(event) => setBillingCurrency(event.target.value)}
+                                    onChange={(event) => {
+                                        const next = event.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3);
+                                        setBillingCurrency(next);
+                                    }}
                                     placeholder="KZT"
+                                    maxLength={3}
                                     disabled={!canEdit}
+                                    data-testid="onboarding-billing-currency"
                                 />
                             </div>
                         </div>
+                        <p className="text-[11px] text-muted-foreground">
+                            Ожидаемые форматы: `contract` = короткий тип договора, `currency` = ISO 4217 (например KZT/USD/EUR).
+                        </p>
                         <div className="flex flex-wrap gap-2 text-xs">
                             <button
                                 type="button"
@@ -2283,7 +2550,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
                 <div className="bg-card border border-border/60 rounded-lg p-4">
                     <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground mb-3">
-                        Client
+                        Клиент
                     </h3>
                     <label className="text-xs text-muted-foreground">Client ID (existing)</label>
                     <input
@@ -2832,7 +3099,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                             Специалисты добавляются в Phase 4 (Team + Calendar).
                         </p>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                            <div className="rounded-lg border border-border/60 bg-background p-3 space-y-3">
+                            <div className="rounded-lg border border-border/60 bg-background p-3 space-y-3" data-testid="onboarding-working-hours-form">
                                 <h4 className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                                     Working hours
                                 </h4>
@@ -2883,6 +3150,9 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                         />
                                     </div>
                                 </div>
+                                <p className="text-[11px] text-muted-foreground">
+                                    Формат времени: `HH:MM`, закрытие должно быть позже открытия.
+                                </p>
                                 <div className="flex flex-wrap gap-2 text-xs">
                                     <button
                                         type="button"
@@ -2915,7 +3185,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                     />
                                 </details>
                             </div>
-                            <div className="rounded-lg border border-border/60 bg-background p-3 space-y-3">
+                            <div className="rounded-lg border border-border/60 bg-background p-3 space-y-3" data-testid="onboarding-booking-settings-form">
                                 <h4 className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                                     Booking settings
                                 </h4>
@@ -2927,9 +3197,11 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                             value={bookingDefaultDuration}
                                             onChange={(event) => setBookingDefaultDuration(event.target.value)}
-                                            placeholder="60"
-                                            min={0}
+                                            placeholder="60 (5..480)"
+                                            min={5}
+                                            max={480}
                                             disabled={!canEdit}
+                                            data-testid="onboarding-booking-default-duration"
                                         />
                                     </div>
                                     <div>
@@ -2939,12 +3211,17 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                             value={bookingBufferMin}
                                             onChange={(event) => setBookingBufferMin(event.target.value)}
-                                            placeholder="10"
+                                            placeholder="10 (0..240)"
                                             min={0}
+                                            max={240}
                                             disabled={!canEdit}
+                                            data-testid="onboarding-booking-buffer-min"
                                         />
                                     </div>
                                 </div>
+                                <p className="text-[11px] text-muted-foreground">
+                                    `default_duration_min`: 5-480, `buffer_min`: 0-240, только целые числа.
+                                </p>
                                 <div className="flex flex-wrap gap-2 text-xs">
                                     <button
                                         type="button"
@@ -3246,8 +3523,27 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
                             <div className="space-y-4">
                                 <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                                    Go/No-Go checks
+                                    Проверки Go/No-Go
                                 </h4>
+                                <div className={`rounded-lg border px-3 py-3 text-xs ${readinessToneClass}`} data-testid="onboarding-readiness-score">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="font-semibold">Readiness score</span>
+                                        <span className="font-mono">{readinessScore}%</span>
+                                    </div>
+                                    <div className="mt-1">
+                                        {readinessStatusLabel} · {readinessCompletedCount}/{requiredReadinessItems.length} обязательных критериев.
+                                    </div>
+                                    {readinessBlockers.length > 0 && (
+                                        <div className="mt-2 rounded-md border border-current/30 bg-white/50 px-2 py-2" data-testid="onboarding-readiness-blockers">
+                                            <div className="font-semibold mb-1">Блокеры:</div>
+                                            <div className="space-y-1">
+                                                {readinessBlockers.slice(0, 8).map((item) => (
+                                                    <div key={item}>- {item}</div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                                 <div className="space-y-2">
                                     {readinessItems.map((item) => (
                                         <div
@@ -3261,7 +3557,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             }`}
                                         >
                                             <span>{item.label}</span>
-                                            <span>{item.required ? (item.ok ? "OK" : "Missing") : "N/A"}</span>
+                                            <span>{item.required ? (item.ok ? "OK" : "Не заполнено") : "N/A"}</span>
                                         </div>
                                     ))}
                                 </div>
@@ -3277,24 +3573,24 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                 )}
                                 <div className="rounded-lg border border-border/60 bg-muted/10 p-3 space-y-2">
                                     <h5 className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                                        Go-Live Gate
+                                        Гейт запуска
                                     </h5>
                                     <p className="text-xs">
-                                        status: <span className="font-mono">{branchGoLiveState}</span> · allowed:{" "}
+                                        статус: <span className="font-mono">{branchGoLiveState}</span> · разрешено:{" "}
                                         <span className={branchGoLiveAllowed ? "text-green-700" : "text-destructive"}>
-                                            {branchGoLiveAllowed ? "yes" : "no"}
+                                            {branchGoLiveAllowed ? "да" : "нет"}
                                         </span>
                                     </p>
                                     {branchGoLiveReason && (
                                         <p className="text-xs text-muted-foreground">
-                                            reason: <span className="font-mono">{String(branchGoLiveReason)}</span>
+                                            причина: <span className="font-mono">{String(branchGoLiveReason)}</span>
                                         </p>
                                     )}
                                     {branchGoLiveWaiverUntil && (
                                         <p className="text-xs text-muted-foreground">
                                             waiver_until: <span className="font-mono">{String(branchGoLiveWaiverUntil)}</span>
                                             {" · "}
-                                            {branchGoLiveWaiverActive ? "active" : "expired"}
+                                            {branchGoLiveWaiverActive ? "активен" : "истек"}
                                         </p>
                                     )}
                                     <textarea
@@ -3302,7 +3598,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                         rows={2}
                                         value={goLiveDecisionReason}
                                         onChange={(event) => setGoLiveDecisionReason(event.target.value)}
-                                        placeholder="reason for approve / reject / waiver"
+                                        placeholder="причина для approve / reject / waiver"
                                         disabled={!canEdit}
                                     />
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -3313,7 +3609,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs"
                                             value={goLiveWaiverHours}
                                             onChange={(event) => setGoLiveWaiverHours(event.target.value)}
-                                            placeholder="waiver ttl_hours"
+                                            placeholder="waiver ttl_hours (часы)"
                                             disabled={!canEdit}
                                         />
                                         <button
@@ -3322,7 +3618,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             onClick={handleWaiveGoLive}
                                             disabled={!canEdit || waiveGoLiveMutation.isPending}
                                         >
-                                            {waiveGoLiveMutation.isPending ? "Waiving..." : "Waive TTL"}
+                                            {waiveGoLiveMutation.isPending ? "Сохранение..." : "Выдать waiver TTL"}
                                         </button>
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -3332,7 +3628,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             onClick={handleApproveGoLive}
                                             disabled={!canEdit || approveGoLiveMutation.isPending}
                                         >
-                                            {approveGoLiveMutation.isPending ? "Approving..." : "Approve Go-Live"}
+                                            {approveGoLiveMutation.isPending ? "Сохранение..." : "Approve Go-Live"}
                                         </button>
                                         <button
                                             type="button"
@@ -3340,7 +3636,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             onClick={handleRejectGoLive}
                                             disabled={!canEdit || rejectGoLiveMutation.isPending}
                                         >
-                                            {rejectGoLiveMutation.isPending ? "Rejecting..." : "Reject Go-Live"}
+                                            {rejectGoLiveMutation.isPending ? "Сохранение..." : "Reject Go-Live"}
                                         </button>
                                     </div>
                                 </div>
@@ -3358,10 +3654,42 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
                                 <div className="rounded-lg border border-border/60 bg-muted/10 p-3 space-y-3">
                                     <h5 className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                                        Onboarding Contract
+                                        Договор онбординга
                                     </h5>
+                                    <div className="rounded-lg border border-border/60 bg-background p-3 space-y-2" data-testid="onboarding-domain-template">
+                                        <div className="text-xs text-muted-foreground">
+                                            Domain template preset: применяет стартовый контракт под нишу.
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+                                            <select
+                                                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                value={selectedDomainTemplate}
+                                                onChange={(event) => setSelectedDomainTemplate(event.target.value as DomainTemplateId)}
+                                                disabled={!canEdit}
+                                                data-testid="onboarding-domain-template-select"
+                                            >
+                                                {DOMAIN_TEMPLATE_PRESETS.map((template) => (
+                                                    <option key={template.id} value={template.id}>
+                                                        {template.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <button
+                                                type="button"
+                                                className="btn-ghost"
+                                                onClick={handleApplyDomainTemplate}
+                                                disabled={!canEdit}
+                                                data-testid="onboarding-domain-template-apply"
+                                            >
+                                                Применить template
+                                            </button>
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            {DOMAIN_TEMPLATE_PRESETS.find((item) => item.id === selectedDomainTemplate)?.summary ?? "—"}
+                                        </p>
+                                    </div>
                                     <div>
-                                        <label className="text-xs text-muted-foreground">domain_slug (niche)</label>
+                                        <label className="text-xs text-muted-foreground">domain_slug (ниша)</label>
                                         <input
                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                             value={onboardingContractDraft.domain_slug ?? ""}
@@ -3376,19 +3704,295 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             disabled={!canEdit}
                                         />
                                     </div>
-                                    <div>
-                                        <label className="text-xs text-muted-foreground">purchased (JSON)</label>
-                                        <textarea
-                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
-                                            rows={8}
-                                            value={purchasedJsonDraft}
-                                            onChange={(event) => {
-                                                setOnboardingContractTouched(true);
-                                                setPurchasedJsonDraft(event.target.value);
-                                            }}
-                                            placeholder='{"channels":{"whatsapp":true}}'
-                                            disabled={!canEdit}
-                                        />
+                                    <div className="rounded-lg border border-border/60 bg-background p-3 space-y-3" data-testid="onboarding-purchased-form">
+                                        <div className="text-xs text-muted-foreground">
+                                            Purchased capabilities (schema form). JSON остаётся как fallback в expert-режиме.
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">WhatsApp</label>
+                                                <select
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={toTriState(purchasedCapabilitiesDraft.channels?.whatsapp)}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setPurchasedCapabilitiesDraft((prev) => ({
+                                                            ...normalizeCapabilities(prev),
+                                                            channels: {
+                                                                ...normalizeCapabilities(prev).channels,
+                                                                whatsapp: fromTriState(event.target.value),
+                                                            },
+                                                        }));
+                                                    }}
+                                                    disabled={!canEdit}
+                                                >
+                                                    <option value="inherit">Не указано</option>
+                                                    <option value="true">Включено</option>
+                                                    <option value="false">Выключено</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">Telegram</label>
+                                                <select
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={toTriState(purchasedCapabilitiesDraft.channels?.telegram)}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setPurchasedCapabilitiesDraft((prev) => ({
+                                                            ...normalizeCapabilities(prev),
+                                                            channels: {
+                                                                ...normalizeCapabilities(prev).channels,
+                                                                telegram: fromTriState(event.target.value),
+                                                            },
+                                                        }));
+                                                    }}
+                                                    disabled={!canEdit}
+                                                >
+                                                    <option value="inherit">Не указано</option>
+                                                    <option value="true">Включено</option>
+                                                    <option value="false">Выключено</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">Instagram</label>
+                                                <select
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={toTriState(purchasedCapabilitiesDraft.channels?.instagram)}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setPurchasedCapabilitiesDraft((prev) => ({
+                                                            ...normalizeCapabilities(prev),
+                                                            channels: {
+                                                                ...normalizeCapabilities(prev).channels,
+                                                                instagram: fromTriState(event.target.value),
+                                                            },
+                                                        }));
+                                                    }}
+                                                    disabled={!canEdit}
+                                                >
+                                                    <option value="inherit">Не указано</option>
+                                                    <option value="true">Включено</option>
+                                                    <option value="false">Выключено</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">availability_provider</label>
+                                                <select
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={purchasedCapabilitiesDraft.providers?.availability_provider ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setPurchasedCapabilitiesDraft((prev) => ({
+                                                            ...normalizeCapabilities(prev),
+                                                            providers: {
+                                                                ...normalizeCapabilities(prev).providers,
+                                                                availability_provider: event.target.value
+                                                                    ? event.target.value as CapabilitiesPayload["providers"]["availability_provider"]
+                                                                    : null,
+                                                            },
+                                                        }));
+                                                    }}
+                                                    disabled={!canEdit}
+                                                >
+                                                    <option value="">Не указано</option>
+                                                    <option value="none">none</option>
+                                                    <option value="google_calendar">google_calendar</option>
+                                                    <option value="bitrix">bitrix</option>
+                                                    <option value="amocrm">amocrm</option>
+                                                    <option value="manual">manual</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">crm_provider</label>
+                                                <select
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={purchasedCapabilitiesDraft.providers?.crm_provider ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setPurchasedCapabilitiesDraft((prev) => ({
+                                                            ...normalizeCapabilities(prev),
+                                                            providers: {
+                                                                ...normalizeCapabilities(prev).providers,
+                                                                crm_provider: event.target.value
+                                                                    ? event.target.value as CapabilitiesPayload["providers"]["crm_provider"]
+                                                                    : null,
+                                                            },
+                                                        }));
+                                                    }}
+                                                    disabled={!canEdit}
+                                                >
+                                                    <option value="">Не указано</option>
+                                                    <option value="none">none</option>
+                                                    <option value="amocrm">amocrm</option>
+                                                    <option value="bitrix">bitrix</option>
+                                                    <option value="custom">custom</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">calendar_provider</label>
+                                                <select
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={purchasedCapabilitiesDraft.providers?.calendar_provider ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setPurchasedCapabilitiesDraft((prev) => ({
+                                                            ...normalizeCapabilities(prev),
+                                                            providers: {
+                                                                ...normalizeCapabilities(prev).providers,
+                                                                calendar_provider: event.target.value
+                                                                    ? event.target.value as CapabilitiesPayload["providers"]["calendar_provider"]
+                                                                    : null,
+                                                            },
+                                                        }));
+                                                    }}
+                                                    disabled={!canEdit}
+                                                >
+                                                    <option value="">Не указано</option>
+                                                    <option value="none">none</option>
+                                                    <option value="google_calendar">google_calendar</option>
+                                                    <option value="local">local</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">booking_mode</label>
+                                                <select
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={purchasedCapabilitiesDraft.features?.booking_mode ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setPurchasedCapabilitiesDraft((prev) => ({
+                                                            ...normalizeCapabilities(prev),
+                                                            features: {
+                                                                ...normalizeCapabilities(prev).features,
+                                                                booking_mode: event.target.value
+                                                                    ? event.target.value as CapabilitiesPayload["features"]["booking_mode"]
+                                                                    : null,
+                                                            },
+                                                        }));
+                                                    }}
+                                                    disabled={!canEdit}
+                                                >
+                                                    <option value="">Не указано</option>
+                                                    <option value="collect_preferences">collect_preferences</option>
+                                                    <option value="confirm_slots">confirm_slots</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">knowledge_upload</label>
+                                                <select
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={toTriState(purchasedCapabilitiesDraft.features?.knowledge_upload)}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setPurchasedCapabilitiesDraft((prev) => ({
+                                                            ...normalizeCapabilities(prev),
+                                                            features: {
+                                                                ...normalizeCapabilities(prev).features,
+                                                                knowledge_upload: fromTriState(event.target.value),
+                                                            },
+                                                        }));
+                                                    }}
+                                                    disabled={!canEdit}
+                                                >
+                                                    <option value="inherit">Не указано</option>
+                                                    <option value="true">Включено</option>
+                                                    <option value="false">Выключено</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">analytics</label>
+                                                <select
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={toTriState(purchasedCapabilitiesDraft.features?.analytics)}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setPurchasedCapabilitiesDraft((prev) => ({
+                                                            ...normalizeCapabilities(prev),
+                                                            features: {
+                                                                ...normalizeCapabilities(prev).features,
+                                                                analytics: fromTriState(event.target.value),
+                                                            },
+                                                        }));
+                                                    }}
+                                                    disabled={!canEdit}
+                                                >
+                                                    <option value="inherit">Не указано</option>
+                                                    <option value="true">Включено</option>
+                                                    <option value="false">Выключено</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">auto_learn</label>
+                                                <select
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={toTriState(purchasedCapabilitiesDraft.features?.auto_learn)}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setPurchasedCapabilitiesDraft((prev) => ({
+                                                            ...normalizeCapabilities(prev),
+                                                            features: {
+                                                                ...normalizeCapabilities(prev).features,
+                                                                auto_learn: fromTriState(event.target.value),
+                                                            },
+                                                        }));
+                                                    }}
+                                                    disabled={!canEdit}
+                                                >
+                                                    <option value="inherit">Не указано</option>
+                                                    <option value="true">Включено</option>
+                                                    <option value="false">Выключено</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex flex-wrap gap-2 text-xs">
+                                            <button
+                                                type="button"
+                                                className="btn-ghost"
+                                                onClick={applyPurchasedToJson}
+                                                disabled={!canEdit}
+                                                data-testid="onboarding-purchased-apply-json"
+                                            >
+                                                Применить в JSON
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="btn-ghost"
+                                                onClick={loadPurchasedFromJson}
+                                                disabled={!canEdit}
+                                                data-testid="onboarding-purchased-load-json"
+                                            >
+                                                Загрузить из JSON
+                                            </button>
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            Валидация: `domain_slug` в snake_case; при `confirm_slots` обязателен `availability_provider`.
+                                        </p>
+                                        <details className="rounded-lg border border-border/60 bg-muted/10 p-3">
+                                            <summary className="cursor-pointer text-xs text-muted-foreground">
+                                                Advanced JSON (expert)
+                                            </summary>
+                                            <textarea
+                                                className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
+                                                rows={8}
+                                                value={purchasedJsonDraft}
+                                                onChange={(event) => {
+                                                    setOnboardingContractTouched(true);
+                                                    setPurchasedJsonDraft(event.target.value);
+                                                    setPurchasedJsonDirty(true);
+                                                }}
+                                                placeholder='{"channels":{"whatsapp":true}}'
+                                                disabled={!canEdit}
+                                                data-testid="onboarding-purchased-json"
+                                            />
+                                        </details>
                                     </div>
                                     <div>
                                         <label className="text-xs text-muted-foreground">payment_status</label>
@@ -3400,9 +4004,9 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             }}
                                             disabled={!canManagePayment}
                                         >
-                                            <option value="pending">pending</option>
-                                            <option value="confirmed">confirmed</option>
-                                            <option value="rejected">rejected</option>
+                                            <option value="pending">pending (ожидает)</option>
+                                            <option value="confirmed">confirmed (подтверждено)</option>
+                                            <option value="rejected">rejected (отклонено)</option>
                                         </select>
                                         {!canManagePayment && (
                                             <p className="mt-1 text-[11px] text-muted-foreground">

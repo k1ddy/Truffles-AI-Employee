@@ -1,0 +1,24 @@
+# SESSION 2026-02-11-knowledge-gate-context-a27 — Knowledge Gate Context UX
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-11-knowledge-gate-context-a27.md
+- branch: fix/2026-02-11-knowledge-gate-context-a27
+- worktree: /home/zhan/truffles-main
+- base_ref: origin/main
+- scope: Упростить gate выбора branch и стабилизировать context transitions в Knowledge для Platform Admin.
+- done:
+  - Подготовлен task package.
+  - Зафиксирован PR-A (stabilization) и открыт PR #624: https://github.com/k1ddy/Truffles-AI-Employee/pull/624
+  - Внесён PR-B uplift для Tenants IA: workspace modes (`All/Portfolio/Onboarding/Change Management/Decommission`) и условный рендер секций.
+  - Добавлен smoke тест переключения режимов Tenants с legacy fallback (`console-web/e2e/smoke.spec.ts`).
+  - Выполнен scope-guard: knowledge-изменение исключено из ветки отдельным `revert`.
+  - Локальные проверки: `npm run lint`, `npm run build`, `npx playwright ... --grep "Tenants"` -> pass (4 passed).
+- next:
+  - Дождаться зелёного CI по PR #624 и закрыть remaining checks.
+- evidence:
+  - PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/624
+  - `console-web/src/app/tenants/page.tsx`
+  - `console-web/e2e/smoke.spec.ts`
+  - `docs/CONSOLE_AUDIT/pages/tenants.md`
+- last_updated: 2026-02-11

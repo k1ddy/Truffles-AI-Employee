@@ -1,0 +1,22 @@
+# SESSION 2026-02-11-tenants-pr-d-templates-readiness-a27 — Session 2026-02-11-tenants-pr-d-templates-readiness-a27
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-d-templates-readiness-a27.md
+- branch: feat/2026-02-11-tenants-pr-d-templates-readiness-a27
+- worktree: /home/zhan/worktrees/2026-02-11-tenants-pr-d-templates-readiness-a27
+- base_ref: origin/main
+- scope: Domain template presets + readiness score/blockers for Tenants Go/No-Go, smoke/doc sync.
+- done:
+  - Added typed domain templates (`beauty`, `clinic`, `legal`, `ecom`) and apply action in Provisioning Wizard.
+  - Added readiness score panel with status band + blockers list for Go/No-Go.
+  - Updated Tenants smoke test for dual-contract compatibility (new/legacy Go/No-Go UI).
+  - Synced tenants audit docs with new controls.
+- next:
+  - Commit changes and open PR for PR-D.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-d-templates-readiness-a27.md
+  - console-web/src/components/ProvisioningWizard.tsx
+  - console-web/e2e/smoke.spec.ts
+  - docs/CONSOLE_AUDIT/pages/tenants.md
+- last_updated: 2026-02-11

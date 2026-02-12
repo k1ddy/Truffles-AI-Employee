@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { InfiniteData, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -8,7 +8,7 @@ import toast from "react-hot-toast";
 import type { components } from "@/types/api.generated";
 import AccessDenied from "@/components/AccessDenied";
 import ProvisioningWizard from "@/components/ProvisioningWizard";
-import { adminApi, authApi, canAccessConsole, confirmationsApi } from "@/lib/api-client";
+import { adminApi, auditApi, authApi, canAccessConsole, confirmationsApi, opsApi } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 
 const CLIENT_ID_STORAGE_KEY = "console:client_id";
@@ -40,7 +40,45 @@ type ClientEditorState = {
     companyId: string;
     originalSlug: string;
     originalCompanyId: string;
+    totalBranches: number;
 };
+
+type ClientLifecycleMode = "archive" | "restore";
+type ClientLifecycleAuditFilter = "all" | "success" | "error";
+type ClientLifecycleAuditSource = "session" | "api";
+type ClientLifecycleDraftState = {
+    clientId: string;
+    clientLabel: string;
+    companyLabel: string;
+    mode: ClientLifecycleMode;
+    currentLifecycleLabel: string;
+    targetLifecycleLabel: string;
+    activeBranches: number;
+    totalBranches: number;
+    degradedBranches: number;
+    reason: string;
+    confirmChecked: boolean;
+    checkClientScope: boolean;
+    checkImpactReview: boolean;
+    checkOwnerAligned: boolean;
+};
+
+type ClientLifecycleAuditEntry = {
+    clientId: string;
+    mode: ClientLifecycleMode;
+    previousLifecycleLabel: string;
+    targetLifecycleLabel: string;
+    reason: string;
+    status: "success" | "error";
+    message: string;
+    traceId?: string;
+    actorLabel: string;
+    happenedAt: string;
+    source: ClientLifecycleAuditSource;
+    sourceEventId?: string;
+};
+
+type ClientLifecycleAuditMap = Record<string, ClientLifecycleAuditEntry[]>;
 
 type BranchEditorState = {
     id: string;
@@ -74,6 +112,141 @@ type FleetLifecycleFilter = "all" | "lead" | "contracting" | "onboarding" | "go_
 type FleetPaymentFilter = "all" | "pending" | "confirmed" | "rejected" | "unknown";
 type FleetServiceFilter = "all" | "ok" | "degraded" | "attention";
 type FleetAttentionLevel = "high" | "medium" | "low";
+type TenantsWorkspaceMode = "all" | "portfolio" | "onboarding" | "changes" | "decommission";
+type OperationalKpiId =
+    | "onboardingCoverage"
+    | "goLiveReadiness"
+    | "serviceStability"
+    | "decommissionShare"
+    | "changeFailure"
+    | "rollbackShare"
+    | "blockedSignals";
+type OperationalKpiStatus = "ok" | "warn" | "critical";
+type OperationalKpiAction = "portfolio" | "onboarding" | "changes" | "decommission";
+type OperationalKpiRule = {
+    id: OperationalKpiId;
+    label: string;
+    unit: "percent" | "count";
+    direction: "higher_better" | "lower_better";
+    warn: number;
+    critical: number;
+    action: OperationalKpiAction;
+    actionLabel: string;
+};
+type OperationalKpiDrilldown = {
+    id: OperationalKpiId;
+    label: string;
+    value: number;
+    displayValue: string;
+    status: OperationalKpiStatus;
+    thresholdLabel: string;
+    reason: string;
+    action: OperationalKpiAction;
+    actionLabel: string;
+};
+type TenantsOperationalSnapshot = {
+    id: string;
+    weekKey: string;
+    createdAt: string;
+    report: {
+        generatedAt: string;
+        sourceWindow: number;
+        workspaceMode: TenantsWorkspaceMode;
+        lifecycleMode: TenantLifecycleMode;
+        kpi: Record<OperationalKpiId, number>;
+        drilldown: Array<{
+            id: OperationalKpiId;
+            status: OperationalKpiStatus;
+            value: number;
+            reason: string;
+        }>;
+        attentionSummary: {
+            activeClientsTotal: number;
+            highRiskClients: number;
+            mediumRiskClients: number;
+            outboxFailed24hTotal: number;
+            pendingHandoversTotal: number;
+        };
+    };
+};
+
+const LIFECYCLE_AUDIT_STORAGE_KEY = "tenants:client-lifecycle-audit:v2";
+const WEEKLY_SNAPSHOT_STORAGE_KEY = "tenants:operational-weekly-snapshots:v1";
+const MAX_LIFECYCLE_AUDIT_ENTRIES_PER_CLIENT = 20;
+const MAX_WEEKLY_SNAPSHOTS = 12;
+
+const OPERATIONAL_KPI_RULES: OperationalKpiRule[] = [
+    {
+        id: "onboardingCoverage",
+        label: "Onboarding coverage",
+        unit: "percent",
+        direction: "higher_better",
+        warn: 60,
+        critical: 40,
+        action: "onboarding",
+        actionLabel: "Открыть Onboarding",
+    },
+    {
+        id: "goLiveReadiness",
+        label: "Go-live readiness",
+        unit: "percent",
+        direction: "higher_better",
+        warn: 70,
+        critical: 50,
+        action: "onboarding",
+        actionLabel: "Проверить Go-live",
+    },
+    {
+        id: "serviceStability",
+        label: "Service stability",
+        unit: "percent",
+        direction: "higher_better",
+        warn: 95,
+        critical: 85,
+        action: "portfolio",
+        actionLabel: "Открыть риски",
+    },
+    {
+        id: "decommissionShare",
+        label: "Decommission share",
+        unit: "percent",
+        direction: "lower_better",
+        warn: 30,
+        critical: 45,
+        action: "decommission",
+        actionLabel: "Открыть Decommission",
+    },
+    {
+        id: "changeFailure",
+        label: "Publish failure rate",
+        unit: "percent",
+        direction: "lower_better",
+        warn: 10,
+        critical: 20,
+        action: "changes",
+        actionLabel: "Открыть Change Mgmt",
+    },
+    {
+        id: "rollbackShare",
+        label: "Rollback share",
+        unit: "percent",
+        direction: "lower_better",
+        warn: 15,
+        critical: 30,
+        action: "changes",
+        actionLabel: "Проверить rollback",
+    },
+    {
+        id: "blockedSignals",
+        label: "Blocked signals",
+        unit: "count",
+        direction: "lower_better",
+        warn: 1,
+        critical: 5,
+        action: "portfolio",
+        actionLabel: "Разобрать блокеры",
+    },
+];
 
 function stringifyOptionalJson(value: unknown): string {
     if (!value || typeof value !== "object") {
@@ -108,6 +281,298 @@ function attentionLevelClass(level?: FleetAttentionLevel): string {
     return "bg-blue-100 text-blue-700";
 }
 
+const FLEET_LIFECYCLE_LABELS: Record<string, string> = {
+    lead: "Лид",
+    contracting: "Договор",
+    onboarding: "Онбординг",
+    go_live_ready: "Готов к запуску",
+    active: "Активный",
+    paused: "Пауза",
+    archived: "Архив",
+};
+
+const FLEET_PAYMENT_LABELS: Record<string, string> = {
+    pending: "Ожидает",
+    confirmed: "Подтверждена",
+    rejected: "Отклонена",
+    unknown: "Не задана",
+};
+
+const FLEET_SERVICE_LABELS: Record<string, string> = {
+    ok: "Стабильно",
+    degraded: "Деградация",
+    attention: "Требует внимания",
+};
+
+const BRANCH_CHANGE_STATUS_LABELS: Record<string, string> = {
+    draft: "Черновик",
+    validated: "Проверено",
+    published: "Применено",
+    publish_failed: "Ошибка применения",
+    rolled_back: "Откат выполнен",
+    rollback_failed: "Ошибка отката",
+};
+
+const SLUG_INPUT_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
+const BRANCH_PHONE_INPUT_PATTERN = /^\+?[0-9][0-9\s()-]{5,23}$/;
+const TELEGRAM_CHAT_ID_INPUT_PATTERN = /^-?[0-9]{5,20}$/;
+const KNOWLEDGE_TAG_INPUT_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+function isValidTimezoneName(value: string): boolean {
+    try {
+        Intl.DateTimeFormat("en-US", { timeZone: value });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function formatStateLabel(
+    value: string | null | undefined,
+    map: Record<string, string>,
+): string {
+    if (!value) {
+        return "—";
+    }
+    return map[value] ?? value;
+}
+
+function formatDateTimeLabel(value: string | undefined): string {
+    if (!value) {
+        return "—";
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return "—";
+    }
+    return parsed.toLocaleString("ru-RU");
+}
+
+function asPercent(numerator: number, denominator: number): number {
+    if (denominator <= 0) {
+        return 0;
+    }
+    return Math.round((numerator / denominator) * 100);
+}
+
+function toWeekKey(dateValue: string): string {
+    const parsed = new Date(dateValue);
+    if (Number.isNaN(parsed.getTime())) {
+        return "invalid-week";
+    }
+    const yearStart = new Date(Date.UTC(parsed.getUTCFullYear(), 0, 1));
+    const current = new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+    const dayOfYear = Math.floor((current.getTime() - yearStart.getTime()) / 86400000) + 1;
+    const week = Math.ceil(dayOfYear / 7);
+    return `${parsed.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+function lifecycleStateFromStatus(status: string | undefined): string {
+    const normalized = (status ?? "").trim().toLowerCase();
+    if (!normalized) {
+        return "—";
+    }
+    if (normalized === "active") {
+        return FLEET_LIFECYCLE_LABELS.active;
+    }
+    if (normalized === "archived" || normalized === "inactive") {
+        return FLEET_LIFECYCLE_LABELS.archived;
+    }
+    return normalized;
+}
+
+function safeParseLifecycleAuditMap(rawValue: string | null): ClientLifecycleAuditMap {
+    if (!rawValue) {
+        return {};
+    }
+    try {
+        const parsed = JSON.parse(rawValue) as ClientLifecycleAuditMap;
+        if (!parsed || typeof parsed !== "object") {
+            return {};
+        }
+        const result: ClientLifecycleAuditMap = {};
+        for (const [clientId, entries] of Object.entries(parsed)) {
+            if (!Array.isArray(entries)) {
+                continue;
+            }
+            const normalized: ClientLifecycleAuditEntry[] = entries
+                .filter((entry) => entry && typeof entry === "object")
+                .map((entry) => {
+                    const raw = entry as Partial<ClientLifecycleAuditEntry>;
+                    const mode: ClientLifecycleMode = raw.mode === "restore" ? "restore" : "archive";
+                    const status: "success" | "error" = raw.status === "error" ? "error" : "success";
+                    const source: ClientLifecycleAuditSource = raw.source === "api" ? "api" : "session";
+                    return {
+                        clientId: raw.clientId ?? clientId,
+                        mode,
+                        previousLifecycleLabel: raw.previousLifecycleLabel ?? "—",
+                        targetLifecycleLabel: raw.targetLifecycleLabel ?? "—",
+                        reason: raw.reason ?? "—",
+                        status,
+                        message: raw.message ?? "—",
+                        traceId: raw.traceId,
+                        actorLabel: raw.actorLabel ?? "unknown",
+                        happenedAt: raw.happenedAt ?? new Date().toISOString(),
+                        source,
+                        sourceEventId: raw.sourceEventId,
+                    };
+                })
+                .slice(0, MAX_LIFECYCLE_AUDIT_ENTRIES_PER_CLIENT);
+            result[clientId] = normalized;
+        }
+        return result;
+    } catch {
+        return {};
+    }
+}
+
+function safeParseWeeklySnapshots(rawValue: string | null): TenantsOperationalSnapshot[] {
+    if (!rawValue) {
+        return [];
+    }
+    try {
+        const parsed = JSON.parse(rawValue) as TenantsOperationalSnapshot[];
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed.filter((item) => item && typeof item === "object").slice(0, MAX_WEEKLY_SNAPSHOTS);
+    } catch {
+        return [];
+    }
+}
+
+function mergeLifecycleAuditEntries(
+    sessionEntries: ClientLifecycleAuditEntry[],
+    apiEntries: ClientLifecycleAuditEntry[],
+): ClientLifecycleAuditEntry[] {
+    const merged = [...sessionEntries, ...apiEntries];
+    const deduped = new Map<string, ClientLifecycleAuditEntry>();
+    for (const entry of merged) {
+        const key = [
+            entry.clientId,
+            entry.mode,
+            entry.status,
+            entry.reason,
+            entry.happenedAt,
+            entry.source,
+            entry.sourceEventId ?? "",
+        ].join("|");
+        if (!deduped.has(key)) {
+            deduped.set(key, entry);
+        }
+    }
+    return [...deduped.values()]
+        .sort((a, b) => new Date(b.happenedAt).getTime() - new Date(a.happenedAt).getTime())
+        .slice(0, MAX_LIFECYCLE_AUDIT_ENTRIES_PER_CLIENT);
+}
+
+function computeKpiStatus(value: number, rule: OperationalKpiRule): OperationalKpiStatus {
+    if (rule.direction === "higher_better") {
+        if (value < rule.critical) {
+            return "critical";
+        }
+        if (value < rule.warn) {
+            return "warn";
+        }
+        return "ok";
+    }
+    if (value > rule.critical) {
+        return "critical";
+    }
+    if (value > rule.warn) {
+        return "warn";
+    }
+    return "ok";
+}
+
+function formatKpiValue(value: number, unit: "percent" | "count"): string {
+    if (unit === "percent") {
+        return `${value}%`;
+    }
+    return `${value}`;
+}
+
+function formatThresholdLabel(rule: OperationalKpiRule): string {
+    const formatValue = (value: number) => (rule.unit === "percent" ? `${value}%` : `${value}`);
+    if (rule.direction === "higher_better") {
+        return `warn < ${formatValue(rule.warn)}, critical < ${formatValue(rule.critical)}`;
+    }
+    return `warn > ${formatValue(rule.warn)}, critical > ${formatValue(rule.critical)}`;
+}
+
+function formatKpiReason(value: number, rule: OperationalKpiRule, status: OperationalKpiStatus): string {
+    const thresholdLabel = formatThresholdLabel(rule);
+    if (status === "ok") {
+        return `В норме (${thresholdLabel})`;
+    }
+    if (status === "critical") {
+        return `Критично (${thresholdLabel})`;
+    }
+    return `Требует внимания (${thresholdLabel})`;
+}
+
+function kpiStatusBadgeClass(status: OperationalKpiStatus): string {
+    if (status === "critical") {
+        return "bg-red-100 text-red-700";
+    }
+    if (status === "warn") {
+        return "bg-amber-100 text-amber-700";
+    }
+    return "bg-emerald-100 text-emerald-700";
+}
+
+function kpiCardClass(status: OperationalKpiStatus): string {
+    if (status === "critical") {
+        return "rounded-lg border border-red-300/80 bg-red-50/30 px-3 py-2";
+    }
+    if (status === "warn") {
+        return "rounded-lg border border-amber-300/80 bg-amber-50/30 px-3 py-2";
+    }
+    return "rounded-lg border border-border/60 px-3 py-2";
+}
+
+function toCsvCell(value: string | number): string {
+    const raw = String(value);
+    if (raw.includes(",") || raw.includes("\"") || raw.includes("\n")) {
+        return `"${raw.replaceAll("\"", "\"\"")}"`;
+    }
+    return raw;
+}
+
+function pushLifecycleAuditEntry(
+    previous: ClientLifecycleAuditMap,
+    entry: ClientLifecycleAuditEntry,
+): ClientLifecycleAuditMap {
+    const existing = previous[entry.clientId] ?? [];
+    const dedupKey = [
+        entry.clientId,
+        entry.mode,
+        entry.status,
+        entry.reason,
+        entry.happenedAt,
+        entry.source,
+        entry.sourceEventId ?? "",
+    ].join("|");
+    if (
+        existing.some((item) =>
+            [
+                item.clientId,
+                item.mode,
+                item.status,
+                item.reason,
+                item.happenedAt,
+                item.source,
+                item.sourceEventId ?? "",
+            ].join("|") === dedupKey)
+    ) {
+        return previous;
+    }
+    return {
+        ...previous,
+        [entry.clientId]: [entry, ...existing].slice(0, MAX_LIFECYCLE_AUDIT_ENTRIES_PER_CLIENT),
+    };
+}
+
 function buildBranchChangePatch(editor: BranchEditorState): {
     patch: components["schemas"]["BranchChangePatch"];
     hasChanges: boolean;
@@ -122,6 +587,13 @@ function buildBranchChangePatch(editor: BranchEditorState): {
             error: "Заполните название и slug филиала",
         };
     }
+    if (!SLUG_INPUT_PATTERN.test(slug)) {
+        return {
+            patch: {},
+            hasChanges: false,
+            error: "slug должен быть в формате snake-case: [a-z0-9_-], без пробелов",
+        };
+    }
     const patch: components["schemas"]["BranchChangePatch"] = {};
     if (name !== editor.original.name) {
         patch.name = name;
@@ -130,10 +602,24 @@ function buildBranchChangePatch(editor: BranchEditorState): {
         patch.slug = slug;
     }
     const timezone = editor.timezone.trim();
+    if (timezone && !isValidTimezoneName(timezone)) {
+        return {
+            patch: {},
+            hasChanges: false,
+            error: "timezone должен быть в формате IANA, например Asia/Almaty",
+        };
+    }
     if (timezone !== editor.original.timezone) {
         patch.timezone = timezone || null;
     }
     const phone = editor.phone.trim();
+    if (phone && !BRANCH_PHONE_INPUT_PATTERN.test(phone)) {
+        return {
+            patch: {},
+            hasChanges: false,
+            error: "phone: ожидается +7 700 000 00 00 (7-15 цифр, допускаются пробелы/скобки)",
+        };
+    }
     if (phone !== editor.original.phone) {
         patch.phone = phone || null;
     }
@@ -142,10 +628,24 @@ function buildBranchChangePatch(editor: BranchEditorState): {
         patch.instance_id = instanceId || null;
     }
     const telegramChatId = editor.telegramChatId.trim();
+    if (telegramChatId && !TELEGRAM_CHAT_ID_INPUT_PATTERN.test(telegramChatId)) {
+        return {
+            patch: {},
+            hasChanges: false,
+            error: "telegram_chat_id: ожидается целое число (например -1001234567890)",
+        };
+    }
     if (telegramChatId !== editor.original.telegramChatId) {
         patch.telegram_chat_id = telegramChatId || null;
     }
     const knowledgeTag = editor.knowledgeTag.trim();
+    if (knowledgeTag && !KNOWLEDGE_TAG_INPUT_PATTERN.test(knowledgeTag.toLowerCase())) {
+        return {
+            patch: {},
+            hasChanges: false,
+            error: "knowledge_tag: [a-z0-9_-], до 64 символов",
+        };
+    }
     if (knowledgeTag !== editor.original.knowledgeTag) {
         patch.knowledge_tag = knowledgeTag || null;
     }
@@ -189,6 +689,74 @@ function applyBranchSnapshotToEditor(
     };
 }
 
+function mapAuditEventToLifecycleEntry(
+    event: components["schemas"]["AuditEvent"],
+): ClientLifecycleAuditEntry | null {
+    const eventType = (event.event_type ?? "").trim();
+    if (!eventType) {
+        return null;
+    }
+    if (eventType !== "client_archived" && eventType !== "client_restored" && eventType !== "client_archive_blocked") {
+        return null;
+    }
+    const payload = event.payload && typeof event.payload === "object"
+        ? (event.payload as Record<string, unknown>)
+        : {};
+    const clientId = typeof event.entity_id === "string" ? event.entity_id : "";
+    if (!clientId) {
+        return null;
+    }
+    const mode: ClientLifecycleMode = eventType === "client_restored" ? "restore" : "archive";
+    const status: "success" | "error" = eventType === "client_archive_blocked" ? "error" : "success";
+    const previousLifecycleLabel = lifecycleStateFromStatus(
+        typeof payload.previous_status === "string" ? payload.previous_status : undefined,
+    );
+    const targetLifecycleLabel = lifecycleStateFromStatus(
+        typeof payload.next_status === "string" ? payload.next_status : undefined,
+    );
+    const reason = typeof payload.reason === "string" ? payload.reason : "—";
+    const message = eventType === "client_archived"
+        ? "Архивация подтверждена API"
+        : eventType === "client_restored"
+            ? "Восстановление подтверждено API"
+            : "Архивация заблокирована зависимостями";
+
+    return {
+        clientId,
+        mode,
+        previousLifecycleLabel,
+        targetLifecycleLabel,
+        reason,
+        status,
+        message,
+        actorLabel: event.actor_name ?? "system",
+        happenedAt: event.created_at ?? new Date().toISOString(),
+        source: "api",
+        sourceEventId: typeof event.id === "string" ? event.id : undefined,
+        traceId: typeof payload.trace_id === "string" ? payload.trace_id : undefined,
+    };
+}
+
+function buildOperationalKpiDrilldown(
+    values: Record<OperationalKpiId, number>,
+): OperationalKpiDrilldown[] {
+    return OPERATIONAL_KPI_RULES.map((rule) => {
+        const value = values[rule.id];
+        const status = computeKpiStatus(value, rule);
+        return {
+            id: rule.id,
+            label: rule.label,
+            value,
+            displayValue: formatKpiValue(value, rule.unit),
+            status,
+            thresholdLabel: formatThresholdLabel(rule),
+            reason: formatKpiReason(value, rule, status),
+            action: rule.action,
+            actionLabel: rule.actionLabel,
+        };
+    });
+}
+
 export default function TenantsPage() {
     const { data: session } = useSession();
     const router = useRouter();
@@ -198,6 +766,7 @@ export default function TenantsPage() {
     const [branchQuery, setBranchQuery] = useState("");
     const [companyQuery, setCompanyQuery] = useState("");
     const [tenantLifecycle, setTenantLifecycle] = useState<TenantLifecycleMode>("active");
+    const [workspaceMode, setWorkspaceMode] = useState<TenantsWorkspaceMode>("all");
     const [fleetLifecycleFilter, setFleetLifecycleFilter] = useState<FleetLifecycleFilter>("all");
     const [fleetPaymentFilter, setFleetPaymentFilter] = useState<FleetPaymentFilter>("all");
     const [fleetServiceFilter, setFleetServiceFilter] = useState<FleetServiceFilter>("all");
@@ -211,6 +780,12 @@ export default function TenantsPage() {
     const [rollingBackBranchChange, setRollingBackBranchChange] = useState(false);
     const [branchChangePreview, setBranchChangePreview] = useState<components["schemas"]["BranchChangeResponse"] | null>(null);
     const [clientLifecyclePendingId, setClientLifecyclePendingId] = useState<string | null>(null);
+    const [clientLifecycleDraft, setClientLifecycleDraft] = useState<ClientLifecycleDraftState | null>(null);
+    const [clientLifecycleAuditById, setClientLifecycleAuditById] = useState<ClientLifecycleAuditMap>({});
+    const [clientLifecycleAuditFilterById, setClientLifecycleAuditFilterById] = useState<Record<string, ClientLifecycleAuditFilter>>({});
+    const [weeklySnapshots, setWeeklySnapshots] = useState<TenantsOperationalSnapshot[]>([]);
+    const [runningMetricsSnapshotMode, setRunningMetricsSnapshotMode] = useState<"dry_run" | "execute" | null>(null);
+    const [lastMetricsSnapshotJob, setLastMetricsSnapshotJob] = useState<components["schemas"]["OpsJobRecord"] | null>(null);
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -253,6 +828,35 @@ export default function TenantsPage() {
     const companyQueryValue = companyQuery.trim() || undefined;
     const clientQueryValue = clientQuery.trim() || undefined;
     const branchQueryValue = branchQuery.trim() || undefined;
+
+    useEffect(() => {
+        if (typeof window === "undefined") {
+            return;
+        }
+        setClientLifecycleAuditById(safeParseLifecycleAuditMap(window.localStorage.getItem(LIFECYCLE_AUDIT_STORAGE_KEY)));
+        setWeeklySnapshots(safeParseWeeklySnapshots(window.localStorage.getItem(WEEKLY_SNAPSHOT_STORAGE_KEY)));
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === "undefined") {
+            return;
+        }
+        window.localStorage.setItem(
+            LIFECYCLE_AUDIT_STORAGE_KEY,
+            JSON.stringify(clientLifecycleAuditById),
+        );
+    }, [clientLifecycleAuditById]);
+
+    useEffect(() => {
+        if (typeof window === "undefined") {
+            return;
+        }
+        window.localStorage.setItem(
+            WEEKLY_SNAPSHOT_STORAGE_KEY,
+            JSON.stringify(weeklySnapshots.slice(0, MAX_WEEKLY_SNAPSHOTS)),
+        );
+    }, [weeklySnapshots]);
+
     const companiesQuery = useInfiniteQuery<
         components["schemas"]["CompanyListResponse"],
         Error,
@@ -372,6 +976,32 @@ export default function TenantsPage() {
         },
         enabled: tenantsEnabled && !!branchEditor?.id,
     });
+    const recentBranchChangesKpiQuery = useQuery({
+        queryKey: ["tenants-branch-changes-recent-kpi", tenantLifecycle],
+        queryFn: async () => {
+            const response = await adminApi.listBranchChanges({
+                limit: 100,
+            });
+            return response.data;
+        },
+        enabled: tenantsEnabled && tenantLifecycle === "active",
+    });
+    const selectedClientAuditQuery = useQuery({
+        queryKey: ["tenants-client-lifecycle-audit-api", selectedClientId],
+        queryFn: async () => {
+            if (!selectedClientId) {
+                return [];
+            }
+            const response = await auditApi.list({
+                entity_type: "client",
+                entity_id: selectedClientId,
+                limit: 50,
+            });
+            return response.data.items ?? [];
+        },
+        enabled: tenantsEnabled && !!selectedClientId,
+        staleTime: 30000,
+    });
 
     const companies = useMemo(
         () => companiesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
@@ -429,6 +1059,126 @@ export default function TenantsPage() {
         () => fleetAttentionQuery.data ?? null,
         [fleetAttentionQuery.data],
     );
+    const recentBranchChangesForKpi = useMemo(
+        () => recentBranchChangesKpiQuery.data?.items ?? [],
+        [recentBranchChangesKpiQuery.data],
+    );
+    const selectedClientApiAuditEntries = useMemo(() => {
+        const events = selectedClientAuditQuery.data ?? [];
+        return events
+            .map((event) => mapAuditEventToLifecycleEntry(event))
+            .filter((entry): entry is ClientLifecycleAuditEntry => entry !== null);
+    }, [selectedClientAuditQuery.data]);
+    const operationalKpi = useMemo(() => {
+        const summary = clientsSummary;
+        const attentionSummary = fleetAttention?.summary;
+        const totalClients = summary?.total_clients ?? 0;
+        const activeClients = summary?.active_clients ?? 0;
+        const onboardingClients = summary?.onboarding_clients ?? 0;
+        const goLiveReadyClients = summary?.go_live_ready_clients ?? 0;
+        const archivedClients = summary?.archived_clients ?? 0;
+        const degradedClients = summary?.degraded_clients ?? 0;
+
+        const totalChanges = recentBranchChangesForKpi.length;
+        const publishedChanges = recentBranchChangesForKpi.filter((item) => item.status === "published").length;
+        const publishFailedChanges = recentBranchChangesForKpi.filter((item) => item.status === "publish_failed").length;
+        const rolledBackChanges = recentBranchChangesForKpi.filter((item) => item.status === "rolled_back").length;
+
+        return {
+            onboardingCoveragePct: asPercent(onboardingClients + goLiveReadyClients, totalClients),
+            goLiveReadinessPct: asPercent(goLiveReadyClients, onboardingClients + goLiveReadyClients),
+            serviceStabilityPct: asPercent(Math.max(activeClients - degradedClients, 0), activeClients),
+            decommissionSharePct: asPercent(archivedClients, totalClients),
+            changeFailurePct: asPercent(publishFailedChanges, totalChanges),
+            rollbackSharePct: asPercent(rolledBackChanges, publishedChanges + rolledBackChanges),
+            blockedSignalsCount:
+                (attentionSummary?.outbox_failed_24h_total ?? 0)
+                + (attentionSummary?.pending_handovers_total ?? 0)
+                + publishFailedChanges,
+            sourceWindow: totalChanges,
+            publishedChanges,
+            publishFailedChanges,
+            rolledBackChanges,
+        };
+    }, [clientsSummary, fleetAttention, recentBranchChangesForKpi]);
+    const operationalKpiValues = useMemo<Record<OperationalKpiId, number>>(() => ({
+        onboardingCoverage: operationalKpi.onboardingCoveragePct,
+        goLiveReadiness: operationalKpi.goLiveReadinessPct,
+        serviceStability: operationalKpi.serviceStabilityPct,
+        decommissionShare: operationalKpi.decommissionSharePct,
+        changeFailure: operationalKpi.changeFailurePct,
+        rollbackShare: operationalKpi.rollbackSharePct,
+        blockedSignals: operationalKpi.blockedSignalsCount,
+    }), [operationalKpi]);
+    const operationalKpiDrilldown = useMemo(
+        () => buildOperationalKpiDrilldown(operationalKpiValues),
+        [operationalKpiValues],
+    );
+    const operationalKpiById = useMemo(() => {
+        const map = new Map<OperationalKpiId, OperationalKpiDrilldown>();
+        for (const item of operationalKpiDrilldown) {
+            map.set(item.id, item);
+        }
+        return map;
+    }, [operationalKpiDrilldown]);
+    const criticalKpiCount = useMemo(
+        () => operationalKpiDrilldown.filter((item) => item.status === "critical").length,
+        [operationalKpiDrilldown],
+    );
+    const warnKpiCount = useMemo(
+        () => operationalKpiDrilldown.filter((item) => item.status === "warn").length,
+        [operationalKpiDrilldown],
+    );
+    const alertHookPayload = useMemo(() => {
+        const breaches = operationalKpiDrilldown
+            .filter((item) => item.status !== "ok")
+            .map((item) => ({
+                metric: item.id,
+                label: item.label,
+                status: item.status,
+                value: item.value,
+                reason: item.reason,
+                action: item.action,
+            }));
+        const severity = breaches.some((item) => item.status === "critical")
+            ? "critical"
+            : breaches.length > 0
+                ? "warning"
+                : "ok";
+        return {
+            generated_at: new Date().toISOString(),
+            severity,
+            source_window: operationalKpi.sourceWindow,
+            breaches,
+            attention_summary: {
+                active_clients_total: fleetAttention?.summary?.active_clients_total ?? 0,
+                high_risk_clients: fleetAttention?.summary?.high_risk_clients ?? 0,
+                medium_risk_clients: fleetAttention?.summary?.medium_risk_clients ?? 0,
+                outbox_failed_24h_total: fleetAttention?.summary?.outbox_failed_24h_total ?? 0,
+                pending_handovers_total: fleetAttention?.summary?.pending_handovers_total ?? 0,
+            },
+        };
+    }, [operationalKpiDrilldown, operationalKpi.sourceWindow, fleetAttention?.summary]);
+    const operationalReport = useMemo(() => ({
+        generatedAt: new Date().toISOString(),
+        sourceWindow: operationalKpi.sourceWindow,
+        workspaceMode,
+        lifecycleMode: tenantLifecycle,
+        kpi: operationalKpiValues,
+        drilldown: operationalKpiDrilldown.map((item) => ({
+            id: item.id,
+            status: item.status,
+            value: item.value,
+            reason: item.reason,
+        })),
+        attentionSummary: {
+            activeClientsTotal: fleetAttention?.summary?.active_clients_total ?? 0,
+            highRiskClients: fleetAttention?.summary?.high_risk_clients ?? 0,
+            mediumRiskClients: fleetAttention?.summary?.medium_risk_clients ?? 0,
+            outboxFailed24hTotal: fleetAttention?.summary?.outbox_failed_24h_total ?? 0,
+            pendingHandoversTotal: fleetAttention?.summary?.pending_handovers_total ?? 0,
+        },
+    }), [operationalKpi.sourceWindow, operationalKpiValues, operationalKpiDrilldown, fleetAttention?.summary, workspaceMode, tenantLifecycle]);
 
     const refreshContext = () => {
         queryClient.invalidateQueries({ queryKey: ["console-me"] });
@@ -439,6 +1189,8 @@ export default function TenantsPage() {
         queryClient.invalidateQueries({ queryKey: ["tenants-clients"] });
         queryClient.invalidateQueries({ queryKey: ["tenants-branches"] });
         queryClient.invalidateQueries({ queryKey: ["tenants-fleet-attention"] });
+        queryClient.invalidateQueries({ queryKey: ["tenants-branch-changes-recent-kpi"] });
+        queryClient.invalidateQueries({ queryKey: ["tenants-client-lifecycle-audit-api"] });
     };
 
     const setCompanyContext = (companyId?: string | null) => {
@@ -468,11 +1220,134 @@ export default function TenantsPage() {
         router.push(target);
     };
 
+    const runKpiAction = (action: OperationalKpiAction) => {
+        if (action === "onboarding") {
+            setWorkspaceMode("onboarding");
+            setTenantLifecycle("active");
+            setTimeout(() => {
+                document.querySelector('[data-testid="tenants-onboarding-section"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 120);
+            return;
+        }
+        if (action === "changes") {
+            setWorkspaceMode("changes");
+            setTenantLifecycle("active");
+            setTimeout(() => {
+                document.querySelector('[data-testid="tenants-change-management"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 120);
+            return;
+        }
+        if (action === "decommission") {
+            setWorkspaceMode("decommission");
+            setTenantLifecycle("all");
+            setTimeout(() => {
+                document.querySelector('[data-testid="tenants-decommission-center"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 120);
+            return;
+        }
+        setWorkspaceMode("portfolio");
+        setTenantLifecycle("active");
+        setTimeout(() => {
+            document.querySelector('[data-testid="tenants-fleet-attention"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 120);
+    };
+
+    const exportOperationalReport = (format: "json" | "csv") => {
+        const timestamp = new Date().toISOString().replaceAll(":", "-");
+        if (format === "json") {
+            const content = JSON.stringify(
+                {
+                    report: operationalReport,
+                    alert_payload: alertHookPayload,
+                },
+                null,
+                2,
+            );
+            const blob = new Blob([content], { type: "application/json;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `tenants-operational-report-${timestamp}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+            toast.success("Отчёт JSON выгружен");
+            return;
+        }
+        const rows = [
+            ["metric", "value", "status", "reason"],
+            ...operationalKpiDrilldown.map((item) => [
+                item.id,
+                item.displayValue,
+                item.status,
+                item.reason,
+            ]),
+        ];
+        const csvContent = rows.map((row) => row.map((cell) => toCsvCell(cell)).join(",")).join("\n");
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `tenants-operational-report-${timestamp}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+        toast.success("Отчёт CSV выгружен");
+    };
+
+    const saveWeeklySnapshot = () => {
+        const now = new Date().toISOString();
+        const weekKey = toWeekKey(now);
+        setWeeklySnapshots((previous) => {
+            const next: TenantsOperationalSnapshot = {
+                id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                    ? crypto.randomUUID()
+                    : `${Date.now()}`,
+                weekKey,
+                createdAt: now,
+                report: operationalReport,
+            };
+            const withoutWeek = previous.filter((item) => item.weekKey !== weekKey);
+            return [next, ...withoutWeek].slice(0, MAX_WEEKLY_SNAPSHOTS);
+        });
+        toast.success(`Weekly snapshot сохранён (${weekKey})`);
+    };
+
+    const copyAlertHookPayload = async () => {
+        const serialized = JSON.stringify(alertHookPayload, null, 2);
+        try {
+            await navigator.clipboard.writeText(serialized);
+            toast.success("Alert payload скопирован");
+        } catch {
+            toast.error("Не удалось скопировать payload");
+        }
+    };
+
+    const runMetricsSnapshotHook = async (mode: "dry_run" | "execute") => {
+        if (!selectedClientId) {
+            toast.error("Сначала выберите клиента в контексте");
+            return;
+        }
+        setRunningMetricsSnapshotMode(mode);
+        try {
+            const response = await opsApi.runJob({
+                job_type: "metrics_snapshot",
+                mode,
+                params: { days: 7 },
+            });
+            setLastMetricsSnapshotJob(response.data.job);
+            toast.success(mode === "dry_run" ? "Snapshot dry-run выполнен" : "Snapshot execute выполнен");
+        } catch (error) {
+            handleError(error);
+        } finally {
+            setRunningMetricsSnapshotMode(null);
+        }
+    };
+
     const startCompanyEdit = (company: components["schemas"]["Company"]) => {
         if (!company.id) {
             toast.error("Не удалось открыть компанию без ID");
             return;
         }
+        setClientLifecycleDraft(null);
         setBranchChangePreview(null);
         setClientEditor(null);
         setBranchEditor(null);
@@ -491,6 +1366,7 @@ export default function TenantsPage() {
             toast.error("Не удалось открыть клиента без ID");
             return;
         }
+        setClientLifecycleDraft(null);
         setBranchChangePreview(null);
         setCompanyEditor(null);
         setBranchEditor(null);
@@ -500,6 +1376,7 @@ export default function TenantsPage() {
             companyId: client.company_id ?? "",
             originalSlug: client.slug ?? client.name ?? "",
             originalCompanyId: client.company_id ?? "",
+            totalBranches: client.total_branches ?? 0,
         });
     };
 
@@ -508,6 +1385,7 @@ export default function TenantsPage() {
             toast.error("Не удалось открыть филиал без ID");
             return;
         }
+        setClientLifecycleDraft(null);
         setBranchChangePreview(null);
         setCompanyEditor(null);
         setClientEditor(null);
@@ -585,11 +1463,20 @@ export default function TenantsPage() {
             toast.error("Укажите slug клиента");
             return;
         }
+        if (!SLUG_INPUT_PATTERN.test(slug)) {
+            toast.error("slug: [a-z0-9_-], без пробелов");
+            return;
+        }
         const payload: components["schemas"]["ClientUpdateRequest"] = {};
         if (slug !== clientEditor.originalSlug) {
             payload.slug = slug;
         }
         const companyId = clientEditor.companyId.trim();
+        const companyLocked = clientEditor.totalBranches > 0 && !!clientEditor.originalCompanyId;
+        if (companyLocked && companyId !== clientEditor.originalCompanyId) {
+            toast.error("company_id нельзя менять после создания филиалов");
+            return;
+        }
         if (companyId !== clientEditor.originalCompanyId) {
             payload.company_id = companyId || null;
         }
@@ -619,60 +1506,118 @@ export default function TenantsPage() {
         return (client.status ?? "").trim().toLowerCase() !== "active";
     };
 
-    const askClientLifecycleReason = (mode: "archive" | "restore"): string | null => {
-        const promptText = mode === "archive"
-            ? "Укажите причину архивации клиента"
-            : "Укажите причину восстановления клиента";
-        const raw = window.prompt(promptText, "");
-        if (raw === null) {
-            return null;
-        }
-        const reason = raw.trim();
-        if (!reason) {
-            toast.error("Укажите причину");
-            return null;
-        }
-        return reason;
-    };
-
-    const handleClientLifecycleAction = async (
+    const openClientLifecycleAction = (
         client: components["schemas"]["Client"],
-        mode: "archive" | "restore",
+        mode: ClientLifecycleMode,
     ) => {
         if (!client.id) {
             toast.error("Не удалось выполнить действие без ID клиента");
             return;
         }
-        const reason = askClientLifecycleReason(mode);
+        setClientLifecycleDraft({
+            clientId: client.id,
+            clientLabel: client.name ?? client.slug ?? client.id,
+            companyLabel: client.company_name ?? "—",
+            mode,
+            currentLifecycleLabel: formatStateLabel(client.lifecycle_state, FLEET_LIFECYCLE_LABELS),
+            targetLifecycleLabel: mode === "archive" ? FLEET_LIFECYCLE_LABELS.archived : FLEET_LIFECYCLE_LABELS.active,
+            activeBranches: client.active_branches ?? 0,
+            totalBranches: client.total_branches ?? 0,
+            degradedBranches: client.degraded_branches ?? 0,
+            reason: "",
+            confirmChecked: false,
+            checkClientScope: false,
+            checkImpactReview: false,
+            checkOwnerAligned: false,
+        });
+    };
+
+    const closeClientLifecycleDraft = () => {
+        if (clientLifecyclePendingId) {
+            return;
+        }
+        setClientLifecycleDraft(null);
+    };
+
+    const handleClientLifecycleAction = async () => {
+        if (!clientLifecycleDraft) {
+            toast.error("Сначала подготовьте действие");
+            return;
+        }
+        const lifecycleDraft = clientLifecycleDraft;
+        const clientId = lifecycleDraft.clientId;
+        if (!clientId) {
+            toast.error("Не удалось выполнить действие без ID клиента");
+            return;
+        }
+        const reason = clientLifecycleDraft.reason.trim();
         if (!reason) {
+            toast.error("Укажите причину");
             return;
         }
-        const confirmed = window.confirm(
-            mode === "archive"
-                ? "Архивировать клиента? Клиент исчезнет из active-списка."
-                : "Восстановить клиента в active-список?",
-        );
-        if (!confirmed) {
+        if (!clientLifecycleDraft.confirmChecked) {
+            toast.error("Подтвердите действие");
             return;
         }
-        setClientLifecyclePendingId(client.id);
+        if (
+            !clientLifecycleDraft.checkClientScope
+            || !clientLifecycleDraft.checkImpactReview
+            || !clientLifecycleDraft.checkOwnerAligned
+        ) {
+            toast.error("Заполните checklist перед выполнением действия");
+            return;
+        }
+        const mode = lifecycleDraft.mode;
+        setClientLifecyclePendingId(clientId);
+        let lifecycleCompleted = false;
         try {
             if (mode === "archive") {
-                await adminApi.archiveClient(client.id, { reason });
+                await adminApi.archiveClient(clientId, { reason });
                 toast.success("Клиент архивирован");
             } else {
-                await adminApi.restoreClient(client.id, { reason });
+                await adminApi.restoreClient(clientId, { reason });
                 toast.success("Клиент восстановлен");
             }
-            if (clientEditor?.id === client.id) {
+            lifecycleCompleted = true;
+            setClientLifecycleAuditById((prev) => pushLifecycleAuditEntry(prev, {
+                    clientId,
+                    mode,
+                    previousLifecycleLabel: lifecycleDraft.currentLifecycleLabel,
+                    targetLifecycleLabel: lifecycleDraft.targetLifecycleLabel,
+                    reason,
+                    status: "success",
+                    message: mode === "archive" ? "Архивация подтверждена API" : "Восстановление подтверждено API",
+                    actorLabel: meData?.agent?.name ?? role,
+                    happenedAt: new Date().toISOString(),
+                    source: "session",
+                }));
+            if (clientEditor?.id === clientId) {
                 setClientEditor(null);
             }
             refreshTenants();
             refreshContext();
         } catch (error) {
-            handleError(error);
+            const parsed = handleError(error) as
+                | { message?: string; trace_id?: string }
+                | undefined;
+            setClientLifecycleAuditById((prev) => pushLifecycleAuditEntry(prev, {
+                    clientId,
+                    mode,
+                    previousLifecycleLabel: lifecycleDraft.currentLifecycleLabel,
+                    targetLifecycleLabel: lifecycleDraft.targetLifecycleLabel,
+                    reason,
+                    status: "error",
+                    message: parsed?.message ?? "Ошибка выполнения lifecycle-действия",
+                    traceId: parsed?.trace_id,
+                    actorLabel: meData?.agent?.name ?? role,
+                    happenedAt: new Date().toISOString(),
+                    source: "session",
+                }));
         } finally {
             setClientLifecyclePendingId(null);
+            if (lifecycleCompleted) {
+                setClientLifecycleDraft(null);
+            }
         }
     };
 
@@ -719,16 +1664,16 @@ export default function TenantsPage() {
             });
             const draftChangeId = draftResponse.data.change?.id;
             if (!draftChangeId) {
-                toast.error("Не удалось создать draft");
+                toast.error("Не удалось создать черновик");
                 return;
             }
             const validateResponse = await adminApi.validateBranchChange(draftChangeId);
             setBranchChangePreview(validateResponse.data);
             const status = validateResponse.data.change?.status;
             if (status === "validated") {
-                toast.success("Draft валидирован. Можно публиковать.");
+                toast.success("Черновик прошел проверку. Можно применять.");
             } else {
-                toast.error("Draft не прошёл валидацию. Проверьте ошибки.");
+                toast.error("Черновик не прошел проверку. Исправьте ошибки.");
             }
             await branchChangesQuery.refetch();
         } catch (error) {
@@ -744,7 +1689,7 @@ export default function TenantsPage() {
         }
         const changeId = branchChangePreview?.change?.id;
         if (!changeId) {
-            toast.error("Сначала выполните draft+validate");
+            toast.error("Сначала подготовьте и проверьте черновик");
             return;
         }
         setPublishingBranchChange(true);
@@ -783,12 +1728,12 @@ export default function TenantsPage() {
             : latestPublishedBranchChange;
         const changeId = targetChange?.id;
         if (!changeId) {
-            toast.error("Нет опубликованного изменения для rollback");
+            toast.error("Нет примененного изменения для отката");
             return;
         }
         const reason = branchEditor.rollbackReason.trim();
         if (!reason) {
-            toast.error("Укажите причину rollback");
+            toast.error("Укажите причину отката");
             return;
         }
 
@@ -816,7 +1761,7 @@ export default function TenantsPage() {
 
             setBranchChangePreview(rollbackResponse.data);
             setBranchEditor((prev) => (prev ? applyBranchSnapshotToEditor(prev, rollbackResponse.data.branch) : prev));
-            toast.success("Rollback выполнен");
+            toast.success("Откат выполнен");
             await branchChangesQuery.refetch();
             refreshTenants();
             refreshContext();
@@ -827,10 +1772,17 @@ export default function TenantsPage() {
         }
     };
 
+    const showPortfolio = workspaceMode === "all" || workspaceMode === "portfolio";
+    const showOnboarding = workspaceMode === "all" || workspaceMode === "onboarding";
+    const showChangeManagement = workspaceMode === "all" || workspaceMode === "changes";
+    const showDecommission = workspaceMode === "all" || workspaceMode === "decommission";
+    const showClientsSection = showPortfolio || showDecommission;
+    const decommissionFocused = workspaceMode === "decommission";
+
     if (!session) {
         return (
             <div className="p-8 text-center text-muted-foreground">
-                Пожалуйста, войдите для просмотра Tenants.
+                Пожалуйста, войдите для просмотра вкладки «Тенанты».
             </div>
         );
     }
@@ -845,7 +1797,7 @@ export default function TenantsPage() {
 
     if (!canReadTenants) {
         return (
-            <AccessDenied message="Эта роль не имеет доступа к Tenants." />
+            <AccessDenied message="Эта роль не имеет доступа к вкладке Тенанты." />
         );
     }
 
@@ -855,6 +1807,59 @@ export default function TenantsPage() {
                 <h1 className="text-2xl font-bold" data-testid="tenants-title">Тенанты</h1>
                 <div className="text-xs text-muted-foreground">
                     Контекст: {selectedCompanyName ?? selectedCompanyId ?? "—"} / {meData?.client?.name ?? selectedClientId ?? "—"} / {selectedBranchName ?? selectedBranchId ?? "—"}
+                </div>
+                <div className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-workspace-modes">
+                    <div className="text-xs text-muted-foreground mb-2">Рабочая зона Tenants:</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <button
+                            className={workspaceMode === "all" ? "btn-primary" : "btn-ghost"}
+                            onClick={() => setWorkspaceMode("all")}
+                            data-testid="tenants-mode-all"
+                        >
+                            Все зоны
+                        </button>
+                        <button
+                            className={workspaceMode === "portfolio" ? "btn-primary" : "btn-ghost"}
+                            onClick={() => setWorkspaceMode("portfolio")}
+                            data-testid="tenants-mode-portfolio"
+                        >
+                            Portfolio
+                        </button>
+                        <button
+                            className={workspaceMode === "onboarding" ? "btn-primary" : "btn-ghost"}
+                            onClick={() => setWorkspaceMode("onboarding")}
+                            data-testid="tenants-mode-onboarding"
+                        >
+                            Onboarding
+                        </button>
+                        <button
+                            className={workspaceMode === "changes" ? "btn-primary" : "btn-ghost"}
+                            onClick={() => setWorkspaceMode("changes")}
+                            data-testid="tenants-mode-changes"
+                        >
+                            Change Management
+                        </button>
+                        <button
+                            className={workspaceMode === "decommission" ? "btn-primary" : "btn-ghost"}
+                            onClick={() => setWorkspaceMode("decommission")}
+                            data-testid="tenants-mode-decommission"
+                        >
+                            Decommission
+                        </button>
+                    </div>
+                </div>
+                <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="tenants-workspace-guide">
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground mb-2">
+                        Операционный guide
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                        Portfolio: риск-панель и состав портфеля. Onboarding: запуск нового филиала. Change Management:
+                        controlled change + draft/validate/publish. Decommission: archive/restore по подтверждению.
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                        Перед Go-Live проверьте: `instance_id`, `phone`, `timezone`, `telegram_chat_id`, `knowledge_tag`,
+                        `payment_status`, active reference pack.
+                    </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                     <span className="text-xs text-muted-foreground">Режим списка:</span>
@@ -880,13 +1885,228 @@ export default function TenantsPage() {
             </div>
 
             <div className="grid gap-6">
-                {tenantLifecycle === "active" ? (
+                {showPortfolio && tenantLifecycle === "active" ? (
+                    <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-operational-kpi">
+                        <div className="flex items-start justify-between gap-4 mb-4">
+                            <div>
+                                <h2 className="text-lg font-semibold">Операционные KPI</h2>
+                                <p className="text-sm text-muted-foreground">
+                                    Прокси-метрики: портфель + attention + branch changes (последние 100 изменений)
+                                </p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2" data-testid="tenants-kpi-export-controls">
+                                <button
+                                    className="btn-ghost"
+                                    onClick={() => {
+                                        fleetAttentionQuery.refetch();
+                                        recentBranchChangesKpiQuery.refetch();
+                                        selectedClientAuditQuery.refetch();
+                                    }}
+                                    disabled={fleetAttentionQuery.isFetching || recentBranchChangesKpiQuery.isFetching}
+                                >
+                                    {fleetAttentionQuery.isFetching || recentBranchChangesKpiQuery.isFetching ? "Обновление..." : "Обновить KPI"}
+                                </button>
+                                <button
+                                    className="btn-ghost"
+                                    onClick={() => exportOperationalReport("json")}
+                                    data-testid="tenants-kpi-export-json"
+                                >
+                                    Экспорт JSON
+                                </button>
+                                <button
+                                    className="btn-ghost"
+                                    onClick={() => exportOperationalReport("csv")}
+                                    data-testid="tenants-kpi-export-csv"
+                                >
+                                    Экспорт CSV
+                                </button>
+                                <button
+                                    className="btn-ghost"
+                                    onClick={saveWeeklySnapshot}
+                                    data-testid="tenants-kpi-save-weekly-snapshot"
+                                >
+                                    Weekly snapshot
+                                </button>
+                            </div>
+                        </div>
+                        <div className="mb-3 text-xs text-muted-foreground">
+                            окно расчета branch-change: {operationalKpi.sourceWindow} · published: {operationalKpi.publishedChanges} · publish_failed: {operationalKpi.publishFailedChanges} · rolled_back: {operationalKpi.rolledBackChanges} · critical KPI: {criticalKpiCount} · warn KPI: {warnKpiCount}
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                            <div className={kpiCardClass(operationalKpiById.get("onboardingCoverage")?.status ?? "ok")} data-testid="tenants-kpi-onboarding-coverage">
+                                <div className="text-xs text-muted-foreground">Onboarding coverage (proxy)</div>
+                                <div className="text-xl font-semibold">{operationalKpi.onboardingCoveragePct}%</div>
+                                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("onboardingCoverage")?.status ?? "ok")}`}>
+                                    {operationalKpiById.get("onboardingCoverage")?.status ?? "ok"}
+                                </div>
+                            </div>
+                            <div className={kpiCardClass(operationalKpiById.get("goLiveReadiness")?.status ?? "ok")} data-testid="tenants-kpi-go-live-readiness">
+                                <div className="text-xs text-muted-foreground">Go-live readiness (proxy)</div>
+                                <div className="text-xl font-semibold">{operationalKpi.goLiveReadinessPct}%</div>
+                                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("goLiveReadiness")?.status ?? "ok")}`}>
+                                    {operationalKpiById.get("goLiveReadiness")?.status ?? "ok"}
+                                </div>
+                            </div>
+                            <div className={kpiCardClass(operationalKpiById.get("serviceStability")?.status ?? "ok")} data-testid="tenants-kpi-service-stability">
+                                <div className="text-xs text-muted-foreground">Service stability</div>
+                                <div className="text-xl font-semibold">{operationalKpi.serviceStabilityPct}%</div>
+                                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("serviceStability")?.status ?? "ok")}`}>
+                                    {operationalKpiById.get("serviceStability")?.status ?? "ok"}
+                                </div>
+                            </div>
+                            <div className={kpiCardClass(operationalKpiById.get("decommissionShare")?.status ?? "ok")} data-testid="tenants-kpi-decommission-share">
+                                <div className="text-xs text-muted-foreground">Decommission share</div>
+                                <div className="text-xl font-semibold">{operationalKpi.decommissionSharePct}%</div>
+                                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("decommissionShare")?.status ?? "ok")}`}>
+                                    {operationalKpiById.get("decommissionShare")?.status ?? "ok"}
+                                </div>
+                            </div>
+                            <div className={kpiCardClass(operationalKpiById.get("changeFailure")?.status ?? "ok")} data-testid="tenants-kpi-change-failure">
+                                <div className="text-xs text-muted-foreground">Publish failure rate (proxy)</div>
+                                <div className="text-xl font-semibold">{operationalKpi.changeFailurePct}%</div>
+                                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("changeFailure")?.status ?? "ok")}`}>
+                                    {operationalKpiById.get("changeFailure")?.status ?? "ok"}
+                                </div>
+                            </div>
+                            <div className={kpiCardClass(operationalKpiById.get("rollbackShare")?.status ?? "ok")} data-testid="tenants-kpi-rollback-share">
+                                <div className="text-xs text-muted-foreground">Rollback share (proxy)</div>
+                                <div className="text-xl font-semibold">{operationalKpi.rollbackSharePct}%</div>
+                                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("rollbackShare")?.status ?? "ok")}`}>
+                                    {operationalKpiById.get("rollbackShare")?.status ?? "ok"}
+                                </div>
+                            </div>
+                            <div className={kpiCardClass(operationalKpiById.get("blockedSignals")?.status ?? "ok")} data-testid="tenants-kpi-blocked-signals">
+                                <div className="text-xs text-muted-foreground">Blocked signals</div>
+                                <div className="text-xl font-semibold">{operationalKpi.blockedSignalsCount}</div>
+                                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("blockedSignals")?.status ?? "ok")}`}>
+                                    {operationalKpiById.get("blockedSignals")?.status ?? "ok"}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-4 rounded-lg border border-border/60 bg-background p-3" data-testid="tenants-kpi-drilldown">
+                            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                                Threshold drill-down
+                            </div>
+                            <div className="space-y-2">
+                                {operationalKpiDrilldown.map((item) => (
+                                    <div
+                                        key={item.id}
+                                        className="rounded-lg border border-border/60 p-2"
+                                        data-testid="tenants-kpi-drilldown-row"
+                                    >
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div className="font-medium text-sm">{item.label}</div>
+                                            <div className="flex items-center gap-2 text-xs">
+                                                <span className={`inline-flex rounded-full px-2 py-0.5 font-semibold ${kpiStatusBadgeClass(item.status)}`}>
+                                                    {item.status}
+                                                </span>
+                                                <span className="font-medium">{item.displayValue}</span>
+                                            </div>
+                                        </div>
+                                        <div className="mt-1 text-xs text-muted-foreground">
+                                            {item.reason}
+                                        </div>
+                                        <div className="mt-1 text-xs text-muted-foreground">
+                                            threshold: {item.thresholdLabel}
+                                        </div>
+                                        <div className="mt-2">
+                                            <button
+                                                className="btn-ghost"
+                                                onClick={() => runKpiAction(item.action)}
+                                                data-testid={`tenants-kpi-action-${item.id}`}
+                                            >
+                                                {item.actionLabel}
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                            <div className="rounded-lg border border-border/60 bg-background p-3" data-testid="tenants-kpi-alert-hooks">
+                                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                                    Alert hooks
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                    <span data-testid="tenants-kpi-alert-severity">severity: {alertHookPayload.severity}</span> · breaches: {alertHookPayload.breaches.length}
+                                </div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <button
+                                        className="btn-ghost"
+                                        onClick={copyAlertHookPayload}
+                                        data-testid="tenants-kpi-alert-copy"
+                                    >
+                                        Скопировать payload
+                                    </button>
+                                    <button
+                                        className="btn-ghost"
+                                        onClick={() => runMetricsSnapshotHook("dry_run")}
+                                        disabled={runningMetricsSnapshotMode !== null}
+                                        data-testid="tenants-kpi-alert-dryrun"
+                                    >
+                                        {runningMetricsSnapshotMode === "dry_run" ? "Dry-run..." : "Snapshot dry-run"}
+                                    </button>
+                                    <button
+                                        className="btn-ghost"
+                                        onClick={() => runMetricsSnapshotHook("execute")}
+                                        disabled={runningMetricsSnapshotMode !== null}
+                                        data-testid="tenants-kpi-alert-execute"
+                                    >
+                                        {runningMetricsSnapshotMode === "execute" ? "Execute..." : "Snapshot execute"}
+                                    </button>
+                                </div>
+                                {lastMetricsSnapshotJob ? (
+                                    <div className="mt-2 text-xs text-muted-foreground" data-testid="tenants-kpi-alert-last-job">
+                                        job: {lastMetricsSnapshotJob.job_type} · mode: {lastMetricsSnapshotJob.mode} · status: {lastMetricsSnapshotJob.status}
+                                    </div>
+                                ) : null}
+                            </div>
+
+                            <div className="rounded-lg border border-border/60 bg-background p-3" data-testid="tenants-kpi-weekly-snapshots">
+                                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                                    Weekly snapshots
+                                </div>
+                                {weeklySnapshots.length === 0 ? (
+                                    <div className="text-xs text-muted-foreground">
+                                        Снимков пока нет. Сохраните первый weekly snapshot.
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {weeklySnapshots.slice(0, 4).map((item, index) => {
+                                            const previous = weeklySnapshots[index + 1];
+                                            const delta = previous
+                                                ? item.report.kpi.changeFailure - previous.report.kpi.changeFailure
+                                                : 0;
+                                            return (
+                                                <div key={item.id} className="rounded border border-border/50 px-2 py-1 text-xs">
+                                                    <div className="font-medium">
+                                                        {item.weekKey} · {formatDateTimeLabel(item.createdAt)}
+                                                    </div>
+                                                    <div className="text-muted-foreground">
+                                                        change_failure: {item.report.kpi.changeFailure}% {previous ? `(Δ ${delta >= 0 ? "+" : ""}${delta}%)` : ""}
+                                                    </div>
+                                                    <div className="text-muted-foreground">
+                                                        blocked_signals: {item.report.kpi.blockedSignals} · service_stability: {item.report.kpi.serviceStability}%
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </section>
+                ) : null}
+
+                {showPortfolio && tenantLifecycle === "active" ? (
                     <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-fleet-attention">
                         <div className="flex items-start justify-between gap-4 mb-4">
                             <div>
                                 <h2 className="text-lg font-semibold">Риски и внимание</h2>
                                 <p className="text-sm text-muted-foreground">
-                                    Операционные риски по активным клиентам (top by score)
+                                    Операционные риски по активным клиентам (топ по score)
                                 </p>
                             </div>
                             <button
@@ -902,17 +2122,17 @@ export default function TenantsPage() {
                             <div className="mb-3 text-xs text-muted-foreground" data-testid="tenants-fleet-attention-summary">
                                 активных клиентов {fleetAttention.summary.active_clients_total} · с риском {fleetAttention.summary.clients_with_attention} ·
                                 высокий {fleetAttention.summary.high_risk_clients} · средний {fleetAttention.summary.medium_risk_clients} ·
-                                ошибок outbox за 24ч {fleetAttention.summary.outbox_failed_24h_total} · pending handover {fleetAttention.summary.pending_handovers_total}
+                                ошибок outbox за 24ч {fleetAttention.summary.outbox_failed_24h_total} · ожидают передачи {fleetAttention.summary.pending_handovers_total}
                             </div>
                         ) : null}
 
                         <div className="space-y-3">
                             {fleetAttentionQuery.isLoading ? (
-                                <div className="text-sm text-muted-foreground">Загрузка risk cockpit...</div>
+                                <div className="text-sm text-muted-foreground">Загрузка панели рисков...</div>
                             ) : fleetAttentionQuery.isError ? (
-                                <div className="text-sm text-muted-foreground">Не удалось загрузить risk cockpit.</div>
+                                <div className="text-sm text-muted-foreground">Не удалось загрузить панель рисков.</div>
                             ) : !fleetAttention?.items?.length ? (
-                                <div className="text-sm text-muted-foreground">Клиенты с medium/high риском не найдены.</div>
+                                <div className="text-sm text-muted-foreground">Клиенты со средним/высоким риском не найдены.</div>
                             ) : (
                                 fleetAttention.items.map((item) => (
                                     <div
@@ -934,10 +2154,10 @@ export default function TenantsPage() {
                                             </div>
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
-                                            жизненный цикл {item.lifecycle_state} · сервис {item.service_state} · владелец {item.owner_name ?? "—"} · следующее действие {item.next_action}
+                                            жизненный цикл {formatStateLabel(item.lifecycle_state, FLEET_LIFECYCLE_LABELS)} · сервис {formatStateLabel(item.service_state, FLEET_SERVICE_LABELS)} · владелец {item.owner_name ?? "—"} · следующее действие {item.next_action}
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
-                                            филиалы active {item.active_branches}/{item.total_branches} · stale {item.stale_branches} · интеграционных ошибок {item.integration_error_branches} · outbox_failed_24h {item.outbox_failed_24h} · pending_handovers {item.pending_handovers}
+                                            филиалы активные {item.active_branches}/{item.total_branches} · неактуальные {item.stale_branches} · интеграционных ошибок {item.integration_error_branches} · outbox_failed_24h {item.outbox_failed_24h} · ожидают передачи {item.pending_handovers}
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
                                             причины: {item.reasons?.join(", ") || "—"}
@@ -972,7 +2192,8 @@ export default function TenantsPage() {
                     </section>
                 ) : null}
 
-                <section className="bg-card border border-border/60 rounded-lg p-5">
+                {showPortfolio ? (
+                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-portfolio-companies">
                     <div className="flex items-center justify-between gap-4 mb-4">
                         <div>
                             <h2 className="text-lg font-semibold">Компании</h2>
@@ -1043,7 +2264,7 @@ export default function TenantsPage() {
                                                         />
                                                     </label>
                                                     <label className="text-xs text-muted-foreground">
-                                                        billing_info (JSON, optional)
+                                                        billing_info (JSON, опционально)
                                                         <textarea
                                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
                                                             rows={3}
@@ -1094,17 +2315,62 @@ export default function TenantsPage() {
                         </div>
                     ) : null}
                 </section>
+                ) : null}
 
-                <section className="bg-card border border-border/60 rounded-lg p-5">
+                {showDecommission ? (
+                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-decommission-center">
+                    <div className="flex items-center justify-between gap-4 mb-3">
+                        <div>
+                            <h2 className="text-lg font-semibold">Decommission</h2>
+                            <p className="text-sm text-muted-foreground">
+                                Архивация и восстановление клиентов с прозрачным подтверждением.
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                className={tenantLifecycle === "archived" ? "btn-primary" : "btn-ghost"}
+                                onClick={() => setTenantLifecycle("archived")}
+                            >
+                                Только архив
+                            </button>
+                            <button
+                                className={tenantLifecycle === "all" ? "btn-primary" : "btn-ghost"}
+                                onClick={() => setTenantLifecycle("all")}
+                            >
+                                Все
+                            </button>
+                            <button
+                                className={tenantLifecycle === "active" ? "btn-primary" : "btn-ghost"}
+                                onClick={() => setTenantLifecycle("active")}
+                            >
+                                Активные
+                            </button>
+                        </div>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                        Для decommission используйте действия `Архивировать/Восстановить` в карточке клиента ниже.
+                    </div>
+                </section>
+                ) : null}
+
+                {showClientsSection ? (
+                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-clients-section">
                     <div className="flex items-center justify-between gap-4 mb-4">
                         <div>
-                            <h2 className="text-lg font-semibold">Клиенты</h2>
+                            <h2 className="text-lg font-semibold">
+                                {decommissionFocused ? "Клиенты (Decommission)" : "Клиенты"}
+                            </h2>
                             <p className="text-sm text-muted-foreground">
                                 {clientsQuery.isLoading ? "—" : `${clients.length} всего`}
                             </p>
+                            {decommissionFocused ? (
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                    Фокус на жизненном цикле клиента: архив/восстановление.
+                                </div>
+                            ) : null}
                             {clientsSummary ? (
                                 <div className="mt-1 text-xs text-muted-foreground">
-                                    портфель: клиентов {clientsSummary.total_clients} · active {clientsSummary.active_clients} · onboarding {clientsSummary.onboarding_clients} · paused {clientsSummary.paused_clients} · archived {clientsSummary.archived_clients} · degraded {clientsSummary.degraded_clients}
+                                    портфель: клиентов {clientsSummary.total_clients} · активные {clientsSummary.active_clients} · онбординг {clientsSummary.onboarding_clients} · пауза {clientsSummary.paused_clients} · архив {clientsSummary.archived_clients} · деградация {clientsSummary.degraded_clients}
                                 </div>
                             ) : null}
                             {selectedCompanyId ? (
@@ -1126,13 +2392,13 @@ export default function TenantsPage() {
                                 onChange={(event) => setFleetLifecycleFilter(event.target.value as FleetLifecycleFilter)}
                             >
                                 <option value="all">Этап: все</option>
-                                <option value="lead">lead</option>
-                                <option value="contracting">contracting</option>
-                                <option value="onboarding">onboarding</option>
-                                <option value="go_live_ready">go_live_ready</option>
-                                <option value="active">active</option>
-                                <option value="paused">paused</option>
-                                <option value="archived">archived</option>
+                                <option value="lead">лид</option>
+                                <option value="contracting">договор</option>
+                                <option value="onboarding">онбординг</option>
+                                <option value="go_live_ready">готов к запуску</option>
+                                <option value="active">активный</option>
+                                <option value="paused">пауза</option>
+                                <option value="archived">архив</option>
                             </select>
                             <select
                                 className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
@@ -1140,10 +2406,10 @@ export default function TenantsPage() {
                                 onChange={(event) => setFleetPaymentFilter(event.target.value as FleetPaymentFilter)}
                             >
                                 <option value="all">Оплата: все</option>
-                                <option value="pending">pending</option>
-                                <option value="confirmed">confirmed</option>
-                                <option value="rejected">rejected</option>
-                                <option value="unknown">unknown</option>
+                                <option value="pending">ожидает</option>
+                                <option value="confirmed">подтверждена</option>
+                                <option value="rejected">отклонена</option>
+                                <option value="unknown">не задана</option>
                             </select>
                             <select
                                 className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
@@ -1151,9 +2417,9 @@ export default function TenantsPage() {
                                 onChange={(event) => setFleetServiceFilter(event.target.value as FleetServiceFilter)}
                             >
                                 <option value="all">Сервис: все</option>
-                                <option value="ok">ok</option>
-                                <option value="degraded">degraded</option>
-                                <option value="attention">attention</option>
+                                <option value="ok">стабильно</option>
+                                <option value="degraded">деградация</option>
+                                <option value="attention">внимание</option>
                             </select>
                         </div>
                     </div>
@@ -1166,12 +2432,32 @@ export default function TenantsPage() {
                             <div className="text-sm text-muted-foreground">Клиенты не найдены.</div>
                         ) : (
                             clients.map((client) => {
+                                const clientIdKey = client.id ? String(client.id) : "";
                                 const isEditing = clientEditor?.id === client.id;
                                 const isArchived = isClientArchived(client);
                                 const lifecyclePending = clientLifecyclePendingId === client.id;
+                                const lifecycleMode: ClientLifecycleMode = isArchived ? "restore" : "archive";
+                                const lifecycleAuditFilter: ClientLifecycleAuditFilter = clientIdKey
+                                    ? (clientLifecycleAuditFilterById[clientIdKey] ?? "all")
+                                    : "all";
+                                const sessionLifecycleAudit = clientIdKey
+                                    ? (clientLifecycleAuditById[clientIdKey] ?? [])
+                                    : [];
+                                const apiLifecycleAudit = clientIdKey && clientIdKey === selectedClientId
+                                    ? selectedClientApiAuditEntries
+                                    : [];
+                                const lifecycleAuditHistory = mergeLifecycleAuditEntries(
+                                    sessionLifecycleAudit,
+                                    apiLifecycleAudit,
+                                );
+                                const filteredLifecycleAuditHistory = lifecycleAuditHistory.filter((entry) => (
+                                    lifecycleAuditFilter === "all" || entry.status === lifecycleAuditFilter
+                                ));
+                                const companyLocked = (client.total_branches ?? 0) > 0 && !!client.company_id;
                                 return (
                                     <div
                                         key={client.id}
+                                        data-testid="tenants-client-row"
                                         className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3"
                                     >
                                         <div>
@@ -1181,17 +2467,102 @@ export default function TenantsPage() {
                                                 <div className="text-xs text-muted-foreground">{client.company_name}</div>
                                             ) : null}
                                             {client.status ? (
-                                                <div className="text-xs text-muted-foreground">status: {client.status}</div>
+                                                <div className="text-xs text-muted-foreground">статус: {client.status}</div>
                                             ) : null}
                                             <div className="text-xs text-muted-foreground">
-                                                lifecycle: {client.lifecycle_state ?? "—"} · payment: {client.payment_status ?? "—"} · service: {client.service_state ?? "—"}
+                                                lifecycle: {formatStateLabel(client.lifecycle_state, FLEET_LIFECYCLE_LABELS)} · payment: {formatStateLabel(client.payment_status, FLEET_PAYMENT_LABELS)} · service: {formatStateLabel(client.service_state, FLEET_SERVICE_LABELS)}
                                             </div>
                                             <div className="text-xs text-muted-foreground">
                                                 owner: {client.owner_name ?? "—"} · next: {client.next_action ?? "—"}
                                             </div>
                                             <div className="text-xs text-muted-foreground">
-                                                branches: active {client.active_branches ?? 0}/{client.total_branches ?? 0} · degraded {client.degraded_branches ?? 0} · go_live_ready {client.go_live_ready_branches ?? 0}
+                                                филиалы: активные {client.active_branches ?? 0}/{client.total_branches ?? 0} · деградация {client.degraded_branches ?? 0} · готовы к запуску {client.go_live_ready_branches ?? 0}
                                             </div>
+                                            {lifecycleAuditHistory.length > 0 || clientIdKey === selectedClientId ? (
+                                                <div className="mt-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs" data-testid="tenants-client-lifecycle-audit">
+                                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                                        <div className="font-medium">
+                                                            Lifecycle timeline (session + API)
+                                                        </div>
+                                                        <div className="flex items-center gap-1">
+                                                            <button
+                                                                className={lifecycleAuditFilter === "all" ? "btn-primary" : "btn-ghost"}
+                                                                onClick={() => {
+                                                                    if (!clientIdKey) {
+                                                                        return;
+                                                                    }
+                                                                    setClientLifecycleAuditFilterById((prev) => ({ ...prev, [clientIdKey]: "all" }));
+                                                                }}
+                                                            >
+                                                                all
+                                                            </button>
+                                                            <button
+                                                                className={lifecycleAuditFilter === "success" ? "btn-primary" : "btn-ghost"}
+                                                                onClick={() => {
+                                                                    if (!clientIdKey) {
+                                                                        return;
+                                                                    }
+                                                                    setClientLifecycleAuditFilterById((prev) => ({ ...prev, [clientIdKey]: "success" }));
+                                                                }}
+                                                            >
+                                                                success
+                                                            </button>
+                                                            <button
+                                                                className={lifecycleAuditFilter === "error" ? "btn-primary" : "btn-ghost"}
+                                                                onClick={() => {
+                                                                    if (!clientIdKey) {
+                                                                        return;
+                                                                    }
+                                                                    setClientLifecycleAuditFilterById((prev) => ({ ...prev, [clientIdKey]: "error" }));
+                                                                }}
+                                                            >
+                                                                error
+                                                            </button>
+                                                            {clientIdKey === selectedClientId ? (
+                                                                <button
+                                                                    className="btn-ghost"
+                                                                    onClick={() => selectedClientAuditQuery.refetch()}
+                                                                    disabled={selectedClientAuditQuery.isFetching}
+                                                                    data-testid="tenants-client-lifecycle-audit-refresh"
+                                                                >
+                                                                    {selectedClientAuditQuery.isFetching ? "Обновление..." : "Обновить API"}
+                                                                </button>
+                                                            ) : null}
+                                                        </div>
+                                                    </div>
+                                                    <div className="mt-1 text-muted-foreground">
+                                                        источник: session cache + API audit{clientIdKey === selectedClientId ? "" : " (API audit доступен в текущем client context)"}
+                                                    </div>
+                                                    <div className="mt-1 space-y-2" data-testid="tenants-client-lifecycle-audit-history">
+                                                        {filteredLifecycleAuditHistory.length === 0 ? (
+                                                            <div className="rounded border border-border/50 px-2 py-1 text-muted-foreground">
+                                                                Записей по текущему фильтру нет.
+                                                            </div>
+                                                        ) : (
+                                                            filteredLifecycleAuditHistory.map((entry, index) => (
+                                                                <div key={`${entry.happenedAt}-${index}`} className="rounded border border-border/50 px-2 py-1" data-testid="tenants-client-lifecycle-audit-item">
+                                                                    <div className="text-muted-foreground">
+                                                                        действие: {entry.mode === "archive" ? "Архивация" : "Восстановление"} · оператор: {entry.actorLabel} · время: {formatDateTimeLabel(entry.happenedAt)}
+                                                                    </div>
+                                                                    <div className="text-muted-foreground">
+                                                                        переход: {entry.previousLifecycleLabel}{" -> "}{entry.targetLifecycleLabel}
+                                                                    </div>
+                                                                    <div className="text-muted-foreground">
+                                                                        причина: {entry.reason}
+                                                                    </div>
+                                                                    <div className="text-muted-foreground">
+                                                                        источник: {entry.source}
+                                                                    </div>
+                                                                    <div className={entry.status === "success" ? "text-emerald-700" : "text-red-700"}>
+                                                                        {entry.status === "success" ? "OK" : "ERROR"}: {entry.message}
+                                                                        {entry.traceId ? ` (trace_id: ${entry.traceId})` : ""}
+                                                                    </div>
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ) : null}
                                         </div>
                                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                             <span>{client.id === selectedClientId ? "Выбран" : ""}</span>
@@ -1199,6 +2570,8 @@ export default function TenantsPage() {
                                                 <button
                                                     className="btn-ghost"
                                                     onClick={() => startClientEdit(client)}
+                                                    data-testid="tenants-client-edit"
+                                                    disabled={lifecyclePending}
                                                 >
                                                     Редактировать
                                                 </button>
@@ -1206,16 +2579,15 @@ export default function TenantsPage() {
                                             {canWriteTenants ? (
                                                 <button
                                                     className="btn-ghost"
-                                                    onClick={() =>
-                                                        handleClientLifecycleAction(client, isArchived ? "restore" : "archive")
-                                                    }
+                                                    onClick={() => openClientLifecycleAction(client, lifecycleMode)}
+                                                    data-testid="tenants-client-lifecycle-open"
                                                     disabled={lifecyclePending}
                                                 >
                                                     {lifecyclePending
                                                         ? "Выполняется..."
-                                                        : isArchived
-                                                            ? "Восстановить"
-                                                            : "Архивировать"}
+                                                        : lifecycleMode === "restore"
+                                                            ? "Открыть восстановление"
+                                                            : "Открыть архивирование"}
                                                 </button>
                                             ) : null}
                                             <button
@@ -1230,7 +2602,7 @@ export default function TenantsPage() {
                                             <div className="w-full mt-3 rounded-lg border border-border/60 bg-muted/30 p-3">
                                                 <div className="grid gap-3">
                                                     <label className="text-xs text-muted-foreground">
-                                                        Slug
+                                                        Slug (идентификатор)
                                                         <input
                                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                             value={clientEditor.slug}
@@ -1243,6 +2615,9 @@ export default function TenantsPage() {
                                                             }
                                                             disabled={!canWriteTenants || savingClient}
                                                         />
+                                                        <div className="mt-1 text-[11px] text-muted-foreground">
+                                                            Формат: `a-z0-9_-`, без пробелов.
+                                                        </div>
                                                     </label>
                                                     <label className="text-xs text-muted-foreground">
                                                         Компания
@@ -1256,7 +2631,7 @@ export default function TenantsPage() {
                                                                         : prev
                                                                 )
                                                             }
-                                                            disabled={!canWriteTenants || savingClient}
+                                                            disabled={!canWriteTenants || savingClient || companyLocked}
                                                         >
                                                             <option value="">Без компании</option>
                                                             {knownCompanies.map((company) => (
@@ -1265,6 +2640,11 @@ export default function TenantsPage() {
                                                                 </option>
                                                             ))}
                                                         </select>
+                                                        {companyLocked ? (
+                                                            <div className="mt-1 text-[11px] text-muted-foreground">
+                                                                `company_id` зафиксирован после создания филиалов.
+                                                            </div>
+                                                        ) : null}
                                                     </label>
                                                     <div className="flex items-center gap-2">
                                                         <button
@@ -1302,8 +2682,10 @@ export default function TenantsPage() {
                         </div>
                     ) : null}
                 </section>
+                ) : null}
 
-                <section className="bg-card border border-border/60 rounded-lg p-5">
+                {showChangeManagement ? (
+                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-change-management">
                     <div className="flex items-center justify-between gap-4 mb-4">
                         <div>
                             <h2 className="text-lg font-semibold">Филиалы</h2>
@@ -1339,6 +2721,7 @@ export default function TenantsPage() {
                                 return (
                                     <div
                                         key={branch.id}
+                                        data-testid="tenants-branch-row"
                                         className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3"
                                     >
                                         <div>
@@ -1348,7 +2731,7 @@ export default function TenantsPage() {
                                                 {branch.instance_id ? `instance_id: ${branch.instance_id}` : "instance_id: —"}
                                             </div>
                                             <div className="text-xs text-muted-foreground">
-                                                {branch.onboarding_state ? `onboarding: ${branch.onboarding_state}` : "onboarding: —"}
+                                                {branch.onboarding_state ? `этап онбординга: ${branch.onboarding_state}` : "этап онбординга: —"}
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -1357,6 +2740,7 @@ export default function TenantsPage() {
                                                 <button
                                                     className="btn-ghost"
                                                     onClick={() => startBranchEdit(branch)}
+                                                    data-testid="tenants-branch-edit"
                                                 >
                                                     Редактировать
                                                 </button>
@@ -1372,6 +2756,12 @@ export default function TenantsPage() {
                                         {isEditing && branchEditor ? (
                                             <div className="w-full mt-3 rounded-lg border border-border/60 bg-muted/30 p-3">
                                                 <div className="grid gap-3">
+                                                    <div className="rounded-lg border border-border/60 bg-background p-3 text-[11px] text-muted-foreground" data-testid="tenants-branch-input-contract">
+                                                        Форматы: `slug` = `a-z0-9_-`; `timezone` = IANA (`Asia/Almaty`);
+                                                        `phone` = 7-15 цифр (допускаются `+`, пробелы, `()`, `-`);
+                                                        `telegram_chat_id` = целое число (`-100...`);
+                                                        `knowledge_tag` = `a-z0-9_-` до 64.
+                                                    </div>
                                                     <div className="grid gap-3 sm:grid-cols-2">
                                                         <label className="text-xs text-muted-foreground">
                                                             Название
@@ -1389,7 +2779,7 @@ export default function TenantsPage() {
                                                             />
                                                         </label>
                                                         <label className="text-xs text-muted-foreground">
-                                                            Slug
+                                                            Slug (идентификатор)
                                                             <input
                                                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                                 value={branchEditor.slug}
@@ -1401,10 +2791,11 @@ export default function TenantsPage() {
                                                                     )
                                                                 }
                                                                 disabled={!canWriteTenants || savingBranch}
+                                                                placeholder="branch-slug"
                                                             />
                                                         </label>
                                                         <label className="text-xs text-muted-foreground">
-                                                            Timezone (optional)
+                                                            Timezone (опционально)
                                                             <input
                                                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                                 value={branchEditor.timezone}
@@ -1416,10 +2807,11 @@ export default function TenantsPage() {
                                                                     )
                                                                 }
                                                                 disabled={!canWriteTenants || savingBranch}
+                                                                placeholder="Asia/Almaty"
                                                             />
                                                         </label>
                                                         <label className="text-xs text-muted-foreground">
-                                                            Phone (optional)
+                                                            Phone (опционально)
                                                             <input
                                                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                                 value={branchEditor.phone}
@@ -1431,10 +2823,11 @@ export default function TenantsPage() {
                                                                     )
                                                                 }
                                                                 disabled={!canWriteTenants || savingBranch}
+                                                                placeholder="+7 700 000 00 00"
                                                             />
                                                         </label>
                                                         <label className="text-xs text-muted-foreground">
-                                                            instance_id (optional)
+                                                            instance_id (опционально)
                                                             <input
                                                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                                 value={branchEditor.instanceId}
@@ -1446,10 +2839,11 @@ export default function TenantsPage() {
                                                                     )
                                                                 }
                                                                 disabled={!canWriteTenants || savingBranch}
+                                                                placeholder="instance-123"
                                                             />
                                                         </label>
                                                         <label className="text-xs text-muted-foreground">
-                                                            telegram_chat_id (optional)
+                                                            telegram_chat_id (опционально)
                                                             <input
                                                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                                 value={branchEditor.telegramChatId}
@@ -1461,10 +2855,11 @@ export default function TenantsPage() {
                                                                     )
                                                                 }
                                                                 disabled={!canWriteTenants || savingBranch}
+                                                                placeholder="-1001234567890"
                                                             />
                                                         </label>
                                                         <label className="text-xs text-muted-foreground">
-                                                            knowledge_tag (optional)
+                                                            knowledge_tag (опционально)
                                                             <input
                                                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                                 value={branchEditor.knowledgeTag}
@@ -1476,6 +2871,7 @@ export default function TenantsPage() {
                                                                     )
                                                                 }
                                                                 disabled={!canWriteTenants || savingBranch}
+                                                                placeholder="demo_salon"
                                                             />
                                                         </label>
                                                     </div>
@@ -1496,7 +2892,7 @@ export default function TenantsPage() {
                                                         Активен
                                                     </label>
                                                     <label className="text-xs text-muted-foreground">
-                                                        Причина изменения (audit)
+                                                        Причина изменения (аудит)
                                                         <input
                                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                             value={branchEditor.changeReason}
@@ -1531,20 +2927,23 @@ export default function TenantsPage() {
                                                         <button
                                                             className="btn-primary"
                                                             onClick={handlePreviewBranchChange}
+                                                            data-testid="tenants-branch-change-preview"
                                                             disabled={!canWriteTenants || savingBranch || publishingBranchChange || rollingBackBranchChange}
                                                         >
-                                                            {savingBranch ? "Подготовка..." : "Draft + Validate"}
+                                                            {savingBranch ? "Подготовка..." : "Черновик + проверка"}
                                                         </button>
                                                         <button
                                                             className="btn-primary"
                                                             onClick={handlePublishBranchChange}
+                                                            data-testid="tenants-branch-change-publish"
                                                             disabled={!canWriteTenants || savingBranch || publishingBranchChange || rollingBackBranchChange || !branchChangePreview?.change?.id}
                                                         >
-                                                            {publishingBranchChange ? "Публикация..." : "Publish"}
+                                                            {publishingBranchChange ? "Применение..." : "Применить"}
                                                         </button>
                                                         <button
                                                             className="btn-ghost"
                                                             onClick={handleRollbackBranchChange}
+                                                            data-testid="tenants-branch-change-rollback"
                                                             disabled={
                                                                 !canWriteTenants ||
                                                                 savingBranch ||
@@ -1553,7 +2952,7 @@ export default function TenantsPage() {
                                                                 !(branchChangePreview?.change?.status === "published" || latestPublishedBranchChange)
                                                             }
                                                         >
-                                                            {rollingBackBranchChange ? "Rollback..." : "Rollback"}
+                                                            {rollingBackBranchChange ? "Откат..." : "Откат"}
                                                         </button>
                                                         <button
                                                             className="btn-ghost"
@@ -1567,7 +2966,7 @@ export default function TenantsPage() {
                                                         </button>
                                                     </div>
                                                     <label className="text-xs text-muted-foreground">
-                                                        Причина rollback
+                                                        Причина отката
                                                         <input
                                                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                             value={branchEditor.rollbackReason}
@@ -1584,14 +2983,14 @@ export default function TenantsPage() {
                                                     {branchChangePreview?.change ? (
                                                         <div className="rounded-lg border border-border/60 bg-background p-3 text-xs">
                                                             <div className="font-medium mb-1">
-                                                                Change #{branchChangePreview.change.id}
+                                                                Изменение #{branchChangePreview.change.id}
                                                             </div>
                                                             <div className="text-muted-foreground mb-2">
-                                                                status: {branchChangePreview.change.status}
+                                                                статус: {formatStateLabel(branchChangePreview.change.status, BRANCH_CHANGE_STATUS_LABELS)}
                                                             </div>
                                                             {previewValidationErrors.length > 0 ? (
                                                                 <div className="mb-2 text-red-600">
-                                                                    validation: {previewValidationErrors.join("; ")}
+                                                                    проверка: {previewValidationErrors.join("; ")}
                                                                 </div>
                                                             ) : null}
                                                             {previewDiffEntries.length > 0 ? (
@@ -1605,7 +3004,7 @@ export default function TenantsPage() {
                                                                     ))}
                                                                 </div>
                                                             ) : (
-                                                                <div className="text-muted-foreground">diff пуст</div>
+                                                                <div className="text-muted-foreground">изменений нет</div>
                                                             )}
                                                         </div>
                                                     ) : null}
@@ -1619,7 +3018,7 @@ export default function TenantsPage() {
                                                             <div className="space-y-1">
                                                                 {branchChangesQuery.data.items.slice(0, 5).map((item) => (
                                                                     <div key={item.id} className="flex items-center justify-between gap-2">
-                                                                        <span>{item.status}</span>
+                                                                        <span>{formatStateLabel(item.status, BRANCH_CHANGE_STATUS_LABELS)}</span>
                                                                         <span className="text-muted-foreground">{item.created_at ? new Date(item.created_at).toLocaleString("ru-RU") : "—"}</span>
                                                                     </div>
                                                                 ))}
@@ -1646,11 +3045,167 @@ export default function TenantsPage() {
                         </div>
                     ) : null}
                 </section>
+                ) : null}
             </div>
 
-            <div className="mt-10">
-                <ProvisioningWizard session={session} accessSection="tenants" />
-            </div>
+            {clientLifecycleDraft ? (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" data-testid="tenants-client-lifecycle-modal-overlay">
+                    <div
+                        className="card-surface w-full max-w-xl space-y-4 p-6"
+                        role="dialog"
+                        aria-modal="true"
+                        data-testid="tenants-client-lifecycle-modal"
+                    >
+                        <div>
+                            <h3 className="text-lg font-semibold">
+                                {clientLifecycleDraft.mode === "archive" ? "Архивировать клиента" : "Восстановить клиента"}
+                            </h3>
+                            <p className="text-sm text-muted-foreground">
+                                Подтвердите lifecycle-действие перед отправкой в API. Заполнение checklist обязательно.
+                            </p>
+                        </div>
+                        <div className="rounded-lg border border-border/60 bg-background p-3 text-xs" data-testid="tenants-client-lifecycle-impact">
+                            <div className="font-medium mb-1">Impact preview</div>
+                            <div className="text-muted-foreground">
+                                клиент: {clientLifecycleDraft.clientLabel} · компания: {clientLifecycleDraft.companyLabel}
+                            </div>
+                            <div className="text-muted-foreground">
+                                переход: {clientLifecycleDraft.currentLifecycleLabel}{" -> "}{clientLifecycleDraft.targetLifecycleLabel}
+                            </div>
+                            <div className="text-muted-foreground">
+                                филиалы: активные {clientLifecycleDraft.activeBranches}/{clientLifecycleDraft.totalBranches} · деградация {clientLifecycleDraft.degradedBranches}
+                            </div>
+                        </div>
+                        <div className="rounded-lg border border-border/60 bg-background p-3 text-xs" data-testid="tenants-client-lifecycle-checklist">
+                            <div className="font-medium mb-1">Pre-submit checklist</div>
+                            <label className="mb-2 flex items-start gap-2 text-muted-foreground">
+                                <input
+                                    type="checkbox"
+                                    className="mt-0.5 h-4 w-4"
+                                    checked={clientLifecycleDraft.checkClientScope}
+                                    data-testid="tenants-client-lifecycle-check-context"
+                                    onChange={(event) =>
+                                        setClientLifecycleDraft((prev) =>
+                                            prev
+                                                ? { ...prev, checkClientScope: event.target.checked }
+                                                : prev
+                                        )
+                                    }
+                                    disabled={Boolean(clientLifecyclePendingId)}
+                                />
+                                <span>Проверил контекст клиента/компании перед действием.</span>
+                            </label>
+                            <label className="mb-2 flex items-start gap-2 text-muted-foreground">
+                                <input
+                                    type="checkbox"
+                                    className="mt-0.5 h-4 w-4"
+                                    checked={clientLifecycleDraft.checkImpactReview}
+                                    data-testid="tenants-client-lifecycle-check-impact"
+                                    onChange={(event) =>
+                                        setClientLifecycleDraft((prev) =>
+                                            prev
+                                                ? { ...prev, checkImpactReview: event.target.checked }
+                                                : prev
+                                        )
+                                    }
+                                    disabled={Boolean(clientLifecyclePendingId)}
+                                />
+                                <span>
+                                    Проверил impact:
+                                    {clientLifecycleDraft.mode === "archive"
+                                        ? " клиент уйдет из активного списка и деактивация отразится в операционном контуре."
+                                        : " клиент вернется в активный список и потребует операционного контроля после восстановления."}
+                                </span>
+                            </label>
+                            <label className="flex items-start gap-2 text-muted-foreground">
+                                <input
+                                    type="checkbox"
+                                    className="mt-0.5 h-4 w-4"
+                                    checked={clientLifecycleDraft.checkOwnerAligned}
+                                    data-testid="tenants-client-lifecycle-check-owner"
+                                    onChange={(event) =>
+                                        setClientLifecycleDraft((prev) =>
+                                            prev
+                                                ? { ...prev, checkOwnerAligned: event.target.checked }
+                                                : prev
+                                        )
+                                    }
+                                    disabled={Boolean(clientLifecyclePendingId)}
+                                />
+                                <span>Подтвердил решение с ответственным владельцем клиента.</span>
+                            </label>
+                        </div>
+                        <label className="text-xs text-muted-foreground">
+                            Причина действия (обязательно)
+                            <input
+                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                value={clientLifecycleDraft.reason}
+                                data-testid="tenants-client-lifecycle-reason"
+                                onChange={(event) =>
+                                    setClientLifecycleDraft((prev) =>
+                                        prev
+                                            ? { ...prev, reason: event.target.value }
+                                            : prev
+                                    )
+                                }
+                                disabled={Boolean(clientLifecyclePendingId)}
+                            />
+                        </label>
+                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <input
+                                type="checkbox"
+                                className="h-4 w-4"
+                                checked={clientLifecycleDraft.confirmChecked}
+                                data-testid="tenants-client-lifecycle-confirm"
+                                onChange={(event) =>
+                                    setClientLifecycleDraft((prev) =>
+                                        prev
+                                            ? { ...prev, confirmChecked: event.target.checked }
+                                            : prev
+                                    )
+                                }
+                                disabled={Boolean(clientLifecyclePendingId)}
+                            />
+                            Подтверждаю выполнение действия и влияние на lifecycle клиента
+                        </label>
+                        <div className="flex flex-wrap justify-end gap-2">
+                            <button
+                                className="btn-ghost"
+                                onClick={closeClientLifecycleDraft}
+                                data-testid="tenants-client-lifecycle-cancel"
+                                disabled={Boolean(clientLifecyclePendingId)}
+                            >
+                                Отмена
+                            </button>
+                            <button
+                                className="btn-primary"
+                                onClick={handleClientLifecycleAction}
+                                data-testid="tenants-client-lifecycle-submit"
+                                disabled={
+                                    Boolean(clientLifecyclePendingId)
+                                    || !clientLifecycleDraft.reason.trim()
+                                    || !clientLifecycleDraft.confirmChecked
+                                    || !clientLifecycleDraft.checkClientScope
+                                    || !clientLifecycleDraft.checkImpactReview
+                                    || !clientLifecycleDraft.checkOwnerAligned
+                                }
+                            >
+                                {clientLifecyclePendingId
+                                    ? "Выполняется..."
+                                    : clientLifecycleDraft.mode === "archive"
+                                        ? "Подтвердить архив"
+                                        : "Подтвердить восстановление"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+
+            {showOnboarding ? (
+                <div className="mt-10" data-testid="tenants-onboarding-section">
+                    <ProvisioningWizard session={session} accessSection="tenants" />
+                </div>
+            ) : null}
         </div>
     );
 }
