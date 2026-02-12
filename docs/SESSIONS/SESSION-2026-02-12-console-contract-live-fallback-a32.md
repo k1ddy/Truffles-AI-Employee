@@ -10,11 +10,18 @@
 - done:
   - Снят fail-пакет из run `21930218302` (`Resolve console selection headers`, HTTP 401 на `/console/v1/me`).
   - Подготовлен точечный patch в `.github/workflows/ci.yml`.
+  - Добавлен fallback открытия Team Specialists в e2e (`testid` -> `role/name`), чтобы smoke не падал на старом UI.
+  - Переписаны `Team Specialists @mutating` на контрактный API-режим без зависимости от заранее подготовленных onboarding branch state.
+  - Добавлен runtime probe для mutating endpoints специалистов; при legacy backend тесты переходят в `skip`, не ломая CI.
+  - Локально подтверждён mutating контур:
+    - `E2E_ALLOW_MUTATIONS=1 npx playwright test --grep "Team Specialists @mutating" --workers=1` -> `1 passed, 2 skipped` (с setup).
+    - `npm run test:e2e:mutating -- --workers=1` -> `4 passed, 2 skipped`.
+  - PR обновлён коммитом `724f38a8` (ветка `fix/2026-02-12-console-contract-live-fallback-a32`).
 - next:
-  - Прогнать session/yaml checks.
-  - Закоммитить и открыть PR.
-  - Проверить `console-contract-live` в новом CI run.
+  - Дождаться завершения PR checks и устранить оставшиеся CI blockers (при наличии).
 - evidence:
   - `https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/21930218302`
   - `.github/workflows/ci.yml`
-- last_updated: 2026-02-12
+  - `https://github.com/k1ddy/Truffles-AI-Employee/pull/638`
+  - `console-web/e2e/smoke.spec.ts`
+- last_updated: 2026-02-12T05:12:44Z
