@@ -31,6 +31,27 @@ def test_build_intake_payload_parses_text_into_pack_fields():
     assert any(service.get("name") == "Маникюр" for service in services)
 
 
+def test_build_intake_payload_parses_neutral_business_aliases():
+    payload = build_intake_payload(
+        client_data_json=None,
+        client_data_text="""
+        Business name: Demo Clinic
+        Location city: Astana
+        Location address: Abay 10
+        Working hours: mon 09:00-18:00
+        Communication languages: ru, kk
+        """,
+    )
+
+    salon = payload.get("client_pack", {}).get("salon", {})
+    assert salon.get("name") == "Demo Clinic"
+    assert salon.get("city") == "Astana"
+    assert salon.get("address", {}).get("full") == "Abay 10"
+    assert salon.get("hours", {}).get("open") == "09:00"
+    assert salon.get("hours", {}).get("close") == "18:00"
+    assert set(salon.get("communication", {}).get("languages", [])) == {"ru", "kk"}
+
+
 def test_evaluate_intake_payload_returns_missing_questions():
     payload = {"client_pack": {"salon": {"name": "Demo Salon"}}}
     missing, questions = evaluate_intake_payload(payload)

@@ -100,12 +100,57 @@ _DOMAIN_DEFAULT_BOOKING_REQUIRED = {
 }
 _DOMAIN_EXTRA_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {}
 
+# Backward-compatible aliases: canonical legacy paths remain stable in error output,
+# while non-salon domains can satisfy validation through neutral business keys.
+_FIELD_VALIDATION_ALIASES: dict[str, tuple[str, ...]] = {
+    "client_pack.salon.name": (
+        "client_pack.business.name",
+        "client_pack.organization.name",
+    ),
+    "client_pack.salon.city": (
+        "client_pack.location.city",
+    ),
+    "client_pack.salon.address.full": (
+        "client_pack.location.address.full",
+        "client_pack.location.address_full",
+    ),
+    "client_pack.salon.hours.days": (
+        "client_pack.operations.hours.days",
+        "client_pack.hours.days",
+    ),
+    "client_pack.salon.hours.open": (
+        "client_pack.operations.hours.open",
+        "client_pack.hours.open",
+    ),
+    "client_pack.salon.hours.close": (
+        "client_pack.operations.hours.close",
+        "client_pack.hours.close",
+    ),
+    "client_pack.salon.services_summary": (
+        "client_pack.catalog.summary",
+        "client_pack.services.summary",
+        "client_pack.offerings.summary",
+    ),
+    "client_pack.salon.communication.languages": (
+        "client_pack.communication.languages",
+        "client_pack.languages",
+    ),
+}
+
 
 def _normalize_domain_slug(domain_slug: str | None) -> str | None:
     if not isinstance(domain_slug, str):
         return None
     cleaned = domain_slug.strip().lower()
     return cleaned or None
+
+
+def _validation_path_candidates(path: str) -> tuple[str, ...]:
+    aliases = _FIELD_VALIDATION_ALIASES.get(path, ())
+    if not aliases:
+        return (path,)
+    # Keep deterministic order and include canonical legacy path first.
+    return (path, *aliases)
 
 
 def _booking_required_for_domain(
@@ -224,27 +269,36 @@ def get_missing_required_fields(
     require_booking: bool | None = None,
 ) -> list[str]:
     normalized = _normalize_payload(payload)
+    normalized_domain = _normalize_domain_slug(domain_slug)
     fields = (
         required_fields
         if required_fields is not None
         else get_required_fields_for_domain(
-            domain_slug=domain_slug,
+            domain_slug=normalized_domain,
             require_booking=require_booking,
         )
     )
     missing: list[str] = []
     for path in fields:
-        value = _get_nested_value(normalized, path)
-        if value is _MISSING or _is_empty_value(value):
+        candidates = _validation_path_candidates(path)
+        values = [_get_nested_value(normalized, candidate) for candidate in candidates]
+        if all(value is _MISSING or _is_empty_value(value) for value in values):
             missing.append(path)
     language_path = "client_pack.salon.communication.languages"
-    language_value = _get_nested_value(normalized, language_path)
+    language_values = [
+        _get_nested_value(normalized, candidate)
+        for candidate in _validation_path_candidates(language_path)
+    ]
+    language_payloads = [
+        value for value in language_values if value is not _MISSING and not _is_empty_value(value)
+    ]
     if (
-        language_value is not _MISSING
-        and not _is_empty_value(language_value)
+        language_payloads
         and language_path not in missing
     ):
-        normalized_languages = set(_normalize_language_list(language_value))
+        normalized_languages: set[str] = set()
+        for value in language_payloads:
+            normalized_languages.update(_normalize_language_list(value))
         if not normalized_languages or not set(MINIMUM_DATA_REQUIRED_LANGUAGES).issubset(
             normalized_languages
         ):
@@ -264,14 +318,23 @@ def get_missing_minimum_data_fields(payload: dict) -> list[str]:
         and not _has_duration_data(normalized)
     ):
         missing.append("client_pack.service_duration_estimates")
-    if "client_pack.salon.communication.languages" not in missing:
-        languages = _get_nested_value(normalized, "client_pack.salon.communication.languages")
-        if languages is not _MISSING:
-            normalized_languages = set(_normalize_language_list(languages))
+    language_path = "client_pack.salon.communication.languages"
+    if language_path not in missing:
+        language_values = [
+            _get_nested_value(normalized, candidate)
+            for candidate in _validation_path_candidates(language_path)
+        ]
+        language_payloads = [
+            value for value in language_values if value is not _MISSING and not _is_empty_value(value)
+        ]
+        if language_payloads:
+            normalized_languages: set[str] = set()
+            for languages in language_payloads:
+                normalized_languages.update(_normalize_language_list(languages))
             if not normalized_languages or not set(MINIMUM_DATA_REQUIRED_LANGUAGES).issubset(
                 normalized_languages
             ):
-                missing.append("client_pack.salon.communication.languages")
+                missing.append(language_path)
     return missing
 
 

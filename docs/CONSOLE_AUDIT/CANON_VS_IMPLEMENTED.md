@@ -27,11 +27,11 @@ Legend
 
 ### Platform Admin
 - [match] Доступ к Tenants, Ops, Audit, Inbox, Settings/Provisioning, Knowledge, Team, Calendar, Insights. Canon: `SPECS/CONTROL_PLANE.md` (RBAC + IA). Impl: `docs/CONSOLE_AUDIT/roles/platform_admin.md`.
-- [missing] Integrations registry (nav/страница). Canon: `SPECS/CONTROL_PLANE.md` (IA: Integrations). Impl: отсутствует в навигации (`docs/CONSOLE_AUDIT/pages/global-shell.md`).
+- [match] Integrations registry (nav/страница) реализован для platform_admin. Canon: `SPECS/CONTROL_PLANE.md` (IA: Integrations). Impl: `console-web/src/components/ConsoleShell.tsx`.
 
 ### Owner/Admin
 - [match] Полный доступ к Inbox/Calendar/Knowledge/Team/Settings/Ops/Audit. Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/roles/owner.md`, `docs/CONSOLE_AUDIT/roles/admin.md`.
-- [missing] Integrations страница. Canon: `SPECS/CONTROL_PLANE.md` (IA). Impl: отсутствует в nav.
+- [partial] Integrations страница есть в IA, но RBAC ограничен platform_admin (owner/admin без доступа). Canon: `SPECS/CONTROL_PLANE.md` (IA). Impl: `console-web/src/components/ConsoleShell.tsx`, `console-web/src/lib/api-client.ts`.
 
 ### Manager
 - [match] Inbox + Calendar (read/write). Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/roles/manager.md`.
@@ -54,8 +54,8 @@ Legend
 
 ## 3) Navigation / IA
 
-- [match] Реализованные пункты навигации: Inbox, Calendar, Knowledge, Team, Settings, Ops, Audit, Insights, Tenants (platform_admin). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `docs/CONSOLE_AUDIT/pages/global-shell.md`.
-- [missing] Integrations page (owner/admin/platform admin). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: отсутствует.
+- [match] Реализованные пункты навигации: Inbox, Calendar, Knowledge, Team, Settings, Ops, Audit, Insights, Tenants, Integrations. Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/components/ConsoleShell.tsx`.
+- [partial] Integrations доступен только platform_admin (owner/admin не включены в текущий RBAC). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/lib/api-client.ts`.
 - [match] Insights/Analytics (optional). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/app/insights/page.tsx`, `console-web/src/components/ConsoleShell.tsx`.
 
 ---
@@ -86,12 +86,12 @@ Legend
 ### Team
 - [partial] Users list + roles + Telegram linking есть; отсутствуют invite/disable. Canon: `SPECS/CONTROL_PLANE.md` §8. Impl: `docs/CONSOLE_AUDIT/pages/team.md`.
 - [partial] Specialists list есть, но нет управления working_hours/availability. Canon: `SPECS/CONTROL_PLANE.md` §8. Impl: `docs/CONSOLE_AUDIT/pages/team.md`.
-- [missing] Team directory доступен для manager (read-only). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: Team скрыт для manager.
+- [match] Team directory доступен для manager (read-only). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/lib/api-client.ts`, `console-web/src/app/team/page.tsx`.
 
 ### Settings + Provisioning Wizard
 - [match] Wizard steps и server‑side onboarding flow. Canon: `SPECS/CONTROL_PLANE.md` §5 + `docs/CONSOLE_GUIDE.md` (Phase 2). Impl: `docs/CONSOLE_AUDIT/pages/settings.md`.
 - [match] Capabilities tri‑state editor + effective view. Canon: `SPECS/CONTROL_PLANE.md` §6. Impl: `docs/CONSOLE_AUDIT/pages/settings.md`.
-- [partial] Support read‑only provisioning отсутствует. Canon: `SPECS/CONTROL_PLANE.md` (Provisioning read includes support). Impl: Settings недоступны support.
+- [match] Support read‑only provisioning реализован через `provisioning:read`. Canon: `SPECS/CONTROL_PLANE.md` (Provisioning read includes support). Impl: `console-web/src/app/settings/page.tsx`.
 
 ### Ops / Status
 - [match] Owner/admin/support видят короткий статус; platform_admin — полный Ops. Canon: `SPECS/CONTROL_PLANE.md` §10. Impl: `console-web/src/components/OpsPage.tsx`.
@@ -113,5 +113,5 @@ Legend
 
 ## 6) GAP summary (canon vs implemented)
 
-- Integrations page отсутствует (owner/admin/platform admin).
+- Integrations page реализована, но RBAC уже канона (owner/admin без доступа).
 - Team Users не поддерживает invite/disable; Specialists без управления working_hours/availability.
