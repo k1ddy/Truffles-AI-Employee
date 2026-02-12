@@ -7,19 +7,16 @@ from typing import Any
 
 import yaml
 
-REQUIRED_CLIENT_PACK_FIELDS = [
-    "client_pack.salon.name",
-    "client_pack.salon.city",
-    "client_pack.salon.address.full",
-    "client_pack.salon.hours.days",
-    "client_pack.salon.hours.open",
-    "client_pack.salon.hours.close",
-    "client_pack.salon.services_summary",
-    "client_pack.salon.communication.languages",
+_COMMON_REQUIRED_FIELDS = [
+    "client_pack.business.name",
+    "client_pack.location.city",
+    "client_pack.location.address.full",
+    "client_pack.operations.hours.days",
+    "client_pack.operations.hours.open",
+    "client_pack.operations.hours.close",
+    "client_pack.catalog.summary",
+    "client_pack.communication.languages",
     "client_pack.services_catalog.services",
-    "client_pack.service_duration_estimates",
-    "client_pack.booking.collect_fields",
-    "client_pack.booking.bot_can_confirm",
     "client_pack.guest_policy",
     "client_pack.safety.medical_note",
     "client_pack.pricing.price_from_reason",
@@ -33,9 +30,7 @@ _BOOKING_REQUIRED_FIELDS = [
     "client_pack.booking.bot_can_confirm",
 ]
 
-_COMMON_REQUIRED_FIELDS = [
-    field for field in REQUIRED_CLIENT_PACK_FIELDS if field not in _BOOKING_REQUIRED_FIELDS
-]
+REQUIRED_CLIENT_PACK_FIELDS = _COMMON_REQUIRED_FIELDS + _BOOKING_REQUIRED_FIELDS
 
 REQUIRED_POLICY_FIELDS = [
     "client_pack.policy.hard_law",
@@ -50,36 +45,9 @@ REQUIRED_POLICY_FIELDS = [
 ]
 
 REQUIRED_PACK_FIELDS = REQUIRED_CLIENT_PACK_FIELDS + REQUIRED_POLICY_FIELDS
-MINIMUM_DATA_CONTRACT_VERSION = "minimum_data_contract.v1"
+MINIMUM_DATA_CONTRACT_VERSION = "minimum_data_contract.v2"
 MINIMUM_DATA_REQUIRED_LANGUAGES = ("ru", "kk")
-MINIMUM_DATA_REQUIRED_FIELDS = [
-    "client_pack.salon.name",
-    "client_pack.salon.city",
-    "client_pack.salon.address.full",
-    "client_pack.salon.hours.days",
-    "client_pack.salon.hours.open",
-    "client_pack.salon.hours.close",
-    "client_pack.salon.services_summary",
-    "client_pack.salon.communication.languages",
-    "client_pack.services_catalog.services",
-    "client_pack.service_duration_estimates",
-    "client_pack.booking.collect_fields",
-    "client_pack.booking.bot_can_confirm",
-    "client_pack.price_list",
-    "client_pack.guest_policy",
-    "client_pack.safety.medical_note",
-    "client_pack.pricing.price_from_reason",
-    "client_pack.quality.expectations_photo",
-    "client_pack.policy.hard_law",
-    "client_pack.policy.payment_info",
-    "client_pack.policy.reschedule",
-    "client_pack.policy.cancel",
-    "client_pack.policy.medical",
-    "client_pack.policy.legal",
-    "client_pack.policy.complaint",
-    "client_pack.policy.discounts",
-    "client_pack.policy.guard_topics.refund",
-]
+MINIMUM_DATA_REQUIRED_FIELDS = REQUIRED_PACK_FIELDS
 _MINIMUM_DATA_DURATION_KEYS = (
     "duration_text",
     "duration",
@@ -98,41 +66,46 @@ _DOMAIN_DEFAULT_BOOKING_REQUIRED = {
     "legal": False,
     "ecom": False,
 }
-_DOMAIN_EXTRA_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {}
+_DOMAIN_EXTRA_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    "beauty": (),
+    "clinic": (),
+    "legal": (),
+    "ecom": (),
+}
 
-# Backward-compatible aliases: canonical legacy paths remain stable in error output,
-# while non-salon domains can satisfy validation through neutral business keys.
+# Backward-compatible aliases: v2 canonical paths stay stable in validation output,
+# while legacy salon data still satisfies requirements.
 _FIELD_VALIDATION_ALIASES: dict[str, tuple[str, ...]] = {
-    "client_pack.salon.name": (
-        "client_pack.business.name",
+    "client_pack.business.name": (
+        "client_pack.salon.name",
         "client_pack.organization.name",
     ),
-    "client_pack.salon.city": (
-        "client_pack.location.city",
+    "client_pack.location.city": (
+        "client_pack.salon.city",
     ),
-    "client_pack.salon.address.full": (
-        "client_pack.location.address.full",
+    "client_pack.location.address.full": (
+        "client_pack.salon.address.full",
         "client_pack.location.address_full",
     ),
-    "client_pack.salon.hours.days": (
-        "client_pack.operations.hours.days",
+    "client_pack.operations.hours.days": (
+        "client_pack.salon.hours.days",
         "client_pack.hours.days",
     ),
-    "client_pack.salon.hours.open": (
-        "client_pack.operations.hours.open",
+    "client_pack.operations.hours.open": (
+        "client_pack.salon.hours.open",
         "client_pack.hours.open",
     ),
-    "client_pack.salon.hours.close": (
-        "client_pack.operations.hours.close",
+    "client_pack.operations.hours.close": (
+        "client_pack.salon.hours.close",
         "client_pack.hours.close",
     ),
-    "client_pack.salon.services_summary": (
-        "client_pack.catalog.summary",
+    "client_pack.catalog.summary": (
+        "client_pack.salon.services_summary",
         "client_pack.services.summary",
         "client_pack.offerings.summary",
     ),
-    "client_pack.salon.communication.languages": (
-        "client_pack.communication.languages",
+    "client_pack.communication.languages": (
+        "client_pack.salon.communication.languages",
         "client_pack.languages",
     ),
 }
@@ -149,7 +122,7 @@ def _validation_path_candidates(path: str) -> tuple[str, ...]:
     aliases = _FIELD_VALIDATION_ALIASES.get(path, ())
     if not aliases:
         return (path,)
-    # Keep deterministic order and include canonical legacy path first.
+    # Keep deterministic order and always check canonical v2 path first.
     return (path, *aliases)
 
 
@@ -284,7 +257,7 @@ def get_missing_required_fields(
         values = [_get_nested_value(normalized, candidate) for candidate in candidates]
         if all(value is _MISSING or _is_empty_value(value) for value in values):
             missing.append(path)
-    language_path = "client_pack.salon.communication.languages"
+    language_path = "client_pack.communication.languages"
     language_values = [
         _get_nested_value(normalized, candidate)
         for candidate in _validation_path_candidates(language_path)
@@ -318,7 +291,7 @@ def get_missing_minimum_data_fields(payload: dict) -> list[str]:
         and not _has_duration_data(normalized)
     ):
         missing.append("client_pack.service_duration_estimates")
-    language_path = "client_pack.salon.communication.languages"
+    language_path = "client_pack.communication.languages"
     if language_path not in missing:
         language_values = [
             _get_nested_value(normalized, candidate)
@@ -473,11 +446,22 @@ def build_summary(payload: dict) -> str | None:
     client_pack = payload.get("client_pack") if isinstance(payload, dict) else None
     if not isinstance(client_pack, dict):
         return None
+    business = client_pack.get("business")
+    location = client_pack.get("location")
     salon = client_pack.get("salon")
-    if not isinstance(salon, dict):
-        return None
-    name = str(salon.get("name") or "").strip()
-    city = str(salon.get("city") or "").strip()
+
+    name = ""
+    if isinstance(business, dict):
+        name = str(business.get("name") or "").strip()
+    if not name and isinstance(salon, dict):
+        name = str(salon.get("name") or "").strip()
+
+    city = ""
+    if isinstance(location, dict):
+        city = str(location.get("city") or "").strip()
+    if not city and isinstance(salon, dict):
+        city = str(salon.get("city") or "").strip()
+
     if name and city:
         return f"{name} ({city})"
     return name or None

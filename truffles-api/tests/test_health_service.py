@@ -99,7 +99,7 @@ class TestGetSystemHealth:
         monkeypatch.setattr(
             health_service,
             "build_minimum_data_status",
-            lambda _db: {"version": "minimum_data_contract.v1"},
+            lambda _db: {"version": "minimum_data_contract.v2"},
         )
         monkeypatch.setattr(
             health_service,
@@ -115,7 +115,7 @@ class TestGetSystemHealth:
         assert result["handovers"]["pending"] == 3
         assert result["handovers"]["active"] == 1
         assert result["safety"]["status"] == "ok"
-        assert result["minimum_data_contract"]["version"] == "minimum_data_contract.v1"
+        assert result["minimum_data_contract"]["version"] == "minimum_data_contract.v2"
 
     def test_returns_checked_at_timestamp(self, monkeypatch):
         db = MagicMock()
@@ -123,7 +123,7 @@ class TestGetSystemHealth:
         monkeypatch.setattr(
             health_service,
             "build_minimum_data_status",
-            lambda _db: {"version": "minimum_data_contract.v1"},
+            lambda _db: {"version": "minimum_data_contract.v2"},
         )
         monkeypatch.setattr(
             health_service,
@@ -141,7 +141,7 @@ class TestGetSystemHealth:
         monkeypatch.setattr(
             health_service,
             "build_minimum_data_status",
-            lambda _db: {"version": "minimum_data_contract.v1"},
+            lambda _db: {"version": "minimum_data_contract.v2"},
         )
         monkeypatch.setattr(
             health_service,

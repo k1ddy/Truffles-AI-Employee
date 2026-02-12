@@ -90,11 +90,11 @@ def test_go_no_go_includes_missing_pack_fields():
         has_capabilities=True,
         has_knowledge_tag=True,
         has_published_knowledge=True,
-        missing_pack_fields=["client_pack.salon.address.full"],
+        missing_pack_fields=["client_pack.location.address.full"],
     )
 
     missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
-    assert "client_pack.salon.address.full" in missing
+    assert "client_pack.location.address.full" in missing
 
 
 def test_go_no_go_requires_payment_confirmation():

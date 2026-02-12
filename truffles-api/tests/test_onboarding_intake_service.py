@@ -56,7 +56,7 @@ def test_evaluate_intake_payload_returns_missing_questions():
     payload = {"client_pack": {"salon": {"name": "Demo Salon"}}}
     missing, questions = evaluate_intake_payload(payload)
 
-    assert "client_pack.salon.city" in missing
+    assert "client_pack.location.city" in missing
     assert any("город" in question.casefold() for question in questions)
 
 

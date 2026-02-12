@@ -68,7 +68,7 @@ def test_validate_payload_missing_required_field():
     payload = _base_payload()
     payload["client_pack"]["salon"].pop("name")
     errors, warnings = validate_payload(payload)
-    assert any("client_pack.salon.name" in err for err in errors)
+    assert any("client_pack.business.name" in err for err in errors)
     assert warnings == []
 
 
@@ -76,7 +76,7 @@ def test_validate_payload_requires_ru_kk_languages():
     payload = _base_payload()
     payload["client_pack"]["salon"]["communication"]["languages"] = ["ru"]
     errors, warnings = validate_payload(payload)
-    assert any("client_pack.salon.communication.languages" in err for err in errors)
+    assert any("client_pack.communication.languages" in err for err in errors)
     assert warnings == []
 
 
@@ -141,11 +141,11 @@ def test_domain_legal_accepts_neutral_business_alias_fields():
 
     missing = get_missing_required_fields(payload, domain_slug="legal")
 
-    assert "client_pack.salon.name" not in missing
-    assert "client_pack.salon.city" not in missing
-    assert "client_pack.salon.address.full" not in missing
-    assert "client_pack.salon.hours.days" not in missing
-    assert "client_pack.salon.hours.open" not in missing
-    assert "client_pack.salon.hours.close" not in missing
-    assert "client_pack.salon.communication.languages" not in missing
-    assert "client_pack.salon.services_summary" not in missing
+    assert "client_pack.business.name" not in missing
+    assert "client_pack.location.city" not in missing
+    assert "client_pack.location.address.full" not in missing
+    assert "client_pack.operations.hours.days" not in missing
+    assert "client_pack.operations.hours.open" not in missing
+    assert "client_pack.operations.hours.close" not in missing
+    assert "client_pack.communication.languages" not in missing
+    assert "client_pack.catalog.summary" not in missing
