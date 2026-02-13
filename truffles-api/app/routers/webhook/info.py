@@ -224,14 +224,12 @@ def _detect_info_class_intents(
         meta["anchor_boost"] = anchor_boost
     meta["info_signals"] = {
         "parking": parking_signal,
-        "pricing": price_signal,
+        "pricing": price_signal or pricing_signal,
         "duration": duration_signal,
         "contact": contact_signal,
         "guest": guest_signal,
         "location": location_signal,
         "hours": hours_signal,
-        "pricing": pricing_signal,
-        "duration": duration_signal,
         "master": master_signal,
     }
     return intents, meta

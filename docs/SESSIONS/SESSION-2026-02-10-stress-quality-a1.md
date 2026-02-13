@@ -21,10 +21,24 @@
   - Local validation:
     - `pytest -q tests/test_message_endpoint.py tests/test_booking_appointments.py tests/test_calendar_provider_sync.py`
     - result: `156 passed, 2 warnings`.
+  - Synced branch with `origin/main`, resolved merge conflict in `truffles-api/app/routers/webhook/info.py`, and pushed merge commit (`30131137`).
+  - Opened/focused active PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/647
+  - Completed local LLM replay run with judge enabled:
+    - `/tmp/booking_quality/booking-replay-20260213-a1/summary.json`
+    - `/tmp/booking_quality/booking-replay-20260213-a1/brief.md`
+    - `/tmp/booking_quality/booking-replay-20260213-a1/responses.jsonl`
+  - Identified current CI blockers in PR #647:
+    - `session-gate` (missing session log/index updates in diff),
+    - `lint` (F601 duplicate dict keys + import ordering),
+    - `unit-tests` (booking interrupt anchor fallback + missing timeout classifier helper).
 - next:
-  - Fix PR CI `session-gate` by keeping session log/index updates in branch history.
+  - Green PR #647 checks (`session-gate`, `lint`, `unit-tests`) after sync conflict fallout.
+  - Run canonical replay against judge-enabled baseline (`semantic_valid=true`) and collect full trace/meta/appointment evidence.
   - Continue complex LLM-dialog + booking-confirm realism runs with evidence (trace/meta/appointment artifacts) before merge.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-10-stress-quality-hardening.md
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/616
-- last_updated: 2026-02-11
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/647
+  - /tmp/booking_quality/booking-replay-20260213-a1/summary.json
+  - /tmp/booking_quality/booking-replay-20260213-a1/brief.md
+- last_updated: 2026-02-13T04:10:00Z

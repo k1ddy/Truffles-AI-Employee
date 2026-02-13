@@ -1,7 +1,7 @@
 import ast
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
-import re
 
 from app.services import demo_salon_knowledge
 

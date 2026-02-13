@@ -3364,6 +3364,25 @@ def _llm_quality_normalize_tool_token(value: object | None) -> str:
     return str(value).strip().lower()
 
 
+def _llm_quality_is_timeout_degrade_reason(reason: object | None) -> bool:
+    token = _llm_quality_normalize_tool_token(reason)
+    if not token:
+        return False
+    return any(
+        marker in token
+        for marker in (
+            "timeout",
+            "timed out",
+            "deadline_exceeded",
+            "deadline exceeded",
+            "llm_timeout",
+            "judge_request_timeout",
+            "policy_timeout",
+            "provider_timeout",
+        )
+    )
+
+
 def _llm_quality_tool_outcome_from_decision(decision: object | None) -> str:
     if decision is True:
         return "success"
