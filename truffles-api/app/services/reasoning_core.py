@@ -211,11 +211,16 @@ async def handle_webhook_payload(
                         break
                     time.sleep(0.5)
 
+        fallback_bot_response = (
+            decision_router.MSG_DELIVERY_FAILED
+            if should_fallback
+            else decision_router.MSG_AI_ERROR
+        )
         result_message = "Fallback response sent" if fallback_sent else "Fallback response skipped"
         return WebhookResponse(
             success=True,
             message=result_message,
-            bot_response=decision_router.MSG_DELIVERY_FAILED if fallback_sent else None,
+            bot_response=fallback_bot_response,
         )
 
 
