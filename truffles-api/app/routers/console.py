@@ -222,6 +222,7 @@ from app.services.onboarding_contract_service import (
     find_capability_mismatches,
     merge_onboarding_contract,
     onboarding_contract_payload_to_dict,
+    validate_onboarding_contract_payload,
 )
 from app.services.onboarding_intake_service import build_intake_payload, evaluate_intake_payload
 from app.services.onboarding_state import (
@@ -8036,7 +8037,12 @@ async def run_integration_reconcile_for_branch(
                 )
                 base_payload = merge_onboarding_contract(client_payload, None)
 
-            effective_payload = OnboardingContractPayload.model_validate(base_payload)
+            # Some older contracts can carry extra top-level keys.
+            # Rebuild through merge helper to keep only contract-relevant structure
+            # and fail with ConsoleAPIError (not unhandled ValidationError).
+            effective_payload = validate_onboarding_contract_payload(
+                merge_onboarding_contract(None, base_payload)
+            )
             existing_binding = effective_payload.provider_binding.whatsapp
             base_binding_payload = (
                 existing_binding.model_dump(exclude_none=True, mode="json")
@@ -8052,7 +8058,7 @@ async def run_integration_reconcile_for_branch(
                 normalized_binding.rebind_required = True
             next_binding_payload = normalized_binding.model_dump(exclude_none=True, mode="json")
             effective_dict = onboarding_contract_payload_to_dict(effective_payload)
-            contract_payload = OnboardingContractPayload.model_validate(
+            contract_payload = validate_onboarding_contract_payload(
                 merge_onboarding_contract(
                     effective_dict,
                     {
