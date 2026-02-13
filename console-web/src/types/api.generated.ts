@@ -5742,6 +5742,12 @@ export interface operations {
             query?: {
                 /** @description Mark branch as stale when no inbound for this many minutes. */
                 stale_after_minutes?: number;
+                /** @description Optional company scope filter. */
+                company_id?: string;
+                /** @description Optional client scope filter. */
+                client_id?: string;
+                /** @description Optional branch scope filter. */
+                branch_id?: string;
             };
             header?: never;
             path?: never;

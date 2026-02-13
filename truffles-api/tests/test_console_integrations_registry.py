@@ -45,6 +45,24 @@ class _QueryMock:
         return self._rows[0] if self._rows else None
 
 
+class _BranchQueryMock(_QueryMock):
+    def filter(self, *args, **_kwargs):
+        filtered = list(self._rows)
+        for expr in args:
+            expr_text = str(expr)
+            try:
+                value = expr.right.value
+            except Exception:
+                value = None
+            if "branches.client_id IN" in expr_text and value is not None:
+                allowed = set(value)
+                filtered = [row for row in filtered if row.client_id in allowed]
+            if "branches.id =" in expr_text and value is not None:
+                filtered = [row for row in filtered if row.id == value]
+        self._rows = filtered
+        return self
+
+
 def test_build_branch_integration_status_missing_instance():
     branch = _make_branch(instance_id=None)
     client_id = uuid4()
@@ -579,6 +597,196 @@ async def test_list_integrations_builds_provider_ops_queue(monkeypatch):
     assert queue_item.priority == "p0"
     assert queue_item.recommended_action == "provider_complete_rebind"
     assert "provider_binding_rebind_required" in queue_item.reasons
+
+
+@pytest.mark.asyncio
+async def test_list_integrations_rejects_unavailable_company_scope(monkeypatch):
+    request = SimpleNamespace(query_params={"company_id": str(uuid4())})
+    db = Mock()
+
+    context = SimpleNamespace(
+        role="platform_admin",
+        accessible_clients=[SimpleNamespace(id=uuid4(), name="demo", status="active", company_id=uuid4())],
+    )
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_integrations(
+            request=request,
+            stale_after_minutes=60,
+            company_id=str(request.query_params["company_id"]),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_list_integrations_rejects_client_company_mismatch(monkeypatch):
+    request = SimpleNamespace(query_params={})
+    company_a = uuid4()
+    company_b = uuid4()
+    client_a = uuid4()
+    client_b = uuid4()
+    db = Mock()
+
+    context = SimpleNamespace(
+        role="platform_admin",
+        client=None,
+        accessible_clients=[
+            SimpleNamespace(id=client_a, name="client-a", status="active", company_id=company_a),
+            SimpleNamespace(id=client_b, name="client-b", status="active", company_id=company_b),
+        ],
+    )
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_integrations(
+            request=request,
+            stale_after_minutes=60,
+            company_id=str(company_a),
+            client_id=str(client_b),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert exc_info.value.message == "client_id does not belong to company_id"
+
+
+@pytest.mark.asyncio
+async def test_list_integrations_rejects_branch_client_mismatch(monkeypatch):
+    request = SimpleNamespace(query_params={})
+    client_a = uuid4()
+    client_b = uuid4()
+    branch_id = uuid4()
+    db = Mock()
+    branch = SimpleNamespace(id=branch_id, client_id=client_a)
+    db.query.return_value = _QueryMock([branch])
+
+    context = SimpleNamespace(
+        role="platform_admin",
+        client=None,
+        accessible_clients=[
+            SimpleNamespace(id=client_a, name="client-a", status="active", company_id=uuid4()),
+            SimpleNamespace(id=client_b, name="client-b", status="active", company_id=uuid4()),
+        ],
+    )
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_integrations(
+            request=request,
+            stale_after_minutes=60,
+            client_id=str(client_b),
+            branch_id=str(branch_id),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert exc_info.value.message == "branch_id does not belong to client_id"
+
+
+@pytest.mark.asyncio
+async def test_list_integrations_applies_scope_filters(monkeypatch):
+    request = SimpleNamespace(query_params={})
+    company_a = uuid4()
+    company_b = uuid4()
+    client_a = uuid4()
+    client_b = uuid4()
+    branch_a = uuid4()
+    branch_b = uuid4()
+    db = Mock()
+    loader_client_ids: list[list] = []
+
+    context = SimpleNamespace(
+        role="platform_admin",
+        client=None,
+        accessible_clients=[
+            SimpleNamespace(id=client_a, name="client-a", status="active", company_id=company_a),
+            SimpleNamespace(id=client_b, name="client-b", status="active", company_id=company_b),
+        ],
+    )
+    branch_rows = [
+        SimpleNamespace(
+            id=branch_a,
+            client_id=client_a,
+            slug="branch-a",
+            name="Branch A",
+            is_active=True,
+            instance_id="instance-a",
+            telegram_chat_id="111",
+            webhook_secret="secret-a",
+        ),
+        SimpleNamespace(
+            id=branch_b,
+            client_id=client_b,
+            slug="branch-b",
+            name="Branch B",
+            is_active=True,
+            instance_id="instance-b",
+            telegram_chat_id="222",
+            webhook_secret="secret-b",
+        ),
+    ]
+    branch_query = _BranchQueryMock(branch_rows)
+
+    def _query_side_effect(*entities):
+        if len(entities) == 1 and entities[0] is console_router.Branch:
+            return branch_query
+        if len(entities) == 2:
+            return _QueryMock([(client_a, "token-a"), (client_b, "token-b")])
+        raise AssertionError(f"unexpected query entities: {entities}")
+
+    db.query.side_effect = _query_side_effect
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+
+    def _capture_inbound_loader(_db, *, client_ids):
+        loader_client_ids.append(list(client_ids))
+        return {}
+
+    monkeypatch.setattr(console_router, "_load_latest_branch_inbound_observations_for_clients", _capture_inbound_loader)
+    monkeypatch.setattr(
+        console_router,
+        "_build_provider_binding_lifecycle_map",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_branch_integration_status",
+        lambda **kwargs: ConsoleBranchIntegrationStatus(
+            client_id=kwargs["client_id"],
+            client_slug=kwargs["client_slug"],
+            branch_id=kwargs["branch"].id,
+            branch_slug=kwargs["branch"].slug,
+            branch_name=kwargs["branch"].name,
+            is_active=True,
+            instance_id=kwargs["branch"].instance_id,
+            telegram_chat_id=kwargs["branch"].telegram_chat_id,
+            webhook_url="https://api.truffles.kz/webhook/demo?webhook_secret=abc",
+            webhook_url_valid=True,
+            whatsapp_status="ok",
+            telegram_status="ok",
+            drift_issues=[],
+            status="ok",
+        ),
+    )
+
+    response = await console_router.list_integrations(
+        request=request,
+        stale_after_minutes=60,
+        company_id=str(company_a),
+        client_id=str(client_a),
+        branch_id=str(branch_a),
+        db=db,
+    )
+
+    assert len(response.items) == 1
+    assert response.items[0].client_id == client_a
+    assert response.items[0].branch_id == branch_a
+    assert loader_client_ids == [[client_a]]
 
 
 @pytest.mark.asyncio

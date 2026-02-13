@@ -2437,6 +2437,24 @@ paths:
             maximum: 1440
             default: 60
           description: Mark branch as stale when no inbound for this many minutes.
+        - name: company_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Optional company scope filter.
+        - name: client_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Optional client scope filter.
+        - name: branch_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Optional branch scope filter.
       responses:
         "200":
           description: Integrations registry
