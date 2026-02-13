@@ -15,6 +15,7 @@
   - Added Integrations UI queue panel and action controls with confirmation flow.
   - Added/updated tests for confirmations and integrations provider-ops behavior.
   - Ran deterministic validation checks (backend tests, openapi check, frontend generate+lint).
+  - Fixed CI lint failure (ruff import ordering in `truffles-api/app/routers/console.py`) after PR run.
 - next:
   - Open PR and handoff to merge.
 - evidence:
@@ -25,4 +26,5 @@
   - python3 truffles-api/scripts/generate_openapi.py --check -> passed
   - npm --prefix console-web run generate:api -> passed
   - npm --prefix console-web run lint -- --file src/app/integrations/page.tsx --file src/lib/api-client.ts -> passed
+  - ruff check app tests -> passed
 - last_updated: 2026-02-13
