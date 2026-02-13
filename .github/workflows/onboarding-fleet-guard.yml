@@ -1,0 +1,168 @@
+name: Onboarding Fleet Guard
+
+on:
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+    inputs:
+      allow_non_main:
+        description: "Allow manual run on non-main branch (must be 'true')"
+        type: string
+        default: "false"
+      update_quality_baseline:
+        description: "Update onboarding quality baseline on server (true/false)"
+        type: string
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  fleet-guard:
+    if: ${{ github.ref == 'refs/heads/main' || inputs.allow_non_main == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          KEY_RAW="${{ secrets.SSH_PRIVATE_KEY }}"
+          export KEY_RAW
+          python3 - <<'PY'
+          import base64
+          import os
+          import subprocess
+          from pathlib import Path
+
+          raw = os.environ.get("KEY_RAW", "")
+          key_path = Path.home() / ".ssh" / "id_rsa"
+
+          def normalize(content: str) -> str:
+              content = content.replace("\r", "")
+              if content.startswith('"') and content.endswith('"'):
+                  content = content[1:-1]
+              if not content.endswith("\n"):
+                  content += "\n"
+              return content
+
+          def try_write(content: str) -> bool:
+              key_path.write_text(normalize(content))
+              key_path.chmod(0o600)
+              try:
+                  subprocess.check_output(
+                      ["ssh-keygen", "-yf", str(key_path)],
+                      stderr=subprocess.STDOUT,
+                  )
+                  return True
+              except subprocess.CalledProcessError:
+                  return False
+
+          candidates = [raw, raw.replace("\r", "")]
+          if "\\n" in raw and "\n" not in raw:
+              candidates.append(raw.replace("\\n", "\n"))
+              candidates.append(raw.replace("\\n", "\n").replace("\r", ""))
+          if "\\n" in raw or "\\r" in raw:
+              try:
+                  candidates.append(raw.encode("utf-8").decode("unicode_escape"))
+              except Exception:
+                  pass
+          for b64 in {
+              raw,
+              raw.replace("\n", ""),
+              raw.replace("\r", ""),
+              raw.replace("\\n", ""),
+              raw.replace(" ", ""),
+          }:
+              try:
+                  decoded = base64.b64decode(b64)
+              except Exception:
+                  continue
+              try:
+                  candidates.append(decoded.decode("utf-8"))
+              except UnicodeDecodeError:
+                  candidates.append(decoded.decode("utf-8", errors="ignore"))
+
+          seen = set()
+          for candidate in candidates:
+              if not candidate or not candidate.strip():
+                  continue
+              if candidate in seen:
+                  continue
+              seen.add(candidate)
+              if try_write(candidate):
+                  print("KEY_OK")
+                  raise SystemExit(0)
+
+          print("KEY_INVALID")
+          raise SystemExit(1)
+          PY
+          ssh-keyscan -p "${{ secrets.SERVER_PORT }}" -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Run remote fleet guard
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          UPDATE_BASELINE: ${{ github.event.inputs.update_quality_baseline || 'false' }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SSH=(ssh -i ~/.ssh/id_rsa -p "${SERVER_PORT}" -o StrictHostKeyChecking=yes "${SERVER_USER}@${SERVER_HOST}")
+          SCP=(scp -i ~/.ssh/id_rsa -P "${SERVER_PORT}" -o StrictHostKeyChecking=yes)
+
+          "${SSH[@]}" "RUN_ID='${RUN_ID}' UPDATE_BASELINE='${UPDATE_BASELINE}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          RUN_ID="${RUN_ID:?}"
+          UPDATE_BASELINE="${UPDATE_BASELINE:-false}"
+          cd /home/zhan/truffles-main
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+
+          mkdir -p .ops_state
+          FLEET_JSON="/tmp/onboarding-fleet-check-${RUN_ID}.json"
+          SMOKE_JSON="/tmp/onboarding-quality-smoke-${RUN_ID}.json"
+          BASELINE_JSON="/home/zhan/truffles-main/.ops_state/onboarding-quality-baseline.json"
+          TAR_PATH="/tmp/onboarding-fleet-guard-${RUN_ID}.tar.gz"
+
+          python3 ops/diagnose.py onboarding-fleet-check --json --fail-on-active-missing > "${FLEET_JSON}"
+
+          if [ "${UPDATE_BASELINE}" = "true" ]; then
+            python3 ops/diagnose.py onboarding-quality-smoke \
+              --domains beauty,clinic,legal,ecom \
+              --save-summary "${SMOKE_JSON}" \
+              --json > /tmp/onboarding-quality-smoke-${RUN_ID}.log
+            cp "${SMOKE_JSON}" "${BASELINE_JSON}"
+          elif [ -f "${BASELINE_JSON}" ]; then
+            python3 ops/diagnose.py onboarding-quality-smoke \
+              --domains beauty,clinic,legal,ecom \
+              --baseline-summary "${BASELINE_JSON}" \
+              --fail-on-regression \
+              --save-summary "${SMOKE_JSON}" \
+              --json > /tmp/onboarding-quality-smoke-${RUN_ID}.log
+          else
+            python3 ops/diagnose.py onboarding-quality-smoke \
+              --domains beauty,clinic,legal,ecom \
+              --save-summary "${SMOKE_JSON}" \
+              --json > /tmp/onboarding-quality-smoke-${RUN_ID}.log
+            cp "${SMOKE_JSON}" "${BASELINE_JSON}"
+          fi
+
+          tar -czf "${TAR_PATH}" \
+            "${FLEET_JSON}" \
+            "${SMOKE_JSON}" \
+            "/tmp/onboarding-quality-smoke-${RUN_ID}.log"
+          REMOTE
+
+          "${SCP[@]}" "${SERVER_USER}@${SERVER_HOST}:/tmp/onboarding-fleet-guard-${RUN_ID}.tar.gz" "artifacts/"
+          tar -xzf "artifacts/onboarding-fleet-guard-${RUN_ID}.tar.gz" -C artifacts
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: onboarding-fleet-guard-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/**

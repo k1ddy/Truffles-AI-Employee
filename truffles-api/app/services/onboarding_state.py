@@ -26,6 +26,7 @@ from app.services.onboarding_contract_service import (
     find_capability_mismatches,
     merge_onboarding_contract,
 )
+from app.services.reference_pack_integrity import evaluate_reference_pack_integrity
 
 
 class OnboardingStep(str, Enum):
@@ -79,6 +80,8 @@ class OnboardingInputs:
     payment_confirmed_by: Optional[UUID]
     has_webhook_secret: bool
     has_reference_pack: bool
+    has_reference_pack_integrity: bool
+    reference_pack_integrity_missing: list[str]
     reference_pack_domain_slug: Optional[str]
     capability_mismatches: list[str]
     has_instance_id: bool
@@ -291,16 +294,25 @@ def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
         onboarding_contract.payload.domain_slug or capabilities.payload.domain_slug
     )
     has_reference_pack = False
+    has_reference_pack_integrity = False
+    reference_pack_integrity_missing: list[str] = []
     if reference_pack_domain_slug:
-        has_reference_pack = (
+        reference_pack_record = (
             db.query(ReferencePack)
             .filter(
                 ReferencePack.domain_slug == reference_pack_domain_slug,
                 ReferencePack.status == "active",
             )
             .first()
-            is not None
         )
+        has_reference_pack = reference_pack_record is not None
+        if reference_pack_record:
+            reference_pack_integrity_missing = evaluate_reference_pack_integrity(
+                domain_slug=reference_pack_domain_slug,
+                schema_version=reference_pack_record.schema_version,
+                metadata=reference_pack_record.metadata_json,
+            )
+            has_reference_pack_integrity = len(reference_pack_integrity_missing) == 0
 
     capability_mismatches: list[str] = []
     if capabilities.has_records and onboarding_contract.has_records:
@@ -327,6 +339,8 @@ def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
         payment_confirmed_by=onboarding_contract.payment_confirmed_by,
         has_webhook_secret=has_webhook_secret,
         has_reference_pack=has_reference_pack,
+        has_reference_pack_integrity=has_reference_pack_integrity,
+        reference_pack_integrity_missing=reference_pack_integrity_missing,
         reference_pack_domain_slug=reference_pack_domain_slug,
         capability_mismatches=capability_mismatches,
         has_instance_id=bool(branch.instance_id),
@@ -410,6 +424,11 @@ def missing_prerequisites(step: OnboardingStep, inputs: OnboardingInputs) -> lis
             missing.append("reference_pack_domain")
         elif not inputs.has_reference_pack:
             missing.append("reference_pack")
+        elif not inputs.has_reference_pack_integrity:
+            if inputs.reference_pack_integrity_missing:
+                missing.extend(inputs.reference_pack_integrity_missing)
+            else:
+                missing.append("reference_pack_integrity")
         if inputs.capability_mismatches:
             missing.extend([f"capability_mismatch:{item}" for item in inputs.capability_mismatches])
 
