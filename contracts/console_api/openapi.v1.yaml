@@ -5634,6 +5634,38 @@ components:
           nullable: true
         purchased:
           $ref: "#/components/schemas/CapabilitiesPayload"
+        provider_binding:
+          $ref: "#/components/schemas/OnboardingProviderBindingPayload"
+
+    OnboardingProviderBindingPayload:
+      type: object
+      additionalProperties: false
+      properties:
+        whatsapp:
+          $ref: "#/components/schemas/OnboardingProviderBindingWhatsApp"
+          nullable: true
+
+    OnboardingProviderBindingWhatsApp:
+      type: object
+      additionalProperties: false
+      properties:
+        provider:
+          type: string
+          nullable: true
+        instance_id:
+          type: string
+          nullable: true
+        webhook_status:
+          type: string
+          enum: [configured, pending, rebind_required]
+          nullable: true
+        paid_until:
+          type: string
+          format: date
+          nullable: true
+        notes:
+          type: string
+          nullable: true
 
     OnboardingContractRecord:
       type: object

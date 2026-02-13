@@ -35,7 +35,7 @@ def validate_onboarding_contract_payload(payload_json: dict[str, Any]) -> Onboar
 
 
 def onboarding_contract_payload_to_dict(payload: OnboardingContractPayload) -> dict[str, Any]:
-    data = payload.model_dump(exclude_none=True)
+    data = payload.model_dump(exclude_none=True, mode="json")
     purchased = data.get("purchased")
     if not isinstance(purchased, dict):
         purchased = {}
@@ -43,7 +43,35 @@ def onboarding_contract_payload_to_dict(payload: OnboardingContractPayload) -> d
     purchased.setdefault("channels", {})
     purchased.setdefault("providers", {})
     purchased.setdefault("features", {})
+    provider_binding = data.get("provider_binding")
+    if not isinstance(provider_binding, dict):
+        provider_binding = {}
+        data["provider_binding"] = provider_binding
+    whatsapp_binding = provider_binding.get("whatsapp")
+    if not isinstance(whatsapp_binding, dict):
+        provider_binding["whatsapp"] = {}
     return data
+
+
+def _merge_provider_binding(
+    base: dict[str, Any] | None,
+    override: dict[str, Any] | None,
+) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    if isinstance(base, dict):
+        merged = deepcopy(base)
+
+    whatsapp_base = merged.get("whatsapp")
+    if not isinstance(whatsapp_base, dict):
+        whatsapp_base = {}
+
+    if isinstance(override, dict):
+        whatsapp_override = override.get("whatsapp")
+        if isinstance(whatsapp_override, dict):
+            whatsapp_base = {**whatsapp_base, **whatsapp_override}
+
+    merged["whatsapp"] = whatsapp_base
+    return merged
 
 
 def merge_onboarding_contract(
@@ -75,6 +103,9 @@ def merge_onboarding_contract(
             purchased_override = raw_override_purchased
 
     merged["purchased"] = merge_capabilities(purchased_base, purchased_override)
+    provider_binding_base = merged.get("provider_binding") if isinstance(merged, dict) else None
+    provider_binding_override = override.get("provider_binding") if isinstance(override, dict) else None
+    merged["provider_binding"] = _merge_provider_binding(provider_binding_base, provider_binding_override)
     if "domain_slug" not in merged:
         merged["domain_slug"] = None
     return merged

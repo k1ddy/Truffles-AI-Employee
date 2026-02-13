@@ -70,6 +70,14 @@ async def test_patch_onboarding_contract_updates_existing_payment_fields(monkeyp
             {
                 "domain_slug": "beauty",
                 "purchased": {"channels": {"whatsapp": True}},
+                "provider_binding": {
+                    "whatsapp": {
+                        "provider": "chatflow",
+                        "instance_id": "instance-123",
+                        "webhook_status": "configured",
+                        "paid_until": "2030-01-01",
+                    }
+                },
             }
         ),
     )
@@ -85,6 +93,8 @@ async def test_patch_onboarding_contract_updates_existing_payment_fields(monkeyp
     assert response.payment_confirmed_by == context.agent.id
     assert response.payment_confirmed_at is not None
     assert response.payload.domain_slug == "beauty"
+    assert response.payload.provider_binding.whatsapp is not None
+    assert response.payload.provider_binding.whatsapp.provider == "chatflow"
     db.commit.assert_called_once()
 
 
