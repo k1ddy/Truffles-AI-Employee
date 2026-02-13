@@ -13,6 +13,9 @@ import {
     canAccessConsole,
     confirmationsApi,
     type BranchIntegrationStatus,
+    type IntegrationBranchActionRequest,
+    type ProviderOpsAction,
+    type ProviderOpsQueueItem,
 } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 
@@ -44,6 +47,8 @@ function statusLabel(status: string): string {
         provider_binding_rebind_required: "Provider rebind required",
         provider_binding_expired: "Provider binding expired",
         provider_binding_expiring_soon: "Provider binding expiring soon",
+        provider_binding_alert_critical: "Provider alert critical",
+        provider_binding_alert_warn: "Provider alert warn",
     };
     return labels[status] ?? status;
 }
@@ -120,6 +125,25 @@ function formatTimestamp(value?: string | null): string {
     return new Date(value).toLocaleString("ru-RU");
 }
 
+function providerOpsActionLabel(action: ProviderOpsAction): string {
+    if (action === "provider_start_rebind") {
+        return "Start rebind";
+    }
+    if (action === "provider_complete_rebind") {
+        return "Complete rebind";
+    }
+    if (action === "provider_renewal_confirmed") {
+        return "Confirm renewal";
+    }
+    if (action === "provider_webhook_updated") {
+        return "Update webhook";
+    }
+    if (action === "provider_send_reminder") {
+        return "Send reminder";
+    }
+    return "Reconcile";
+}
+
 function DriftIssues({ item }: { item: BranchIntegrationStatus }) {
     if (!item.drift_issues || item.drift_issues.length === 0) {
         return <span className="text-muted-foreground">—</span>;
@@ -142,7 +166,11 @@ export default function IntegrationsPage() {
     const { data: session } = useSession();
     const { handleError } = useErrorHandler();
     const [staleAfterMinutes, setStaleAfterMinutes] = useState(60);
-    const [runningAction, setRunningAction] = useState<{ branchId: string; mode: "dry_run" | "execute" } | null>(null);
+    const [runningAction, setRunningAction] = useState<{
+        branchId: string;
+        mode: "dry_run" | "execute";
+        action: ProviderOpsAction;
+    } | null>(null);
     const [actionSummaryByBranch, setActionSummaryByBranch] = useState<Record<string, string>>({});
 
     const { data: meData, isLoading: meLoading } = useQuery({
@@ -232,10 +260,16 @@ export default function IntegrationsPage() {
     }
 
     const items = data?.items ?? [];
+    const providerOpsQueue = data?.provider_ops_queue ?? [];
+    const itemByBranch = new Map(items.map((item) => [String(item.branch_id), item]));
 
-    const createReconcileConfirmation = async (branchId: string, reason: string): Promise<string> => {
+    const createBranchConfirmation = async (
+        branchId: string,
+        reason: string,
+        action: "integration_reconcile" | "provider_ops_execute",
+    ): Promise<string> => {
         const confirmation = await confirmationsApi.create({
-            action: "integration_reconcile",
+            action,
             target_type: "branch",
             target_id: branchId,
             reason,
@@ -243,13 +277,123 @@ export default function IntegrationsPage() {
         return confirmation.data.confirmation_id;
     };
 
-    const runBranchReconcile = async (branchId: string, mode: "dry_run" | "execute") => {
-        setRunningAction({ branchId, mode });
+    const defaultExecuteReason = (action: ProviderOpsAction): string => {
+        if (action === "provider_send_reminder") {
+            return "provider lifecycle reminder from integrations queue";
+        }
+        if (action === "provider_renewal_confirmed") {
+            return "provider renewal confirmed by platform admin";
+        }
+        if (action === "provider_webhook_updated") {
+            return "provider webhook updated by platform admin";
+        }
+        if (action === "provider_complete_rebind") {
+            return "provider rebind completed by platform admin";
+        }
+        if (action === "provider_start_rebind") {
+            return "provider rebind started by platform admin";
+        }
+        return "manual integration reconcile from platform admin cockpit";
+    };
+
+    const promptProviderActionPayload = (
+        action: ProviderOpsAction,
+        item: BranchIntegrationStatus,
+    ): Partial<IntegrationBranchActionRequest> | null => {
+        if (action === "provider_send_reminder") {
+            const notes = window.prompt(
+                "Комментарий для reminder (опционально)",
+                `reminder for ${item.branch_slug}`,
+            );
+            if (notes === null) {
+                return null;
+            }
+            return { notes: notes.trim() || undefined };
+        }
+        if (action === "provider_renewal_confirmed") {
+            const renewal = window.prompt(
+                "Укажите paid_until (YYYY-MM-DD)",
+                item.provider_binding_next_renewal_at ?? item.provider_binding_paid_until ?? "",
+            );
+            if (renewal === null) {
+                return null;
+            }
+            const normalized = renewal.trim();
+            if (!normalized) {
+                toast.error("paid_until обязателен для renewal_confirmed");
+                return null;
+            }
+            return { paid_until: normalized };
+        }
+        if (action === "provider_webhook_updated" || action === "provider_complete_rebind") {
+            const instanceId = window.prompt(
+                "Укажите instance_id (оставьте пустым, чтобы не менять)",
+                item.instance_id ?? item.provider_binding_instance_id ?? "",
+            );
+            if (instanceId === null) {
+                return null;
+            }
+            const notes = window.prompt(
+                "Комментарий операции (опционально)",
+                `${providerOpsActionLabel(action)} for ${item.branch_slug}`,
+            );
+            if (notes === null) {
+                return null;
+            }
+            return {
+                instance_id: instanceId.trim() || undefined,
+                notes: notes.trim() || undefined,
+            };
+        }
+        if (action === "provider_start_rebind") {
+            const notes = window.prompt(
+                "Комментарий операции (опционально)",
+                `start rebind for ${item.branch_slug}`,
+            );
+            if (notes === null) {
+                return null;
+            }
+            return { notes: notes.trim() || undefined };
+        }
+        return {};
+    };
+
+    const buildActionSummary = (
+        action: ProviderOpsAction,
+        result: Record<string, unknown>,
+    ): string => {
+        if (action === "integration_reconcile") {
+            return `checked ${result.checked ?? 0} · degraded ${result.degraded ?? 0} · recovered ${result.recovered ?? 0} · remediated ${result.remediated ?? 0}`;
+        }
+        if (action === "provider_send_reminder") {
+            return "reminder recorded";
+        }
+        const bindingAfter = result.binding_after as Record<string, unknown> | undefined;
+        if (bindingAfter) {
+            return [
+                `status ${String(bindingAfter.webhook_status ?? "—")}`,
+                `renewal ${String(bindingAfter.next_renewal_at ?? bindingAfter.paid_until ?? "—")}`,
+                `rebind ${String(bindingAfter.rebind_required ?? "—")}`,
+            ].join(" · ");
+        }
+        return providerOpsActionLabel(action);
+    };
+
+    const runBranchAction = async (
+        branchId: string,
+        action: ProviderOpsAction,
+        mode: "dry_run" | "execute",
+        payload: Partial<IntegrationBranchActionRequest> = {},
+    ) => {
+        setRunningAction({ branchId, mode, action });
         try {
+            const confirmationAction = action === "integration_reconcile" ? "integration_reconcile" : "provider_ops_execute";
             const runAction = async (confirmationId?: string) =>
                 adminApi.reconcileIntegrationBranch(branchId, {
+                    action,
                     mode,
                     confirmation_id: confirmationId,
+                    ...payload,
                 });
 
             let response;
@@ -262,19 +406,19 @@ export default function IntegrationsPage() {
                     throw error;
                 }
                 const reason = window.prompt(
-                    "Укажите причину execute integration_reconcile",
-                    "manual integration reconcile from platform admin cockpit",
+                    `Укажите причину execute ${action}`,
+                    defaultExecuteReason(action),
                 );
                 if (!reason || !reason.trim()) {
                     toast.error("Укажите причину для execute");
                     return;
                 }
-                const confirmationId = await createReconcileConfirmation(branchId, reason.trim());
+                const confirmationId = await createBranchConfirmation(branchId, reason.trim(), confirmationAction);
                 response = await runAction(confirmationId);
             }
 
-            const result = response.data.result || {};
-            const summary = `checked ${result.checked ?? 0} · degraded ${result.degraded ?? 0} · recovered ${result.recovered ?? 0} · remediated ${result.remediated ?? 0}`;
+            const result = (response.data.result ?? {}) as Record<string, unknown>;
+            const summary = buildActionSummary(action, result);
             setActionSummaryByBranch((prev) => ({ ...prev, [branchId]: summary }));
             toast.success(mode === "dry_run" ? "Dry-run выполнен" : "Execute выполнен");
             await refetch();
@@ -283,6 +427,30 @@ export default function IntegrationsPage() {
         } finally {
             setRunningAction(null);
         }
+    };
+
+    const runBranchReconcile = async (branchId: string, mode: "dry_run" | "execute") =>
+        runBranchAction(branchId, "integration_reconcile", mode);
+
+    const runProviderAction = async (
+        item: BranchIntegrationStatus,
+        action: ProviderOpsAction,
+        mode: "dry_run" | "execute" = "execute",
+    ) => {
+        const payload = promptProviderActionPayload(action, item);
+        if (payload === null) {
+            return;
+        }
+        await runBranchAction(String(item.branch_id), action, mode, payload);
+    };
+
+    const runRecommendedQueueAction = async (queueItem: ProviderOpsQueueItem) => {
+        const branch = itemByBranch.get(String(queueItem.branch_id));
+        if (!branch) {
+            toast.error("Branch not found in current integrations list");
+            return;
+        }
+        await runProviderAction(branch, queueItem.recommended_action, "execute");
     };
 
     return (
@@ -319,6 +487,39 @@ export default function IntegrationsPage() {
             <div className="mb-3 text-xs text-muted-foreground" data-testid="integrations-threshold-info">
                 stale_after_minutes: {data?.stale_after_minutes ?? staleAfterMinutes}
             </div>
+
+            {providerOpsQueue.length > 0 && (
+                <div className="mb-4 rounded-lg border border-amber-300/60 bg-amber-50/60 p-4" data-testid="provider-ops-queue">
+                    <div className="mb-2 text-sm font-semibold text-amber-900">
+                        Provider Ops Queue ({providerOpsQueue.length})
+                    </div>
+                    <div className="space-y-2">
+                        {providerOpsQueue.map((queueItem) => (
+                            <div
+                                key={`queue-${queueItem.branch_id}`}
+                                className="flex flex-wrap items-center justify-between gap-3 rounded border border-amber-300/50 bg-background/80 p-2 text-xs"
+                            >
+                                <div>
+                                    <div className="font-medium text-foreground">
+                                        {queueItem.client_slug} / {queueItem.branch_name}
+                                    </div>
+                                    <div className="text-muted-foreground">
+                                        priority {queueItem.priority.toUpperCase()} · reasons: {queueItem.reasons.map((reason) => statusLabel(reason)).join(", ")}
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    className="rounded-full border border-border/60 px-3 py-1 font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onClick={() => runRecommendedQueueAction(queueItem)}
+                                    disabled={!!runningAction}
+                                >
+                                    {providerOpsActionLabel(queueItem.recommended_action)}
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             <div className="bg-card border border-border/60 rounded-lg overflow-hidden" data-testid="integrations-table">
                 <table className="w-full text-left">
@@ -432,7 +633,11 @@ export default function IntegrationsPage() {
                                             onClick={() => runBranchReconcile(String(item.branch_id), "dry_run")}
                                             disabled={!item.is_active || !!runningAction}
                                         >
-                                            {runningAction?.branchId === String(item.branch_id) && runningAction?.mode === "dry_run" ? "Dry-run..." : "Dry-run"}
+                                            {runningAction?.branchId === String(item.branch_id)
+                                                && runningAction?.mode === "dry_run"
+                                                && runningAction?.action === "integration_reconcile"
+                                                ? "Dry-run..."
+                                                : "Dry-run"}
                                         </button>
                                         <button
                                             type="button"
@@ -440,7 +645,68 @@ export default function IntegrationsPage() {
                                             onClick={() => runBranchReconcile(String(item.branch_id), "execute")}
                                             disabled={!item.is_active || !!runningAction}
                                         >
-                                            {runningAction?.branchId === String(item.branch_id) && runningAction?.mode === "execute" ? "Execute..." : "Execute"}
+                                            {runningAction?.branchId === String(item.branch_id)
+                                                && runningAction?.mode === "execute"
+                                                && runningAction?.action === "integration_reconcile"
+                                                ? "Execute..."
+                                                : "Execute"}
+                                        </button>
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onClick={() => runProviderAction(item, "provider_start_rebind", "execute")}
+                                            disabled={!item.is_active || !!runningAction}
+                                        >
+                                            {runningAction?.branchId === String(item.branch_id)
+                                                && runningAction?.action === "provider_start_rebind"
+                                                ? "Start..."
+                                                : "Start rebind"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onClick={() => runProviderAction(item, "provider_complete_rebind", "execute")}
+                                            disabled={!item.is_active || !!runningAction}
+                                        >
+                                            {runningAction?.branchId === String(item.branch_id)
+                                                && runningAction?.action === "provider_complete_rebind"
+                                                ? "Complete..."
+                                                : "Complete rebind"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onClick={() => runProviderAction(item, "provider_renewal_confirmed", "execute")}
+                                            disabled={!item.is_active || !!runningAction}
+                                        >
+                                            {runningAction?.branchId === String(item.branch_id)
+                                                && runningAction?.action === "provider_renewal_confirmed"
+                                                ? "Renewal..."
+                                                : "Renewal"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onClick={() => runProviderAction(item, "provider_webhook_updated", "execute")}
+                                            disabled={!item.is_active || !!runningAction}
+                                        >
+                                            {runningAction?.branchId === String(item.branch_id)
+                                                && runningAction?.action === "provider_webhook_updated"
+                                                ? "Webhook..."
+                                                : "Webhook"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                            onClick={() => runProviderAction(item, "provider_send_reminder", "execute")}
+                                            disabled={!item.is_active || !!runningAction}
+                                        >
+                                            {runningAction?.branchId === String(item.branch_id)
+                                                && runningAction?.action === "provider_send_reminder"
+                                                ? "Reminder..."
+                                                : "Reminder"}
                                         </button>
                                     </div>
                                     <div className="mt-1 text-xs text-muted-foreground">

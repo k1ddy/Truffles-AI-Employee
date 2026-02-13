@@ -1,0 +1,28 @@
+# SESSION 2026-02-13-provider-ops-workflow-a36 — Session 2026-02-13-provider-ops-workflow-a36
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-13-provider-ops-workflow-queue-a36.md
+- branch: feat/2026-02-13-provider-ops-workflow-a36
+- worktree: /home/zhan/worktrees/2026-02-13-provider-ops-workflow-a36
+- base_ref: origin/main
+- scope: Provider Ops workflow actions + queue/reminders for ChatFlow lifecycle in Console Plane.
+- done:
+  - Added provider-ops execute confirmation action and accessible-client confirmation target resolution.
+  - Implemented action-based provider operations in integrations branch action endpoint (rebind start/complete, renewal confirmed, webhook updated, reminder).
+  - Implemented provider ops queue derivation in integrations list response.
+  - Extended OpenAPI contract and regenerated frontend types.
+  - Added Integrations UI queue panel and action controls with confirmation flow.
+  - Added/updated tests for confirmations and integrations provider-ops behavior.
+  - Ran deterministic validation checks (backend tests, openapi check, frontend generate+lint).
+- next:
+  - Open PR and handoff to merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-13-provider-ops-workflow-queue-a36.md
+  - pytest -q truffles-api/tests/test_console_integrations_registry.py -> 16 passed
+  - pytest -q truffles-api/tests/test_console_access_admin_pr2.py -k "integrations or onboarding or provider or confirmation" -> 7 passed
+  - pytest -q truffles-api/tests/test_console_*.py -> 255 passed, 4 warnings
+  - python3 truffles-api/scripts/generate_openapi.py --check -> passed
+  - npm --prefix console-web run generate:api -> passed
+  - npm --prefix console-web run lint -- --file src/app/integrations/page.tsx --file src/lib/api-client.ts -> passed
+- last_updated: 2026-02-13

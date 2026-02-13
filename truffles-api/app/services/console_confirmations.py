@@ -19,6 +19,7 @@ CONFIRMATION_ACTIONS = {
     "knowledge_rollback": "knowledge_version",
     "branch_deactivate": "branch",
     "integration_reconcile": "branch",
+    "provider_ops_execute": "branch",
 }
 
 
@@ -26,6 +27,12 @@ CONFIRMATION_ACTIONS = {
 class ConfirmationTarget:
     client_id: UUID
     branch_id: Optional[UUID]
+
+
+def _accessible_client_ids(context: ConsoleAuthContext) -> set[UUID]:
+    client_ids = {context.client.id}
+    client_ids.update(client.id for client in (context.accessible_clients or []) if client and client.id)
+    return client_ids
 
 
 def _normalize_reason(reason: str) -> str:
@@ -47,7 +54,7 @@ def _resolve_target(
         branch = db.query(Branch).filter(Branch.id == target_id).first()
         if not branch:
             raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
-        if branch.client_id != context.client.id:
+        if branch.client_id not in _accessible_client_ids(context):
             raise ConsoleAPIError(403, "TENANT_MISMATCH", "Branch access denied")
         if context.effective_branch_id and context.effective_branch_id != branch.id:
             raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Branch access denied")
@@ -57,7 +64,7 @@ def _resolve_target(
         version = db.query(KnowledgeVersion).filter(KnowledgeVersion.id == target_id).first()
         if not version:
             raise ConsoleAPIError(404, "NOT_FOUND", "Knowledge version not found")
-        if version.client_id != context.client.id:
+        if version.client_id not in _accessible_client_ids(context):
             raise ConsoleAPIError(403, "TENANT_MISMATCH", "Knowledge access denied")
         if context.effective_branch_id and context.effective_branch_id != version.branch_id:
             raise ConsoleAPIError(403, "BRANCH_ACCESS_DENIED", "Branch access denied")
@@ -143,7 +150,7 @@ def require_confirmation(
     if confirmation.actor_id != context.agent.id:
         _record_confirmation_failure(db, context, confirmation_id, action, target_type, target_id, "actor_mismatch")
         raise ConsoleAPIError(409, "CONFIRMATION_REQUIRED", "Confirmation mismatch")
-    if confirmation.client_id != context.client.id:
+    if confirmation.client_id not in _accessible_client_ids(context):
         _record_confirmation_failure(db, context, confirmation_id, action, target_type, target_id, "tenant_mismatch")
         raise ConsoleAPIError(409, "CONFIRMATION_REQUIRED", "Confirmation mismatch")
     if confirmation.branch_id and context.effective_branch_id and confirmation.branch_id != context.effective_branch_id:
