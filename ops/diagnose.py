@@ -4736,16 +4736,31 @@ def _llm_quality_evaluate_turn(
         calendar_outcome = _llm_quality_normalize_tool_token(calendar_signal.get("outcome"))
     intent_value = _llm_quality_effective_intent(meta if isinstance(meta, dict) else None)
     meta_action_value = _llm_quality_normalize_tool_token(meta_action)
+    meta_intent_value = _llm_quality_normalize_tool_token(
+        (meta or {}).get("intent") if isinstance(meta, dict) else None
+    )
+    meta_source_value = _llm_quality_normalize_tool_token(
+        (meta or {}).get("source") if isinstance(meta, dict) else None
+    )
     appointment_id = (meta or {}).get("appointment_id") if isinstance(meta, dict) else None
     appointment_status = _llm_quality_normalize_tool_token(
         (meta or {}).get("appointment_status") if isinstance(meta, dict) else None
     )
+    booking_verification_handoff = bool(
+        state in {"pending", "manager_active"}
+        and meta_action_value == "escalate"
+        and meta_intent_value == "check_booking"
+        and meta_source_value in {"booking_verification", "tool_registry"}
+    )
     requires_calendar_contract = bool(
-        appointment_id
-        or appointment_status in LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS
-        or meta_action_value == "booking_confirm"
-        or intent_value == "calendar.get_booking"
-        or _llm_quality_is_booking_confirmation_text(outbox_text)
+        not booking_verification_handoff
+        and (
+            appointment_id
+            or appointment_status in LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS
+            or meta_action_value == "booking_confirm"
+            or intent_value == "calendar.get_booking"
+            or _llm_quality_is_booking_confirmation_text(outbox_text)
+        )
     )
     if requires_calendar_contract and calendar_outcome != "success":
         reasons.append("calendar_tool_contract_miss")

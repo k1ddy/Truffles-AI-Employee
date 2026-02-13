@@ -3203,6 +3203,8 @@ def _looks_like_time_only_request(message_text: str | None) -> bool:
 
 BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration", "location", "parking", "master"}
 INFO_INTENTS = {"pricing", "hours", "duration", "location", "parking", "promotions", "master", "contact"}
+INFO_SERVICE_DEPENDENT_INTENTS = {"pricing", "duration"}
+INFO_NON_SERVICE_INTENTS = {"hours", "location", "parking", "promotions", "master", "contact"}
 INFO_INTENT_HINTS = (
     ("parking", {"parking"}),
     ("парков", {"parking"}),
@@ -3303,6 +3305,7 @@ SESSION_MEMORY_RESET_PHRASES = (
 BOOKING_VERIFICATION_PATTERNS = (
     re.compile(r"\bпров\w*\b.*\b(запис|брон|бронир)\w*"),
     re.compile(r"\bподтверд\w*\b.*\b(запис|брон|бронир)\w*"),
+    re.compile(r"\bподтверд\w*\b.*\b(дат|врем)\w*"),
     re.compile(r"\b(жду|ожидаю|не получил\w*)\b.*\b(подтвержд|ответ)\w*"),
     re.compile(r"\b(изменить|поменять|перенести)\b.*\b(время|запис)\w*"),
     re.compile(r"\b(check|verify|confirm)\b.*\b(booking|appointment|reservation)\b"),
@@ -3428,6 +3431,12 @@ def _derive_service_clarify_info_sections(*sources: Any) -> list[str]:
             if normalized in INFO_INTENTS and normalized not in sections:
                 sections.append(normalized)
     return sections
+
+
+def _should_collect_service_for_info(policy_info_set: set[str]) -> bool:
+    return bool(policy_info_set & INFO_SERVICE_DEPENDENT_INTENTS) and not bool(
+        policy_info_set & INFO_NON_SERVICE_INTENTS
+    )
 
 
 def _normalize_policy_action_from_tool_action(
@@ -9024,7 +9033,12 @@ async def _handle_webhook_payload(
                     client_slug=payload.client_slug,
                 )
             policy_info_set = set(policy_info_intents)
-            requires_service = bool({"pricing", "duration"} & policy_info_set)
+            if policy_info_set & INFO_NON_SERVICE_INTENTS:
+                policy_info_intents = [
+                    ref for ref in policy_info_intents if ref in INFO_NON_SERVICE_INTENTS
+                ] or sorted(policy_info_set & INFO_NON_SERVICE_INTENTS)
+                policy_info_set = set(policy_info_intents)
+            requires_service = _should_collect_service_for_info(policy_info_set)
             if requires_service and not policy_service_query:
                 clarify_sections = _derive_service_clarify_info_sections(policy_info_intents)
                 context = _get_conversation_context(conversation)

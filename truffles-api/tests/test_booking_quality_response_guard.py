@@ -40,6 +40,7 @@ def _load_evaluate_turn():
     tree = ast.parse(source, filename=str(script_path))
     wanted_functions = {
         "_llm_quality_evaluate_turn",
+        "_llm_quality_effective_intent",
         "_llm_quality_is_booking_confirmation_text",
         "_llm_quality_normalize_tool_token",
         "_llm_quality_outbox_delivery_state",
@@ -594,6 +595,38 @@ def test_calendar_contract_miss_reported_for_get_booking_without_success():
         tool_signals={"calendar": {"outcome": "failure"}},
     )
     assert "calendar_tool_contract_miss" in reasons
+
+
+def test_calendar_contract_miss_not_reported_for_booking_verification_handoff_in_pending():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={
+            "action": "escalate",
+            "intent": "check_booking",
+            "source": "booking_verification",
+        },
+        trace_entries=[{"stage": "booking_verification"}],
+        state="pending",
+        conv_meta={},
+        handover_meta={"handover_id": "h-1"},
+        bot_response=True,
+        expected_response=False,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Передал менеджеру.",
+        tool_signals={"calendar": {"outcome": "pending"}},
+    )
+    assert "calendar_tool_contract_miss" not in reasons
 
 
 def test_state_fallback_allows_pending_when_expected_bot_active():

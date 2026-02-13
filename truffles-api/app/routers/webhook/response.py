@@ -124,6 +124,15 @@ def _should_append_booking_cta(
     return True
 
 
+def _should_route_explicit_info_to_main_flow(
+    *, consult_short_circuit: bool, consult_short_circuit_reason: str | None
+) -> bool:
+    return bool(
+        consult_short_circuit
+        and consult_short_circuit_reason in {"explicit_info", "explicit_info_unknown_topic"}
+    )
+
+
 def _compose_fact_response(
     bot_response: str | None,
     *,
@@ -1559,10 +1568,9 @@ def _handle_consult_flow(
             )
             consult_flow_decision = "consult_clarify"
 
-    route_explicit_info_to_main_flow = (
-        consult_short_circuit
-        and consult_short_circuit_reason in {"explicit_info", "explicit_info_unknown_topic"}
-        and not (consult_decision and consult_decision.action == "reply")
+    route_explicit_info_to_main_flow = _should_route_explicit_info_to_main_flow(
+        consult_short_circuit=consult_short_circuit,
+        consult_short_circuit_reason=consult_short_circuit_reason,
     )
     if route_explicit_info_to_main_flow:
         consult_signal = False

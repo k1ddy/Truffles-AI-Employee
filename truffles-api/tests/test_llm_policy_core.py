@@ -49,3 +49,10 @@ def test_derive_policy_info_refs_accepts_slot_style_hours_hint():
     )
 
     assert "hours" in refs
+
+
+def test_should_collect_service_for_info_only_when_service_dependent():
+    assert decision_router._should_collect_service_for_info({"pricing"}) is True
+    assert decision_router._should_collect_service_for_info({"duration"}) is True
+    assert decision_router._should_collect_service_for_info({"duration", "hours"}) is False
+    assert decision_router._should_collect_service_for_info({"pricing", "location"}) is False
