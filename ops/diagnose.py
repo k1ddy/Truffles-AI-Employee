@@ -2064,11 +2064,7 @@ def _chaos_booking_reply_active(conv_meta):
 
 def _chaos_reply_type_fallback_ok(expected_reply_type, actual_reply, meta, conv_meta, trace_entries):
     if expected_reply_type in CHAOS_BOOKING_REPLY_TYPES:
-        intent = (
-            str((meta or {}).get("intent") or "").strip().lower()
-            if isinstance(meta, dict)
-            else ""
-        )
+        intent = _llm_quality_effective_intent(meta if isinstance(meta, dict) else None)
         tool_decision = (
             str((meta or {}).get("tool_decision") or "").strip().lower()
             if isinstance(meta, dict)
@@ -2138,11 +2134,7 @@ def _chaos_state_fallback_ok(expected_state, actual_state, meta, conv_meta, hand
         if isinstance(meta, dict)
         else ""
     )
-    intent_value = (
-        _llm_quality_normalize_tool_token((meta or {}).get("intent"))
-        if isinstance(meta, dict)
-        else ""
-    )
+    intent_value = _llm_quality_effective_intent(meta if isinstance(meta, dict) else None)
     if expected_state == "pending":
         if action in CHAOS_PENDING_ACTIONS or pending_action in CHAOS_PENDING_ACTIONS:
             return True
@@ -2732,7 +2724,7 @@ def _llm_quality_should_expect_booking_progress(expected_reply_type, turn_tags, 
     if expected_reply_type not in CHAOS_BOOKING_REPLY_TYPES:
         return False
     if isinstance(meta, dict):
-        intent_value = _llm_quality_normalize_tool_token(meta.get("intent"))
+        intent_value = _llm_quality_effective_intent(meta)
         tool_decision_value = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
         if (
             intent_value == "calendar.list_slots"
@@ -2766,7 +2758,7 @@ def _llm_quality_check_booking_tool_answered(meta, turn_tags, outbox_text):
         return False
     if meta.get("action") != "reply":
         return False
-    if meta.get("intent") != "calendar.get_booking":
+    if _llm_quality_effective_intent(meta) != "calendar.get_booking":
         return False
     normalized_tags = {
         str(tag).strip().lower()
@@ -3361,6 +3353,24 @@ def _llm_quality_normalize_tool_token(value: object | None) -> str:
     return str(value).strip().lower()
 
 
+def _llm_quality_effective_intent(meta: dict | None) -> str:
+    if not isinstance(meta, dict):
+        return ""
+    intent = _llm_quality_normalize_tool_token(meta.get("intent"))
+    if intent in {"check_booking", "check_record"}:
+        return "calendar.get_booking"
+    if intent:
+        return intent
+    llm_policy_core = meta.get("llm_policy_core")
+    if isinstance(llm_policy_core, dict):
+        payload = llm_policy_core.get("payload")
+        if isinstance(payload, dict):
+            tool_action = _llm_quality_normalize_tool_token(payload.get("tool_action"))
+            if tool_action:
+                return tool_action
+    return ""
+
+
 def _llm_quality_tool_outcome_from_decision(decision: object | None) -> str:
     if decision is True:
         return "success"
@@ -3400,7 +3410,7 @@ def _llm_quality_extract_tool_signals(meta, trace_entries):
     if not isinstance(meta, dict):
         return {}
     action = _llm_quality_normalize_tool_token(meta.get("action"))
-    intent = _llm_quality_normalize_tool_token(meta.get("intent"))
+    intent = _llm_quality_effective_intent(meta)
     tool_decision = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
     slot_required = bool(meta.get("slot_confirmation_required"))
     slot_decision = meta.get("slot_confirmation_decision")
@@ -4292,7 +4302,11 @@ def _llm_quality_build_tool_evidence_status(
     booking_commit_trace_events = _as_int(trace_stages.get("booking_commit"))
     booking_confirm_trace_events = _as_int(trace_stages.get("booking_confirm"))
     booking_confirm_actions = _as_int(actions.get("booking_confirm"))
-    check_booking_intents = _as_int(intents.get("calendar.get_booking"))
+    check_booking_intents = (
+        _as_int(intents.get("calendar.get_booking"))
+        + _as_int(intents.get("check_booking"))
+        + _as_int(intents.get("check_record"))
+    )
 
     calendar_evidence_total = (
         calendar_tool_events + calendar_hook_events + booking_commit_trace_events
@@ -4654,7 +4668,7 @@ def _llm_quality_evaluate_turn(
         reasons.append("info_section_miss")
     booking_stall_ignored = False
     if isinstance(meta, dict):
-        intent_value = _llm_quality_normalize_tool_token(meta.get("intent"))
+        intent_value = _llm_quality_effective_intent(meta)
         tool_decision = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
         if intent_value == "calendar.get_booking" and tool_decision in {"ok", "time_mismatch", "not_found"}:
             booking_stall_ignored = True
@@ -4673,9 +4687,7 @@ def _llm_quality_evaluate_turn(
     calendar_outcome = ""
     if isinstance(calendar_signal, dict):
         calendar_outcome = _llm_quality_normalize_tool_token(calendar_signal.get("outcome"))
-    intent_value = ""
-    if isinstance(meta, dict):
-        intent_value = _llm_quality_normalize_tool_token(meta.get("intent"))
+    intent_value = _llm_quality_effective_intent(meta if isinstance(meta, dict) else None)
     meta_action_value = _llm_quality_normalize_tool_token(meta_action)
     appointment_id = (meta or {}).get("appointment_id") if isinstance(meta, dict) else None
     appointment_status = _llm_quality_normalize_tool_token(
@@ -8357,7 +8369,7 @@ def _run_llm_quality(args):
                     coverage_stats["actions"][action_value] = (
                         coverage_stats["actions"].get(action_value, 0) + 1
                     )
-                intent_value = (meta or {}).get("intent") if isinstance(meta, dict) else None
+                intent_value = _llm_quality_effective_intent(meta if isinstance(meta, dict) else None)
                 if intent_value:
                     coverage_stats["intents"][intent_value] = (
                         coverage_stats["intents"].get(intent_value, 0) + 1
@@ -8563,7 +8575,7 @@ def _run_llm_quality(args):
                     if progress_expected and info_tags and expected_reply_matched is not True:
                         progress_expected = False
                     if progress_expected and isinstance(meta, dict):
-                        intent_value = _llm_quality_normalize_tool_token(meta.get("intent"))
+                        intent_value = _llm_quality_effective_intent(meta)
                         tool_decision_value = _llm_quality_normalize_tool_token(
                             meta.get("tool_decision")
                         )

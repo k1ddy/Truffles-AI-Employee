@@ -181,4 +181,28 @@
     - `TEST_MODE=1 DIAGNOSE_PSQL_TIMEOUT_SEC=20 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18110 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-20260213-a1-toolgate7-realistic/scenarios.json --count 10 --timeout-profile realistic --manager-mode simulate --pending-mode ack --tool-hooks auto --tool-confirm-text "да, подтверждаю запись" --tool-calendar-text "проверь мою запись" --tool-evidence-policy strict --judge-mode all --skip-outbox --reset-before-dialog --fail-on-thresholds --run-id booking-replay-20260213-a1-toolgate9-realistic`
     - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:8000 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-20260213-a1-toolgate7-realistic/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-20260213-a1-toolgate7-realistic/summary.json --count 10 --tool-hooks auto --tool-confirm-text "да, подтверждаю запись" --tool-calendar-text "проверь мою запись" --reset-before-dialog --jid-mode unique --skip-outbox --judge-mode all --timeout-profile realistic --fail-on-thresholds --fail-on-regression --run-id booking-replay-20260213-a1-toolgate11-realistic`
     - `pytest -q truffles-api/tests/test_booking_quality_output_dir_guard.py truffles-api/tests/test_booking_quality_openai_key_resolution.py truffles-api/tests/test_webhook_booking.py`
-- last_updated: 2026-02-13T09:52:18+05:00
+- last_updated: 2026-02-13T11:10:03+05:00
+- updates (2026-02-13 continuation):
+  - Fixed `llm-quality` intent normalization for tool evidence:
+    - Added `_llm_quality_effective_intent` in `ops/diagnose.py`.
+    - `check_booking/check_record` are normalized to `calendar.get_booking` for signal extraction, strict checks, booking-progress guards, and coverage counters.
+    - `tool_evidence` strict gate now counts `check_booking/check_record` aliases as confirm candidates.
+  - Added policy-core fallback for info refs from slot hints:
+    - `decision.py`: when `tool_action=info` and `pack_refs` are empty, derive refs from `slots.service` hint (e.g., `hours`, `parking`) before declaring `pack_refs_missing`.
+  - Expanded low-confidence allowlist for policy-core calendar updates:
+    - `decision.py`: `LLM_POLICY_CORE_LOW_CONFIDENCE_TOOL_ALLOWLIST` now includes `calendar.reschedule` to avoid degraded collect loop on valid reschedule turns.
+  - Reinforced parking lexical fallback:
+    - `demo_salon_knowledge.py`: parking markers include `паркир`.
+  - Realistic full replay evidence (frozen scenarios):
+    - `booking-replay-20260213-a1-toolgate13-localfix` (`count=10`, strict tool evidence, judge all, unique JID, skip-outbox).
+    - Result: `infra_valid=true`, `semantic_valid=false` (regression breach only on `degraded_fallback_rate`), `strict_pass_rate=0.9766`, `hard_fail_rate=0.0`, `failure_counts={expected_reply_type_mismatch:1, judge_fail:2}`.
+    - Confirm/tool evidence now valid at scale: `check_booking_intents=7`, `confirm_tool_events=9`, `confirm_hook_events=5`, `tool_evidence.valid=true`.
+  - Realistic focus replay evidence after latest logic fixes:
+    - `booking-replay-20260213-a1-toolgate15-focusfix` (`count=4`, same strict settings).
+    - Result: `infra_valid=true`, `semantic_valid=true`, `strict_pass_rate=0.9412`, `hard_fail_rate=0.0`, `degraded_fallback_rate=0.0`, `failure_counts={expected_reply_type_mismatch:1, judge_fail:2}`.
+    - Delta vs previous focus baseline `booking-replay-20260213-a1-toolgate12-focus`:
+      - `infra_valid: false -> true`
+      - `semantic_valid: false -> true`
+      - `strict_pass_rate: 0.7843 -> 0.9412`
+      - `degraded_fallback_rate: 0.4375 -> 0.0`
+      - `tool_evidence.confirm_candidate_missing/confirm_evidence_missing/confirm_hook_missing`: removed.

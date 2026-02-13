@@ -1324,7 +1324,10 @@ def _has_parking_signal(normalized: str, *, client_slug: str | None = None) -> b
         return True
     # Keep deterministic marker fallback for colloquial parking asks when
     # tenant lexicon misses a specific phrase (e.g. "паркинг возле салона").
-    if any(marker in normalized for marker in ("парков", "паркинг", "стоян", "тұрақ", "турак")):
+    if any(
+        marker in normalized
+        for marker in ("парков", "паркинг", "паркир", "стоян", "тұрақ", "турак")
+    ):
         return True
     machine_prefixes = get_signal_lexicon_list(client_slug, "parking_machine_prefixes")
     if machine_prefixes and any(prefix in normalized for prefix in machine_prefixes):

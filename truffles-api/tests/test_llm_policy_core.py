@@ -1,4 +1,5 @@
 from app.schemas.intent import validate_llm_policy_core_output
+from app.routers.webhook import decision as decision_router
 
 
 def test_validate_llm_policy_core_output_valid():
@@ -34,3 +35,17 @@ def test_validate_llm_policy_core_output_invalid():
 
     assert contract is None
     assert error is not None
+
+
+def test_low_confidence_allowlist_includes_reschedule():
+    assert "calendar.reschedule" in decision_router.LLM_POLICY_CORE_LOW_CONFIDENCE_TOOL_ALLOWLIST
+
+
+def test_derive_policy_info_refs_accepts_slot_style_hours_hint():
+    refs = decision_router._derive_policy_info_refs(
+        policy_intent="hours",
+        message_text="а как у вас там",
+        client_slug="demo_salon",
+    )
+
+    assert "hours" in refs

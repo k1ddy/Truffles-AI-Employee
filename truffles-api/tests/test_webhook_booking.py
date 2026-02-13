@@ -95,6 +95,17 @@ def test_booking_confirmation_deferred_for_info_interrupt():
     assert deferred is True
 
 
+def test_booking_flow_deferred_for_info_interrupt():
+    deferred = booking_router._should_defer_booking_flow_for_info_interrupt(
+        booking_active=True,
+        booking_signal=False,
+        booking_related=False,
+        basic_info_message=True,
+    )
+
+    assert deferred is True
+
+
 @pytest.mark.parametrize(
     "message_text,expected",
     [

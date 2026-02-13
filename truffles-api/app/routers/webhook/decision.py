@@ -3188,6 +3188,7 @@ LLM_POLICY_CORE_ALLOWED_TOOL_ACTIONS = LLM_PLAN_ALLOWED_TOOL_ACTIONS
 LLM_POLICY_CORE_LOW_CONFIDENCE_TOOL_ALLOWLIST = {
     "calendar.list_slots",
     "calendar.get_booking",
+    "calendar.reschedule",
     "catalog.service_query",
     "catalog.location",
     "catalog.portfolio",
@@ -7044,6 +7045,14 @@ async def _handle_webhook_payload(
                         message_text=message_text,
                         client_slug=payload.client_slug,
                     )
+                    if not policy_pack_refs:
+                        slot_service_hint = policy_slot_state_normalized.get("service")
+                        if isinstance(slot_service_hint, str) and slot_service_hint.strip():
+                            policy_pack_refs = _derive_policy_info_refs(
+                                policy_intent=slot_service_hint,
+                                message_text=slot_service_hint,
+                                client_slug=payload.client_slug,
+                            )
                 if policy_validation_error is None:
                     allowed_info_map = {ref.casefold(): ref for ref in info_refs}
                     allowed_consult_map = {ref.casefold(): ref for ref in consult_refs}

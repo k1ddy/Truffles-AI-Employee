@@ -15,6 +15,7 @@ def _load_tool_evidence_helpers():
     }
     wanted_functions = {
         "_llm_quality_normalize_tool_token",
+        "_llm_quality_effective_intent",
         "_llm_quality_tool_outcome_from_decision",
         "_llm_quality_calendar_outcome_from_meta",
         "_llm_quality_extract_tool_signals",
@@ -73,6 +74,28 @@ def test_extract_tool_signals_marks_get_booking_not_found_as_successful_tool_cal
     assert signals["confirm"]["required"] is True
 
 
+def test_extract_tool_signals_normalizes_check_booking_intent_to_confirm_signal():
+    ns = _load_tool_evidence_helpers()
+    extract_tool_signals = ns["_llm_quality_extract_tool_signals"]
+
+    signals = extract_tool_signals(
+        {
+            "action": "escalate",
+            "intent": "check_booking",
+            "llm_policy_core": {
+                "payload": {
+                    "tool_action": "calendar.get_booking",
+                }
+            },
+        },
+        [],
+    )
+
+    assert signals["confirm"]["required"] is True
+    assert signals["calendar"]["intent"] == "check_booking"
+    assert signals["calendar"]["outcome"] == "pending"
+
+
 def test_tool_evidence_strict_policy_blocks_missing_calendar_and_confirm_evidence():
     ns = _load_tool_evidence_helpers()
     build_tool_evidence_status = ns["_llm_quality_build_tool_evidence_status"]
@@ -120,3 +143,24 @@ def test_tool_evidence_strict_policy_accepts_runs_with_calendar_and_confirm_proo
 
     assert tool_evidence["valid"] is True
     assert tool_evidence["reasons"] == []
+
+
+def test_tool_evidence_strict_policy_counts_check_booking_alias_intents():
+    ns = _load_tool_evidence_helpers()
+    build_tool_evidence_status = ns["_llm_quality_build_tool_evidence_status"]
+
+    tool_evidence = build_tool_evidence_status(
+        scenario_coverage="booking,info,interrupt",
+        tool_hooks_mode="auto",
+        tool_evidence_policy="strict",
+        coverage_stats={
+            "intents": {"check_booking": 2, "calendar.list_slots": 4},
+            "actions": {},
+            "trace_stages": {},
+            "tools": {"events": {"calendar": 4, "confirm": 2}},
+            "tool_hooks": {"by_action": {"calendar": 1, "confirm": 1}},
+        },
+    )
+
+    assert tool_evidence["valid"] is True
+    assert tool_evidence["counts"]["check_booking_intents"] == 2

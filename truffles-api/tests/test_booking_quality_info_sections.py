@@ -128,3 +128,8 @@ def test_parking_signal_accepts_machine_phrase_with_parking_context():
 def test_parking_signal_accepts_colloquial_parking_wording():
     normalized = demo_salon_knowledge._normalize_text("Подскажите, есть ли паркинг возле салона?")
     assert demo_salon_knowledge._has_parking_signal(normalized, client_slug="demo_salon") is True
+
+
+def test_parking_signal_accepts_parkirovat_wording():
+    normalized = demo_salon_knowledge._normalize_text("Где можно паркировать машину?")
+    assert demo_salon_knowledge._has_parking_signal(normalized, client_slug="demo_salon") is True
