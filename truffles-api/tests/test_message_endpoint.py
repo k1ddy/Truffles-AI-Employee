@@ -12243,6 +12243,9 @@ def test_booking_verification_handoff_intent_detection():
     assert not webhook_router._looks_like_booking_verification_request(
         "Мне нужно изменить время записи.",
     )
+    assert webhook_router._looks_like_booking_verification_request(
+        "Подтвердите, пожалуйста, новую дату.",
+    )
 
 
 def test_style_reference_photo_keeps_booking_context_active():

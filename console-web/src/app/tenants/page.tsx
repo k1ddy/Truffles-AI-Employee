@@ -105,6 +105,18 @@ type BranchEditorState = {
     };
 };
 
+type QuickCreateFormState = {
+    companyName: string;
+    clientSlug: string;
+    branchName: string;
+    branchSlug: string;
+    branchTimezone: string;
+    branchPhone: string;
+    branchInstanceId: string;
+    companyId: string;
+    clientId: string;
+};
+
 type BranchChangeRecord = components["schemas"]["BranchChangeRecord"];
 
 type TenantLifecycleMode = "active" | "archived" | "all";
@@ -819,6 +831,18 @@ export default function TenantsPage() {
     const [weeklySnapshots, setWeeklySnapshots] = useState<TenantsOperationalSnapshot[]>([]);
     const [runningMetricsSnapshotMode, setRunningMetricsSnapshotMode] = useState<"dry_run" | "execute" | null>(null);
     const [lastMetricsSnapshotJob, setLastMetricsSnapshotJob] = useState<components["schemas"]["OpsJobRecord"] | null>(null);
+    const [quickCreateForm, setQuickCreateForm] = useState<QuickCreateFormState>({
+        companyName: "",
+        clientSlug: "",
+        branchName: "",
+        branchSlug: "",
+        branchTimezone: "Asia/Almaty",
+        branchPhone: "",
+        branchInstanceId: "",
+        companyId: "",
+        clientId: "",
+    });
+    const [quickCreateRunning, setQuickCreateRunning] = useState<"company" | "client" | "branch" | null>(null);
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -859,6 +883,8 @@ export default function TenantsPage() {
         }
         return knownBranches.find((branch) => branch.id === selectedBranchId)?.name ?? null;
     }, [knownBranches, selectedBranchId]);
+    const quickCreateCompanyId = quickCreateForm.companyId || selectedCompanyId || "";
+    const quickCreateClientId = quickCreateForm.clientId || selectedClientId || "";
 
     const tenantsEnabled = Boolean(session && canReadTenants);
     const companyQueryValue = companyQuery.trim() || undefined;
@@ -1246,6 +1272,134 @@ export default function TenantsPage() {
     const setBranchContext = (branchId?: string | null) => {
         setLocalStorageValue(BRANCH_ID_STORAGE_KEY, branchId ?? null);
         refreshContext();
+    };
+
+    const handleQuickCreateCompany = async () => {
+        const companyName = quickCreateForm.companyName.trim();
+        if (!companyName) {
+            toast.error("Укажите название компании");
+            return;
+        }
+        setQuickCreateRunning("company");
+        try {
+            const response = await adminApi.createCompany({ name: companyName });
+            const companyId = response.data.company?.id;
+            if (!companyId) {
+                toast.error("Компания создана, но company_id не вернулся");
+                return;
+            }
+            setQuickCreateForm((prev) => ({
+                ...prev,
+                companyId,
+                companyName,
+            }));
+            setCompanyContext(companyId);
+            refreshTenants();
+            toast.success("Компания создана");
+        } catch (error) {
+            handleError(error);
+        } finally {
+            setQuickCreateRunning(null);
+        }
+    };
+
+    const handleQuickCreateClient = async () => {
+        const slug = quickCreateForm.clientSlug.trim().toLowerCase();
+        const companyId = quickCreateCompanyId;
+        if (!companyId) {
+            toast.error("Сначала выберите или создайте компанию");
+            return;
+        }
+        if (!slug) {
+            toast.error("Укажите slug клиента");
+            return;
+        }
+        if (!SLUG_INPUT_PATTERN.test(slug)) {
+            toast.error("slug: [a-z0-9_-], без пробелов");
+            return;
+        }
+        setQuickCreateRunning("client");
+        try {
+            const response = await adminApi.createClient({
+                slug,
+                company_id: companyId,
+            });
+            const clientId = response.data.client?.id;
+            if (!clientId) {
+                toast.error("Клиент создан, но client_id не вернулся");
+                return;
+            }
+            setQuickCreateForm((prev) => ({
+                ...prev,
+                clientSlug: slug,
+                companyId,
+                clientId,
+            }));
+            setClientContext(clientId, companyId);
+            refreshTenants();
+            toast.success("Клиент создан");
+        } catch (error) {
+            handleError(error);
+        } finally {
+            setQuickCreateRunning(null);
+        }
+    };
+
+    const handleQuickCreateBranch = async () => {
+        const clientId = quickCreateClientId;
+        const branchName = quickCreateForm.branchName.trim();
+        const branchSlug = quickCreateForm.branchSlug.trim().toLowerCase();
+        const timezone = quickCreateForm.branchTimezone.trim();
+        const phone = quickCreateForm.branchPhone.trim();
+        const instanceId = quickCreateForm.branchInstanceId.trim();
+        if (!clientId) {
+            toast.error("Сначала выберите или создайте клиента");
+            return;
+        }
+        if (!branchName || !branchSlug) {
+            toast.error("Укажите название и slug филиала");
+            return;
+        }
+        if (!SLUG_INPUT_PATTERN.test(branchSlug)) {
+            toast.error("branch slug: [a-z0-9_-], без пробелов");
+            return;
+        }
+        if (timezone && !isValidTimezoneName(timezone)) {
+            toast.error("timezone должен быть в формате IANA, например Asia/Almaty");
+            return;
+        }
+        if (phone && !BRANCH_PHONE_INPUT_PATTERN.test(phone)) {
+            toast.error("phone: 7-15 цифр (допускаются +, пробелы, скобки и -)");
+            return;
+        }
+        if (instanceId && !phone) {
+            toast.error("Для instance_id укажите phone филиала");
+            return;
+        }
+        setQuickCreateRunning("branch");
+        try {
+            const response = await adminApi.createBranch({
+                client_id: clientId,
+                name: branchName,
+                slug: branchSlug,
+                timezone: timezone || undefined,
+                phone: phone || undefined,
+                instance_id: instanceId || undefined,
+                is_active: Boolean(phone && instanceId),
+            });
+            const branchId = response.data.branch?.id;
+            if (!branchId) {
+                toast.error("Филиал создан, но branch_id не вернулся");
+                return;
+            }
+            setBranchContext(branchId);
+            refreshTenants();
+            toast.success("Филиал создан и выбран в контексте");
+        } catch (error) {
+            handleError(error);
+        } finally {
+            setQuickCreateRunning(null);
+        }
     };
 
     const openClientContextTarget = (target: "/" | "/integrations" | "/ops", clientId?: string | null, companyId?: string | null) => {
@@ -2049,6 +2203,128 @@ export default function TenantsPage() {
                         Порядок работы: `Action Queue`, затем контекст клиента, затем профильная зона, затем подтверждение результата через trace/audit.
                     </div>
                 </div>
+                {canWriteTenants ? (
+                    <section className="rounded-lg border border-border/60 bg-card p-4" data-testid="tenants-quick-create">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <h2 className="text-sm font-semibold">Quick Create Wizard</h2>
+                                <p className="text-xs text-muted-foreground">
+                                    Быстрый поток: {"company -> client -> branch"} с автоматическим установлением контекста.
+                                </p>
+                            </div>
+                            <button
+                                className="btn-ghost"
+                                onClick={() => router.push("/company-workspace")}
+                            >
+                                Company Workspace
+                            </button>
+                        </div>
+                        <div className="mt-3 grid gap-3 md:grid-cols-3">
+                            <div className="rounded-lg border border-border/60 bg-background p-3">
+                                <div className="text-xs font-semibold">1. Компания</div>
+                                <label className="mt-2 block text-xs text-muted-foreground">
+                                    name
+                                    <input
+                                        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                        value={quickCreateForm.companyName}
+                                        onChange={(event) =>
+                                            setQuickCreateForm((prev) => ({ ...prev, companyName: event.target.value }))
+                                        }
+                                        placeholder="Beauty Group"
+                                    />
+                                </label>
+                                <button
+                                    className="btn-primary mt-3"
+                                    onClick={() => void handleQuickCreateCompany()}
+                                    disabled={quickCreateRunning !== null}
+                                >
+                                    {quickCreateRunning === "company" ? "Создание..." : "Создать компанию"}
+                                </button>
+                                <div className="mt-2 text-[11px] text-muted-foreground">
+                                    company_id: <span className="font-mono">{quickCreateCompanyId || "—"}</span>
+                                </div>
+                            </div>
+
+                            <div className="rounded-lg border border-border/60 bg-background p-3">
+                                <div className="text-xs font-semibold">2. Клиент</div>
+                                <label className="mt-2 block text-xs text-muted-foreground">
+                                    slug
+                                    <input
+                                        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                        value={quickCreateForm.clientSlug}
+                                        onChange={(event) =>
+                                            setQuickCreateForm((prev) => ({ ...prev, clientSlug: event.target.value.toLowerCase() }))
+                                        }
+                                        placeholder="beauty_group_almaty"
+                                    />
+                                </label>
+                                <button
+                                    className="btn-primary mt-3"
+                                    onClick={() => void handleQuickCreateClient()}
+                                    disabled={quickCreateRunning !== null}
+                                >
+                                    {quickCreateRunning === "client" ? "Создание..." : "Создать клиента"}
+                                </button>
+                                <div className="mt-2 text-[11px] text-muted-foreground">
+                                    client_id: <span className="font-mono">{quickCreateClientId || "—"}</span>
+                                </div>
+                            </div>
+
+                            <div className="rounded-lg border border-border/60 bg-background p-3">
+                                <div className="text-xs font-semibold">3. Филиал</div>
+                                <div className="mt-2 grid gap-2">
+                                    <input
+                                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                        value={quickCreateForm.branchName}
+                                        onChange={(event) =>
+                                            setQuickCreateForm((prev) => ({ ...prev, branchName: event.target.value }))
+                                        }
+                                        placeholder="Branch name"
+                                    />
+                                    <input
+                                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                        value={quickCreateForm.branchSlug}
+                                        onChange={(event) =>
+                                            setQuickCreateForm((prev) => ({ ...prev, branchSlug: event.target.value.toLowerCase() }))
+                                        }
+                                        placeholder="branch_slug"
+                                    />
+                                    <input
+                                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                        value={quickCreateForm.branchTimezone}
+                                        onChange={(event) =>
+                                            setQuickCreateForm((prev) => ({ ...prev, branchTimezone: event.target.value }))
+                                        }
+                                        placeholder="Asia/Almaty"
+                                    />
+                                    <input
+                                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                        value={quickCreateForm.branchPhone}
+                                        onChange={(event) =>
+                                            setQuickCreateForm((prev) => ({ ...prev, branchPhone: event.target.value }))
+                                        }
+                                        placeholder="+77000000000"
+                                    />
+                                    <input
+                                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                        value={quickCreateForm.branchInstanceId}
+                                        onChange={(event) =>
+                                            setQuickCreateForm((prev) => ({ ...prev, branchInstanceId: event.target.value }))
+                                        }
+                                        placeholder="instance-xxxxxxxx"
+                                    />
+                                </div>
+                                <button
+                                    className="btn-primary mt-3"
+                                    onClick={() => void handleQuickCreateBranch()}
+                                    disabled={quickCreateRunning !== null}
+                                >
+                                    {quickCreateRunning === "branch" ? "Создание..." : "Создать филиал"}
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+                ) : null}
                 <section className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-action-queue">
                     <div className="flex items-start justify-between gap-3">
                         <div>

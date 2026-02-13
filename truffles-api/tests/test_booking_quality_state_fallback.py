@@ -11,6 +11,7 @@ def _load_state_fallback():
     wanted_assigns = {"CHAOS_PENDING_ACTIONS"}
     wanted_functions = {
         "_llm_quality_normalize_tool_token",
+        "_llm_quality_effective_intent",
         "_chaos_booking_completion_actions",
         "_chaos_state_fallback_ok",
     }

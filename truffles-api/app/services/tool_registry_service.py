@@ -138,6 +138,35 @@ def _extract_time_token(text: str | None) -> str | None:
     return token.replace(".", ":")
 
 
+def _expected_reply_prompt_from_hint(expected_reply_type: str | None) -> str | None:
+    normalized = str(expected_reply_type or "").strip().casefold()
+    if normalized == "name":
+        return "Как вас зовут?"
+    if normalized == "time":
+        return "На какую дату и время вам удобно?"
+    if normalized == "service_choice":
+        return "На какую услугу хотите записаться?"
+    return None
+
+
+def _is_photo_offer_message(text: str | None) -> bool:
+    if not isinstance(text, str) or not text.strip():
+        return False
+    normalized = text.casefold()
+    try:
+        from app.services import demo_salon_knowledge as knowledge
+
+        normalized = knowledge._normalize_text(text)
+    except Exception:
+        pass
+    if "фото" not in normalized and "референс" not in normalized:
+        return False
+    return any(
+        token in normalized
+        for token in ("пришл", "отправл", "скин", "могу", "можно", "покаж", "прикреп")
+    )
+
+
 def _resolve_branch(db: Session, branch_id: UUID | None) -> Branch | None:
     if not branch_id:
         return None
@@ -689,19 +718,8 @@ def _catalog_portfolio(
     )
     if instagram:
         prefix = "Примеры работ"
-        if isinstance(message_text, str) and message_text.strip():
-            try:
-                from app.services import demo_salon_knowledge as knowledge
-
-                normalized = knowledge._normalize_text(message_text)
-                photo_offer = (
-                    "фото" in normalized
-                    and any(token in normalized for token in ("пришл", "отправл", "скин", "могу"))
-                )
-                if photo_offer:
-                    prefix = "Да, конечно. Пришлите фото, и я помогу сориентировать по услуге.\nПримеры работ"
-            except Exception:
-                pass
+        if _is_photo_offer_message(message_text):
+            prefix = "Да, конечно. Пришлите фото, и я помогу сориентировать по услуге.\nПримеры работ"
         return f"{prefix}: {instagram}", None
     return None, "portfolio_missing"
 
@@ -717,6 +735,7 @@ def execute_tool_action(
     service_query: str | None,
     info_sections_hint: list[str] | None = None,
     message_text: str | None = None,
+    expected_reply_type: str | None = None,
     now: datetime | None = None,
     user_name: str | None = None,
     user_phone: str | None = None,
@@ -877,19 +896,35 @@ def execute_tool_action(
             conversation_id=conversation_id,
         )
         if error:
+            followup_prompt = _expected_reply_prompt_from_hint(expected_reply_type)
+            response_parts: list[str] = []
+            if _is_photo_offer_message(message_text):
+                response_parts.append(
+                    "Спасибо за фото/референс. Это поможет менеджеру уточнить детали."
+                )
+            if requested_time:
+                response_parts.append(f"Время {requested_time} отметил.")
+            response_parts.append(
+                "Не вижу активной записи. Если нужно перенести, подтвердить или отменить запись, "
+                "подскажите номер телефона и примерную дату/время, и я помогу найти."
+            )
+            if followup_prompt:
+                response_parts.append(followup_prompt)
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
-                response_text=(
-                    "Не вижу активной записи. Если нужно перенести, подтвердить или отменить запись, "
-                    "подскажите номер телефона и примерную дату/время, и я помогу найти."
-                ),
+                response_text=" ".join(response_parts),
                 error_code=error,
-                decision_meta={"tool_action": tool_action, "tool_decision": "not_found"},
+                decision_meta={
+                    "tool_action": tool_action,
+                    "tool_decision": "not_found",
+                    "requested_time": requested_time,
+                },
                 trace={
                     "stage": "tool_registry",
                     "decision": "not_found",
                     "tool_action": tool_action,
+                    "requested_time": requested_time,
                 },
             )
         appointment_time = _appointment_time_token(appointment)
@@ -1083,25 +1118,36 @@ def execute_tool_action(
     if tool_action == "calendar.reschedule":
         appointment_id = tool_args.get("appointment_id")
         appointment_uuid = _parse_uuid(appointment_id)
+        requested_time = _extract_time_token(message_text)
         appointment, error = _get_booking(
             db,
             appointment_id=appointment_uuid,
             conversation_id=conversation_id,
         )
         if error:
+            prefix = f"Время {requested_time} отметил. " if requested_time else ""
+            followup_prompt = _expected_reply_prompt_from_hint(expected_reply_type)
+            response_text = (
+                f"{prefix}Чтобы перенести запись, сначала нужно найти текущую. "
+                "Подскажите номер телефона и примерную дату/время записи."
+            )
+            if followup_prompt:
+                response_text = f"{response_text} {followup_prompt}"
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
-                response_text=(
-                    "Чтобы перенести запись, сначала нужно найти текущую. "
-                    "Подскажите номер телефона и примерную дату/время записи."
-                ),
+                response_text=response_text,
                 error_code=error,
-                decision_meta={"tool_action": tool_action, "tool_decision": "not_found"},
+                decision_meta={
+                    "tool_action": tool_action,
+                    "tool_decision": "not_found",
+                    "requested_time": requested_time,
+                },
                 trace={
                     "stage": "tool_registry",
                     "decision": "not_found",
                     "tool_action": tool_action,
+                    "requested_time": requested_time,
                 },
             )
         start_at = _parse_datetime(tool_args.get("start_at"), fallback_tz=branch.timezone)

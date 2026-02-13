@@ -24,6 +24,7 @@ def _load_progress_gate():
         if isinstance(node, ast.FunctionDef) and node.name in {
             "_llm_quality_should_expect_booking_progress",
             "_llm_quality_normalize_tool_token",
+            "_llm_quality_effective_intent",
         }:
             selected_nodes.append(node)
     module = ast.Module(body=selected_nodes, type_ignores=[])
@@ -53,6 +54,7 @@ def _load_booking_tool_answered():
     selected_nodes = []
     wanted_functions = {
         "_llm_quality_normalize_tool_token",
+        "_llm_quality_effective_intent",
         "_llm_quality_check_booking_tool_answered",
     }
     for node in tree.body:

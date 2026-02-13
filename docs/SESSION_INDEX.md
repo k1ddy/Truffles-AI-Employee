@@ -5,7 +5,7 @@
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
 | 2026-02-12-tenants-action-queue-a32 | active | feat/2026-02-12-tenants-action-queue-a32 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-12-tenants-action-queue-a32.md | 2026-02-12 |
-| 2026-02-12-stress-quality-copy-a1 | active | feat/2026-02-10-stress-quality-a1-copy | /home/zhan/worktrees/2026-02-10-stress-quality-a1-copy | docs/TASK_PACKAGES/TP-2026-02-10-stress-quality-hardening.md | 2026-02-12T14:26:00Z |
+| 2026-02-12-stress-quality-copy-a1 | active | feat/2026-02-10-stress-quality-a1-copy | /home/zhan/worktrees/2026-02-10-stress-quality-a1-copy | docs/TASK_PACKAGES/TP-2026-02-10-stress-quality-hardening.md | 2026-02-13T06:10:19Z |
 | 2026-02-12-mdc-v2-scorecard-ui-a32 | done | fix/2026-02-12-mdc-v2-scorecard-ui-a32 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-12-mdc-v2-scorecard-ui-a32.md | 2026-02-12T14:20:00Z |
 | 2026-02-12-deploy-fetch-main-a32 | active | fix/2026-02-12-deploy-fetch-main-a32 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-12-deploy-fetch-main-a32.md | 2026-02-12 |
 | 2026-02-12-console-onboarding-scorecard-a32 | active | fix/2026-02-12-console-onboarding-scorecard-a32 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-12-console-onboarding-scorecard-a32.md | 2026-02-12T09:05:00Z |
@@ -420,3 +420,5 @@
 | 2026-02-13-provider-ops-lifecycle-a34 | done | feat/2026-02-13-provider-ops-lifecycle-a34 | /home/zhan/worktrees/2026-02-13-provider-ops-lifecycle-a34 | docs/TASK_PACKAGES/TP-2026-02-13-provider-ops-lifecycle-a34.md | 2026-02-13 |
 | 2026-02-13-console-provider-onboarding-hardening-a35 | active | feat/2026-02-13-console-provider-onboarding-hardening-a35 | /home/zhan/worktrees/2026-02-13-console-provider-onboarding-hardening-a35 | docs/TASK_PACKAGES/TP-2026-02-13-console-provider-onboarding-hardening-a35.md | 2026-02-13 |
 | 2026-02-13-provider-ops-workflow-a36 | done | feat/2026-02-13-provider-ops-workflow-a36 | /home/zhan/worktrees/2026-02-13-provider-ops-workflow-a36 | docs/TASK_PACKAGES/TP-2026-02-13-provider-ops-workflow-queue-a36.md | 2026-02-13 |
+| 2026-02-13-company-workspace-ux-a36 | done | feat/2026-02-13-company-workspace-ux-a36 | /home/zhan/worktrees/2026-02-13-company-workspace-ux-a36 | docs/TASK_PACKAGES/TP-2026-02-13-company-workspace-ux-a36.md | 2026-02-13 |
+| 2026-02-13-company-control-plane-v3-a37 | done | feat/2026-02-13-company-control-plane-v3-a37 | /home/zhan/worktrees/2026-02-13-company-control-plane-v3-a37 | docs/TASK_PACKAGES/TP-2026-02-13-company-control-plane-v3-a37.md | 2026-02-13 |

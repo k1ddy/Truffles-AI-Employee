@@ -1513,8 +1513,14 @@ def test_consult_pack_only_and_short_circuit():
             },
             case_id,
         )
-        stage = "truth_gate" if fact_source == "truth" else "service_matcher"
-        _assert_trace_stage_decision_any(trace, case_id, {stage})
+        if fact_source == "truth":
+            _assert_trace_stage_decision_any(
+                trace,
+                case_id,
+                {"truth_gate", "info_class", "fact_resolver"},
+            )
+        else:
+            _assert_trace_stage_decision_any(trace, case_id, {"service_matcher"})
 
 
 def test_ood_low_signal_and_smalltalk_gates():

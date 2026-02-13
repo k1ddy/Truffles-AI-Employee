@@ -201,6 +201,38 @@ def _build_booking_confirmation_prompt(slot_key: str, value: str) -> str:
     return f"Подтвердите, пожалуйста: {value}. Верно?"
 
 
+def _should_defer_booking_confirmation_for_info(
+    *,
+    confirmation: dict | None,
+    basic_info_message: bool,
+    message_text: str | None,
+    client_slug: str | None,
+) -> bool:
+    from . import _legacy as legacy
+
+    return bool(
+        confirmation
+        and basic_info_message
+        and message_text
+        and legacy._looks_like_info_query(message_text, client_slug=client_slug)
+    )
+
+
+def _should_defer_booking_flow_for_info_interrupt(
+    *,
+    booking_active: bool,
+    booking_signal: bool,
+    booking_related: bool,
+    basic_info_message: bool,
+) -> bool:
+    return bool(
+        booking_active
+        and basic_info_message
+        and not booking_signal
+        and not booking_related
+    )
+
+
 def _set_service_hint(context: dict, service: str, now: datetime) -> dict:
     from . import _legacy as legacy
 
@@ -514,6 +546,22 @@ def _validate_name_slot(
     if allow_freeform and len(tokens) > 2:
         return None
     if any(len(token) < 2 for token in tokens):
+        return None
+    booking_action_tokens = {
+        "проверь",
+        "проверить",
+        "подтверди",
+        "подтвердить",
+        "перенеси",
+        "перенести",
+        "отмени",
+        "отменить",
+    }
+    booking_object_tokens = {"запись", "бронь", "броньку", "броню"}
+    if (
+        set(tokens).intersection(booking_action_tokens)
+        and set(tokens).intersection(booking_object_tokens)
+    ):
         return None
     if all(token in legacy.NAME_NOISE_TOKENS for token in tokens):
         return None
@@ -2379,6 +2427,35 @@ def _handle_booking_flow(
             )
 
         confirmation = _get_booking_confirmation(booking_state)
+        confirmation_info_interrupt = _should_defer_booking_confirmation_for_info(
+            confirmation=confirmation,
+            basic_info_message=basic_info_message,
+            message_text=message_text,
+            client_slug=client_slug,
+        )
+        if confirmation_info_interrupt:
+            slot_key = confirmation.get("slot") if isinstance(confirmation, dict) else None
+            slot_value = confirmation.get("value") if isinstance(confirmation, dict) else None
+            legacy._record_decision_trace(
+                conversation,
+                {
+                    "stage": "booking_confirm",
+                    "decision": "defer_info_interrupt",
+                    "slot": slot_key,
+                    "value": slot_value,
+                },
+            )
+            if saved_message:
+                legacy._update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "slot_confirmation_deferred": True,
+                        "slot_confirmation_deferred_reason": "info_interrupt",
+                        "slot": slot_key,
+                        "slot_value": slot_value,
+                    },
+                )
+            return BookingFlowResult(response=None, booking_t0=booking_t0, booking_logged=booking_logged)
         if confirmation:
             from app.services.ai_service import classify_confirmation
 
@@ -2546,6 +2623,30 @@ def _handle_booking_flow(
         booking_related = any(
             legacy._is_booking_related_message(msg, client_slug) for msg in booking_messages
         )
+        if _should_defer_booking_flow_for_info_interrupt(
+            booking_active=booking_active,
+            booking_signal=booking_signal,
+            booking_related=booking_related,
+            basic_info_message=basic_info_message,
+        ):
+            legacy._record_decision_trace(
+                conversation,
+                {
+                    "stage": "booking",
+                    "decision": "defer_info_interrupt",
+                    "state": conversation.state,
+                    "booking_active": booking_active,
+                },
+            )
+            if saved_message:
+                legacy._update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "booking_flow_deferred": True,
+                        "booking_flow_deferred_reason": "info_interrupt",
+                    },
+                )
+            return BookingFlowResult(response=None, booking_t0=booking_t0, booking_logged=booking_logged)
         last_question = booking_state.get("last_question")
         slot_lock_active = bool(
             booking_active
