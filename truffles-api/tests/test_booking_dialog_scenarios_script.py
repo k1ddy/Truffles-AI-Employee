@@ -29,9 +29,22 @@ _module = _load_module()
 _merge_expectations = _module._merge_expectations
 
 
+def test_resolve_openai_api_key_reads_local_truffles_api_env(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    env_dir = tmp_path / "truffles-api"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    (env_dir / ".env").write_text("OPENAI_API_KEY=test-from-env-file\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    key, source = _module._resolve_openai_api_key(None)
+
+    assert key == "test-from-env-file"
+    assert source is not None and "truffles-api/.env" in source
+
+
 def test_merge_expectations_applies_override_fields():
     expect = _merge_expectations(
-        ["booking", "time"],
+        ["booking", "handoff", "master"],
         {
             "action": "handoff",
             "reply_type": "name",
@@ -46,6 +59,34 @@ def test_merge_expectations_applies_override_fields():
     assert expect["state"] == "pending"
     assert expect["expected_reply"] is False
     assert "master" in (expect.get("info_sections") or [])
+
+
+def test_merge_expectations_sanitizes_handoff_override_without_handoff_tags():
+    expect = _merge_expectations(
+        ["confirm"],
+        {
+            "action": "booking_escalated",
+            "state": "manager_active",
+            "expected_reply": "true",
+        },
+    )
+
+    assert expect["action"] is None
+    assert expect["state"] is None
+    assert expect["expected_reply"] is True
+
+
+def test_merge_expectations_drops_info_override_without_info_tags():
+    expect = _merge_expectations(
+        ["booking"],
+        {
+            "info_sections": ["service_duration"],
+            "expected_reply": "true",
+        },
+    )
+
+    assert expect["info_sections"] == []
+    assert expect["expected_reply"] is True
 
 
 def test_generate_llm_dialogs_retries_after_json_error(monkeypatch):

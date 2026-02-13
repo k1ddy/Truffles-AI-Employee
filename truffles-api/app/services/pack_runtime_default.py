@@ -130,6 +130,19 @@ def _has_guest_waiting_signal(normalized: str, *, client_slug: str | None = None
     )
 
 
+def _has_contact_signal(
+    normalized: str,
+    raw_text: str | None = None,
+    *,
+    client_slug: str | None = None,
+) -> bool:
+    return _resolve_adapter(client_slug)._has_contact_signal(
+        normalized,
+        raw_text,
+        client_slug=client_slug,
+    )
+
+
 def semantic_question_type(
     text: str,
     *,

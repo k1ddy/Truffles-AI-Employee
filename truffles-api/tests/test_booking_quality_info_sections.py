@@ -150,5 +150,10 @@ def test_parking_signal_accepts_machine_phrase_with_parking_context():
 
 
 def test_info_tag_infer_detects_duration_from_how_long_question():
-    tags = _infer_info_tags("Сколько времени занимает запись?")
+    tags = _infer_info_tags("Какая длительность процедуры?")
     assert "duration" in tags
+
+
+def test_parking_signal_accepts_colloquial_parking_wording():
+    normalized = demo_salon_knowledge._normalize_text("Подскажите, есть ли паркинг возле салона?")
+    assert demo_salon_knowledge._has_parking_signal(normalized, client_slug="demo_salon") is True

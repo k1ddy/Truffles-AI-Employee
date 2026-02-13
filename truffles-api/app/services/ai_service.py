@@ -288,6 +288,25 @@ _llm_budget_client = None
 _llm_budget_url = None
 
 
+def _normalize_api_key(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _current_openai_api_key() -> str | None:
+    """Resolve API key from env first and keep provider in sync."""
+    global OPENAI_API_KEY, _llm_provider
+    env_key = _normalize_api_key(os.environ.get("OPENAI_API_KEY"))
+    fallback_key = _normalize_api_key(OPENAI_API_KEY)
+    resolved_key = env_key or fallback_key
+    if resolved_key != fallback_key:
+        OPENAI_API_KEY = resolved_key
+        _llm_provider = None
+    return resolved_key
+
+
 def _is_env_enabled(value: str | None, default: bool = True) -> bool:
     if value is None:
         return default
@@ -471,8 +490,11 @@ def _filter_consult_advice(text: str) -> str | None:
 def get_llm_provider() -> OpenAIProvider:
     """Get or create LLM provider instance."""
     global _llm_provider
+    api_key = _current_openai_api_key()
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY missing")
     if _llm_provider is None:
-        _llm_provider = OpenAIProvider(api_key=OPENAI_API_KEY, default_model=FAST_MODEL)
+        _llm_provider = OpenAIProvider(api_key=api_key, default_model=FAST_MODEL)
     return _llm_provider
 
 
@@ -694,7 +716,7 @@ def transcribe_audio(
     timeout_seconds: Optional[float] = None,
 ) -> Optional[str]:
     """Transcribe short audio to text. Returns None on failure."""
-    if not OPENAI_API_KEY:
+    if not _current_openai_api_key():
         logger.warning("Audio transcription skipped: OPENAI_API_KEY missing")
         return None
 
@@ -750,7 +772,7 @@ def _transcribe_with_openai(
     language: Optional[str],
     timeout_seconds: float | None,
 ) -> tuple[str | None, str | None]:
-    if not OPENAI_API_KEY:
+    if not _current_openai_api_key():
         return None, "missing_openai_key"
     provider = get_llm_provider()
     if not hasattr(provider, "transcribe_audio"):
@@ -1007,7 +1029,7 @@ def rewrite_for_service_match(
     normalized = normalize_for_matching(text)
     if not normalized or len(normalized) < 3:
         return None
-    if not OPENAI_API_KEY:
+    if not _current_openai_api_key():
         logger.warning("Service rewrite skipped: OPENAI_API_KEY missing")
         return None
     if not _should_attempt_llm(
@@ -1120,7 +1142,7 @@ def rewrite_query_for_retrieval(
     normalized = normalize_for_matching(text)
     if not normalized or len(normalized) < 3:
         return {"rewrite_used": False, "rewrite_text": "", "reason": "too_short"}
-    if not OPENAI_API_KEY:
+    if not _current_openai_api_key():
         logger.warning("RAG rewrite skipped: OPENAI_API_KEY missing")
         return {"rewrite_used": False, "rewrite_text": "", "reason": "missing_api_key"}
     if not _should_attempt_llm(
@@ -1337,7 +1359,7 @@ def detect_multi_intent(
         return _fallback_payload()
     if len(normalized) < 3:
         return _fallback_payload()
-    if not OPENAI_API_KEY:
+    if not _current_openai_api_key():
         logger.warning("Multi-intent detection skipped: OPENAI_API_KEY missing")
         return _fallback_payload()
     reserve_ms_value = 0.0
@@ -1581,7 +1603,7 @@ def generate_consult_controller_output(
 ) -> Result[ConsultControllerOutput]:
     if not message_text or not topics:
         return Result.failure("consult_controller_missing_input", code="invalid_input")
-    if not OPENAI_API_KEY:
+    if not _current_openai_api_key():
         return Result.failure("consult_controller_disabled", code="llm_disabled")
     if not _should_attempt_llm(
         timing_context,
@@ -1620,10 +1642,11 @@ def generate_consult_controller_output(
 
     llm = get_llm_provider()
     llm_start = time.monotonic()
+    temperature = 1.0 if FAST_MODEL.strip().lower().startswith("gpt-5") else 0.0
     try:
         response = llm.generate(
             messages,
-            temperature=0.0,
+            temperature=temperature,
             max_tokens=CONSULT_CONTROLLER_MAX_TOKENS,
             model=FAST_MODEL,
             timeout_seconds=CONSULT_CONTROLLER_TIMEOUT_SECONDS,
@@ -2350,7 +2373,15 @@ def generate_ai_response(
                 messages.append({"role": "user", "content": user_message})
 
         # 7. Generate response
-        llm = get_llm_provider()
+        try:
+            llm = get_llm_provider()
+        except RuntimeError as exc:
+            if "OPENAI_API_KEY missing" in str(exc):
+                if timing_context is not None:
+                    timing_context.setdefault("llm_degradation_reason", "llm_skip")
+                logger.warning("AI generation skipped: OPENAI_API_KEY missing")
+                return Result.success((None, "low_confidence"))
+            raise
         logger.debug(f"Calling LLM with {len(messages)} messages")
         llm_start = time.monotonic()
         try:
@@ -2424,7 +2455,7 @@ def generate_consult_advice(
 ) -> Result[Optional[str]]:
     if not message_text:
         return Result.success(None)
-    if not OPENAI_API_KEY:
+    if not _current_openai_api_key():
         logger.warning("Consult LLM skipped: OPENAI_API_KEY missing")
         return Result.success(None)
     if not _should_attempt_llm(

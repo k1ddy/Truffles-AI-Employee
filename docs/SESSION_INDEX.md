@@ -4,13 +4,14 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-02-12-stress-quality-copy-a1 | active | feat/2026-02-10-stress-quality-a1-copy | /home/zhan/worktrees/2026-02-10-stress-quality-a1-copy | docs/TASK_PACKAGES/TP-2026-02-10-stress-quality-hardening.md | 2026-02-12T10:05:00Z |
 | 2026-02-12-mdc-v2-scorecard-ui-a32 | done | fix/2026-02-12-mdc-v2-scorecard-ui-a32 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-12-mdc-v2-scorecard-ui-a32.md | 2026-02-12 |
 | 2026-02-12-console-onboarding-scorecard-a32 | active | fix/2026-02-12-console-onboarding-scorecard-a32 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-12-console-onboarding-scorecard-a32.md | 2026-02-12T09:05:00Z |
 | 2026-02-12-console-contract-live-fallback-a32 | active | fix/2026-02-12-console-contract-live-fallback-a32 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-12-console-contract-live-fallback-a32.md | 2026-02-12T07:32:22Z |
 | 2026-02-12-stress-quality-copy-a1 | active | feat/2026-02-10-stress-quality-a1-copy | /home/zhan/worktrees/2026-02-10-stress-quality-a1-copy | docs/TASK_PACKAGES/TP-2026-02-10-stress-quality-hardening.md | 2026-02-12T01:20:00Z |
 | 2026-02-12-deploy-fetch-main-a32 | active | fix/2026-02-12-deploy-fetch-main-a32 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-12-deploy-fetch-main-a32.md | 2026-02-12 |
 | 2026-02-12-tenants-action-queue-a32 | active | feat/2026-02-12-tenants-action-queue-a32 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-12-tenants-action-queue-a32.md | 2026-02-12 |
-| 2026-02-12-stress-quality-copy-a1 | active | feat/2026-02-10-stress-quality-a1-copy | /home/zhan/worktrees/2026-02-10-stress-quality-a1-copy | docs/TASK_PACKAGES/TP-2026-02-10-stress-quality-hardening.md | 2026-02-12 |
+| 2026-02-12-stress-quality-copy-a1 | active | feat/2026-02-10-stress-quality-a1-copy | /home/zhan/worktrees/2026-02-10-stress-quality-a1-copy | docs/TASK_PACKAGES/TP-2026-02-10-stress-quality-hardening.md | 2026-02-12T09:17:40Z |
 | 2026-02-11-tenants-pr-ef-validators-ia-a28 | done | feat/2026-02-11-tenants-pr-ef-validators-ia-a28 | /home/zhan/worktrees/2026-02-11-tenants-pr-ef-validators-ia-a28 | docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-ef-validators-ia-a27.md | 2026-02-11 |
 | 2026-02-10-sso-provisioning-env-alias-a26 | active | fix/2026-02-10-sso-provisioning-env-alias-a26 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-10-sso-provisioning-env-alias-a26.md | 2026-02-10 |
 | 2026-02-10-console-contract-live-flake-a26 | active | fix/2026-02-10-console-contract-live-flake-a26 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-10-console-contract-live-flake-a26.md | 2026-02-10 |
@@ -370,3 +371,5 @@
 | 2026-02-11-tenants-pr-h-quality-completion-a30 | done | feat/2026-02-11-tenants-pr-h-quality-completion-a30 | /home/zhan/worktrees/2026-02-11-tenants-pr-h-quality-completion-a30 | docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-h-quality-completion-a30.md | 2026-02-11 |
 | 2026-02-11-tenants-pr-i-operational-kpi-a31 | done | feat/2026-02-11-tenants-pr-i-operational-kpi-a31 | /home/zhan/worktrees/2026-02-11-tenants-pr-i-operational-kpi-a31 | docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-i-operational-kpi-a31.md | 2026-02-11 |
 | 2026-02-11-tenants-pr-jkl-ops-reporting-a32 | done | feat/2026-02-11-tenants-pr-jkl-ops-reporting-a32 | /home/zhan/worktrees/2026-02-11-tenants-pr-jkl-ops-reporting-a32 | docs/TASK_PACKAGES/TP-2026-02-11-tenants-pr-jkl-ops-reporting-a32.md | 2026-02-11 |
+| 2026-02-12-reference-pack-integrity-gate-a32 | done | fix/2026-02-12-reference-pack-integrity-gate-a32 | /home/zhan/worktrees/2026-02-12-reference-pack-integrity-gate-a32 | docs/TASK_PACKAGES/TP-2026-02-12-reference-pack-integrity-gate-a32.md | 2026-02-12 |
+| 2026-02-12-onboarding-fleet-remediation-a33 | active | feat/2026-02-12-onboarding-fleet-remediation-a33 | /home/zhan/worktrees/2026-02-12-onboarding-fleet-remediation-a33 | docs/TASK_PACKAGES/TP-2026-02-12-onboarding-fleet-remediation-a33.md | 2026-02-12 |

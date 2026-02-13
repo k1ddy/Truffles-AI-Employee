@@ -713,7 +713,6 @@ def _handle_consult_flow(
     )
     from app.services.pack_runtime_service import (
         PackDecision,
-        get_pack_decision,
         get_pack_service_decision,
     )
 
@@ -844,160 +843,6 @@ def _handle_consult_flow(
         consult_blocked = False
     elif intent_decomp_set & {"booking", "pricing", "duration", "location", "hours"}:
         consult_blocked = True
-
-    if message_text and policy_type == "demo_salon" and routing.get("allow_truth_gate_reply"):
-        from app.services.pack_runtime_service import _normalize_text
-
-        normalized = _normalize_text(message_text)
-        prep_trigger = bool(
-            normalized
-            and any(token in normalized for token in ("подготов", "линз", "контейнер", "макияж"))
-            and any(token in normalized for token in ("бров", "ресниц", "лами"))
-        )
-        combo_trigger = bool(
-            normalized
-            and ("совмещ" in normalized or "в один день" in normalized)
-            and "чистк" in normalized
-            and "пилинг" in normalized
-        )
-        aftercare_trigger = bool(
-            normalized
-            and "гель лак" in normalized
-            and any(token in normalized for token in ("ухаж", "продл", "держ", "нос", "срок"))
-        )
-        if aftercare_trigger or prep_trigger or combo_trigger:
-            from app.services.pack_runtime_service import get_pack_decision
-
-            truth_decision = get_pack_decision(
-                message_text,
-                client_slug=client_slug,
-                intent_decomp=intent_decomp_payload,
-            )
-            if (
-                truth_decision
-                and truth_decision.action == "reply"
-                and truth_decision.intent in {"aftercare_gel_lac", "prep_brows_lashes"}
-            ):
-                bot_response = truth_decision.response
-                legacy._reset_low_confidence_retry(conversation)
-                trace_payload = {
-                    "stage": "truth_gate",
-                    "decision": truth_decision.action,
-                    "intent": truth_decision.intent,
-                    "state": conversation.state,
-                    "booking_wants_flow": booking_wants_flow,
-                    "policy_type": policy_type,
-                    "consult_override": True,
-                }
-                if isinstance(getattr(truth_decision, "meta", None), dict):
-                    trace_payload.update(truth_decision.meta)
-                _record_decision_trace(conversation, trace_payload)
-                _record_message_decision_meta(
-                    saved_message,
-                    action=truth_decision.action,
-                    intent=truth_decision.intent,
-                    source="truth_gate",
-                    fast_intent=False,
-                )
-                if saved_message and isinstance(getattr(truth_decision, "meta", None), dict):
-                    _update_message_decision_metadata(saved_message, truth_decision.meta)
-                bot_response, sent = send_and_save(bot_response)
-                result_message = "Truth gate override reply sent"
-                if not sent:
-                    result_message = f"{result_message}; response_send=failed"
-                db.commit()
-                return ConsultFlowResult(
-                    response=WebhookResponse(
-                        success=True,
-                        message=result_message,
-                        conversation_id=conversation.id,
-                        bot_response=bot_response,
-                    ),
-                    consult_intent=consult_intent,
-                    consult_topic=consult_topic,
-                    consult_question=consult_question,
-                    intent_decomp_payload=intent_decomp_payload,
-                )
-            if (
-                truth_decision
-                and truth_decision.action == "escalate"
-                and truth_decision.intent == "procedure_combo"
-            ):
-                bot_response = truth_decision.response
-                legacy._reset_low_confidence_retry(conversation)
-                result_message = "Truth gate escalation reply sent"
-                _, reused, telegram_sent = legacy._reuse_active_handover(
-                    db=db,
-                    conversation=conversation,
-                    user=user,
-                    message=message_text,
-                    source="truth_gate",
-                    intent=truth_decision.intent,
-                )
-                if reused:
-                    result_message = f"Truth gate reuse, telegram={'sent' if telegram_sent else 'failed'}"
-                elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value:
-                    record_escalation_metric("intent")
-                    result = legacy.escalate_to_pending(
-                        db=db,
-                        conversation=conversation,
-                        user_message=message_text,
-                        trigger_type="intent",
-                        trigger_value=truth_decision.intent or "policy",
-                    )
-                    if result.ok:
-                        handover = result.value
-                        telegram_sent = legacy.send_telegram_notification(
-                            db=db,
-                            handover=handover,
-                            conversation=conversation,
-                            user=user,
-                            message=message_text,
-                        )
-                        result_message = (
-                            f"Truth gate escalation, telegram={'sent' if telegram_sent else 'failed'}"
-                        )
-                    else:
-                        result_message = f"Truth gate escalation failed: {result.error}"
-                else:
-                    result_message = "Truth gate escalation skipped (already pending)"
-                trace_payload = {
-                    "stage": "truth_gate",
-                    "decision": truth_decision.action,
-                    "intent": truth_decision.intent,
-                    "state": conversation.state,
-                    "booking_wants_flow": booking_wants_flow,
-                    "policy_type": policy_type,
-                    "consult_override": True,
-                }
-                if isinstance(getattr(truth_decision, "meta", None), dict):
-                    trace_payload.update(truth_decision.meta)
-                _record_decision_trace(conversation, trace_payload)
-                _record_message_decision_meta(
-                    saved_message,
-                    action=truth_decision.action,
-                    intent=truth_decision.intent,
-                    source="truth_gate",
-                    fast_intent=False,
-                )
-                if saved_message and isinstance(getattr(truth_decision, "meta", None), dict):
-                    _update_message_decision_metadata(saved_message, truth_decision.meta)
-                bot_response, sent = send_and_save(bot_response)
-                if not sent:
-                    result_message = f"{result_message}; response_send=failed"
-                db.commit()
-                return ConsultFlowResult(
-                    response=WebhookResponse(
-                        success=True,
-                        message=result_message,
-                        conversation_id=conversation.id,
-                        bot_response=bot_response,
-                    ),
-                    consult_intent=consult_intent,
-                    consult_topic=consult_topic,
-                    consult_question=consult_question,
-                    intent_decomp_payload=intent_decomp_payload,
-                )
 
     consult_flow_override = None
     consult_pack_used = False
@@ -1206,7 +1051,8 @@ def _handle_consult_flow(
             explicit_info_signal = price_or_duration_signal
             explicit_info_intent = bool(
                 explicit_info_signal
-                or info_class_intents & {"location", "hours"}
+                or info_class_intents
+                & {"location", "hours", "parking", "contact", "master", "duration", "pricing"}
             )
             service_matcher = None
             handler_override = legacy._get_policy_handler(None, client_slug=client_slug)
@@ -1214,14 +1060,17 @@ def _handle_consult_flow(
                 service_matcher = handler_override.get("service_matcher")
             if service_matcher is None and isinstance(policy_handler, dict):
                 service_matcher = policy_handler.get("service_matcher")
-            if short_circuit_service and service_availability_decision is None and price_or_duration_signal:
+            if (
+                service_availability_decision is None
+                and (explicit_info_intent or (short_circuit_service and price_or_duration_signal))
+            ):
                 if service_matcher:
                     service_availability_decision = service_matcher(
                         message_text,
                         client_slug=client_slug,
                         intent_decomp=intent_decomp_payload,
                     )
-                elif policy_type == "demo_salon":
+                else:
                     service_availability_decision = get_pack_service_decision(
                         message_text,
                         client_slug=client_slug,
@@ -1337,6 +1186,15 @@ def _handle_consult_flow(
             else:
                 if not guard_reason and not consult_pack_topic_id:
                     guard_reason = "unknown_topic"
+                if guard_reason == "unknown_topic" and explicit_info_intent:
+                    # Keep deterministic info answers (location/hours/parking) from being
+                    # downgraded into consult clarify when consult topic mapping is missing.
+                    consult_short_circuit = True
+                    consult_short_circuit_reason = "explicit_info_unknown_topic"
+                    consult_short_circuit_service = short_circuit_service
+                    consult_intent = False
+                    consult_signal = False
+                    guard_reason = None
                 topic = (
                     get_consult_topic(playbook, consult_pack_topic_id)
                     if consult_pack_topic_id
@@ -1474,7 +1332,8 @@ def _handle_consult_flow(
                         playbook=playbook,
                         topic_id=consult_pack_topic_id,
                         conversation_id=str(conversation.id),
-                        consult_question=consult_question,
+                        consult_question=message_text or consult_question,
+                        client_slug=client_slug,
                     )
                     if pack_decision:
                         consult_meta = (
@@ -1525,6 +1384,7 @@ def _handle_consult_flow(
         and consult_decision.action == "reply"
         and consult_pack_used
         and short_circuit_intents
+        and consult_short_circuit_reason not in {"explicit_info", "explicit_info_unknown_topic"}
     ):
         consult_short_circuit = True
         consult_short_circuit_reason = "consult_overrides_info"
@@ -1678,6 +1538,17 @@ def _handle_consult_flow(
                 meta=consult_meta,
             )
             consult_flow_decision = "consult_clarify"
+
+    route_explicit_info_to_main_flow = (
+        consult_short_circuit
+        and consult_short_circuit_reason in {"explicit_info", "explicit_info_unknown_topic"}
+        and not (consult_decision and consult_decision.action == "reply")
+    )
+    if route_explicit_info_to_main_flow:
+        consult_signal = False
+        consult_decision = None
+        consult_intent = False
+        consult_flow_decision = None
 
     if consult_decision:
         class_router_result = _build_consult_class_router_result()
@@ -2275,6 +2146,17 @@ def _handle_ai_response_action(
         rewrite_query = None
         semantic_attempted = False
         info_intent_hint = False
+        info_signal_intents = {
+            "hours",
+            "pricing",
+            "duration",
+            "location",
+            "parking",
+            "contact",
+            "master",
+            "promotions",
+            "promo",
+        }
         if isinstance(intent_decomp_payload, dict):
             raw_intents = intent_decomp_payload.get("intents")
             if isinstance(raw_intents, list):
@@ -2284,8 +2166,24 @@ def _handle_ai_response_action(
                     if isinstance(item, str) and item.strip()
                 }
                 info_intent_hint = bool(
-                    normalized_intents & {"hours", "pricing", "duration", "location"}
+                    normalized_intents & info_signal_intents
                 )
+        if not info_intent_hint and info_class_intents:
+            normalized_info_intents = {
+                item.strip().casefold()
+                for item in info_class_intents
+                if isinstance(item, str) and item.strip()
+            }
+            info_intent_hint = bool(normalized_info_intents & info_signal_intents)
+        if not info_intent_hint and isinstance(class_router_result, dict):
+            router_intents = class_router_result.get("intents")
+            if isinstance(router_intents, list):
+                normalized_router_intents = {
+                    item.strip().casefold()
+                    for item in router_intents
+                    if isinstance(item, str) and item.strip()
+                }
+                info_intent_hint = bool(normalized_router_intents & info_signal_intents)
         if info_intent_hint:
             llm_primary_failed = True
             llm_primary_reason = "low_confidence"

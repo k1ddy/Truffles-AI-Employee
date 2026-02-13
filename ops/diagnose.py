@@ -8,17 +8,17 @@
 - Состояние handovers
 """
 import argparse
-import http.client
 import base64
 import glob
 import hashlib
+import http.client
 import json
 import math
 import os
 import random
 import re
-import signal
 import shlex
+import signal
 import socket
 import subprocess
 import sys
@@ -626,7 +626,15 @@ CHAOS_POLICY_MAP = {
 CHAOS_HARD_LAW = {"refund", "medical", "complaint", "reschedule"}
 CHAOS_INFO = {"pricing", "address", "hours", "duration"}
 CHAOS_BOOKING_REPLY_TYPES = {"service_choice", "time", "name"}
-CHAOS_PENDING_ACTIONS = {"pending_status", "pending_wait", "pending_ack"}
+CHAOS_PENDING_ACTIONS = {
+    "pending_status",
+    "pending_wait",
+    "pending_ack",
+    "pending_close",
+    "pending_pass",
+    "pending_sla_ping",
+    "pending_guard_reset",
+}
 CHAOS_RAG_TOP_N = 10
 CHAOS_IN_DOMAIN_INTENTS = (
     set(CHAOS_INFO)
@@ -2677,6 +2685,15 @@ def _llm_quality_pick_jid(jids, idx, rng, mode, run_id=None):
         return rng.choice(jids)
     return jids[idx % len(jids)]
 
+
+def _llm_quality_resolve_jid_mode(args):
+    mode = str(getattr(args, "jid_mode", "auto") or "auto").strip().lower()
+    if mode != "auto":
+        return mode
+    if getattr(args, "skip_outbox", False):
+        return "unique"
+    return "round_robin"
+
 def _llm_quality_extract_turn_tags(turn):
     tags = []
     for tag in turn.get("tags") or []:
@@ -2902,8 +2919,8 @@ def _llm_quality_normalize_expect_value(value):
 
 
 LLM_QUALITY_EXPECT_ACTION_HANDOFF = {"booking_escalated", "escalate", "handoff"}
-LLM_QUALITY_EXPECT_TAGS_ALLOW_PENDING = {"handoff", "human", "pending", "cancel", "reschedule"}
-LLM_QUALITY_EXPECT_TAGS_ALLOW_MANAGER_ACTIVE = {"handoff", "human", "pending"}
+LLM_QUALITY_EXPECT_TAGS_ALLOW_PENDING = {"handoff", "human", "pending", "cancel", "reschedule", "media"}
+LLM_QUALITY_EXPECT_TAGS_ALLOW_MANAGER_ACTIVE = {"handoff", "human", "pending", "media"}
 LLM_QUALITY_EXPECT_INFO_TAGS = set(LLM_QUALITY_INFO_TAGS) | {"discount"}
 
 
@@ -3020,8 +3037,39 @@ def _llm_quality_extract_expectations(turn):
     reply_type = _llm_quality_normalize_expect_value(expect.get("reply_type"))
     state = _llm_quality_normalize_expect_value(expect.get("state"))
     tag_set = _llm_quality_collect_turn_tags(turn)
+    booking_reply_types = globals().get(
+        "CHAOS_BOOKING_REPLY_TYPES",
+        {"service_choice", "time", "name"},
+    )
+    if reply_type in booking_reply_types and "consult" in tag_set:
+        # Consult turns do not carry booking slot-contract prompts.
+        reply_type = None
     action = _llm_quality_sanitize_expect_action_by_tags(tag_set, action)
     state = _llm_quality_sanitize_expect_state_by_tags(tag_set, state)
+    if state is not None:
+        allow_pending = bool(tag_set & LLM_QUALITY_EXPECT_TAGS_ALLOW_PENDING)
+        allow_manager_active = bool(tag_set & LLM_QUALITY_EXPECT_TAGS_ALLOW_MANAGER_ACTIVE)
+        state_values = (
+            list(state)
+            if isinstance(state, (list, tuple, set))
+            else [state]
+        )
+        normalized_states = []
+        for value in state_values:
+            if not isinstance(value, str):
+                continue
+            token = value.strip().lower()
+            if token:
+                normalized_states.append(token)
+        if "bot_active" in normalized_states:
+            if allow_pending and "pending" not in normalized_states:
+                normalized_states.append("pending")
+            if allow_manager_active and "manager_active" not in normalized_states:
+                normalized_states.append("manager_active")
+        if normalized_states:
+            state = normalized_states[0] if len(normalized_states) == 1 else normalized_states
+        else:
+            state = None
     info_sections = _llm_quality_sanitize_expect_info_sections_by_tags(tag_set, info_sections)
     expected_reply = expect.get("expected_reply")
     if isinstance(expected_reply, str):
@@ -3174,6 +3222,7 @@ def _llm_quality_expected_reply_matches(
     meta,
     conv_meta,
     handover_meta,
+    bot_response=False,
 ):
     if expected_reply is None:
         return True
@@ -3181,10 +3230,12 @@ def _llm_quality_expected_reply_matches(
         return True
     if expected_reply is True and expected_response is False:
         action = (meta or {}).get("action")
+        pending_action = (meta or {}).get("pending_action")
         tool_decision = _llm_quality_normalize_tool_token((meta or {}).get("tool_decision"))
         intent_value = _llm_quality_normalize_tool_token((meta or {}).get("intent"))
         if state in {"pending", "manager_active"} and (
             action in CHAOS_PENDING_ACTIONS
+            or pending_action in CHAOS_PENDING_ACTIONS
             or action
             in {
                 "escalate",
@@ -3193,6 +3244,12 @@ def _llm_quality_expected_reply_matches(
                 "booking_reuse_handover",
                 "booking_paused",
             }
+        ):
+            return True
+        if (
+            state in {"pending", "manager_active"}
+            and pending_action == "policy_core_degraded_hold"
+            and bot_response
         ):
             return True
         if state in {"pending", "manager_active"} and action in {"booking_prompt", "booking_confirm"}:
@@ -3388,6 +3445,15 @@ def _llm_quality_collect_info_signals(meta, trace_entries):
             for section in sections:
                 if isinstance(section, str) and section.strip():
                     info_sections.add(section.strip().lower())
+        llm_policy_core = meta.get("llm_policy_core")
+        llm_payload = llm_policy_core.get("payload") if isinstance(llm_policy_core, dict) else None
+        pack_refs = llm_payload.get("pack_refs") if isinstance(llm_payload, dict) else None
+        if isinstance(pack_refs, list):
+            for ref in pack_refs:
+                if isinstance(ref, str) and ref.strip():
+                    token = ref.strip().lower()
+                    intents.add(token)
+                    info_sections.add(token)
     for entry in _llm_quality_current_turn_trace_entries(meta, trace_entries):
         if not isinstance(entry, dict):
             continue
@@ -3486,6 +3552,9 @@ def _llm_quality_should_judge_turn(
 ):
     if not judge_enabled:
         return False, None
+    tags = {str(tag).strip().lower() for tag in (turn_tags or []) if str(tag).strip()}
+    if tags.intersection({"interrupt", "channel"}):
+        return False, "tag_skip"
     if not bot_response:
         return False, "no_bot_response"
     if not isinstance(user_text, str) or not user_text.strip():
@@ -3500,7 +3569,6 @@ def _llm_quality_should_judge_turn(
             critical = True
         if booking_active and booking_progress_expected:
             critical = True
-        tags = set(turn_tags or [])
         if tags.intersection(LLM_QUALITY_JUDGE_CRITICAL_TAGS):
             critical = True
         if not critical:
@@ -4328,9 +4396,21 @@ def _llm_quality_evaluate_turn(
             fallback_ok = True
         if not fallback_ok:
             reasons.append("expected_reply_type_mismatch")
+    expected_reply_for_check = expected_reply
+    if (
+        expected_reply is False
+        and expected_response is True
+        and (
+            expected_reply_type is not None
+            or bool(expected_info_sections)
+            or bool(booking_active)
+        )
+    ):
+        expected_reply_for_check = None
     if not _llm_quality_expected_reply_matches(
-        expected_reply=expected_reply,
+        expected_reply=expected_reply_for_check,
         expected_response=expected_response,
+        bot_response=bot_response,
         expected_reply_type=expected_reply_type,
         expected_state=expected_state,
         state=state,
@@ -4803,8 +4883,8 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--remote-jid", default=None)
     parser.add_argument(
         "--jid-mode",
-        choices=["round_robin", "random", "unique"],
-        default="round_robin",
+        choices=["auto", "round_robin", "random", "unique"],
+        default="auto",
     )
     parser.add_argument("--allow-non-allowlist", action="store_true")
     parser.add_argument("--webhook-secret", default=None)
@@ -4940,6 +5020,107 @@ def _load_env_file(path):
     except Exception:
         return {}
     return env
+
+
+def _clean_api_key(value):
+    if not value:
+        return None
+    cleaned = str(value).strip().strip('"').strip("'")
+    return cleaned or None
+
+
+def _parent_env_candidates(start_path):
+    current = os.path.abspath(start_path or os.getcwd())
+    candidates = []
+    seen = set()
+    while True:
+        for rel in ("truffles-api/.env", ".env"):
+            candidate = os.path.join(current, rel)
+            if candidate not in seen:
+                seen.add(candidate)
+                candidates.append(candidate)
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return candidates
+
+
+def _openai_key_candidate_env_files():
+    parent_candidate_builder = globals().get("_parent_env_candidates")
+    if not callable(parent_candidate_builder):
+        def parent_candidate_builder(start_path):
+            current = os.path.abspath(start_path or os.getcwd())
+            candidates = []
+            seen = set()
+            while True:
+                for rel in ("truffles-api/.env", ".env"):
+                    candidate = os.path.join(current, rel)
+                    if candidate not in seen:
+                        seen.add(candidate)
+                        candidates.append(candidate)
+                parent = os.path.dirname(current)
+                if parent == current:
+                    break
+                current = parent
+            return candidates
+
+    script_file = globals().get("__file__")
+    if script_file:
+        script_dir = os.path.dirname(os.path.abspath(script_file))
+    else:
+        script_dir = os.path.join(os.getcwd(), "ops")
+    repo_root = os.path.dirname(script_dir)
+    parent_candidates = parent_candidate_builder(os.getcwd())
+    parent_candidates.extend(parent_candidate_builder(script_dir))
+    candidates = [
+        os.environ.get("TRUFFLES_API_ENV_FILE"),
+        os.environ.get("ENV_FILE"),
+        os.path.join(os.getcwd(), "truffles-api", ".env"),
+        os.path.join(os.getcwd(), ".env"),
+        os.path.join(repo_root, "truffles-api", ".env"),
+        os.path.join(repo_root, ".env"),
+        "/home/zhan/truffles-main/truffles-api/.env",
+        "/home/zhan/truffles-main/.env",
+        "/home/zhan/truffles-main-deploy/truffles-api/.env",
+        "/home/zhan/truffles-main-deploy/.env",
+        "/home/zhan/infrastructure/.env",
+        *parent_candidates,
+    ]
+    unique: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        if not item:
+            continue
+        path = os.path.abspath(os.path.expanduser(str(item)))
+        if path in seen:
+            continue
+        seen.add(path)
+        unique.append(path)
+    return unique
+
+
+def _resolve_openai_api_key(explicit=None, *, container_name=None):
+    key = _clean_api_key(explicit)
+    if key:
+        return key, "explicit"
+
+    env_key = _clean_api_key(os.environ.get("OPENAI_API_KEY"))
+    if env_key:
+        return env_key, "env:OPENAI_API_KEY"
+
+    for env_path in _openai_key_candidate_env_files():
+        env_map = _load_env_file(env_path)
+        file_key = _clean_api_key(env_map.get("OPENAI_API_KEY"))
+        if file_key:
+            return file_key, f"env_file:{env_path}"
+
+    if container_name:
+        container_key = _clean_api_key(_resolve_env_from_container(container_name, "OPENAI_API_KEY"))
+        if container_key:
+            return container_key, f"container:{container_name}"
+
+    return None, None
 
 
 def _fetch_keycloak_token(env_map):
@@ -5695,6 +5876,7 @@ def _llm_quality_should_infer_bot_response_from_duplicate_ack(
     return action in {
         "reply",
         "match",
+        "ai_response",
         "booking_prompt",
         "smalltalk",
         "booking_confirm",
@@ -6892,6 +7074,28 @@ def _run_llm_quality(args):
 
     container_name, _ = resolve_container_name()
     allowlist_jids = _resolve_allowlist_jids(args.allowlist_jids, container_name)
+    jid_mode_effective = _llm_quality_resolve_jid_mode(args)
+    if args.jid_mode == "auto":
+        print(
+            json.dumps(
+                {
+                    "stage": "llm_quality_jid_mode",
+                    "requested": "auto",
+                    "resolved": jid_mode_effective,
+                    "skip_outbox": bool(args.skip_outbox),
+                },
+                ensure_ascii=False,
+            )
+        )
+    if (
+        jid_mode_effective == "unique"
+        and not args.remote_jid
+        and not args.skip_outbox
+        and not args.allow_non_allowlist
+    ):
+        raise SystemExit(
+            "llm-quality: --jid-mode unique requires --skip-outbox or --allow-non-allowlist"
+        )
     if args.remote_jid:
         if allowlist_jids and args.remote_jid not in allowlist_jids and not args.allow_non_allowlist:
             raise SystemExit(
@@ -7043,8 +7247,26 @@ def _run_llm_quality(args):
         elif client_meta and client_meta.get("client_id"):
             console_headers["X-Client-Id"] = client_meta.get("client_id")
 
+    llm_api_key, llm_api_key_source = _resolve_openai_api_key(
+        args.llm_api_key,
+        container_name=container_name,
+    )
+    if llm_api_key:
+        args.llm_api_key = llm_api_key
+    elif args.mode == "llm" and not args.scenarios_file:
+        raise SystemExit(
+            "llm-quality: missing OPENAI_API_KEY for scenario generation "
+            "(checked --llm-api-key, OPENAI_API_KEY env, *.env candidates, container env)"
+        )
+
     judge_mode = args.judge_mode
-    judge_api_key = args.judge_api_key or os.environ.get("OPENAI_API_KEY")
+    judge_api_key, judge_api_key_source = _resolve_openai_api_key(
+        args.judge_api_key,
+        container_name=container_name,
+    )
+    if not judge_api_key and args.llm_api_key:
+        judge_api_key = args.llm_api_key
+        judge_api_key_source = f"llm:{llm_api_key_source or 'explicit'}"
     judge_enabled = judge_mode != "off"
     judge_skip_reason = "judge_mode_off" if judge_mode == "off" else None
     if judge_enabled and not judge_api_key:
@@ -7059,7 +7281,8 @@ def _run_llm_quality(args):
     if judge_required and not judge_enabled:
         raise SystemExit(
             "llm-quality: strict replay requires judge enabled "
-            f"(reason={judge_skip_reason or 'judge_disabled'}; use --judge-mode sample|all|critical and API key, "
+            f"(reason={judge_skip_reason or 'judge_disabled'}; key_source={judge_api_key_source or 'none'}; "
+            "use --judge-mode sample|all|critical and API key, "
             "or pass --allow-judge-off for debug-only runs)"
         )
     judge_seed = args.judge_seed if args.judge_seed is not None else args.seed
@@ -7204,6 +7427,7 @@ def _run_llm_quality(args):
         "enabled": judge_enabled,
         "mode": judge_mode if judge_enabled else "off",
         "required": judge_required,
+        "api_key_source": judge_api_key_source if judge_enabled else None,
         "sample": args.judge_sample,
         "model": args.judge_model if judge_enabled else None,
         "base_url": args.judge_base_url if judge_enabled else None,
@@ -7645,7 +7869,7 @@ def _run_llm_quality(args):
     ) as trace_handle:
         for dialog_idx, dialog in enumerate(dialogs, start=1):
             remote_jid = args.remote_jid or _llm_quality_pick_jid(
-                allowlist_jids, dialog_idx - 1, rng, args.jid_mode, run_id=run_id
+                allowlist_jids, dialog_idx - 1, rng, jid_mode_effective, run_id=run_id
             )
             if not remote_jid:
                 raise SystemExit("llm-quality: remote_jid unresolved")
@@ -7653,6 +7877,13 @@ def _run_llm_quality(args):
                 preflight = _reset_dialog_state(remote_jid)
                 if preflight:
                     print(json.dumps(preflight, ensure_ascii=False))
+                    state_before = preflight.get("state_before")
+                    cleared = bool(preflight.get("cleared"))
+                    if state_before in {"pending", "manager_active"} and not cleared:
+                        raise SystemExit(
+                            "llm-quality: contaminated preflight (state_before="
+                            f"{state_before}, cleared=false); restart with --jid-mode unique"
+                        )
 
             for turn_idx, turn in enumerate(dialog.get("turns") or [], start=1):
                 stats["turns"] += 1
@@ -8617,12 +8848,15 @@ def _run_llm_quality(args):
         "tool_cancel_text": args.tool_cancel_text,
         "tool_calendar_text": args.tool_calendar_text,
         "tool_hook_wait": args.tool_hook_wait,
-        "jid_mode": args.jid_mode,
+        "jid_mode": jid_mode_effective,
+        "jid_mode_requested": args.jid_mode,
         "max_failures": args.max_failures,
         "baseline_summary": args.baseline_summary,
         "regression_tolerance": args.regression_tolerance,
         "judge_mode": judge_mode,
         "judge_required": judge_required,
+        "llm_api_key_source": llm_api_key_source,
+        "judge_api_key_source": judge_api_key_source if judge_enabled else None,
         "judge_sample": args.judge_sample,
         "judge_model": args.judge_model if judge_enabled else None,
         "judge_max_tokens": args.judge_max_tokens if judge_enabled else None,
@@ -12479,6 +12713,785 @@ def _run_livecheck(args):
             time.sleep(rng.uniform(min_wait, max_wait))
 
 
+def _parse_branch_domain_pairs(values):
+    mapping = {}
+    for raw in values or []:
+        token = str(raw or "").strip()
+        if not token:
+            continue
+        if "=" not in token:
+            raise SystemExit(
+                "onboarding-fleet-remediate: --branch-domain requires key=domain_slug"
+            )
+        key, domain = token.split("=", 1)
+        key = key.strip().lower()
+        domain = domain.strip().lower()
+        if not key or not domain:
+            raise SystemExit(
+                "onboarding-fleet-remediate: --branch-domain requires non-empty key and domain_slug"
+            )
+        mapping[key] = domain
+    return mapping
+
+
+def _resolve_diagnose_container(explicit_name):
+    if explicit_name:
+        return explicit_name
+    container_name, docker_error = resolve_container_name()
+    if docker_error:
+        raise SystemExit(f"onboarding-fleet: docker error ({docker_error})")
+    if not container_name:
+        raise SystemExit("onboarding-fleet: truffles-api container not found")
+    return container_name
+
+
+def _load_json_output(raw_stdout, *, command_name):
+    text = (raw_stdout or "").strip()
+    if not text:
+        raise SystemExit(f"{command_name}: empty response")
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in reversed(lines):
+        try:
+            return json.loads(line)
+        except Exception:
+            continue
+    raise SystemExit(f"{command_name}: non-json response ({text[:200]})")
+
+
+def _run_onboarding_fleet_container(payload, *, container_name):
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    payload_literal = json.dumps(payload_json)
+    script = f"""python - <<'PY'
+import json
+from datetime import datetime, timezone
+from uuid import uuid4
+
+from app.database import SessionLocal
+from app.models import Branch, Client, ClientCapability, ClientOnboardingContract, ReferencePack
+from app.services.onboarding_state import build_onboarding_scorecard
+from app.services.reference_pack_integrity import (
+    REFERENCE_PACK_SCHEMA_VERSION,
+    build_reference_pack_metadata,
+    evaluate_reference_pack_integrity,
+)
+
+payload = json.loads({payload_literal})
+mode = payload.get("mode")
+active_only = bool(payload.get("active_only", True))
+apply_changes = bool(payload.get("apply_changes", False))
+default_domain_slug = (payload.get("default_domain_slug") or "").strip().lower() or None
+branch_domain_map = payload.get("branch_domain_map") or {{}}
+confirm_payment = bool(payload.get("confirm_payment", False))
+ensure_contract = bool(payload.get("ensure_contract", True))
+sync_reference_pack = bool(payload.get("sync_reference_pack", False))
+
+session = SessionLocal()
+try:
+    query = session.query(Branch)
+    if active_only:
+        query = query.filter(Branch.is_active.is_(True))
+    branches = query.order_by(Branch.created_at.asc()).all()
+
+    report_rows = []
+    missing_counts = {{}}
+    actions = []
+    unresolved = []
+    now = datetime.now(timezone.utc)
+
+    def latest_capability(branch):
+        return (
+            session.query(ClientCapability)
+            .filter(
+                ClientCapability.client_id == branch.client_id,
+                ClientCapability.branch_id == branch.id,
+                ClientCapability.scope == "branch",
+                ClientCapability.status == "active",
+            )
+            .order_by(ClientCapability.created_at.desc())
+            .first()
+        )
+
+    def latest_contract(branch):
+        return (
+            session.query(ClientOnboardingContract)
+            .filter(
+                ClientOnboardingContract.client_id == branch.client_id,
+                ClientOnboardingContract.branch_id == branch.id,
+                ClientOnboardingContract.scope == "branch",
+                ClientOnboardingContract.status == "active",
+            )
+            .order_by(ClientOnboardingContract.created_at.desc())
+            .first()
+        )
+
+    def read_domain(payload_json):
+        if not isinstance(payload_json, dict):
+            return None
+        value = payload_json.get("domain_slug")
+        if not isinstance(value, str):
+            return None
+        value = value.strip().lower()
+        return value or None
+
+    def resolve_domain(branch, cap_domain, contract_domain):
+        if contract_domain:
+            return contract_domain, "contract"
+        if cap_domain:
+            return cap_domain, "capability"
+        branch_key_id = str(branch.id).strip().lower()
+        branch_key_slug = (branch.slug or "").strip().lower()
+        if branch_key_id and branch_key_id in branch_domain_map:
+            return str(branch_domain_map[branch_key_id]).strip().lower(), "map:branch_id"
+        if branch_key_slug and branch_key_slug in branch_domain_map:
+            return str(branch_domain_map[branch_key_slug]).strip().lower(), "map:branch_slug"
+        if default_domain_slug:
+            return default_domain_slug, "default"
+        return None, None
+
+    def ensure_capability_domain(record, *, domain_slug):
+        payload_json = record.payload_json if isinstance(record.payload_json, dict) else {{}}
+        next_payload = dict(payload_json)
+        if str(next_payload.get("domain_slug") or "").strip().lower() == domain_slug:
+            return False
+        next_payload["domain_slug"] = domain_slug
+        record.payload_json = next_payload
+        record.updated_at = now
+        return True
+
+    def ensure_contract_domain(record, *, domain_slug):
+        payload_json = record.payload_json if isinstance(record.payload_json, dict) else {{}}
+        next_payload = dict(payload_json)
+        if str(next_payload.get("domain_slug") or "").strip().lower() != domain_slug:
+            next_payload["domain_slug"] = domain_slug
+        purchased = next_payload.get("purchased")
+        if not isinstance(purchased, dict):
+            purchased = {{}}
+        if str(purchased.get("domain_slug") or "").strip().lower() != domain_slug:
+            purchased = dict(purchased)
+            purchased["domain_slug"] = domain_slug
+        next_payload["purchased"] = purchased
+        changed = next_payload != payload_json
+        if changed:
+            record.payload_json = next_payload
+            record.updated_at = now
+        return changed
+
+    def ensure_reference_pack(domain_slug):
+        record = (
+            session.query(ReferencePack)
+            .filter(ReferencePack.domain_slug == domain_slug)
+            .first()
+        )
+        if not sync_reference_pack:
+            return record, []
+        act = []
+        if not record:
+            metadata = build_reference_pack_metadata(
+                domain_slug=domain_slug,
+                metadata={{"source": "onboarding_fleet_remediate"}},
+            )
+            record = ReferencePack(
+                id=uuid4(),
+                domain_slug=domain_slug,
+                title=f"Reference pack: {{domain_slug}}",
+                description="Auto-created by onboarding fleet remediation",
+                schema_version=REFERENCE_PACK_SCHEMA_VERSION,
+                status="active",
+                metadata_json=metadata,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(record)
+            act.append("reference_pack_created")
+            return record, act
+        metadata_json = record.metadata_json if isinstance(record.metadata_json, dict) else None
+        next_metadata = build_reference_pack_metadata(
+            domain_slug=domain_slug,
+            metadata=metadata_json,
+        )
+        if (
+            record.schema_version != REFERENCE_PACK_SCHEMA_VERSION
+            or record.metadata_json != next_metadata
+            or record.status != "active"
+        ):
+            record.schema_version = REFERENCE_PACK_SCHEMA_VERSION
+            record.metadata_json = next_metadata
+            record.status = "active"
+            record.updated_at = now
+            act.append("reference_pack_integrity_synced")
+        return record, act
+
+    for branch in branches:
+        client = session.query(Client).filter(Client.id == branch.client_id).first()
+        cap = latest_capability(branch)
+        contract = latest_contract(branch)
+        cap_domain = read_domain(cap.payload_json if cap else None)
+        contract_domain = read_domain(contract.payload_json if contract else None)
+        resolved_domain, domain_source = resolve_domain(branch, cap_domain, contract_domain)
+
+        row_actions = []
+
+        if mode == "remediate":
+            if not resolved_domain:
+                unresolved.append(
+                    {{
+                        "branch_id": str(branch.id),
+                        "branch_slug": branch.slug,
+                        "client_id": str(branch.client_id),
+                        "client_slug": client.name if client else None,
+                        "reason": "domain_unresolved",
+                    }}
+                )
+            else:
+                if cap:
+                    if ensure_capability_domain(cap, domain_slug=resolved_domain):
+                        row_actions.append("capability_domain_updated")
+                else:
+                    cap = ClientCapability(
+                        id=uuid4(),
+                        client_id=branch.client_id,
+                        branch_id=branch.id,
+                        scope="branch",
+                        payload_json={{
+                            "domain_slug": resolved_domain,
+                            "channels": {{}},
+                            "providers": {{}},
+                            "features": {{}},
+                        }},
+                        schema_version="v1",
+                        status="active",
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    session.add(cap)
+                    row_actions.append("capability_created")
+
+                if ensure_contract:
+                    if contract:
+                        if ensure_contract_domain(contract, domain_slug=resolved_domain):
+                            row_actions.append("onboarding_contract_domain_updated")
+                    else:
+                        contract = ClientOnboardingContract(
+                            id=uuid4(),
+                            client_id=branch.client_id,
+                            branch_id=branch.id,
+                            scope="branch",
+                            payload_json={{
+                                "domain_slug": resolved_domain,
+                                "purchased": {{
+                                    "domain_slug": resolved_domain,
+                                    "channels": {{}},
+                                    "providers": {{}},
+                                    "features": {{}},
+                                }},
+                            }},
+                            schema_version="v1",
+                            status="active",
+                            payment_status="pending",
+                            created_at=now,
+                            updated_at=now,
+                        )
+                        session.add(contract)
+                        row_actions.append("onboarding_contract_created")
+
+                if contract and confirm_payment and contract.payment_status != "confirmed":
+                    contract.payment_status = "confirmed"
+                    contract.payment_confirmed_at = now
+                    contract.payment_confirmed_by = None
+                    contract.updated_at = now
+                    row_actions.append("payment_confirmed")
+
+                if resolved_domain:
+                    _, pack_actions = ensure_reference_pack(resolved_domain)
+                    row_actions.extend(pack_actions)
+
+            if row_actions:
+                session.flush()
+                cap_domain = read_domain(cap.payload_json if cap else None)
+                contract_domain = read_domain(contract.payload_json if contract else None)
+                resolved_domain = contract_domain or cap_domain or resolved_domain
+
+        effective_domain = resolved_domain or contract_domain or cap_domain
+        reference_pack = None
+        reference_pack_integrity_missing = []
+        if effective_domain:
+            reference_pack = (
+                session.query(ReferencePack)
+                .filter(ReferencePack.domain_slug == effective_domain)
+                .first()
+            )
+            if reference_pack:
+                reference_pack_integrity_missing = evaluate_reference_pack_integrity(
+                    domain_slug=reference_pack.domain_slug,
+                    schema_version=reference_pack.schema_version,
+                    metadata=reference_pack.metadata_json if isinstance(reference_pack.metadata_json, dict) else None,
+                )
+            else:
+                reference_pack_integrity_missing = ["reference_pack"]
+        else:
+            reference_pack_integrity_missing = ["reference_pack_domain"]
+
+        scorecard = build_onboarding_scorecard(session, branch)
+        missing = list(scorecard.missing or [])
+        for code in missing:
+            missing_counts[code] = int(missing_counts.get(code, 0)) + 1
+
+        report_rows.append(
+            {{
+                "branch_id": str(branch.id),
+                "branch_slug": branch.slug,
+                "client_id": str(branch.client_id),
+                "client_slug": client.name if client else None,
+                "is_active": bool(branch.is_active),
+                "scorecard_ready": bool(scorecard.ready),
+                "scorecard_missing": missing,
+                "cap_domain": cap_domain,
+                "contract_domain": contract_domain,
+                "resolved_domain": effective_domain,
+                "domain_source": domain_source,
+                "payment_status": contract.payment_status if contract else None,
+                "reference_pack_status": reference_pack.status if reference_pack else None,
+                "reference_pack_integrity_missing": reference_pack_integrity_missing,
+            }}
+        )
+        if row_actions:
+            actions.append(
+                {{
+                    "branch_id": str(branch.id),
+                    "branch_slug": branch.slug,
+                    "actions": row_actions,
+                }}
+            )
+
+    active_rows = [row for row in report_rows if row.get("is_active")]
+    active_not_ready = [row for row in active_rows if not row.get("scorecard_ready")]
+    summary = {{
+        "mode": mode,
+        "active_only": active_only,
+        "total_branches": len(report_rows),
+        "active_branches": len(active_rows),
+        "active_not_ready": len(active_not_ready),
+        "active_missing_codes": missing_counts,
+        "changed_branches": len(actions),
+        "unresolved_branches": len(unresolved),
+        "apply_changes": apply_changes,
+    }}
+
+    if apply_changes and mode == "remediate":
+        session.commit()
+    else:
+        session.rollback()
+
+    print(
+        json.dumps(
+            {{
+                "summary": summary,
+                "rows": report_rows,
+                "active_not_ready_rows": active_not_ready,
+                "actions": actions,
+                "unresolved": unresolved,
+            }},
+            ensure_ascii=False,
+        )
+    )
+finally:
+    session.close()
+PY"""
+    result = run_docker_exec(container_name, script)
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        raise SystemExit(
+            f"onboarding-fleet: container command failed ({stderr or 'unknown error'})"
+        )
+    return _load_json_output(result.stdout, command_name="onboarding-fleet")
+
+
+def _parse_onboarding_fleet_check_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py onboarding-fleet-check",
+        description="Check onboarding readiness for branches and fail on active missing gates.",
+    )
+    parser.add_argument(
+        "--include-inactive",
+        action="store_true",
+        help="Include inactive branches in report (default: active only).",
+    )
+    parser.add_argument(
+        "--fail-on-active-missing",
+        action="store_true",
+        help="Exit non-zero when at least one active branch is not scorecard-ready.",
+    )
+    parser.add_argument("--container-name", default=None)
+    parser.add_argument("--json", action="store_true")
+    return parser.parse_args(argv)
+
+
+def _run_onboarding_fleet_check(args):
+    container_name = _resolve_diagnose_container(args.container_name)
+    payload = {
+        "mode": "check",
+        "active_only": not args.include_inactive,
+        "apply_changes": False,
+    }
+    result = _run_onboarding_fleet_container(payload, container_name=container_name)
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False))
+    else:
+        summary = result.get("summary") or {}
+        print(
+            json.dumps(
+                {
+                    "active_not_ready": summary.get("active_not_ready"),
+                    "active_missing_codes": summary.get("active_missing_codes"),
+                    "active_branches": summary.get("active_branches"),
+                },
+                ensure_ascii=False,
+            )
+        )
+        rows = result.get("active_not_ready_rows") or []
+        for row in rows:
+            print(
+                f"- {row.get('client_slug')}/{row.get('branch_slug')} "
+                f"missing={','.join(row.get('scorecard_missing') or [])}"
+            )
+    active_not_ready = int((result.get("summary") or {}).get("active_not_ready") or 0)
+    if args.fail_on_active_missing and active_not_ready > 0:
+        raise SystemExit(
+            f"onboarding-fleet-check: active branches not ready ({active_not_ready})"
+        )
+
+
+def _parse_onboarding_fleet_remediate_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py onboarding-fleet-remediate",
+        description="Backfill onboarding domain/contract/payment for branches with controlled flags.",
+    )
+    parser.add_argument(
+        "--include-inactive",
+        action="store_true",
+        help="Include inactive branches in remediation/report.",
+    )
+    parser.add_argument(
+        "--branch-domain",
+        action="append",
+        default=[],
+        help="Explicit mapping: branch_id=domain_slug or branch_slug=domain_slug (repeatable).",
+    )
+    parser.add_argument(
+        "--default-domain-slug",
+        default=None,
+        help="Fallback domain_slug used only when branch has no contract/capability domain and no explicit mapping.",
+    )
+    parser.add_argument(
+        "--confirm-payment",
+        action="store_true",
+        help="Set onboarding contract payment_status=confirmed for touched branches.",
+    )
+    parser.add_argument(
+        "--no-ensure-contract",
+        action="store_true",
+        help="Do not create missing onboarding contracts during remediation.",
+    )
+    parser.add_argument(
+        "--sync-reference-pack-integrity",
+        action="store_true",
+        help="Create/update reference packs to integrity v2 for resolved domains.",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Persist changes (default is dry-run).",
+    )
+    parser.add_argument("--container-name", default=None)
+    parser.add_argument("--json", action="store_true")
+    return parser.parse_args(argv)
+
+
+def _run_onboarding_fleet_remediate(args):
+    container_name = _resolve_diagnose_container(args.container_name)
+    branch_domain_map = _parse_branch_domain_pairs(args.branch_domain)
+    payload = {
+        "mode": "remediate",
+        "active_only": not args.include_inactive,
+        "apply_changes": bool(args.apply),
+        "default_domain_slug": args.default_domain_slug,
+        "branch_domain_map": branch_domain_map,
+        "confirm_payment": bool(args.confirm_payment),
+        "ensure_contract": not bool(args.no_ensure_contract),
+        "sync_reference_pack": bool(args.sync_reference_pack_integrity),
+    }
+    result = _run_onboarding_fleet_container(payload, container_name=container_name)
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False))
+        return
+    summary = result.get("summary") or {}
+    print(
+        json.dumps(
+            {
+                "apply_changes": summary.get("apply_changes"),
+                "changed_branches": summary.get("changed_branches"),
+                "unresolved_branches": summary.get("unresolved_branches"),
+                "active_not_ready": summary.get("active_not_ready"),
+                "active_missing_codes": summary.get("active_missing_codes"),
+            },
+            ensure_ascii=False,
+        )
+    )
+    for row in (result.get("actions") or []):
+        print(
+            f"- changed {row.get('branch_slug')} ({row.get('branch_id')}): "
+            f"{', '.join(row.get('actions') or [])}"
+        )
+    for row in (result.get("unresolved") or []):
+        print(
+            f"- unresolved {row.get('branch_slug')} ({row.get('branch_id')}): {row.get('reason')}"
+        )
+
+
+def _onboarding_quality_imports():
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    api_root = os.path.join(repo_root, "truffles-api")
+    if api_root not in sys.path:
+        sys.path.insert(0, api_root)
+    from app.services.knowledge_validation import get_missing_required_fields, get_required_fields_for_domain
+    from app.services.onboarding_intake_service import evaluate_intake_payload
+    from app.services.reference_pack_integrity import (
+        REFERENCE_PACK_SCHEMA_VERSION,
+        build_reference_pack_metadata,
+        build_required_fields_checksum,
+        evaluate_reference_pack_integrity,
+    )
+
+    return {
+        "get_missing_required_fields": get_missing_required_fields,
+        "get_required_fields_for_domain": get_required_fields_for_domain,
+        "evaluate_intake_payload": evaluate_intake_payload,
+        "REFERENCE_PACK_SCHEMA_VERSION": REFERENCE_PACK_SCHEMA_VERSION,
+        "build_reference_pack_metadata": build_reference_pack_metadata,
+        "build_required_fields_checksum": build_required_fields_checksum,
+        "evaluate_reference_pack_integrity": evaluate_reference_pack_integrity,
+    }
+
+
+def _set_nested_path(payload, path, value):
+    current = payload
+    parts = path.split(".")
+    for idx, key in enumerate(parts):
+        last = idx == len(parts) - 1
+        if last:
+            current[key] = value
+            return
+        next_value = current.get(key)
+        if not isinstance(next_value, dict):
+            next_value = {}
+            current[key] = next_value
+        current = next_value
+
+
+def _domain_smoke_value_for_field(path):
+    mapping = {
+        "client_pack.business.name": "Smoke Biz",
+        "client_pack.location.city": "Almaty",
+        "client_pack.location.address.full": "Abylai Khan 1",
+        "client_pack.operations.hours.days": ["mon", "tue", "wed", "thu", "fri"],
+        "client_pack.operations.hours.open": "10:00",
+        "client_pack.operations.hours.close": "20:00",
+        "client_pack.catalog.summary": "Basic services",
+        "client_pack.communication.languages": ["ru", "kk"],
+        "client_pack.services_catalog.services": [
+            {"name": "base_service", "price": "10000", "duration_minutes": 60}
+        ],
+        "client_pack.guest_policy": "ask_manager",
+        "client_pack.safety.medical_note": "consult specialist",
+        "client_pack.pricing.price_from_reason": "depends_on_scope",
+        "client_pack.quality.expectations_photo": "reference_required",
+        "client_pack.price_list": [{"service": "base_service", "price": "10000"}],
+        "client_pack.service_duration_estimates": [
+            {"service": "base_service", "duration_minutes": 60}
+        ],
+        "client_pack.booking.collect_fields": ["service", "time", "name", "phone"],
+        "client_pack.booking.bot_can_confirm": True,
+        "client_pack.policy.hard_law": "no_medical_claims",
+        "client_pack.policy.payment_info": "cash_or_card",
+        "client_pack.policy.reschedule": "2h_notice",
+        "client_pack.policy.cancel": "free_before_2h",
+        "client_pack.policy.medical": "no_diagnosis",
+        "client_pack.policy.legal": "consumer_law",
+        "client_pack.policy.complaint": "manager_review",
+        "client_pack.policy.discounts": "published_only",
+        "client_pack.policy.guard_topics.refund": ["refund", "возврат"],
+    }
+    return mapping.get(path, "smoke_value")
+
+
+def _build_domain_smoke_payload(required_fields):
+    payload = {}
+    for path in required_fields:
+        _set_nested_path(payload, path, _domain_smoke_value_for_field(path))
+    return payload
+
+
+def _onboarding_quality_evaluate_domain(domain_slug, *, imports):
+    required_fields = imports["get_required_fields_for_domain"](domain_slug=domain_slug)
+    payload = _build_domain_smoke_payload(required_fields)
+    missing = imports["get_missing_required_fields"](payload, domain_slug=domain_slug)
+    intake_missing, intake_questions = imports["evaluate_intake_payload"](
+        payload,
+        domain_slug=domain_slug,
+    )
+    metadata = imports["build_reference_pack_metadata"](domain_slug=domain_slug)
+    integrity_missing = imports["evaluate_reference_pack_integrity"](
+        domain_slug=domain_slug,
+        schema_version=imports["REFERENCE_PACK_SCHEMA_VERSION"],
+        metadata=metadata,
+    )
+    checksum = imports["build_required_fields_checksum"](required_fields)
+    status = "pass"
+    if missing or intake_missing or integrity_missing:
+        status = "fail"
+    return {
+        "domain_slug": domain_slug,
+        "status": status,
+        "required_fields_count": len(required_fields),
+        "required_fields_checksum": checksum,
+        "missing_required_fields": missing,
+        "intake_missing_fields": intake_missing,
+        "intake_missing_questions": intake_questions,
+        "integrity_missing": integrity_missing,
+    }
+
+
+def _onboarding_quality_compare_baseline(summary, baseline_summary):
+    regressions = []
+    current_by_domain = {
+        row.get("domain_slug"): row
+        for row in (summary.get("domains") or [])
+        if row.get("domain_slug")
+    }
+    baseline_by_domain = {
+        row.get("domain_slug"): row
+        for row in (baseline_summary.get("domains") or [])
+        if row.get("domain_slug")
+    }
+    for domain_slug, current in current_by_domain.items():
+        baseline = baseline_by_domain.get(domain_slug)
+        if not baseline:
+            continue
+        if baseline.get("status") == "pass" and current.get("status") != "pass":
+            regressions.append(f"{domain_slug}:status")
+        if baseline.get("required_fields_checksum") != current.get("required_fields_checksum"):
+            regressions.append(f"{domain_slug}:required_fields_checksum")
+        baseline_missing = len(baseline.get("missing_required_fields") or [])
+        current_missing = len(current.get("missing_required_fields") or [])
+        if current_missing > baseline_missing:
+            regressions.append(f"{domain_slug}:missing_required_fields")
+    return regressions
+
+
+def _parse_onboarding_quality_smoke_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py onboarding-quality-smoke",
+        description="Run deterministic onboarding quality smoke for multiple domains.",
+    )
+    parser.add_argument(
+        "--domains",
+        default="beauty,clinic,legal,ecom",
+        help="Comma-separated domain slugs.",
+    )
+    parser.add_argument(
+        "--baseline-summary",
+        default=None,
+        help="Path to baseline summary json for regression comparison.",
+    )
+    parser.add_argument(
+        "--save-summary",
+        default=None,
+        help="Write current summary json to this path.",
+    )
+    parser.add_argument(
+        "--fail-on-regression",
+        action="store_true",
+        help="Exit non-zero when regression is detected vs baseline-summary.",
+    )
+    parser.add_argument("--json", action="store_true")
+    return parser.parse_args(argv)
+
+
+def _run_onboarding_quality_smoke(args):
+    domains = _parse_csv_values(args.domains)
+    if not domains:
+        raise SystemExit("onboarding-quality-smoke: no domains provided")
+    imports = _onboarding_quality_imports()
+    rows = []
+    for domain_slug in domains:
+        rows.append(_onboarding_quality_evaluate_domain(domain_slug, imports=imports))
+    failed_domains = [
+        row.get("domain_slug")
+        for row in rows
+        if row.get("status") != "pass"
+    ]
+    summary = {
+        "domains": rows,
+        "checked_domains": len(rows),
+        "failed_domains": failed_domains,
+        "status": "pass" if not failed_domains else "fail",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    regressions = []
+    if args.baseline_summary:
+        if not os.path.isfile(args.baseline_summary):
+            raise SystemExit(
+                f"onboarding-quality-smoke: baseline-summary not found ({args.baseline_summary})"
+            )
+        try:
+            with open(args.baseline_summary, "r", encoding="utf-8") as handle:
+                baseline_summary = json.load(handle)
+        except Exception as exc:
+            raise SystemExit(
+                f"onboarding-quality-smoke: baseline-summary parse failed ({exc})"
+            ) from exc
+        regressions = _onboarding_quality_compare_baseline(summary, baseline_summary)
+        summary["regressions"] = regressions
+
+    if args.save_summary:
+        output_dir = os.path.dirname(args.save_summary)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        with open(args.save_summary, "w", encoding="utf-8") as handle:
+            json.dump(summary, handle, ensure_ascii=False, indent=2)
+
+    if args.json:
+        print(json.dumps(summary, ensure_ascii=False))
+    else:
+        print(
+            json.dumps(
+                {
+                    "status": summary["status"],
+                    "checked_domains": summary["checked_domains"],
+                    "failed_domains": failed_domains,
+                    "regressions": regressions,
+                },
+                ensure_ascii=False,
+            )
+        )
+        for row in rows:
+            print(
+                f"- {row.get('domain_slug')}: status={row.get('status')} "
+                f"required_fields={row.get('required_fields_count')} "
+                f"missing={len(row.get('missing_required_fields') or [])} "
+                f"integrity_missing={len(row.get('integrity_missing') or [])}"
+            )
+
+    if failed_domains:
+        raise SystemExit(
+            f"onboarding-quality-smoke: failed domains ({', '.join(failed_domains)})"
+        )
+    if args.fail_on_regression and regressions:
+        raise SystemExit(
+            f"onboarding-quality-smoke: regressions ({', '.join(regressions)})"
+        )
+
+
 def _parse_deploy_verify_args(argv):
     parser = argparse.ArgumentParser(
         prog="ops/diagnose.py deploy-verify",
@@ -13170,6 +14183,15 @@ if len(sys.argv) > 1 and sys.argv[1] == "dialog-report":
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "emit-evidence":
     _run_emit_evidence(_parse_emit_evidence_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "onboarding-fleet-check":
+    _run_onboarding_fleet_check(_parse_onboarding_fleet_check_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "onboarding-fleet-remediate":
+    _run_onboarding_fleet_remediate(_parse_onboarding_fleet_remediate_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "onboarding-quality-smoke":
+    _run_onboarding_quality_smoke(_parse_onboarding_quality_smoke_args(sys.argv[2:]))
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "livecheck-auto":
     _run_livecheck_auto(_parse_livecheck_auto_args(sys.argv[2:]))

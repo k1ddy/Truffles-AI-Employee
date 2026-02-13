@@ -158,7 +158,7 @@ async def handle_webhook_payload(
             error_type=context["error_type"],
             error_message=context["error"],
         )
-        logger.error("Webhook processing failed", extra={"context": context})
+        logger.exception("Webhook processing failed", extra={"context": context})
         record_delivery_failure(
             payload.client_slug,
             source="webhook",

@@ -2621,7 +2621,7 @@ MEMORY_PROFILE_ENABLED = os.environ.get("MEMORY_PROFILE_ENABLED", "").strip().lo
 
 MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться?"
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
-MSG_BOOKING_ASK_NAME = "Как вас зовут?"
+MSG_BOOKING_ASK_NAME = "Отлично, время подходит. Как вас зовут?"
 MSG_BOOKING_ASK_ALL = "Чтобы записать, пожалуйста, напишите: услуга, точная дата, точное время, имя, контактный номер."
 MSG_BOOKING_SLOT_LOCK_STUB = "Я помогаю только по вопросам салона и записи."
 MSG_BOOKING_CANCELLED = "Хорошо, если передумаете — пишите."
@@ -3175,8 +3175,26 @@ def _looks_like_time_only_request(message_text: str | None) -> bool:
     return has_time_token
 
 
-BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration", "location", "master"}
-INFO_INTENTS = {"pricing", "hours", "duration", "location", "promotions", "master"}
+BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration", "location", "parking", "master"}
+INFO_INTENTS = {"pricing", "hours", "duration", "location", "parking", "promotions", "master", "contact"}
+INFO_INTENT_HINTS = (
+    ("parking", {"parking"}),
+    ("парков", {"parking"}),
+    ("паркинг", {"parking"}),
+    ("location", {"location"}),
+    ("address", {"location"}),
+    ("hours", {"hours"}),
+    ("schedule", {"hours"}),
+    ("pricing", {"pricing"}),
+    ("price", {"pricing"}),
+    ("cost", {"pricing"}),
+    ("duration", {"duration"}),
+    ("promot", {"promotions"}),
+    ("discount", {"promotions"}),
+    ("master", {"master"}),
+    ("contact", {"contact"}),
+    ("phone", {"contact"}),
+)
 TOOL_INFO_SECTION_MAP = {
     "catalog.location": ["location"],
     "catalog.portfolio": ["portfolio"],
@@ -3338,6 +3356,51 @@ def _plan_outcome_matches_action(outcome: str | None, tool_action: str | None) -
             "calendar."
         ) or tool_action.startswith("catalog.")
     return False
+
+
+def _derive_policy_info_refs(
+    *,
+    policy_intent: str | None,
+    message_text: str | None,
+    client_slug: str | None,
+) -> list[str]:
+    derived: list[str] = []
+
+    def _append_ref(ref: str) -> None:
+        if ref in INFO_INTENTS and ref not in derived:
+            derived.append(ref)
+
+    if isinstance(policy_intent, str) and policy_intent.strip():
+        normalized_hint = policy_intent.strip().casefold()
+        for token, refs in INFO_INTENT_HINTS:
+            if token in normalized_hint:
+                for ref in refs:
+                    _append_ref(ref)
+
+    if isinstance(message_text, str) and message_text.strip():
+        fallback_intents, _ = _detect_info_class_intents(
+            message_text,
+            intent_decomp_set=set(),
+            client_slug=client_slug,
+        )
+        for ref in fallback_intents:
+            _append_ref(ref)
+
+    return derived
+
+
+def _derive_service_clarify_info_sections(*sources: Any) -> list[str]:
+    sections: list[str] = []
+    for source in sources:
+        if not isinstance(source, (list, tuple, set)):
+            continue
+        for item in source:
+            if not isinstance(item, str):
+                continue
+            normalized = item.strip().casefold()
+            if normalized in INFO_INTENTS and normalized not in sections:
+                sections.append(normalized)
+    return sections
 
 
 def _normalize_policy_action_from_tool_action(
@@ -7035,55 +7098,68 @@ async def _handle_webhook_payload(
                     policy_low_confidence_ok = True
                 else:
                     policy_validation_error = "low_confidence"
-            elif policy_action not in LLM_POLICY_CORE_ALLOWED_ACTIONS:
-                normalized_action, was_normalized = _normalize_policy_action_from_tool_action(
-                    policy_action,
-                    policy_tool_action,
-                )
-                if normalized_action in LLM_POLICY_CORE_ALLOWED_ACTIONS:
-                    policy_action = normalized_action
-                    policy_action_normalized = was_normalized
-                else:
-                    policy_validation_error = "action_invalid"
-            elif not policy_tool_action or policy_tool_action not in LLM_POLICY_CORE_ALLOWED_TOOL_ACTIONS:
-                policy_validation_error = "tool_action_invalid"
-            elif not _plan_outcome_matches_action(policy_action, policy_tool_action):
-                policy_validation_error = "action_tool_mismatch"
             else:
-                allowed_info_map = {ref.casefold(): ref for ref in info_refs}
-                allowed_consult_map = {ref.casefold(): ref for ref in consult_refs}
-                if policy_tool_action == "info":
-                    if not policy_pack_refs:
-                        # Accept info plans without explicit pack refs when a concrete query exists.
-                        # This avoids degrading to out_of_domain on in-domain consult questions like lateness.
-                        if not policy_service_query:
+                if policy_action not in LLM_POLICY_CORE_ALLOWED_ACTIONS:
+                    normalized_action, was_normalized = _normalize_policy_action_from_tool_action(
+                        policy_action,
+                        policy_tool_action,
+                    )
+                    if normalized_action in LLM_POLICY_CORE_ALLOWED_ACTIONS:
+                        policy_action = normalized_action
+                        policy_action_normalized = was_normalized
+                    else:
+                        policy_validation_error = "action_invalid"
+                if (
+                    policy_validation_error is None
+                    and (not policy_tool_action or policy_tool_action not in LLM_POLICY_CORE_ALLOWED_TOOL_ACTIONS)
+                ):
+                    policy_validation_error = "tool_action_invalid"
+                if (
+                    policy_validation_error is None
+                    and not _plan_outcome_matches_action(policy_action, policy_tool_action)
+                ):
+                    policy_validation_error = "action_tool_mismatch"
+                if policy_validation_error is None and policy_tool_action == "info" and not policy_pack_refs:
+                    policy_pack_refs = _derive_policy_info_refs(
+                        policy_intent=policy_intent,
+                        message_text=message_text,
+                        client_slug=payload.client_slug,
+                    )
+                if policy_validation_error is None:
+                    allowed_info_map = {ref.casefold(): ref for ref in info_refs}
+                    allowed_consult_map = {ref.casefold(): ref for ref in consult_refs}
+                    if policy_tool_action == "info":
+                        if not policy_pack_refs:
+                            # Accept info plans without explicit pack refs when a concrete query exists.
+                            # This avoids degrading to out_of_domain on in-domain consult questions like lateness.
+                            if not policy_service_query:
+                                policy_validation_error = "pack_refs_missing"
+                        else:
+                            fallback_info_refs = {item.casefold() for item in INFO_INTENTS}
+                            for ref in policy_pack_refs:
+                                resolved = allowed_info_map.get(ref)
+                                if not resolved and not allowed_info_map and ref in fallback_info_refs:
+                                    resolved = ref
+                                if not resolved:
+                                    policy_validation_error = "pack_ref_invalid"
+                                    break
+                                resolved_policy_refs.append(resolved)
+                    elif policy_tool_action == "consult":
+                        if consult_refs_error:
+                            policy_validation_error = "consult_refs_missing"
+                        elif not policy_pack_refs:
                             policy_validation_error = "pack_refs_missing"
-                    else:
-                        fallback_info_refs = {item.casefold() for item in INFO_INTENTS}
-                        for ref in policy_pack_refs:
-                            resolved = allowed_info_map.get(ref)
-                            if not resolved and not allowed_info_map and ref in fallback_info_refs:
-                                resolved = ref
-                            if not resolved:
-                                policy_validation_error = "pack_ref_invalid"
-                                break
-                            resolved_policy_refs.append(resolved)
-                elif policy_tool_action == "consult":
-                    if consult_refs_error:
-                        policy_validation_error = "consult_refs_missing"
-                    elif not policy_pack_refs:
-                        policy_validation_error = "pack_refs_missing"
-                    else:
-                        for ref in policy_pack_refs:
-                            resolved = allowed_consult_map.get(ref)
-                            if not resolved:
-                                policy_validation_error = "pack_ref_invalid"
-                                break
-                            resolved_policy_refs.append(resolved)
-                elif policy_pack_refs:
-                    policy_pack_refs = []
-                    resolved_policy_refs = []
-                    policy_pack_refs_dropped = True
+                        else:
+                            for ref in policy_pack_refs:
+                                resolved = allowed_consult_map.get(ref)
+                                if not resolved:
+                                    policy_validation_error = "pack_ref_invalid"
+                                    break
+                                resolved_policy_refs.append(resolved)
+                    elif policy_pack_refs:
+                        policy_pack_refs = []
+                        resolved_policy_refs = []
+                        policy_pack_refs_dropped = True
 
             if policy_validation_error is None and policy_action == "handoff":
                 # If LLM explicitly selected handoff, manager escalation is implied.
@@ -8313,6 +8389,13 @@ async def _handle_webhook_payload(
                     client_slug=payload.client_slug,
                 )
                 info_sections_hint = [intent for intent in fallback_info_intents if intent in INFO_INTENTS]
+            # Guard parking/location/hours asks from being routed to service_query.
+            if policy_tool_action == "catalog.service_query":
+                info_route_set = set(info_sections_hint)
+                if {"parking", "location", "hours", "contact"} & info_route_set:
+                    policy_tool_action = "catalog.location"
+                    policy_tool_args = {}
+                    policy_service_query = None
             if not info_sections_hint:
                 info_sections_hint = list(TOOL_INFO_SECTION_MAP.get(policy_tool_action, []))
             if policy_tool_action == "catalog.location":
@@ -8851,7 +8934,16 @@ async def _handle_webhook_payload(
                 )
 
         if policy_tool_action == "info":
-            policy_info_intents = list(dict.fromkeys(policy_pack_refs))
+            policy_info_intents: list[str] = []
+            for ref in policy_pack_refs:
+                if ref in INFO_INTENTS and ref not in policy_info_intents:
+                    policy_info_intents.append(ref)
+            if not policy_info_intents:
+                policy_info_intents = _derive_policy_info_refs(
+                    policy_intent=policy_intent,
+                    message_text=message_text,
+                    client_slug=payload.client_slug,
+                )
             policy_info_set = set(policy_info_intents)
             requires_service = bool({"pricing", "duration"} & policy_info_set)
             direct_info_without_service = False
@@ -8880,6 +8972,7 @@ async def _handle_webhook_payload(
                 ):
                     direct_info_without_service = True
             if requires_service and not policy_service_query and not direct_info_without_service:
+                clarify_sections = _derive_service_clarify_info_sections(policy_info_intents)
                 context = _get_conversation_context(conversation)
                 context = _set_expected_reply_context(
                     conversation=conversation,
@@ -8902,6 +8995,7 @@ async def _handle_webhook_payload(
                         "decision": "llm_policy_core_collect",
                         "state": conversation.state,
                         "missing_slot": "service",
+                        "info_sections": clarify_sections,
                     },
                 )
                 _record_message_decision_meta(
@@ -8911,6 +9005,15 @@ async def _handle_webhook_payload(
                     source="llm_policy_core",
                     fast_intent=False,
                 )
+                if saved_message and clarify_sections:
+                    clarify_fact_intents = list(dict.fromkeys(["service_clarify", *clarify_sections]))
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "info_sections": clarify_sections,
+                            "fact_intents": clarify_fact_intents,
+                        },
+                    )
                 bot_response, sent = _send_and_save(bot_response)
                 result_message = (
                     "LLM policy core collect response sent"
@@ -9332,6 +9435,11 @@ async def _handle_webhook_payload(
                     else "LLM policy core booking prompt failed"
                 )
             else:
+                clarify_sections = _derive_service_clarify_info_sections(
+                    policy_pack_refs,
+                    intent_decomp_set,
+                    info_class_intents,
+                )
                 context = _get_conversation_context(conversation)
                 context = _set_expected_reply_context(
                     conversation=conversation,
@@ -9354,6 +9462,7 @@ async def _handle_webhook_payload(
                         "decision": "llm_policy_core_collect",
                         "state": conversation.state,
                         "missing_slot": policy_collect_slot,
+                        "info_sections": clarify_sections,
                     },
                 )
                 _record_message_decision_meta(
@@ -9363,6 +9472,15 @@ async def _handle_webhook_payload(
                     source="llm_policy_core",
                     fast_intent=False,
                 )
+                if saved_message and clarify_sections:
+                    clarify_fact_intents = list(dict.fromkeys(["service_clarify", *clarify_sections]))
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "info_sections": clarify_sections,
+                            "fact_intents": clarify_fact_intents,
+                        },
+                    )
                 bot_response, sent = _send_and_save(bot_response)
                 result_message = (
                     "LLM policy core collect response sent"
