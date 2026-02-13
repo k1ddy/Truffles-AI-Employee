@@ -590,10 +590,12 @@ def _should_block_expected_reply_by_info(
     info_query = legacy._looks_like_info_query(message_text, client_slug=client_slug)
     price_signal = legacy._has_price_signal(normalized_message, message_text)
     duration_signal = legacy._has_duration_signal(normalized_message, message_text)
+    style_reference_signal = _is_style_reference_request(message_text, has_media=False)
     blocked = bool(
         info_query
         or price_signal
         or duration_signal
+        or style_reference_signal
     )
     if not blocked and expected_reply_type in {
         legacy.EXPECTED_REPLY_TIME,
@@ -907,19 +909,27 @@ def _apply_expected_reply_contract(
             slot_confidence = 1.0
         else:
             if answer_used and use_llm_slot:
-                validated_value = _validate_expected_reply_value(
-                    expected_reply_type=expected_reply_type,
-                    value=answer_value,
-                    client_slug=client_slug,
-                )
-                if validated_value:
-                    matched = True
-                    value = validated_value
-                    slot_source = "llm"
-                    slot_confidence = answer_confidence
-                else:
+                # Guard against fabricated time slots: for datetime replies we only
+                # accept LLM slot values when the user text had a deterministic
+                # datetime signal in this turn.
+                if expected_reply_type == legacy.EXPECTED_REPLY_TIME and not deterministic_available:
                     answer_value_validated = False
-                    slot_validation_error = "validation_failed"
+                    slot_validation_error = "time_not_grounded"
+                    answer_error = "time_not_grounded"
+                else:
+                    validated_value = _validate_expected_reply_value(
+                        expected_reply_type=expected_reply_type,
+                        value=answer_value,
+                        client_slug=client_slug,
+                    )
+                    if validated_value:
+                        matched = True
+                        value = validated_value
+                        slot_source = "llm"
+                        slot_confidence = answer_confidence
+                    else:
+                        answer_value_validated = False
+                        slot_validation_error = "validation_failed"
             elif answer_used and not use_llm_slot:
                 answer_used = False
                 answer_value_validated = False
@@ -3193,6 +3203,8 @@ def _looks_like_time_only_request(message_text: str | None) -> bool:
 
 BOOKING_INFO_QUESTION_TYPES = {"pricing", "hours", "duration", "location", "parking", "master"}
 INFO_INTENTS = {"pricing", "hours", "duration", "location", "parking", "promotions", "master", "contact"}
+INFO_SERVICE_DEPENDENT_INTENTS = {"pricing", "duration"}
+INFO_NON_SERVICE_INTENTS = {"hours", "location", "parking", "promotions", "master", "contact"}
 INFO_INTENT_HINTS = (
     ("parking", {"parking"}),
     ("парков", {"parking"}),
@@ -3237,6 +3249,7 @@ LLM_POLICY_CORE_ALLOWED_TOOL_ACTIONS = LLM_PLAN_ALLOWED_TOOL_ACTIONS
 LLM_POLICY_CORE_LOW_CONFIDENCE_TOOL_ALLOWLIST = {
     "calendar.list_slots",
     "calendar.get_booking",
+    "calendar.reschedule",
     "catalog.service_query",
     "catalog.location",
     "catalog.portfolio",
@@ -3292,6 +3305,7 @@ SESSION_MEMORY_RESET_PHRASES = (
 BOOKING_VERIFICATION_PATTERNS = (
     re.compile(r"\bпров\w*\b.*\b(запис|брон|бронир)\w*"),
     re.compile(r"\bподтверд\w*\b.*\b(запис|брон|бронир)\w*"),
+    re.compile(r"\bподтверд\w*\b.*\b(дат|врем)\w*"),
     re.compile(r"\b(жду|ожидаю|не получил\w*)\b.*\b(подтвержд|ответ)\w*"),
     re.compile(r"\b(изменить|поменять|перенести)\b.*\b(время|запис)\w*"),
     re.compile(r"\b(check|verify|confirm)\b.*\b(booking|appointment|reservation)\b"),
@@ -3417,6 +3431,12 @@ def _derive_service_clarify_info_sections(*sources: Any) -> list[str]:
             if normalized in INFO_INTENTS and normalized not in sections:
                 sections.append(normalized)
     return sections
+
+
+def _should_collect_service_for_info(policy_info_set: set[str]) -> bool:
+    return bool(policy_info_set & INFO_SERVICE_DEPENDENT_INTENTS) and not bool(
+        policy_info_set & INFO_NON_SERVICE_INTENTS
+    )
 
 
 def _normalize_policy_action_from_tool_action(
@@ -7141,6 +7161,14 @@ async def _handle_webhook_payload(
                         message_text=message_text,
                         client_slug=payload.client_slug,
                     )
+                    if not policy_pack_refs:
+                        slot_service_hint = policy_slot_state_normalized.get("service")
+                        if isinstance(slot_service_hint, str) and slot_service_hint.strip():
+                            policy_pack_refs = _derive_policy_info_refs(
+                                policy_intent=slot_service_hint,
+                                message_text=slot_service_hint,
+                                client_slug=payload.client_slug,
+                            )
                 if policy_validation_error is None:
                     allowed_info_map = {ref.casefold(): ref for ref in info_refs}
                     allowed_consult_map = {ref.casefold(): ref for ref in consult_refs}
@@ -8538,6 +8566,7 @@ async def _handle_webhook_payload(
                 service_query=policy_service_query,
                 info_sections_hint=info_sections_hint,
                 message_text=message_text,
+                expected_reply_type=expected_reply_type,
                 now=now,
                 user_name=getattr(user, "name", None) if user else None,
                 user_phone=getattr(user, "phone", None) if user else None,
@@ -9004,7 +9033,12 @@ async def _handle_webhook_payload(
                     client_slug=payload.client_slug,
                 )
             policy_info_set = set(policy_info_intents)
-            requires_service = bool({"pricing", "duration"} & policy_info_set)
+            if policy_info_set & INFO_NON_SERVICE_INTENTS:
+                policy_info_intents = [
+                    ref for ref in policy_info_intents if ref in INFO_NON_SERVICE_INTENTS
+                ] or sorted(policy_info_set & INFO_NON_SERVICE_INTENTS)
+                policy_info_set = set(policy_info_intents)
+            requires_service = _should_collect_service_for_info(policy_info_set)
             if requires_service and not policy_service_query:
                 clarify_sections = _derive_service_clarify_info_sections(policy_info_intents)
                 context = _get_conversation_context(conversation)

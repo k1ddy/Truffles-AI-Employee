@@ -3,7 +3,10 @@ from types import SimpleNamespace
 
 from app.routers import webhook
 from app.routers.webhook import _legacy as legacy
-from app.routers.webhook.response import _finalize_bot_response
+from app.routers.webhook.response import (
+    _finalize_bot_response,
+    _should_route_explicit_info_to_main_flow,
+)
 
 
 def test_maybe_append_booking_cta_adds_prompt_when_needed():
@@ -112,3 +115,22 @@ def test_time_only_guard_detection():
     assert legacy._looks_like_time_only_request("э на чассов в 7") is True
     assert legacy._looks_like_time_only_request("маникюр в 7") is False
     assert legacy._looks_like_time_only_request("на час") is False
+
+
+def test_route_explicit_info_to_main_flow_flag():
+    assert _should_route_explicit_info_to_main_flow(
+        consult_short_circuit=True,
+        consult_short_circuit_reason="explicit_info",
+    )
+    assert _should_route_explicit_info_to_main_flow(
+        consult_short_circuit=True,
+        consult_short_circuit_reason="explicit_info_unknown_topic",
+    )
+    assert not _should_route_explicit_info_to_main_flow(
+        consult_short_circuit=True,
+        consult_short_circuit_reason="consult_overrides_info",
+    )
+    assert not _should_route_explicit_info_to_main_flow(
+        consult_short_circuit=False,
+        consult_short_circuit_reason="explicit_info",
+    )

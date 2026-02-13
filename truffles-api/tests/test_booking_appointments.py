@@ -374,6 +374,67 @@ def test_tool_registry_get_booking_reports_time_mismatch():
     assert result.decision_meta["appointment_time"] == "09:00"
 
 
+def test_tool_registry_get_booking_not_found_acknowledges_photo_offer():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service, "_get_booking", return_value=(None, "booking_not_found")
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.get_booking",
+            tool_args={"appointment_id": ""},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query=None,
+            message_text="Могу прислать фото своего стиля",
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "booking_not_found"
+    assert "Спасибо за фото/референс" in (result.response_text or "")
+
+
+def test_tool_registry_reschedule_not_found_echoes_requested_time():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service, "_get_booking", return_value=(None, "booking_not_found")
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.reschedule",
+            tool_args={"appointment_id": ""},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query=None,
+            message_text="Я хочу изменить время на 15:00",
+            expected_reply_type="name",
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "booking_not_found"
+    assert "Время 15:00 отметил." in (result.response_text or "")
+    assert "Как вас зовут?" in (result.response_text or "")
+    assert result.decision_meta.get("requested_time") == "15:00"
+
+
 def test_tool_registry_book_slot_allows_missing_specialist_when_not_explicit():
     db = Mock()
     branch = SimpleNamespace(

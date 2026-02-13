@@ -9,6 +9,7 @@ import os
 import random
 import re
 import time
+import urllib.error
 import urllib.request
 from typing import Any
 
@@ -68,10 +69,16 @@ CANONICAL_EXPECT_INFO_SECTIONS = sorted(
     {section for sections in EXPECT_INFO_SECTIONS.values() for section in sections}
 )
 REQUIRED_LLM_TAGS = ["booking", "time", "name"]
+REQUIRED_BOOKING_CONFIRM_TAGS = ["check_booking", "confirm"]
 REQUIRED_LLM_TURNS = {
     "booking": {"text": "{greet}, хочу записаться на {service}.", "tags": ["booking"]},
     "time": {"text": "Можно {time_exact}?", "tags": ["time"]},
     "name": {"text": "Меня зовут {name}.", "tags": ["name"]},
+    "check_booking": {
+        "text": "Проверьте, пожалуйста, мою запись на {day} {time_exact}.",
+        "tags": ["check_booking"],
+    },
+    "confirm": {"text": "Да, подтверждаю.", "tags": ["confirm"]},
 }
 
 
@@ -100,7 +107,17 @@ def _load_env_file(path: str | None) -> dict[str, str]:
                 if "=" not in line:
                     continue
                 key, value = line.split("=", 1)
-                env[key.strip()] = value.strip().strip('"').strip("'")
+                cleaned_key = key.strip()
+                cleaned_value = value.strip().strip('"').strip("'")
+                if cleaned_value.startswith("${") and cleaned_value.endswith("}") and len(cleaned_value) > 3:
+                    ref_key = cleaned_value[2:-1].strip()
+                    if ref_key:
+                        cleaned_value = env.get(ref_key) or os.environ.get(ref_key) or cleaned_value
+                elif cleaned_value.startswith("$") and len(cleaned_value) > 1:
+                    ref_key = cleaned_value[1:].strip()
+                    if ref_key and all(ch.isalnum() or ch == "_" for ch in ref_key):
+                        cleaned_value = env.get(ref_key) or os.environ.get(ref_key) or cleaned_value
+                env[cleaned_key] = cleaned_value
     except Exception:
         return {}
     return env
@@ -137,18 +154,49 @@ def _openai_key_candidate_env_files() -> list[str]:
 
 
 def _resolve_openai_api_key(explicit: str | None = None) -> tuple[str | None, str | None]:
+    key_aliases = (
+        "OPENAI_API_KEY",
+        "OPENAI_KEY",
+        "OPENAI_API_TOKEN",
+        "OPENAI_TOKEN",
+        "LLM_API_KEY",
+        "OPENAI_JUDGE_API_KEY",
+        "JUDGE_API_KEY",
+    )
+
+    def _alias_source(prefix: str, alias: str) -> str:
+        if alias == "OPENAI_API_KEY":
+            return prefix
+        return f"{prefix}:{alias}"
+
     key = _clean_api_key(explicit)
     if key:
         return key, "explicit"
-    env_key = _clean_api_key(os.environ.get("OPENAI_API_KEY"))
-    if env_key:
-        return env_key, "env:OPENAI_API_KEY"
+    for alias in key_aliases:
+        env_key = _clean_api_key(os.environ.get(alias))
+        if env_key:
+            return env_key, _alias_source("env:OPENAI_API_KEY", alias)
     for env_path in _openai_key_candidate_env_files():
         env_map = _load_env_file(env_path)
-        file_key = _clean_api_key(env_map.get("OPENAI_API_KEY"))
-        if file_key:
-            return file_key, f"env_file:{env_path}"
+        for alias in key_aliases:
+            file_key = _clean_api_key(env_map.get(alias))
+            if file_key:
+                return file_key, _alias_source(f"env_file:{env_path}", alias)
     return None, None
+
+
+def _required_llm_tags(coverage: list[str] | None) -> list[str]:
+    required = list(REQUIRED_LLM_TAGS)
+    coverage_tokens = {
+        str(item).strip().lower()
+        for item in (coverage or [])
+        if isinstance(item, str) and str(item).strip()
+    }
+    if "booking" in coverage_tokens:
+        for tag in REQUIRED_BOOKING_CONFIRM_TAGS:
+            if tag not in required:
+                required.append(tag)
+    return required
 
 ASSISTANT_TURN_PATTERNS = [
     re.compile(r"\bвам удобно\b", re.IGNORECASE),
@@ -571,9 +619,11 @@ def _ensure_required_tags(
     ctx: dict[str, str],
     *,
     max_turns: int,
+    coverage: list[str] | None = None,
 ) -> list[dict[str, Any]]:
+    required_tags = _required_llm_tags(coverage)
     existing = {tag for turn in turns for tag in (turn.get("tags") or [])}
-    missing = [tag for tag in REQUIRED_LLM_TAGS if tag not in existing]
+    missing = [tag for tag in required_tags if tag not in existing]
     if missing:
         for tag in missing:
             template = REQUIRED_LLM_TURNS.get(tag)
@@ -584,7 +634,7 @@ def _ensure_required_tags(
                 turns.insert(0, formatted)
             else:
                 turns.append(formatted)
-    return _prune_turns(turns, max_turns, set(REQUIRED_LLM_TAGS))
+    return _prune_turns(turns, max_turns, set(required_tags))
 
 def _normalize_expect_token(token: Any, allowed: set[str] | None) -> str | None:
     if token is None:
@@ -871,8 +921,38 @@ def _call_openai(
         method="POST",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
     )
-    with urllib.request.urlopen(req, timeout=40) as resp:
-        body = json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=40) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raw = ""
+        try:
+            raw = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            raw = ""
+        message = f"openai_http_error_{exc.code}"
+        if exc.code == 429:
+            message = "openai_rate_or_quota_limited"
+        elif exc.code == 401:
+            message = "openai_auth_failed"
+        elif exc.code == 403:
+            message = "openai_forbidden"
+        if raw:
+            try:
+                payload = json.loads(raw)
+                error_payload = payload.get("error") if isinstance(payload, dict) else None
+                if isinstance(error_payload, dict):
+                    code = error_payload.get("code")
+                    detail = error_payload.get("message")
+                    if isinstance(code, str) and code.strip():
+                        message = f"{message} ({code})"
+                    if isinstance(detail, str) and detail.strip():
+                        message = f"{message}: {detail.strip()}"
+            except Exception:
+                compact = " ".join(raw.split())
+                if compact:
+                    message = f"{message}: {compact[:400]}"
+        raise RuntimeError(message) from exc
     return body["choices"][0]["message"]["content"]
 
 
@@ -1011,7 +1091,7 @@ def _generate_llm_dialogs(
                 tags = list(turn.get("tags") or [])
                 turn["expect"] = _merge_expectations(tags, turn.get("expect"))
             ctx = _infer_context_from_dialog(dialog, rng)
-            turns = _ensure_required_tags(turns, ctx, max_turns=max_turns)
+            turns = _ensure_required_tags(turns, ctx, max_turns=max_turns, coverage=coverage)
             turns = _sanitize_llm_turns(turns, ctx, rng)
             dialog["turns"] = turns
             dialog["dialog_id"] = dialog.get("dialog_id") or next_dialog_id
@@ -1023,7 +1103,7 @@ def _generate_llm_dialogs(
                     1, _media_turn(ctx, mode=media_mode, kind=media_kind)
                 )
                 dialog["turns"] = _prune_turns(
-                    dialog["turns"], max_turns, set(REQUIRED_LLM_TAGS)
+                    dialog["turns"], max_turns, set(_required_llm_tags(coverage))
                 )
             dialogs.append(dialog)
 
@@ -1065,7 +1145,7 @@ def main() -> None:
     if args.mode == "llm":
         if not args.llm_api_key:
             raise SystemExit(
-                "LLM mode requires OPENAI_API_KEY or --llm-api-key "
+                "LLM mode requires OPENAI_API_KEY aliases or --llm-api-key "
                 "(checked env and local .env candidates)"
             )
         dialogs = _generate_llm_dialogs(

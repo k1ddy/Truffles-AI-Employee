@@ -18,6 +18,7 @@ import os
 import random
 import re
 import shlex
+import shutil
 import signal
 import socket
 import subprocess
@@ -2063,11 +2064,7 @@ def _chaos_booking_reply_active(conv_meta):
 
 def _chaos_reply_type_fallback_ok(expected_reply_type, actual_reply, meta, conv_meta, trace_entries):
     if expected_reply_type in CHAOS_BOOKING_REPLY_TYPES:
-        intent = (
-            str((meta or {}).get("intent") or "").strip().lower()
-            if isinstance(meta, dict)
-            else ""
-        )
+        intent = _llm_quality_effective_intent(meta if isinstance(meta, dict) else None)
         tool_decision = (
             str((meta or {}).get("tool_decision") or "").strip().lower()
             if isinstance(meta, dict)
@@ -2141,11 +2138,7 @@ def _chaos_state_fallback_ok(expected_state, actual_state, meta, conv_meta, hand
         if isinstance(meta, dict)
         else ""
     )
-    intent_value = (
-        _llm_quality_normalize_tool_token((meta or {}).get("intent"))
-        if isinstance(meta, dict)
-        else ""
-    )
+    intent_value = _llm_quality_effective_intent(meta if isinstance(meta, dict) else None)
     if expected_state == "pending":
         if action in CHAOS_PENDING_ACTIONS or pending_action in CHAOS_PENDING_ACTIONS:
             return True
@@ -2735,7 +2728,7 @@ def _llm_quality_should_expect_booking_progress(expected_reply_type, turn_tags, 
     if expected_reply_type not in CHAOS_BOOKING_REPLY_TYPES:
         return False
     if isinstance(meta, dict):
-        intent_value = _llm_quality_normalize_tool_token(meta.get("intent"))
+        intent_value = _llm_quality_effective_intent(meta)
         tool_decision_value = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
         if (
             intent_value == "calendar.list_slots"
@@ -2769,7 +2762,7 @@ def _llm_quality_check_booking_tool_answered(meta, turn_tags, outbox_text):
         return False
     if meta.get("action") != "reply":
         return False
-    if meta.get("intent") != "calendar.get_booking":
+    if _llm_quality_effective_intent(meta) != "calendar.get_booking":
         return False
     normalized_tags = {
         str(tag).strip().lower()
@@ -3364,6 +3357,24 @@ def _llm_quality_normalize_tool_token(value: object | None) -> str:
     return str(value).strip().lower()
 
 
+def _llm_quality_effective_intent(meta: dict | None) -> str:
+    if not isinstance(meta, dict):
+        return ""
+    intent = _llm_quality_normalize_tool_token(meta.get("intent"))
+    if intent in {"check_booking", "check_record"}:
+        return "calendar.get_booking"
+    if intent:
+        return intent
+    llm_policy_core = meta.get("llm_policy_core")
+    if isinstance(llm_policy_core, dict):
+        payload = llm_policy_core.get("payload")
+        if isinstance(payload, dict):
+            tool_action = _llm_quality_normalize_tool_token(payload.get("tool_action"))
+            if tool_action:
+                return tool_action
+    return ""
+
+
 def _llm_quality_is_timeout_degrade_reason(reason: object | None) -> bool:
     token = _llm_quality_normalize_tool_token(reason)
     if not token:
@@ -3422,7 +3433,7 @@ def _llm_quality_extract_tool_signals(meta, trace_entries):
     if not isinstance(meta, dict):
         return {}
     action = _llm_quality_normalize_tool_token(meta.get("action"))
-    intent = _llm_quality_normalize_tool_token(meta.get("intent"))
+    intent = _llm_quality_effective_intent(meta)
     tool_decision = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
     slot_required = bool(meta.get("slot_confirmation_required"))
     slot_decision = meta.get("slot_confirmation_decision")
@@ -3757,6 +3768,28 @@ def _llm_quality_fetch_outbox_payload(db_user, client_id, inbound_message_id):
     status = parts[1] if len(parts) > 1 else None
     return payload, status, None
 
+def _normalize_scenario_generation_error(stderr):
+    text = (stderr or "").strip()
+    if not text:
+        return "scenario generation failed"
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in reversed(lines):
+        marker = "RuntimeError:"
+        idx = line.find(marker)
+        if idx >= 0:
+            return line[idx + len(marker) :].strip()
+    lower = text.lower()
+    if "http error 429" in lower or "insufficient_quota" in lower:
+        return "openai_rate_or_quota_limited: provider returned HTTP 429"
+    if "http error 401" in lower:
+        return "openai_auth_failed: provider returned HTTP 401"
+    if "http error 403" in lower:
+        return "openai_forbidden: provider returned HTTP 403"
+    if "openai_api_key is required" in lower:
+        return "missing_openai_api_key"
+    tail = lines[-1] if lines else text
+    return tail[:500]
+
 def _llm_quality_generate_batch(args, *, count, seed):
     scenario_timeout = float(os.getenv("DIAGNOSE_SCENARIO_GEN_TIMEOUT_SEC", "180"))
     script_path = _llm_quality_dialog_script()
@@ -3793,8 +3826,7 @@ def _llm_quality_generate_batch(args, *, count, seed):
             cmd += ["--llm-api-key", args.llm_api_key]
     result = run_command(cmd, timeout=scenario_timeout)
     if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        return None, None, stderr or "scenario generation failed"
+        return None, None, _normalize_scenario_generation_error(result.stderr or "")
     try:
         payload = json.loads(result.stdout or "")
     except Exception as exc:
@@ -4278,6 +4310,77 @@ def _llm_quality_parse_coverage_tokens(value):
     return {token for token in raw_tokens if token and token not in {"none", "off"}}
 
 
+def _llm_quality_build_scenario_contract_status(*, dialogs, scenario_coverage):
+    coverage_tokens = _llm_quality_parse_coverage_tokens(scenario_coverage)
+    required_tags_by_coverage = {
+        "booking": ("booking", "check_booking", "confirm"),
+    }
+    tag_counts = {}
+    dialogs_with_check_confirm_sequence = 0
+
+    for dialog in dialogs or []:
+        if not isinstance(dialog, dict):
+            continue
+        turns = dialog.get("turns")
+        if not isinstance(turns, list):
+            continue
+        first_check_booking = None
+        first_confirm_after_check = None
+        for idx, turn in enumerate(turns):
+            if not isinstance(turn, dict):
+                continue
+            raw_tags = turn.get("tags")
+            if not isinstance(raw_tags, list):
+                continue
+            tags = []
+            for item in raw_tags:
+                if not isinstance(item, str):
+                    continue
+                token = item.strip().casefold()
+                if not token:
+                    continue
+                tags.append(token)
+                tag_counts[token] = tag_counts.get(token, 0) + 1
+            if "check_booking" in tags and first_check_booking is None:
+                first_check_booking = idx
+            if (
+                "confirm" in tags
+                and first_check_booking is not None
+                and idx > first_check_booking
+                and first_confirm_after_check is None
+            ):
+                first_confirm_after_check = idx
+        if first_check_booking is not None and first_confirm_after_check is not None:
+            dialogs_with_check_confirm_sequence += 1
+
+    reasons = []
+    required = {}
+    for coverage_token, required_tags in required_tags_by_coverage.items():
+        if coverage_token not in coverage_tokens:
+            continue
+        for tag in required_tags:
+            present = tag_counts.get(tag, 0) > 0
+            required[tag] = present
+            if not present:
+                reasons.append(f"missing_tag:{tag}")
+
+    if (
+        "booking" in coverage_tokens
+        and required.get("check_booking")
+        and required.get("confirm")
+        and dialogs_with_check_confirm_sequence <= 0
+    ):
+        reasons.append("check_confirm_sequence_missing")
+
+    return {
+        "valid": not reasons,
+        "reasons": reasons,
+        "coverage_tokens": sorted(coverage_tokens),
+        "tag_counts": tag_counts,
+        "dialogs_with_check_confirm_sequence": dialogs_with_check_confirm_sequence,
+    }
+
+
 def _llm_quality_build_tool_evidence_status(
     *,
     scenario_coverage,
@@ -4288,6 +4391,7 @@ def _llm_quality_build_tool_evidence_status(
     policy = _llm_quality_normalize_tool_token(tool_evidence_policy) or "auto"
     if policy not in {"off", "auto", "strict"}:
         policy = "auto"
+    hooks_mode = _llm_quality_normalize_tool_token(tool_hooks_mode)
 
     intents = (coverage_stats or {}).get("intents")
     if not isinstance(intents, dict):
@@ -4331,7 +4435,11 @@ def _llm_quality_build_tool_evidence_status(
     booking_commit_trace_events = _as_int(trace_stages.get("booking_commit"))
     booking_confirm_trace_events = _as_int(trace_stages.get("booking_confirm"))
     booking_confirm_actions = _as_int(actions.get("booking_confirm"))
-    check_booking_intents = _as_int(intents.get("calendar.get_booking"))
+    check_booking_intents = (
+        _as_int(intents.get("calendar.get_booking"))
+        + _as_int(intents.get("check_booking"))
+        + _as_int(intents.get("check_record"))
+    )
 
     calendar_evidence_total = (
         calendar_tool_events + calendar_hook_events + booking_commit_trace_events
@@ -4347,9 +4455,11 @@ def _llm_quality_build_tool_evidence_status(
     confirm_candidates = check_booking_intents + booking_confirm_actions
     require_calendar = policy in {"auto", "strict"} and booking_required
     require_confirm = policy == "strict" and booking_required
-    require_hooks = policy == "strict" and _llm_quality_normalize_tool_token(tool_hooks_mode) == "auto"
+    require_hooks = policy == "strict"
 
     reasons = []
+    if policy == "strict" and hooks_mode != "auto":
+        reasons.append("tool_hooks_mode_not_auto")
     if require_calendar and calendar_intent_turns == 0:
         reasons.append("calendar_intent_missing")
     if require_calendar and calendar_evidence_total <= 0:
@@ -4358,9 +4468,9 @@ def _llm_quality_build_tool_evidence_status(
         reasons.append("confirm_candidate_missing")
     if require_confirm and confirm_evidence_total <= 0:
         reasons.append("confirm_evidence_missing")
-    if require_hooks and require_calendar and calendar_hook_events <= 0:
+    if require_hooks and hooks_mode == "auto" and require_calendar and calendar_hook_events <= 0:
         reasons.append("calendar_hook_missing")
-    if require_hooks and require_confirm and confirm_hook_events <= 0:
+    if require_hooks and hooks_mode == "auto" and require_confirm and confirm_hook_events <= 0:
         reasons.append("confirm_hook_missing")
 
     return {
@@ -4372,6 +4482,7 @@ def _llm_quality_build_tool_evidence_status(
             "calendar": require_calendar,
             "confirm": require_confirm,
             "hooks": require_hooks,
+            "hooks_mode": hooks_mode,
         },
         "counts": {
             "calendar_intent_turns": calendar_intent_turns,
@@ -4700,7 +4811,7 @@ def _llm_quality_evaluate_turn(
         reasons.append("info_section_miss")
     booking_stall_ignored = False
     if isinstance(meta, dict):
-        intent_value = _llm_quality_normalize_tool_token(meta.get("intent"))
+        intent_value = _llm_quality_effective_intent(meta)
         tool_decision = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
         if intent_value == "calendar.get_booking" and tool_decision in {"ok", "time_mismatch", "not_found"}:
             booking_stall_ignored = True
@@ -4719,20 +4830,33 @@ def _llm_quality_evaluate_turn(
     calendar_outcome = ""
     if isinstance(calendar_signal, dict):
         calendar_outcome = _llm_quality_normalize_tool_token(calendar_signal.get("outcome"))
-    intent_value = ""
-    if isinstance(meta, dict):
-        intent_value = _llm_quality_normalize_tool_token(meta.get("intent"))
+    intent_value = _llm_quality_effective_intent(meta if isinstance(meta, dict) else None)
     meta_action_value = _llm_quality_normalize_tool_token(meta_action)
+    meta_intent_value = _llm_quality_normalize_tool_token(
+        (meta or {}).get("intent") if isinstance(meta, dict) else None
+    )
+    meta_source_value = _llm_quality_normalize_tool_token(
+        (meta or {}).get("source") if isinstance(meta, dict) else None
+    )
     appointment_id = (meta or {}).get("appointment_id") if isinstance(meta, dict) else None
     appointment_status = _llm_quality_normalize_tool_token(
         (meta or {}).get("appointment_status") if isinstance(meta, dict) else None
     )
+    booking_verification_handoff = bool(
+        state in {"pending", "manager_active"}
+        and meta_action_value == "escalate"
+        and meta_intent_value == "check_booking"
+        and meta_source_value in {"booking_verification", "tool_registry"}
+    )
     requires_calendar_contract = bool(
-        appointment_id
-        or appointment_status in LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS
-        or meta_action_value == "booking_confirm"
-        or intent_value == "calendar.get_booking"
-        or _llm_quality_is_booking_confirmation_text(outbox_text)
+        not booking_verification_handoff
+        and (
+            appointment_id
+            or appointment_status in LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS
+            or meta_action_value == "booking_confirm"
+            or intent_value == "calendar.get_booking"
+            or _llm_quality_is_booking_confirmation_text(outbox_text)
+        )
     )
     if requires_calendar_contract and calendar_outcome != "success":
         reasons.append("calendar_tool_contract_miss")
@@ -5063,6 +5187,42 @@ def _llm_quality_build_default_run_id(timestamp=None):
     return f"{stamp}-{namespace}-p{os.getpid()}-{uuid.uuid4().hex[:6]}"
 
 
+LLM_QUALITY_ARTIFACT_FILES = (
+    "brief.md",
+    "preflight.json",
+    "responses.jsonl",
+    "scenarios.json",
+    "summary.json",
+    "trace_bundle.jsonl",
+)
+
+
+def _llm_quality_prepare_output_dir(path, *, allow_overwrite=False):
+    output_dir = os.path.abspath(os.path.expanduser(path))
+    os.makedirs(output_dir, exist_ok=True)
+    entries = []
+    try:
+        entries = os.listdir(output_dir)
+    except OSError:
+        entries = []
+    if entries and not allow_overwrite:
+        raise SystemExit(
+            "llm-quality: output-dir already contains artifacts; "
+            "use unique --run-id/--output-dir or pass --allow-output-overwrite"
+        )
+    if entries and allow_overwrite:
+        for entry in entries:
+            target = os.path.join(output_dir, entry)
+            if os.path.isdir(target):
+                shutil.rmtree(target, ignore_errors=True)
+                continue
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+    return output_dir
+
+
 def _parse_llm_quality_args(argv):
     parser = argparse.ArgumentParser(
         prog="ops/diagnose.py llm-quality",
@@ -5153,6 +5313,7 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--console-client-id", default=None)
     parser.add_argument("--console-mode", choices=["real", "skip"], default="real")
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--allow-output-overwrite", action="store_true")
     parser.add_argument("--run-id", default=None)
     parser.add_argument(
         "--brief-file",
@@ -5248,7 +5409,25 @@ def _load_env_file(path):
                 if "=" not in line:
                     continue
                 key, value = line.split("=", 1)
-                env[key.strip()] = value.strip().strip('"').strip("'")
+                cleaned_key = key.strip()
+                cleaned_value = value.strip().strip('"').strip("'")
+                if cleaned_value.startswith("${") and cleaned_value.endswith("}") and len(cleaned_value) > 3:
+                    ref_key = cleaned_value[2:-1].strip()
+                    if ref_key:
+                        cleaned_value = (
+                            env.get(ref_key)
+                            or os.environ.get(ref_key)
+                            or cleaned_value
+                        )
+                elif cleaned_value.startswith("$") and len(cleaned_value) > 1:
+                    ref_key = cleaned_value[1:].strip()
+                    if ref_key and all(ch.isalnum() or ch == "_" for ch in ref_key):
+                        cleaned_value = (
+                            env.get(ref_key)
+                            or os.environ.get(ref_key)
+                            or cleaned_value
+                        )
+                env[cleaned_key] = cleaned_value
     except Exception:
         return {}
     return env
@@ -5259,6 +5438,14 @@ def _clean_api_key(value):
         return None
     cleaned = str(value).strip().strip('"').strip("'")
     return cleaned or None
+
+
+def _export_openai_api_key(value):
+    cleaned = _clean_api_key(value)
+    if not cleaned:
+        return False
+    os.environ["OPENAI_API_KEY"] = cleaned
+    return True
 
 
 def _parent_env_candidates(start_path):
@@ -5333,24 +5520,42 @@ def _openai_key_candidate_env_files():
 
 
 def _resolve_openai_api_key(explicit=None, *, container_name=None):
+    key_aliases = (
+        "OPENAI_API_KEY",
+        "OPENAI_KEY",
+        "OPENAI_API_TOKEN",
+        "OPENAI_TOKEN",
+        "LLM_API_KEY",
+        "OPENAI_JUDGE_API_KEY",
+        "JUDGE_API_KEY",
+    )
+
+    def _alias_source(prefix: str, alias: str) -> str:
+        if alias == "OPENAI_API_KEY":
+            return prefix
+        return f"{prefix}:{alias}"
+
     key = _clean_api_key(explicit)
     if key:
         return key, "explicit"
 
-    env_key = _clean_api_key(os.environ.get("OPENAI_API_KEY"))
-    if env_key:
-        return env_key, "env:OPENAI_API_KEY"
+    for alias in key_aliases:
+        env_key = _clean_api_key(os.environ.get(alias))
+        if env_key:
+            return env_key, _alias_source("env:OPENAI_API_KEY", alias)
 
     for env_path in _openai_key_candidate_env_files():
         env_map = _load_env_file(env_path)
-        file_key = _clean_api_key(env_map.get("OPENAI_API_KEY"))
-        if file_key:
-            return file_key, f"env_file:{env_path}"
+        for alias in key_aliases:
+            file_key = _clean_api_key(env_map.get(alias))
+            if file_key:
+                return file_key, _alias_source(f"env_file:{env_path}", alias)
 
     if container_name:
-        container_key = _clean_api_key(_resolve_env_from_container(container_name, "OPENAI_API_KEY"))
-        if container_key:
-            return container_key, f"container:{container_name}"
+        for alias in key_aliases:
+            container_key = _clean_api_key(_resolve_env_from_container(container_name, alias))
+            if container_key:
+                return container_key, _alias_source(f"container:{container_name}", alias)
 
     return None, None
 
@@ -6698,7 +6903,59 @@ def _build_livecheck_message(rng, case, marker_prefix, timestamp, idx, noise):
         message = text
     return text, marker, message
 
-def _fetch_message_meta(db_user, message_id, *, timeout=None):
+def _parse_message_meta_row(row):
+    row_text = (row or "").strip()
+    if not row_text:
+        return None, None
+    parts = row_text.split("\t", 1)
+    conversation_id = parts[0] if parts else None
+    meta_raw = parts[1] if len(parts) > 1 else None
+    if meta_raw:
+        try:
+            meta = json.loads(meta_raw)
+        except Exception:
+            meta = None
+    else:
+        meta = None
+    return conversation_id, meta
+
+
+def _fetch_message_meta_by_conversation(db_user, conversation_id, *, timeout=None):
+    if not conversation_id:
+        return None, None, "missing conversation_id_hint"
+    safe_conv_id = str(conversation_id).replace("'", "''")
+    query = (
+        "SELECT conversation_id, metadata->'decision_meta' AS decision_meta "
+        "FROM messages WHERE role='user' "
+        f"AND conversation_id = '{safe_conv_id}' "
+        "ORDER BY created_at DESC LIMIT 1;"
+    )
+    result = run_command(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "truffles_postgres_1",
+            "psql",
+            "-U",
+            db_user,
+            "-d",
+            "chatbot",
+            "-t",
+            "-A",
+            "-F",
+            "\t",
+            "-c",
+            query,
+        ],
+        timeout=_resolve_psql_timeout(timeout),
+    )
+    if result.returncode != 0:
+        return None, None, result.stderr.strip()
+    return (*_parse_message_meta_row(result.stdout), None)
+
+
+def _fetch_message_meta(db_user, message_id, *, timeout=None, conversation_id_hint=None):
     query = (
         "SELECT conversation_id, metadata->'decision_meta' AS decision_meta "
         "FROM messages WHERE role='user' "
@@ -6725,22 +6982,27 @@ def _fetch_message_meta(db_user, message_id, *, timeout=None):
         ],
         timeout=_resolve_psql_timeout(timeout),
     )
-    if result.returncode != 0:
-        return None, None, result.stderr.strip()
-    row = result.stdout.strip()
-    if not row:
+    primary_error = result.stderr.strip() if result.returncode != 0 else None
+    if result.returncode == 0:
+        conversation_id, meta = _parse_message_meta_row(result.stdout)
+        if conversation_id or meta is not None:
+            return conversation_id, meta, None
         return None, None, None
-    parts = row.split("\t", 1)
-    conversation_id = parts[0] if parts else None
-    meta_raw = parts[1] if len(parts) > 1 else None
-    if meta_raw:
-        try:
-            meta = json.loads(meta_raw)
-        except Exception:
-            meta = None
-    else:
-        meta = None
-    return conversation_id, meta, None
+    # Fallback by conversation_id for transient slow JSON-path scans on messageId lookup.
+    # This keeps LLM-quality runs from false hard fails when webhook already returned
+    # a concrete conversation_id but the messageId query timed out under load.
+    timeout_error = "timeout" in primary_error.casefold() if isinstance(primary_error, str) else False
+    if conversation_id_hint and timeout_error:
+        hint_conv_id, hint_meta, hint_error = _fetch_message_meta_by_conversation(
+            db_user,
+            conversation_id_hint,
+            timeout=max(12.0, _resolve_psql_timeout(timeout)),
+        )
+        if hint_conv_id or hint_meta is not None:
+            return hint_conv_id, hint_meta, None
+        if hint_error:
+            return None, None, hint_error
+    return None, None, primary_error
 
 def _poll_decision_meta(
     db_user,
@@ -6749,6 +7011,7 @@ def _poll_decision_meta(
     interval,
     require_action=True,
     fail_fast_after=None,
+    conversation_id_hint=None,
 ):
     deadline = time.time() + max(timeout, 0)
     last_meta = None
@@ -6760,6 +7023,7 @@ def _poll_decision_meta(
             db_user,
             message_id,
             timeout=min(8.0, max(interval * 4, 1.0)),
+            conversation_id_hint=conversation_id_hint,
         )
         if error:
             last_error = error
@@ -6791,6 +7055,7 @@ def _poll_decision_meta(
         db_user,
         message_id,
         timeout=max(8.0, max(timeout, 0.0)),
+        conversation_id_hint=conversation_id_hint,
     )
     if final_conv_id:
         last_conv_id = final_conv_id
@@ -7301,8 +7566,10 @@ def _run_llm_quality(args):
     base_url = args.base_url.rstrip("/")
     client_slug = args.client_slug
     webhook_url = f"{base_url}/webhook/{client_slug}"
-    output_dir = args.output_dir or os.path.join("/tmp/booking_quality", run_id)
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir = _llm_quality_prepare_output_dir(
+        args.output_dir or os.path.join("/tmp/booking_quality", run_id),
+        allow_overwrite=bool(getattr(args, "allow_output_overwrite", False)),
+    )
 
     container_name, _ = resolve_container_name()
     allowlist_jids = _resolve_allowlist_jids(args.allowlist_jids, container_name)
@@ -7485,10 +7752,11 @@ def _run_llm_quality(args):
     )
     if llm_api_key:
         args.llm_api_key = llm_api_key
+        _export_openai_api_key(llm_api_key)
     elif args.mode == "llm" and not args.scenarios_file:
         raise SystemExit(
             "llm-quality: missing OPENAI_API_KEY for scenario generation "
-            "(checked --llm-api-key, OPENAI_API_KEY env, *.env candidates, container env)"
+            "(checked --llm-api-key, OPENAI_API_KEY aliases in env, *.env candidates, container env)"
         )
 
     judge_mode = args.judge_mode
@@ -7499,6 +7767,8 @@ def _run_llm_quality(args):
     if not judge_api_key and args.llm_api_key:
         judge_api_key = args.llm_api_key
         judge_api_key_source = f"llm:{llm_api_key_source or 'explicit'}"
+    if judge_api_key:
+        _export_openai_api_key(judge_api_key)
     judge_enabled = judge_mode != "off"
     judge_skip_reason = "judge_mode_off" if judge_mode == "off" else None
     if judge_enabled and not judge_api_key:
@@ -7571,6 +7841,28 @@ def _run_llm_quality(args):
 
     if not dialogs:
         raise SystemExit("llm-quality: no dialogs to execute")
+
+    scenario_contract = _llm_quality_build_scenario_contract_status(
+        dialogs=dialogs,
+        scenario_coverage=args.scenario_coverage,
+    )
+    scenario_preflight_payload = {
+        "stage": "llm_quality_scenario_contract_preflight",
+        "valid": scenario_contract.get("valid"),
+        "reasons": scenario_contract.get("reasons"),
+        "coverage_tokens": scenario_contract.get("coverage_tokens"),
+        "tag_counts": scenario_contract.get("tag_counts"),
+        "dialogs_with_check_confirm_sequence": scenario_contract.get(
+            "dialogs_with_check_confirm_sequence"
+        ),
+    }
+    print(json.dumps(scenario_preflight_payload, ensure_ascii=False))
+    if not scenario_contract.get("valid"):
+        reason_tokens = scenario_contract.get("reasons") or ["unknown"]
+        raise SystemExit(
+            "llm-quality: INVALID RUN - scenario contract failed "
+            f"({','.join(reason_tokens)})"
+        )
 
     scenarios_payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -8165,6 +8457,7 @@ def _run_llm_quality(args):
                 attempts = 0
                 response_payload = None
                 inline_response_text = None
+                conversation_id_hint = None
                 if not args.dry_run:
                     response_status, response_body, response_error, attempts = _send_webhook_payload_with_retry(
                         webhook_url,
@@ -8183,6 +8476,9 @@ def _run_llm_quality(args):
                         inline_response_text = response_payload.get("bot_response")
                         if not isinstance(inline_response_text, str):
                             inline_response_text = None
+                        hint_value = response_payload.get("conversation_id")
+                        if isinstance(hint_value, str) and hint_value.strip():
+                            conversation_id_hint = hint_value.strip()
                     if response_error:
                         stats["webhook_errors"] += 1
                         if _is_infra_error(response_error):
@@ -8208,6 +8504,7 @@ def _run_llm_quality(args):
                         message_id,
                         args.poll_timeout,
                         args.poll_interval,
+                        conversation_id_hint=conversation_id_hint,
                     )
                     if meta_error:
                         stats["decision_meta_errors"] += 1
@@ -8288,7 +8585,7 @@ def _run_llm_quality(args):
                     coverage_stats["actions"][action_value] = (
                         coverage_stats["actions"].get(action_value, 0) + 1
                     )
-                intent_value = (meta or {}).get("intent") if isinstance(meta, dict) else None
+                intent_value = _llm_quality_effective_intent(meta if isinstance(meta, dict) else None)
                 if intent_value:
                     coverage_stats["intents"][intent_value] = (
                         coverage_stats["intents"].get(intent_value, 0) + 1
@@ -8494,7 +8791,7 @@ def _run_llm_quality(args):
                     if progress_expected and info_tags and expected_reply_matched is not True:
                         progress_expected = False
                     if progress_expected and isinstance(meta, dict):
-                        intent_value = _llm_quality_normalize_tool_token(meta.get("intent"))
+                        intent_value = _llm_quality_effective_intent(meta)
                         tool_decision_value = _llm_quality_normalize_tool_token(
                             meta.get("tool_decision")
                         )
@@ -9150,6 +9447,7 @@ def _run_llm_quality(args):
         "top_failures": top_failures,
         "failures": failures,
         "coverage": coverage_stats,
+        "scenario_contract": scenario_contract,
         "tool_evidence": tool_evidence_status,
         "judge": judge_stats,
         "webhook_secret_preflight": secret_preflight,
@@ -9162,6 +9460,8 @@ def _run_llm_quality(args):
             "semantic_reasons": semantic_status["reasons"],
             "tool_evidence_valid": tool_evidence_status.get("valid"),
             "tool_evidence_reasons": tool_evidence_status.get("reasons"),
+            "scenario_contract_valid": scenario_contract.get("valid"),
+            "scenario_contract_reasons": scenario_contract.get("reasons"),
             "comparison_blocked": comparison_blocked,
             "comparison_block_reasons": comparison_block_reasons,
         },

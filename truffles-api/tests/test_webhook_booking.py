@@ -1,6 +1,7 @@
 import pytest
 
 from app.routers import webhook
+from app.routers.webhook import booking as booking_router
 
 
 def test_get_set_expected_reply_type_round_trip():
@@ -37,6 +38,8 @@ def test_validate_name_slot_accepts_name(message_text, expected):
         "привет",
         "да",
         "меня зовут 123",
+        "проверь запись",
+        "подтверди запись",
     ],
 )
 def test_validate_name_slot_rejects_noise(message_text):
@@ -69,6 +72,38 @@ def test_match_expected_reply_for_name():
 
     assert matched is True
     assert value == "Лиза"
+
+
+def test_expected_reply_blocked_for_style_reference_text():
+    blocked = webhook._should_block_expected_reply_by_info(
+        expected_reply_type=webhook.EXPECTED_REPLY_NAME,
+        message_text="Вот фото референса",
+        client_slug="demo_salon",
+    )
+
+    assert blocked is True
+
+
+def test_booking_confirmation_deferred_for_info_interrupt():
+    deferred = booking_router._should_defer_booking_confirmation_for_info(
+        confirmation={"slot": "datetime", "value": "12:58"},
+        basic_info_message=True,
+        message_text="Есть ли у вас парковка?",
+        client_slug="demo_salon",
+    )
+
+    assert deferred is True
+
+
+def test_booking_flow_deferred_for_info_interrupt():
+    deferred = booking_router._should_defer_booking_flow_for_info_interrupt(
+        booking_active=True,
+        booking_signal=False,
+        booking_related=False,
+        basic_info_message=True,
+    )
+
+    assert deferred is True
 
 
 @pytest.mark.parametrize(
