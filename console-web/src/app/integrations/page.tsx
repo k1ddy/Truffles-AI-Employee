@@ -162,6 +162,17 @@ function DriftIssues({ item }: { item: BranchIntegrationStatus }) {
     );
 }
 
+type ProviderActionDialogState = {
+    item: BranchIntegrationStatus;
+    action: ProviderOpsAction;
+    mode: "dry_run" | "execute";
+    reason: string;
+    notes: string;
+    paidUntil: string;
+    nextRenewalAt: string;
+    instanceId: string;
+};
+
 export default function IntegrationsPage() {
     const { data: session } = useSession();
     const { handleError } = useErrorHandler();
@@ -172,6 +183,7 @@ export default function IntegrationsPage() {
         action: ProviderOpsAction;
     } | null>(null);
     const [actionSummaryByBranch, setActionSummaryByBranch] = useState<Record<string, string>>({});
+    const [providerActionDialog, setProviderActionDialog] = useState<ProviderActionDialogState | null>(null);
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -296,68 +308,6 @@ export default function IntegrationsPage() {
         return "manual integration reconcile from platform admin cockpit";
     };
 
-    const promptProviderActionPayload = (
-        action: ProviderOpsAction,
-        item: BranchIntegrationStatus,
-    ): Partial<IntegrationBranchActionRequest> | null => {
-        if (action === "provider_send_reminder") {
-            const notes = window.prompt(
-                "Комментарий для reminder (опционально)",
-                `reminder for ${item.branch_slug}`,
-            );
-            if (notes === null) {
-                return null;
-            }
-            return { notes: notes.trim() || undefined };
-        }
-        if (action === "provider_renewal_confirmed") {
-            const renewal = window.prompt(
-                "Укажите paid_until (YYYY-MM-DD)",
-                item.provider_binding_next_renewal_at ?? item.provider_binding_paid_until ?? "",
-            );
-            if (renewal === null) {
-                return null;
-            }
-            const normalized = renewal.trim();
-            if (!normalized) {
-                toast.error("paid_until обязателен для renewal_confirmed");
-                return null;
-            }
-            return { paid_until: normalized };
-        }
-        if (action === "provider_webhook_updated" || action === "provider_complete_rebind") {
-            const instanceId = window.prompt(
-                "Укажите instance_id (оставьте пустым, чтобы не менять)",
-                item.instance_id ?? item.provider_binding_instance_id ?? "",
-            );
-            if (instanceId === null) {
-                return null;
-            }
-            const notes = window.prompt(
-                "Комментарий операции (опционально)",
-                `${providerOpsActionLabel(action)} for ${item.branch_slug}`,
-            );
-            if (notes === null) {
-                return null;
-            }
-            return {
-                instance_id: instanceId.trim() || undefined,
-                notes: notes.trim() || undefined,
-            };
-        }
-        if (action === "provider_start_rebind") {
-            const notes = window.prompt(
-                "Комментарий операции (опционально)",
-                `start rebind for ${item.branch_slug}`,
-            );
-            if (notes === null) {
-                return null;
-            }
-            return { notes: notes.trim() || undefined };
-        }
-        return {};
-    };
-
     const buildActionSummary = (
         action: ProviderOpsAction,
         result: Record<string, unknown>,
@@ -379,11 +329,73 @@ export default function IntegrationsPage() {
         return providerOpsActionLabel(action);
     };
 
+    const openProviderActionDialog = (
+        item: BranchIntegrationStatus,
+        action: ProviderOpsAction,
+        mode: "dry_run" | "execute" = "execute",
+    ) => {
+        setProviderActionDialog({
+            item,
+            action,
+            mode,
+            reason: defaultExecuteReason(action),
+            notes: action === "provider_send_reminder"
+                ? `reminder for ${item.branch_slug}`
+                : `${providerOpsActionLabel(action)} for ${item.branch_slug}`,
+            paidUntil: item.provider_binding_next_renewal_at ?? item.provider_binding_paid_until ?? "",
+            nextRenewalAt: item.provider_binding_next_renewal_at ?? "",
+            instanceId: item.instance_id ?? item.provider_binding_instance_id ?? "",
+        });
+    };
+
+    const closeProviderActionDialog = () => {
+        if (runningAction) {
+            return;
+        }
+        setProviderActionDialog(null);
+    };
+
+    const buildDialogPayload = (dialog: ProviderActionDialogState): Partial<IntegrationBranchActionRequest> | null => {
+        if (dialog.mode === "execute" && !dialog.reason.trim()) {
+            toast.error("Укажите причину execute");
+            return null;
+        }
+        if (dialog.action === "provider_renewal_confirmed") {
+            const paidUntil = dialog.paidUntil.trim();
+            const nextRenewalAt = dialog.nextRenewalAt.trim();
+            if (!paidUntil && !nextRenewalAt) {
+                toast.error("Укажите paid_until или next_renewal_at");
+                return null;
+            }
+            return {
+                paid_until: paidUntil || undefined,
+                next_renewal_at: nextRenewalAt || undefined,
+                notes: dialog.notes.trim() || undefined,
+            };
+        }
+        if (dialog.action === "provider_webhook_updated" || dialog.action === "provider_complete_rebind") {
+            return {
+                instance_id: dialog.instanceId.trim() || undefined,
+                notes: dialog.notes.trim() || undefined,
+            };
+        }
+        if (dialog.action === "provider_start_rebind" || dialog.action === "provider_send_reminder") {
+            return {
+                notes: dialog.notes.trim() || undefined,
+            };
+        }
+        if (dialog.action === "integration_reconcile") {
+            return {};
+        }
+        return null;
+    };
+
     const runBranchAction = async (
         branchId: string,
         action: ProviderOpsAction,
         mode: "dry_run" | "execute",
         payload: Partial<IntegrationBranchActionRequest> = {},
+        confirmationReason?: string,
     ) => {
         setRunningAction({ branchId, mode, action });
         try {
@@ -405,15 +417,12 @@ export default function IntegrationsPage() {
                 if (mode !== "execute" || apiCode !== "CONFIRMATION_REQUIRED") {
                     throw error;
                 }
-                const reason = window.prompt(
-                    `Укажите причину execute ${action}`,
-                    defaultExecuteReason(action),
-                );
-                if (!reason || !reason.trim()) {
+                const normalizedReason = confirmationReason?.trim();
+                if (!normalizedReason) {
                     toast.error("Укажите причину для execute");
                     return;
                 }
-                const confirmationId = await createBranchConfirmation(branchId, reason.trim(), confirmationAction);
+                const confirmationId = await createBranchConfirmation(branchId, normalizedReason, confirmationAction);
                 response = await runAction(confirmationId);
             }
 
@@ -429,20 +438,8 @@ export default function IntegrationsPage() {
         }
     };
 
-    const runBranchReconcile = async (branchId: string, mode: "dry_run" | "execute") =>
-        runBranchAction(branchId, "integration_reconcile", mode);
-
-    const runProviderAction = async (
-        item: BranchIntegrationStatus,
-        action: ProviderOpsAction,
-        mode: "dry_run" | "execute" = "execute",
-    ) => {
-        const payload = promptProviderActionPayload(action, item);
-        if (payload === null) {
-            return;
-        }
-        await runBranchAction(String(item.branch_id), action, mode, payload);
-    };
+    const runBranchReconcileDryRun = async (branchId: string) =>
+        runBranchAction(branchId, "integration_reconcile", "dry_run");
 
     const runRecommendedQueueAction = async (queueItem: ProviderOpsQueueItem) => {
         const branch = itemByBranch.get(String(queueItem.branch_id));
@@ -450,7 +447,25 @@ export default function IntegrationsPage() {
             toast.error("Branch not found in current integrations list");
             return;
         }
-        await runProviderAction(branch, queueItem.recommended_action, "execute");
+        openProviderActionDialog(branch, queueItem.recommended_action, "execute");
+    };
+
+    const submitProviderActionDialog = async () => {
+        if (!providerActionDialog) {
+            return;
+        }
+        const payload = buildDialogPayload(providerActionDialog);
+        if (payload === null) {
+            return;
+        }
+        await runBranchAction(
+            String(providerActionDialog.item.branch_id),
+            providerActionDialog.action,
+            providerActionDialog.mode,
+            payload,
+            providerActionDialog.reason,
+        );
+        setProviderActionDialog(null);
     };
 
     return (
@@ -630,7 +645,7 @@ export default function IntegrationsPage() {
                                         <button
                                             type="button"
                                             className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() => runBranchReconcile(String(item.branch_id), "dry_run")}
+                                            onClick={() => runBranchReconcileDryRun(String(item.branch_id))}
                                             disabled={!item.is_active || !!runningAction}
                                         >
                                             {runningAction?.branchId === String(item.branch_id)
@@ -642,7 +657,7 @@ export default function IntegrationsPage() {
                                         <button
                                             type="button"
                                             className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() => runBranchReconcile(String(item.branch_id), "execute")}
+                                            onClick={() => openProviderActionDialog(item, "integration_reconcile", "execute")}
                                             disabled={!item.is_active || !!runningAction}
                                         >
                                             {runningAction?.branchId === String(item.branch_id)
@@ -656,7 +671,7 @@ export default function IntegrationsPage() {
                                         <button
                                             type="button"
                                             className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() => runProviderAction(item, "provider_start_rebind", "execute")}
+                                            onClick={() => openProviderActionDialog(item, "provider_start_rebind", "execute")}
                                             disabled={!item.is_active || !!runningAction}
                                         >
                                             {runningAction?.branchId === String(item.branch_id)
@@ -667,7 +682,7 @@ export default function IntegrationsPage() {
                                         <button
                                             type="button"
                                             className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() => runProviderAction(item, "provider_complete_rebind", "execute")}
+                                            onClick={() => openProviderActionDialog(item, "provider_complete_rebind", "execute")}
                                             disabled={!item.is_active || !!runningAction}
                                         >
                                             {runningAction?.branchId === String(item.branch_id)
@@ -678,7 +693,7 @@ export default function IntegrationsPage() {
                                         <button
                                             type="button"
                                             className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() => runProviderAction(item, "provider_renewal_confirmed", "execute")}
+                                            onClick={() => openProviderActionDialog(item, "provider_renewal_confirmed", "execute")}
                                             disabled={!item.is_active || !!runningAction}
                                         >
                                             {runningAction?.branchId === String(item.branch_id)
@@ -689,7 +704,7 @@ export default function IntegrationsPage() {
                                         <button
                                             type="button"
                                             className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() => runProviderAction(item, "provider_webhook_updated", "execute")}
+                                            onClick={() => openProviderActionDialog(item, "provider_webhook_updated", "execute")}
                                             disabled={!item.is_active || !!runningAction}
                                         >
                                             {runningAction?.branchId === String(item.branch_id)
@@ -700,7 +715,7 @@ export default function IntegrationsPage() {
                                         <button
                                             type="button"
                                             className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() => runProviderAction(item, "provider_send_reminder", "execute")}
+                                            onClick={() => openProviderActionDialog(item, "provider_send_reminder", "execute")}
                                             disabled={!item.is_active || !!runningAction}
                                         >
                                             {runningAction?.branchId === String(item.branch_id)
@@ -725,6 +740,138 @@ export default function IntegrationsPage() {
                     </tbody>
                 </table>
             </div>
+
+            {providerActionDialog && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" data-testid="integrations-action-modal-overlay">
+                    <div className="w-full max-w-xl rounded-xl border border-border/60 bg-card p-5 shadow-xl" role="dialog" aria-modal="true" data-testid="integrations-action-modal">
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <h2 className="text-lg font-semibold">
+                                    {providerOpsActionLabel(providerActionDialog.action)}
+                                </h2>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    {providerActionDialog.item.client_slug} / {providerActionDialog.item.branch_name} · mode: {providerActionDialog.mode}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                className="btn-ghost"
+                                onClick={closeProviderActionDialog}
+                                disabled={!!runningAction}
+                            >
+                                Закрыть
+                            </button>
+                        </div>
+
+                        <div className="mt-4 space-y-3">
+                            {providerActionDialog.mode === "execute" && (
+                                <label className="text-xs text-muted-foreground">
+                                    Причина execute (обязательно)
+                                    <textarea
+                                        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                        rows={2}
+                                        value={providerActionDialog.reason}
+                                        onChange={(event) =>
+                                            setProviderActionDialog((prev) =>
+                                                prev ? { ...prev, reason: event.target.value } : prev
+                                            )
+                                        }
+                                        placeholder="Укажите причину execute"
+                                    />
+                                </label>
+                            )}
+
+                            {(providerActionDialog.action === "provider_start_rebind"
+                                || providerActionDialog.action === "provider_complete_rebind"
+                                || providerActionDialog.action === "provider_webhook_updated"
+                                || providerActionDialog.action === "provider_send_reminder"
+                                || providerActionDialog.action === "provider_renewal_confirmed") && (
+                                <label className="text-xs text-muted-foreground">
+                                    Комментарий (опционально)
+                                    <textarea
+                                        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                        rows={2}
+                                        value={providerActionDialog.notes}
+                                        onChange={(event) =>
+                                            setProviderActionDialog((prev) =>
+                                                prev ? { ...prev, notes: event.target.value } : prev
+                                            )
+                                        }
+                                        placeholder="Комментарий операции"
+                                    />
+                                </label>
+                            )}
+
+                            {(providerActionDialog.action === "provider_complete_rebind"
+                                || providerActionDialog.action === "provider_webhook_updated") && (
+                                <label className="text-xs text-muted-foreground">
+                                    instance_id (опционально)
+                                    <input
+                                        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                        value={providerActionDialog.instanceId}
+                                        onChange={(event) =>
+                                            setProviderActionDialog((prev) =>
+                                                prev ? { ...prev, instanceId: event.target.value } : prev
+                                            )
+                                        }
+                                        placeholder="instance-xxxxxxxx"
+                                    />
+                                </label>
+                            )}
+
+                            {providerActionDialog.action === "provider_renewal_confirmed" && (
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                    <label className="text-xs text-muted-foreground">
+                                        paid_until (YYYY-MM-DD)
+                                        <input
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={providerActionDialog.paidUntil}
+                                            onChange={(event) =>
+                                                setProviderActionDialog((prev) =>
+                                                    prev ? { ...prev, paidUntil: event.target.value } : prev
+                                                )
+                                            }
+                                            placeholder="2026-12-31"
+                                        />
+                                    </label>
+                                    <label className="text-xs text-muted-foreground">
+                                        next_renewal_at (опционально)
+                                        <input
+                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                            value={providerActionDialog.nextRenewalAt}
+                                            onChange={(event) =>
+                                                setProviderActionDialog((prev) =>
+                                                    prev ? { ...prev, nextRenewalAt: event.target.value } : prev
+                                                )
+                                            }
+                                            placeholder="2026-12-31"
+                                        />
+                                    </label>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="mt-4 flex items-center justify-end gap-2">
+                            <button
+                                type="button"
+                                className="btn-ghost"
+                                onClick={closeProviderActionDialog}
+                                disabled={!!runningAction}
+                            >
+                                Отмена
+                            </button>
+                            <button
+                                type="button"
+                                className="btn-primary"
+                                onClick={() => void submitProviderActionDialog()}
+                                disabled={!!runningAction}
+                            >
+                                {runningAction ? "Выполнение..." : providerActionDialog.mode === "execute" ? "Выполнить" : "Dry-run"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
