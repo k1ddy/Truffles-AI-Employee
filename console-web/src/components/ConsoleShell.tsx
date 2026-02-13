@@ -69,6 +69,7 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
     { label: "Тенанты", href: "/tenants", section: "tenants", action: "read", testId: "nav-tenants" },
+    { label: "Workspace", href: "/company-workspace", section: "tenants", action: "read", testId: "nav-company-workspace" },
     { label: "Интеграции", href: "/integrations", section: "integrations", action: "read", testId: "nav-integrations" },
     { label: "Заявки", href: "/", section: "inbox", action: "read", testId: "nav-cases" },
     { label: "Записи", href: "/calendar", section: "calendar", action: "read", testId: "nav-calendar" },

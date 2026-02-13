@@ -1,0 +1,23 @@
+# SESSION 2026-02-13-company-workspace-ux-a36 — Session 2026-02-13-company-workspace-ux-a36
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-13-company-workspace-ux-a36.md
+- branch: feat/2026-02-13-company-workspace-ux-a36
+- worktree: /home/zhan/worktrees/2026-02-13-company-workspace-ux-a36
+- base_ref: origin/main
+- scope: Company Workspace UX: typed provider ops actions, explicit quick create flow, unified ops screen.
+- done:
+  - Replaced `window.prompt` provider-ops flow in Integrations with typed modal form and execute reason input.
+  - Added explicit `Quick Create Wizard` in Tenants for `company -> client -> branch` with validation and context updates.
+  - Added dedicated `Company Workspace` page (`/company-workspace`) for unified admin operations and queue navigation.
+  - Added navigation item in Console shell for `Company Workspace`.
+  - Ran backend/frontend checks and validated no lint errors on touched UI files.
+- next:
+  - Open PR and handoff to merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-13-company-workspace-ux-a36.md
+  - pytest -q truffles-api/tests/test_console_integrations_registry.py -> 16 passed
+  - pytest -q truffles-api/tests/test_console_*.py -> 255 passed, 4 warnings
+  - npm --prefix console-web run lint -- --file src/app/integrations/page.tsx --file src/app/tenants/page.tsx --file src/app/company-workspace/page.tsx --file src/components/ConsoleShell.tsx -> passed
+- last_updated: 2026-02-13
