@@ -907,6 +907,29 @@ LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS = {
     "scheduled",
     "active",
 }
+LLM_QUALITY_CALENDAR_INTENTS = {
+    "calendar.list_slots",
+    "calendar.book_slot",
+    "calendar.get_booking",
+    "calendar.reschedule",
+    "calendar.cancel",
+}
+LLM_QUALITY_CALENDAR_SUCCESS_DECISIONS = {
+    "ok",
+    "not_found",
+    "time_mismatch",
+    "slot_mismatch",
+    "missing_slot",
+    "already_cancelled",
+}
+LLM_QUALITY_CALENDAR_FAILURE_DECISIONS = {
+    "provider_unavailable",
+    "branch_missing",
+    "error",
+    "failed",
+    "failure",
+    "timeout",
+}
 LLM_QUALITY_TOOL_OUTCOMES = ("success", "failure", "pending")
 LLM_QUALITY_OUTBOX_SUCCESS_STATUSES = {"SENT"}
 LLM_QUALITY_OUTBOX_FAILURE_STATUSES = {"FAILED"}
@@ -3350,10 +3373,34 @@ def _llm_quality_tool_outcome_from_decision(decision: object | None) -> str:
     return "pending"
 
 
+def _llm_quality_calendar_outcome_from_meta(
+    *,
+    appointment_id,
+    appointment_status,
+    blocked_reason,
+    tool_decision,
+):
+    if blocked_reason:
+        return "failure"
+    status_token = _llm_quality_normalize_tool_token(appointment_status)
+    decision_token = _llm_quality_normalize_tool_token(tool_decision)
+    if appointment_id or status_token in LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS:
+        return "success"
+    if decision_token in LLM_QUALITY_CALENDAR_FAILURE_DECISIONS:
+        return "failure"
+    if decision_token in LLM_QUALITY_CALENDAR_SUCCESS_DECISIONS:
+        return "success"
+    if decision_token:
+        return "pending"
+    return "pending"
+
+
 def _llm_quality_extract_tool_signals(meta, trace_entries):
     if not isinstance(meta, dict):
         return {}
     action = _llm_quality_normalize_tool_token(meta.get("action"))
+    intent = _llm_quality_normalize_tool_token(meta.get("intent"))
+    tool_decision = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
     slot_required = bool(meta.get("slot_confirmation_required"))
     slot_decision = meta.get("slot_confirmation_decision")
     appointment_id = meta.get("appointment_id")
@@ -3366,6 +3413,13 @@ def _llm_quality_extract_tool_signals(meta, trace_entries):
             "required": slot_required,
             "decision": slot_decision,
             "outcome": outcome,
+        }
+    elif intent == "calendar.get_booking":
+        # Confirmation/status dialogs must exercise confirm-path simulation too.
+        signals["confirm"] = {
+            "required": True,
+            "decision": slot_decision,
+            "outcome": _llm_quality_tool_outcome_from_decision(slot_decision),
         }
     if appointment_id:
         outcome = "success"
@@ -3387,13 +3441,18 @@ def _llm_quality_extract_tool_signals(meta, trace_entries):
             "appointment_status": meta.get("appointment_status"),
             "outcome": outcome,
         }
-    if appointment_id or appointment_status:
-        outcome = "success" if (appointment_id or appointment_status) else "pending"
-        if blocked_reason:
-            outcome = "failure"
+    if appointment_id or appointment_status or intent in LLM_QUALITY_CALENDAR_INTENTS:
+        outcome = _llm_quality_calendar_outcome_from_meta(
+            appointment_id=appointment_id,
+            appointment_status=meta.get("appointment_status"),
+            blocked_reason=blocked_reason,
+            tool_decision=tool_decision,
+        )
         signals["calendar"] = {
             "appointment_id": appointment_id,
             "appointment_status": meta.get("appointment_status"),
+            "intent": meta.get("intent"),
+            "tool_decision": meta.get("tool_decision"),
             "outcome": outcome,
         }
     return signals
@@ -4167,7 +4226,130 @@ def _llm_quality_baseline_is_canonical(payload):
     return False, "judge_mode_missing"
 
 
-def _llm_quality_build_infra_status(stats, secret_preflight):
+def _llm_quality_parse_coverage_tokens(value):
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        raw_tokens = [item.strip().casefold() for item in value.split(",")]
+    elif isinstance(value, (list, tuple, set)):
+        raw_tokens = [str(item).strip().casefold() for item in value]
+    else:
+        raw_tokens = [str(value).strip().casefold()]
+    return {token for token in raw_tokens if token and token not in {"none", "off"}}
+
+
+def _llm_quality_build_tool_evidence_status(
+    *,
+    scenario_coverage,
+    tool_hooks_mode,
+    tool_evidence_policy,
+    coverage_stats,
+):
+    policy = _llm_quality_normalize_tool_token(tool_evidence_policy) or "auto"
+    if policy not in {"off", "auto", "strict"}:
+        policy = "auto"
+
+    intents = (coverage_stats or {}).get("intents")
+    if not isinstance(intents, dict):
+        intents = {}
+    actions = (coverage_stats or {}).get("actions")
+    if not isinstance(actions, dict):
+        actions = {}
+    trace_stages = (coverage_stats or {}).get("trace_stages")
+    if not isinstance(trace_stages, dict):
+        trace_stages = {}
+    tools = (coverage_stats or {}).get("tools")
+    if not isinstance(tools, dict):
+        tools = {}
+    tool_events = tools.get("events") if isinstance(tools.get("events"), dict) else {}
+    tool_hooks = (coverage_stats or {}).get("tool_hooks")
+    if not isinstance(tool_hooks, dict):
+        tool_hooks = {}
+    hook_by_action = tool_hooks.get("by_action") if isinstance(tool_hooks.get("by_action"), dict) else {}
+
+    def _as_int(value):
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            return int(value)
+        return 0
+
+    coverage_tokens = _llm_quality_parse_coverage_tokens(scenario_coverage)
+    calendar_intent_turns = sum(
+        _as_int(count)
+        for intent, count in intents.items()
+        if isinstance(intent, str) and intent.startswith("calendar.")
+    )
+    calendar_tool_events = (
+        _as_int(tool_events.get("calendar"))
+        + _as_int(tool_events.get("commit"))
+        + _as_int(tool_events.get("cancel"))
+    )
+    confirm_tool_events = _as_int(tool_events.get("confirm"))
+    calendar_hook_events = _as_int(hook_by_action.get("calendar"))
+    confirm_hook_events = _as_int(hook_by_action.get("confirm"))
+    booking_commit_trace_events = _as_int(trace_stages.get("booking_commit"))
+    booking_confirm_trace_events = _as_int(trace_stages.get("booking_confirm"))
+    booking_confirm_actions = _as_int(actions.get("booking_confirm"))
+    check_booking_intents = _as_int(intents.get("calendar.get_booking"))
+
+    calendar_evidence_total = (
+        calendar_tool_events + calendar_hook_events + booking_commit_trace_events
+    )
+    confirm_evidence_total = (
+        confirm_tool_events
+        + confirm_hook_events
+        + booking_confirm_trace_events
+        + booking_confirm_actions
+    )
+
+    booking_required = "booking" in coverage_tokens or calendar_intent_turns > 0
+    confirm_candidates = check_booking_intents + booking_confirm_actions
+    require_calendar = policy in {"auto", "strict"} and booking_required
+    require_confirm = policy == "strict" and booking_required
+    require_hooks = policy == "strict" and _llm_quality_normalize_tool_token(tool_hooks_mode) == "auto"
+
+    reasons = []
+    if require_calendar and calendar_intent_turns == 0:
+        reasons.append("calendar_intent_missing")
+    if require_calendar and calendar_evidence_total <= 0:
+        reasons.append("calendar_evidence_missing")
+    if require_confirm and confirm_candidates <= 0:
+        reasons.append("confirm_candidate_missing")
+    if require_confirm and confirm_evidence_total <= 0:
+        reasons.append("confirm_evidence_missing")
+    if require_hooks and require_calendar and calendar_hook_events <= 0:
+        reasons.append("calendar_hook_missing")
+    if require_hooks and require_confirm and confirm_hook_events <= 0:
+        reasons.append("confirm_hook_missing")
+
+    return {
+        "policy": policy,
+        "valid": not reasons,
+        "reasons": reasons,
+        "required": {
+            "booking": booking_required,
+            "calendar": require_calendar,
+            "confirm": require_confirm,
+            "hooks": require_hooks,
+        },
+        "counts": {
+            "calendar_intent_turns": calendar_intent_turns,
+            "check_booking_intents": check_booking_intents,
+            "booking_confirm_actions": booking_confirm_actions,
+            "calendar_tool_events": calendar_tool_events,
+            "confirm_tool_events": confirm_tool_events,
+            "calendar_hook_events": calendar_hook_events,
+            "confirm_hook_events": confirm_hook_events,
+            "booking_commit_trace_events": booking_commit_trace_events,
+            "booking_confirm_trace_events": booking_confirm_trace_events,
+            "calendar_evidence_total": calendar_evidence_total,
+            "confirm_evidence_total": confirm_evidence_total,
+        },
+    }
+
+
+def _llm_quality_build_infra_status(stats, secret_preflight, tool_evidence_status=None):
     reasons = []
     if isinstance(secret_preflight, dict) and not secret_preflight.get("valid", False):
         preflight_reasons = secret_preflight.get("reasons") or []
@@ -4184,6 +4366,13 @@ def _llm_quality_build_infra_status(stats, secret_preflight):
         reasons.append("decision_meta_errors")
     if (stats or {}).get("decision_trace_errors", 0):
         reasons.append("decision_trace_errors")
+    if isinstance(tool_evidence_status, dict) and not tool_evidence_status.get("valid", True):
+        tool_reasons = tool_evidence_status.get("reasons") or []
+        if tool_reasons:
+            for reason in tool_reasons:
+                reasons.append(f"tool_evidence:{reason}")
+        else:
+            reasons.append("tool_evidence:invalid")
     return {"valid": not reasons, "reasons": reasons}
 
 
@@ -4483,16 +4672,22 @@ def _llm_quality_evaluate_turn(
     calendar_outcome = ""
     if isinstance(calendar_signal, dict):
         calendar_outcome = _llm_quality_normalize_tool_token(calendar_signal.get("outcome"))
+    intent_value = ""
+    if isinstance(meta, dict):
+        intent_value = _llm_quality_normalize_tool_token(meta.get("intent"))
+    meta_action_value = _llm_quality_normalize_tool_token(meta_action)
     appointment_id = (meta or {}).get("appointment_id") if isinstance(meta, dict) else None
     appointment_status = _llm_quality_normalize_tool_token(
         (meta or {}).get("appointment_status") if isinstance(meta, dict) else None
     )
-    has_calendar_contract = bool(
+    requires_calendar_contract = bool(
         appointment_id
         or appointment_status in LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS
-        or calendar_signal
+        or meta_action_value == "booking_confirm"
+        or intent_value == "calendar.get_booking"
+        or _llm_quality_is_booking_confirmation_text(outbox_text)
     )
-    if has_calendar_contract and calendar_outcome != "success":
+    if requires_calendar_contract and calendar_outcome != "success":
         reasons.append("calendar_tool_contract_miss")
 
     if _llm_quality_is_booking_confirmation_text(outbox_text):
@@ -4895,6 +5090,15 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--tool-calendar-text", default="проверь запись")
     parser.add_argument("--tool-hook-wait", type=float, default=0.8)
     parser.add_argument("--tool-hook-limit", type=int, default=2)
+    parser.add_argument(
+        "--tool-evidence-policy",
+        choices=["off", "auto", "strict"],
+        default=os.environ.get("LLM_QUALITY_TOOL_EVIDENCE_POLICY", "strict"),
+        help=(
+            "Gate booking-quality validity by calendar/confirm tool evidence "
+            "(strict marks runs INVALID when booking intents lack tool/hook proof)."
+        ),
+    )
     parser.add_argument("--reset-before-dialog", action="store_true")
     parser.add_argument("--console-base-url", default=os.environ.get("CONSOLE_API_BASE_URL"))
     parser.add_argument("--console-token", default=None)
@@ -7403,6 +7607,11 @@ def _run_llm_quality(args):
             "outcomes": {key: 0 for key in LLM_QUALITY_TOOL_OUTCOMES},
             "by_tool": {},
         },
+        "tool_hooks": {
+            "sent_total": 0,
+            "errors": 0,
+            "by_action": {},
+        },
     }
     judge_stats = {
         "enabled": judge_enabled,
@@ -8524,6 +8733,18 @@ def _run_llm_quality(args):
                             hook_state["calendar"] += 1
                 if tool_hook_results:
                     tool_hook_result = tool_hook_results[0]
+                hook_stats = coverage_stats.get("tool_hooks")
+                if isinstance(hook_stats, dict):
+                    by_action = hook_stats.setdefault("by_action", {})
+                    for hook in tool_hook_results:
+                        if not isinstance(hook, dict):
+                            continue
+                        action = _llm_quality_normalize_tool_token(hook.get("action"))
+                        if action:
+                            hook_stats["sent_total"] = hook_stats.get("sent_total", 0) + 1
+                            by_action[action] = by_action.get(action, 0) + 1
+                        if hook.get("error"):
+                            hook_stats["errors"] = hook_stats.get("errors", 0) + 1
 
                 record = {
                     "dialog_id": dialog.get("dialog_id"),
@@ -8782,7 +9003,18 @@ def _run_llm_quality(args):
             baseline_canonical_reason = None
 
     threshold_results, threshold_breaches = _llm_quality_check_thresholds(metrics)
-    infra_status = _llm_quality_build_infra_status(stats, secret_preflight)
+    tool_evidence_policy = args.tool_evidence_policy
+    if args.dry_run:
+        tool_evidence_policy = "off"
+    tool_evidence_status = _llm_quality_build_tool_evidence_status(
+        scenario_coverage=args.scenario_coverage,
+        tool_hooks_mode=args.tool_hooks,
+        tool_evidence_policy=tool_evidence_policy,
+        coverage_stats=coverage_stats,
+    )
+    infra_status = _llm_quality_build_infra_status(
+        stats, secret_preflight, tool_evidence_status=tool_evidence_status
+    )
     comparison_enforced = bool(args.fail_on_regression)
     comparison_block_reasons = []
     if comparison_enforced and not infra_status["valid"]:
@@ -8831,6 +9063,7 @@ def _run_llm_quality(args):
         "tool_cancel_text": args.tool_cancel_text,
         "tool_calendar_text": args.tool_calendar_text,
         "tool_hook_wait": args.tool_hook_wait,
+        "tool_evidence_policy": tool_evidence_policy,
         "jid_mode": jid_mode_effective,
         "jid_mode_requested": args.jid_mode,
         "max_failures": args.max_failures,
@@ -8870,6 +9103,7 @@ def _run_llm_quality(args):
         "top_failures": top_failures,
         "failures": failures,
         "coverage": coverage_stats,
+        "tool_evidence": tool_evidence_status,
         "judge": judge_stats,
         "webhook_secret_preflight": secret_preflight,
         "infra_valid": infra_status["valid"],
@@ -8879,6 +9113,8 @@ def _run_llm_quality(args):
             "infra_reasons": infra_status["reasons"],
             "semantic_valid": semantic_status["valid"],
             "semantic_reasons": semantic_status["reasons"],
+            "tool_evidence_valid": tool_evidence_status.get("valid"),
+            "tool_evidence_reasons": tool_evidence_status.get("reasons"),
             "comparison_blocked": comparison_blocked,
             "comparison_block_reasons": comparison_block_reasons,
         },
