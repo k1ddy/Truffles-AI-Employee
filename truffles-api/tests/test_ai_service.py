@@ -313,7 +313,9 @@ class TestDetectMultiIntentBudgetReserve:
         timing_context = {}
         required_ms = MULTI_INTENT_TIMEOUT_SECONDS * 1000
 
-        with patch("app.services.ai_service.OPENAI_API_KEY", "test"), patch(
+        with patch("app.services.ai_service.OPENAI_API_KEY", "test"), patch.dict(
+            "os.environ", {"OPENAI_API_KEY": "test"}, clear=False
+        ), patch(
             "app.services.ai_service._remaining_pipeline_budget_ms", return_value=required_ms + 200
         ), patch("app.services.ai_service.get_llm_provider") as mock_llm:
             result = detect_multi_intent(

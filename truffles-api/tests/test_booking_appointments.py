@@ -8,8 +8,7 @@ import pytest
 from app.models.appointment import Appointment
 from app.models.branch import Branch
 from app.models.service import Service
-from app.services import demo_salon_knowledge
-from app.services import tool_registry_service
+from app.services import demo_salon_knowledge, tool_registry_service
 
 pytest.importorskip("dateparser")
 from app.routers.webhook import _legacy as legacy
