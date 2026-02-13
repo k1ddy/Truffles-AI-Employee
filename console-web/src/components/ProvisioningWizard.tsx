@@ -91,6 +91,16 @@ const MISSING_LABELS: Record<string, string> = {
     reference_pack_required_fields: "Reference pack required fields snapshot",
     reference_pack_required_fields_checksum: "Reference pack required fields checksum",
     branch_active: "Филиал активен",
+    "provider_binding.whatsapp": "Provider binding (WhatsApp)",
+    "provider_binding.whatsapp.provider": "Provider binding: provider",
+    "provider_binding.whatsapp.instance_id": "Provider binding: instance_id",
+    "provider_binding.whatsapp.instance_id_mismatch": "Provider binding: instance_id не совпадает с branch",
+    "provider_binding.whatsapp.webhook_status": "Provider binding: webhook_status=configured",
+    "provider_binding.whatsapp.owner": "Provider binding: owner",
+    "provider_binding.whatsapp.next_renewal_at": "Provider binding: next_renewal_at",
+    "provider_binding.whatsapp.paid_until": "Provider binding: paid_until",
+    "provider_binding.whatsapp.paid_until_expired": "Provider binding: paid_until истёк",
+    "provider_binding.whatsapp.rebind_required": "Provider binding: rebind required",
     "client_pack.business.name": "Профиль бизнеса: название",
     "client_pack.location.city": "Локация: город",
     "client_pack.location.address.full": "Локация: адрес",
@@ -475,6 +485,20 @@ function normalizeOnboardingContractPayload(
     return {
         domain_slug: payload?.domain_slug ?? null,
         purchased: normalizeCapabilities(payload?.purchased ?? null),
+        provider_binding: {
+            whatsapp: {
+                provider: payload?.provider_binding?.whatsapp?.provider ?? null,
+                instance_id: payload?.provider_binding?.whatsapp?.instance_id ?? null,
+                webhook_status: payload?.provider_binding?.whatsapp?.webhook_status ?? null,
+                paid_until: payload?.provider_binding?.whatsapp?.paid_until ?? null,
+                owner: payload?.provider_binding?.whatsapp?.owner ?? null,
+                next_renewal_at: payload?.provider_binding?.whatsapp?.next_renewal_at ?? null,
+                last_rebind_at: payload?.provider_binding?.whatsapp?.last_rebind_at ?? null,
+                rebind_required: payload?.provider_binding?.whatsapp?.rebind_required ?? null,
+                alert_state: payload?.provider_binding?.whatsapp?.alert_state ?? null,
+                notes: payload?.provider_binding?.whatsapp?.notes ?? null,
+            },
+        },
     };
 }
 
@@ -686,6 +710,15 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         instanceId: "",
         domainSlug: "beauty",
         paymentStatus: "pending" as "pending" | "confirmed" | "rejected",
+        providerBindingProvider: "chatflow",
+        providerBindingWebhookStatus: "pending" as "configured" | "pending" | "rebind_required",
+        providerBindingPaidUntil: "",
+        providerBindingOwner: "",
+        providerBindingNextRenewalAt: "",
+        providerBindingLastRebindAt: "",
+        providerBindingRebindRequired: false,
+        providerBindingAlertState: "warn" as "ok" | "warn" | "critical",
+        providerBindingNotes: "",
         clientDataText: "",
     });
     const [autopilotServices, setAutopilotServices] = useState<OnboardingPurchasedService[]>(["whatsapp"]);
@@ -1742,6 +1775,11 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const autopilotNeedsBranchName = !branchData?.id;
     const autopilotBranchName = autopilotForm.branchName.trim();
     const autopilotClientDataText = autopilotForm.clientDataText.trim();
+    const autopilotProviderBindingProvider = autopilotForm.providerBindingProvider.trim();
+    const autopilotProviderBindingPaidUntil = autopilotForm.providerBindingPaidUntil.trim();
+    const autopilotProviderBindingOwner = autopilotForm.providerBindingOwner.trim();
+    const autopilotProviderBindingNextRenewalAt = autopilotForm.providerBindingNextRenewalAt.trim();
+    const autopilotProviderBindingLastRebindAt = autopilotForm.providerBindingLastRebindAt.trim();
     const autopilotMissingInputs: string[] = [];
     if (!autopilotPhone) {
         autopilotMissingInputs.push("phone");
@@ -1763,6 +1801,20 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     }
     if (!autopilotClientDataText) {
         autopilotMissingInputs.push("client_data_text");
+    }
+    if (autopilotServices.includes("whatsapp")) {
+        if (!autopilotProviderBindingProvider) {
+            autopilotMissingInputs.push("provider_binding.provider");
+        }
+        if (!autopilotForm.providerBindingWebhookStatus) {
+            autopilotMissingInputs.push("provider_binding.webhook_status");
+        }
+        if (!autopilotProviderBindingOwner) {
+            autopilotMissingInputs.push("provider_binding.owner");
+        }
+        if (!autopilotProviderBindingPaidUntil && !autopilotProviderBindingNextRenewalAt) {
+            autopilotMissingInputs.push("provider_binding.next_renewal_at | paid_until");
+        }
     }
     const autopilotBlockedByScorecard = Boolean(branchData?.id && scorecardFailed);
     const canRunAutopilot = (
@@ -1879,6 +1931,22 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             payment_status: canManagePayment ? autopilotForm.paymentStatus : "pending",
             domain_slug: autopilotForm.domainSlug.trim() || undefined,
             purchased_services: autopilotServices.length ? autopilotServices : undefined,
+            provider_binding: autopilotServices.includes("whatsapp")
+                ? {
+                    whatsapp: {
+                        provider: autopilotProviderBindingProvider || null,
+                        instance_id: autopilotInstanceId,
+                        webhook_status: autopilotForm.providerBindingWebhookStatus || null,
+                        paid_until: autopilotProviderBindingPaidUntil || null,
+                        owner: autopilotProviderBindingOwner || null,
+                        next_renewal_at: autopilotProviderBindingNextRenewalAt || null,
+                        last_rebind_at: autopilotProviderBindingLastRebindAt || null,
+                        rebind_required: autopilotForm.providerBindingRebindRequired,
+                        alert_state: autopilotForm.providerBindingAlertState || null,
+                        notes: autopilotForm.providerBindingNotes.trim() || null,
+                    },
+                }
+                : undefined,
             client_data_text: autopilotClientDataText || undefined,
             activate_branch: false,
             auto_create_reference_pack: true,
@@ -2194,9 +2262,24 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         } else {
             setPurchasedJsonDraft(JSON.stringify(purchasedPayload, null, 2));
         }
+        const providerBindingWhatsApp = onboardingContractDraft.provider_binding?.whatsapp;
         const payload: OnboardingContractPayload = {
             domain_slug: onboardingContractDraft.domain_slug?.trim() || null,
             purchased: purchasedPayload,
+            provider_binding: {
+                whatsapp: {
+                    provider: providerBindingWhatsApp?.provider?.trim() || null,
+                    instance_id: providerBindingWhatsApp?.instance_id?.trim() || null,
+                    webhook_status: providerBindingWhatsApp?.webhook_status ?? null,
+                    paid_until: providerBindingWhatsApp?.paid_until?.trim() || null,
+                    owner: providerBindingWhatsApp?.owner?.trim() || null,
+                    next_renewal_at: providerBindingWhatsApp?.next_renewal_at?.trim() || null,
+                    last_rebind_at: providerBindingWhatsApp?.last_rebind_at?.trim() || null,
+                    rebind_required: providerBindingWhatsApp?.rebind_required ?? null,
+                    alert_state: providerBindingWhatsApp?.alert_state ?? null,
+                    notes: providerBindingWhatsApp?.notes?.trim() || null,
+                },
+            },
         };
         const requestPayload: components["schemas"]["OnboardingContractPatchRequest"] = {
             scope: "branch",
@@ -2273,6 +2356,15 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             instanceId: "",
             domainSlug: "beauty",
             paymentStatus: "pending",
+            providerBindingProvider: "chatflow",
+            providerBindingWebhookStatus: "pending",
+            providerBindingPaidUntil: "",
+            providerBindingOwner: "",
+            providerBindingNextRenewalAt: "",
+            providerBindingLastRebindAt: "",
+            providerBindingRebindRequired: false,
+            providerBindingAlertState: "warn",
+            providerBindingNotes: "",
             clientDataText: "",
         });
         setAutopilotServices(["whatsapp"]);
@@ -2482,6 +2574,113 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                         <option value="confirmed">payment: confirmed</option>
                         <option value="rejected">payment: rejected</option>
                     </select>
+                </div>
+
+                <div className="rounded-lg border border-border/60 bg-background p-3 space-y-3">
+                    <div className="text-xs text-muted-foreground">
+                        Provider binding (WhatsApp contract для autopilot).
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <input
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            placeholder="provider (chatflow)"
+                            value={autopilotForm.providerBindingProvider}
+                            onChange={(event) => setAutopilotForm((prev) => ({
+                                ...prev,
+                                providerBindingProvider: event.target.value,
+                            }))}
+                            disabled={!canEdit}
+                        />
+                        <select
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            value={autopilotForm.providerBindingWebhookStatus}
+                            onChange={(event) => setAutopilotForm((prev) => ({
+                                ...prev,
+                                providerBindingWebhookStatus: event.target.value as "configured" | "pending" | "rebind_required",
+                            }))}
+                            disabled={!canEdit}
+                        >
+                            <option value="configured">webhook: configured</option>
+                            <option value="pending">webhook: pending</option>
+                            <option value="rebind_required">webhook: rebind_required</option>
+                        </select>
+                        <input
+                            type="date"
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            value={autopilotForm.providerBindingPaidUntil}
+                            onChange={(event) => setAutopilotForm((prev) => ({
+                                ...prev,
+                                providerBindingPaidUntil: event.target.value,
+                            }))}
+                            disabled={!canEdit}
+                        />
+                        <input
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            placeholder="owner (Platform admin)"
+                            value={autopilotForm.providerBindingOwner}
+                            onChange={(event) => setAutopilotForm((prev) => ({
+                                ...prev,
+                                providerBindingOwner: event.target.value,
+                            }))}
+                            disabled={!canEdit}
+                        />
+                        <input
+                            type="date"
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            value={autopilotForm.providerBindingNextRenewalAt}
+                            onChange={(event) => setAutopilotForm((prev) => ({
+                                ...prev,
+                                providerBindingNextRenewalAt: event.target.value,
+                            }))}
+                            disabled={!canEdit}
+                        />
+                        <input
+                            type="date"
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            value={autopilotForm.providerBindingLastRebindAt}
+                            onChange={(event) => setAutopilotForm((prev) => ({
+                                ...prev,
+                                providerBindingLastRebindAt: event.target.value,
+                            }))}
+                            disabled={!canEdit}
+                        />
+                        <select
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            value={autopilotForm.providerBindingAlertState}
+                            onChange={(event) => setAutopilotForm((prev) => ({
+                                ...prev,
+                                providerBindingAlertState: event.target.value as "ok" | "warn" | "critical",
+                            }))}
+                            disabled={!canEdit}
+                        >
+                            <option value="ok">alert: ok</option>
+                            <option value="warn">alert: warn</option>
+                            <option value="critical">alert: critical</option>
+                        </select>
+                        <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                            <input
+                                type="checkbox"
+                                checked={autopilotForm.providerBindingRebindRequired}
+                                onChange={(event) => setAutopilotForm((prev) => ({
+                                    ...prev,
+                                    providerBindingRebindRequired: event.target.checked,
+                                }))}
+                                disabled={!canEdit}
+                            />
+                            rebind_required
+                        </label>
+                    </div>
+                    <textarea
+                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs"
+                        rows={2}
+                        placeholder="provider binding notes"
+                        value={autopilotForm.providerBindingNotes}
+                        onChange={(event) => setAutopilotForm((prev) => ({
+                            ...prev,
+                            providerBindingNotes: event.target.value,
+                        }))}
+                        disabled={!canEdit}
+                    />
                 </div>
 
                 <div>
@@ -3904,6 +4103,275 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             placeholder="beauty"
                                             disabled={!canEdit}
                                         />
+                                    </div>
+                                    <div className="rounded-lg border border-border/60 bg-background p-3 space-y-3">
+                                        <div className="text-xs text-muted-foreground">
+                                            Provider binding (manual proof для ChatFlow/WhatsApp).
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">provider</label>
+                                                <input
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={onboardingContractDraft.provider_binding?.whatsapp?.provider ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setOnboardingContractDraft((prev) => {
+                                                            const normalized = normalizeOnboardingContractPayload(prev);
+                                                            return {
+                                                                ...normalized,
+                                                                provider_binding: {
+                                                                    ...normalized.provider_binding,
+                                                                    whatsapp: {
+                                                                        ...normalized.provider_binding?.whatsapp,
+                                                                        provider: event.target.value || null,
+                                                                    },
+                                                                },
+                                                            };
+                                                        });
+                                                    }}
+                                                    placeholder="chatflow"
+                                                    disabled={!canEdit}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">instance_id (provider side)</label>
+                                                <input
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={onboardingContractDraft.provider_binding?.whatsapp?.instance_id ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setOnboardingContractDraft((prev) => {
+                                                            const normalized = normalizeOnboardingContractPayload(prev);
+                                                            return {
+                                                                ...normalized,
+                                                                provider_binding: {
+                                                                    ...normalized.provider_binding,
+                                                                    whatsapp: {
+                                                                        ...normalized.provider_binding?.whatsapp,
+                                                                        instance_id: event.target.value || null,
+                                                                    },
+                                                                },
+                                                            };
+                                                        });
+                                                    }}
+                                                    placeholder="instance-xxxxxxxx"
+                                                    disabled={!canEdit}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">webhook_status</label>
+                                                <select
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={onboardingContractDraft.provider_binding?.whatsapp?.webhook_status ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setOnboardingContractDraft((prev) => {
+                                                            const normalized = normalizeOnboardingContractPayload(prev);
+                                                            return {
+                                                                ...normalized,
+                                                                provider_binding: {
+                                                                    ...normalized.provider_binding,
+                                                                    whatsapp: {
+                                                                        ...normalized.provider_binding?.whatsapp,
+                                                                        webhook_status: event.target.value
+                                                                            ? event.target.value as "configured" | "pending" | "rebind_required"
+                                                                            : null,
+                                                                    },
+                                                                },
+                                                            };
+                                                        });
+                                                    }}
+                                                    disabled={!canEdit}
+                                                >
+                                                    <option value="">Не указано</option>
+                                                    <option value="configured">configured</option>
+                                                    <option value="pending">pending</option>
+                                                    <option value="rebind_required">rebind_required</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">paid_until</label>
+                                                <input
+                                                    type="date"
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={onboardingContractDraft.provider_binding?.whatsapp?.paid_until ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setOnboardingContractDraft((prev) => {
+                                                            const normalized = normalizeOnboardingContractPayload(prev);
+                                                            return {
+                                                                ...normalized,
+                                                                provider_binding: {
+                                                                    ...normalized.provider_binding,
+                                                                    whatsapp: {
+                                                                        ...normalized.provider_binding?.whatsapp,
+                                                                        paid_until: event.target.value || null,
+                                                                    },
+                                                                },
+                                                            };
+                                                        });
+                                                    }}
+                                                    disabled={!canEdit}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">owner</label>
+                                                <input
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={onboardingContractDraft.provider_binding?.whatsapp?.owner ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setOnboardingContractDraft((prev) => {
+                                                            const normalized = normalizeOnboardingContractPayload(prev);
+                                                            return {
+                                                                ...normalized,
+                                                                provider_binding: {
+                                                                    ...normalized.provider_binding,
+                                                                    whatsapp: {
+                                                                        ...normalized.provider_binding?.whatsapp,
+                                                                        owner: event.target.value || null,
+                                                                    },
+                                                                },
+                                                            };
+                                                        });
+                                                    }}
+                                                    placeholder="Platform admin"
+                                                    disabled={!canEdit}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">next_renewal_at</label>
+                                                <input
+                                                    type="date"
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={onboardingContractDraft.provider_binding?.whatsapp?.next_renewal_at ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setOnboardingContractDraft((prev) => {
+                                                            const normalized = normalizeOnboardingContractPayload(prev);
+                                                            return {
+                                                                ...normalized,
+                                                                provider_binding: {
+                                                                    ...normalized.provider_binding,
+                                                                    whatsapp: {
+                                                                        ...normalized.provider_binding?.whatsapp,
+                                                                        next_renewal_at: event.target.value || null,
+                                                                    },
+                                                                },
+                                                            };
+                                                        });
+                                                    }}
+                                                    disabled={!canEdit}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">last_rebind_at</label>
+                                                <input
+                                                    type="date"
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={onboardingContractDraft.provider_binding?.whatsapp?.last_rebind_at ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setOnboardingContractDraft((prev) => {
+                                                            const normalized = normalizeOnboardingContractPayload(prev);
+                                                            return {
+                                                                ...normalized,
+                                                                provider_binding: {
+                                                                    ...normalized.provider_binding,
+                                                                    whatsapp: {
+                                                                        ...normalized.provider_binding?.whatsapp,
+                                                                        last_rebind_at: event.target.value || null,
+                                                                    },
+                                                                },
+                                                            };
+                                                        });
+                                                    }}
+                                                    disabled={!canEdit}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">alert_state</label>
+                                                <select
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={onboardingContractDraft.provider_binding?.whatsapp?.alert_state ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setOnboardingContractDraft((prev) => {
+                                                            const normalized = normalizeOnboardingContractPayload(prev);
+                                                            return {
+                                                                ...normalized,
+                                                                provider_binding: {
+                                                                    ...normalized.provider_binding,
+                                                                    whatsapp: {
+                                                                        ...normalized.provider_binding?.whatsapp,
+                                                                        alert_state: event.target.value
+                                                                            ? event.target.value as "ok" | "warn" | "critical"
+                                                                            : null,
+                                                                    },
+                                                                },
+                                                            };
+                                                        });
+                                                    }}
+                                                    disabled={!canEdit}
+                                                >
+                                                    <option value="">Не указано</option>
+                                                    <option value="ok">ok</option>
+                                                    <option value="warn">warn</option>
+                                                    <option value="critical">critical</option>
+                                                </select>
+                                            </div>
+                                            <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={Boolean(onboardingContractDraft.provider_binding?.whatsapp?.rebind_required)}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setOnboardingContractDraft((prev) => {
+                                                            const normalized = normalizeOnboardingContractPayload(prev);
+                                                            return {
+                                                                ...normalized,
+                                                                provider_binding: {
+                                                                    ...normalized.provider_binding,
+                                                                    whatsapp: {
+                                                                        ...normalized.provider_binding?.whatsapp,
+                                                                        rebind_required: event.target.checked,
+                                                                    },
+                                                                },
+                                                            };
+                                                        });
+                                                    }}
+                                                    disabled={!canEdit}
+                                                />
+                                                rebind_required
+                                            </label>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-muted-foreground">notes</label>
+                                            <textarea
+                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs"
+                                                rows={2}
+                                                value={onboardingContractDraft.provider_binding?.whatsapp?.notes ?? ""}
+                                                onChange={(event) => {
+                                                    setOnboardingContractTouched(true);
+                                                    setOnboardingContractDraft((prev) => {
+                                                        const normalized = normalizeOnboardingContractPayload(prev);
+                                                        return {
+                                                            ...normalized,
+                                                            provider_binding: {
+                                                                ...normalized.provider_binding,
+                                                                whatsapp: {
+                                                                    ...normalized.provider_binding?.whatsapp,
+                                                                    notes: event.target.value || null,
+                                                                },
+                                                            },
+                                                        };
+                                                    });
+                                                }}
+                                                placeholder="Manual ops comment"
+                                                disabled={!canEdit}
+                                            />
+                                        </div>
                                     </div>
                                     <div className="rounded-lg border border-border/60 bg-background p-3 space-y-3" data-testid="onboarding-purchased-form">
                                         <div className="text-xs text-muted-foreground">

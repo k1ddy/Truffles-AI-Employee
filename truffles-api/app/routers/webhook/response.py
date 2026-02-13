@@ -713,6 +713,7 @@ def _handle_consult_flow(
     )
     from app.services.pack_runtime_service import (
         PackDecision,
+        get_pack_decision,
         get_pack_service_decision,
     )
 
@@ -1048,7 +1049,22 @@ def _handle_consult_flow(
                     normalized_message,
                     message_text,
                 ) or _has_duration_signal(normalized_message, message_text)
-            explicit_info_signal = price_or_duration_signal
+            truth_priority_intent = None
+            if message_text:
+                truth_priority_decision = get_pack_decision(
+                    message_text,
+                    client_slug=client_slug,
+                    intent_decomp=intent_decomp_payload,
+                )
+                if isinstance(truth_priority_decision, PackDecision):
+                    candidate_intent = (
+                        truth_priority_decision.intent.strip()
+                        if isinstance(truth_priority_decision.intent, str)
+                        else ""
+                    )
+                    if candidate_intent in {"aftercare_gel_lac", "prep_brows_lashes", "procedure_combo"}:
+                        truth_priority_intent = candidate_intent
+            explicit_info_signal = bool(price_or_duration_signal or truth_priority_intent)
             explicit_info_intent = bool(
                 explicit_info_signal
                 or info_class_intents
@@ -1062,6 +1078,7 @@ def _handle_consult_flow(
                 service_matcher = policy_handler.get("service_matcher")
             if (
                 service_availability_decision is None
+                and not truth_priority_intent
                 and (explicit_info_intent or (short_circuit_service and price_or_duration_signal))
             ):
                 if service_matcher:
@@ -1079,6 +1096,7 @@ def _handle_consult_flow(
             if (
                 consult_intent
                 and short_circuit_service
+                and not truth_priority_intent
                 and service_availability_decision is None
                 and service_matcher
             ):
@@ -1160,6 +1178,8 @@ def _handle_consult_flow(
                     "explicit_info": True,
                     "service_query": short_circuit_service,
                 }
+                if truth_priority_intent:
+                    consult_flow_trace["truth_priority_intent"] = truth_priority_intent
                 if consult_pack_topic_id:
                     consult_flow_trace["consult_playbook_id"] = consult_pack_topic_id
                 if consult_question:
@@ -1327,7 +1347,7 @@ def _handle_consult_flow(
                     if consult_pack_topic_id:
                         consult_topic = consult_pack_topic_id
                     consult_pack_used = True
-                elif consult_pack_topic_id:
+                elif consult_pack_topic_id and not explicit_info_intent:
                     pack_decision = build_consult_pack_reply(
                         playbook=playbook,
                         topic_id=consult_pack_topic_id,
@@ -2859,6 +2879,9 @@ def _handle_ai_response_action(
                 if sent
                 else "No response: handover confirmation send failed"
             )
+
+    if result_message is None:
+        result_message = "AI fallback response skipped"
 
     if saved_message:
         llm_used = bool(timing_context.get("llm_used")) if timing_context else False

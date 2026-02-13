@@ -16,6 +16,10 @@ from app.schemas.console import (
     ConsoleBranchUpdateRequest,
     ConsoleOnboardingAutopilotRequest,
 )
+from app.schemas.onboarding_contract import (
+    OnboardingProviderBindingPayload,
+    OnboardingProviderBindingWhatsApp,
+)
 from app.services.console_errors import ConsoleAPIError
 
 
@@ -705,6 +709,345 @@ async def test_run_onboarding_autopilot_activate_requires_scorecard_pass(monkeyp
     db.rollback.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_run_onboarding_autopilot_preserves_existing_provider_binding(monkeypatch):
+    now = datetime.now(timezone.utc)
+    company_id = uuid4()
+    client_id = uuid4()
+    branch_id = uuid4()
+    actor_id = uuid4()
+    company = SimpleNamespace(id=company_id, name="Company A", billing_info={})
+    client = SimpleNamespace(
+        id=client_id,
+        name="client-a",
+        status="active",
+        config={},
+        company_id=company_id,
+        created_at=now,
+        updated_at=now,
+    )
+    branch = SimpleNamespace(
+        id=branch_id,
+        client_id=client_id,
+        slug="branch-a",
+        name="Branch A",
+        timezone="Asia/Almaty",
+        phone="+77001112233",
+        instance_id="inst-existing",
+        telegram_chat_id=None,
+        knowledge_tag="knowledge-a",
+        working_hours={},
+        booking_settings={},
+        is_active=False,
+        onboarding_state="branch_draft",
+        onboarding_updated_at=now,
+        go_live_state="pending",
+        go_live_reason=None,
+        go_live_reviewed_at=None,
+        go_live_reviewed_by=None,
+        go_live_waiver_until=None,
+        go_live_waiver_reason=None,
+        go_live_waiver_by=None,
+        webhook_secret=None,
+        created_at=now,
+        updated_at=now,
+    )
+    contract_record = SimpleNamespace(
+        id=uuid4(),
+        client_id=client_id,
+        branch_id=branch_id,
+        scope="branch",
+        status="active",
+        schema_version="v1",
+        payment_status="pending",
+        payment_confirmed_at=None,
+        payment_confirmed_by=None,
+        payload_json={
+            "domain_slug": None,
+            "purchased": {
+                "channels": {"whatsapp": True},
+                "providers": {},
+                "features": {},
+            },
+            "provider_binding": {
+                "whatsapp": {
+                    "provider": "chatflow",
+                    "instance_id": "inst-existing",
+                    "webhook_status": "configured",
+                    "paid_until": "2030-01-01",
+                    "notes": "existing binding",
+                }
+            },
+        },
+        created_by=actor_id,
+        created_at=now,
+        updated_at=now,
+    )
+    capability_record = SimpleNamespace(
+        id=uuid4(),
+        client_id=client_id,
+        branch_id=branch_id,
+        scope="branch",
+        status="active",
+        schema_version="v1",
+        payload_json={
+            "channels": {"whatsapp": True},
+            "providers": {},
+            "features": {},
+        },
+        created_by=actor_id,
+        created_at=now,
+        updated_at=now,
+    )
+
+    db = Mock()
+    db.query.return_value.filter.return_value.first.side_effect = [
+        company,
+        client,
+        None,
+        None,
+        branch,
+    ]
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=client_id, company_id=company_id)],
+            client_id=client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_get_latest_capability", lambda *args, **kwargs: capability_record)
+    monkeypatch.setattr(console_router, "_get_latest_onboarding_contract", lambda *args, **kwargs: contract_record)
+    monkeypatch.setattr(console_router, "_next_available_branch_slug", lambda *args, **kwargs: "branch-a")
+    monkeypatch.setattr(
+        console_router,
+        "_ensure_client_webhook_secret_from_instance",
+        lambda *args, **kwargs: ("whs_test", "https://example.com/webhook", False),
+    )
+    monkeypatch.setattr(console_router, "build_intake_payload", lambda *args, **kwargs: {"client_pack": {}})
+    monkeypatch.setattr(console_router, "upsert_draft", lambda *args, **kwargs: SimpleNamespace(id=uuid4()))
+    monkeypatch.setattr(console_router, "evaluate_intake_payload", lambda *args, **kwargs: ([], []))
+    monkeypatch.setattr(console_router, "build_onboarding_inputs", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_status",
+        lambda *args, **kwargs: SimpleNamespace(
+            current_step=console_router.OnboardingStep.BRANCH_DRAFT,
+            steps=[
+                SimpleNamespace(
+                    id=console_router.OnboardingStep.BRANCH_DRAFT,
+                    status="complete",
+                    required=True,
+                    missing=[],
+                )
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_scorecard",
+        lambda *args, **kwargs: SimpleNamespace(ready=True, missing=[], checks=[]),
+    )
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+
+    response = await console_router.run_onboarding_autopilot(
+        request=Mock(),
+        body=ConsoleOnboardingAutopilotRequest(
+            company_id=company_id,
+            client_id=client_id,
+            branch_id=branch_id,
+            phone="+77001112233",
+            instance_id="inst-new",
+            activate_branch=False,
+        ),
+        db=db,
+    )
+
+    binding = response.onboarding_contract.payload.provider_binding.whatsapp
+    assert binding is not None
+    assert binding.provider == "chatflow"
+    assert binding.instance_id == "inst-existing"
+    assert binding.webhook_status == "configured"
+    assert binding.paid_until == "2030-01-01"
+    assert binding.notes == "existing binding"
+
+
+@pytest.mark.asyncio
+async def test_run_onboarding_autopilot_autofills_provider_binding_instance_id(monkeypatch):
+    now = datetime.now(timezone.utc)
+    company_id = uuid4()
+    client_id = uuid4()
+    branch_id = uuid4()
+    actor_id = uuid4()
+    company = SimpleNamespace(id=company_id, name="Company A", billing_info={})
+    client = SimpleNamespace(
+        id=client_id,
+        name="client-a",
+        status="active",
+        config={},
+        company_id=company_id,
+        created_at=now,
+        updated_at=now,
+    )
+    branch = SimpleNamespace(
+        id=branch_id,
+        client_id=client_id,
+        slug="branch-a",
+        name="Branch A",
+        timezone="Asia/Almaty",
+        phone="+77001112233",
+        instance_id="inst-existing",
+        telegram_chat_id=None,
+        knowledge_tag="knowledge-a",
+        working_hours={},
+        booking_settings={},
+        is_active=False,
+        onboarding_state="branch_draft",
+        onboarding_updated_at=now,
+        go_live_state="pending",
+        go_live_reason=None,
+        go_live_reviewed_at=None,
+        go_live_reviewed_by=None,
+        go_live_waiver_until=None,
+        go_live_waiver_reason=None,
+        go_live_waiver_by=None,
+        webhook_secret=None,
+        created_at=now,
+        updated_at=now,
+    )
+    contract_record = SimpleNamespace(
+        id=uuid4(),
+        client_id=client_id,
+        branch_id=branch_id,
+        scope="branch",
+        status="active",
+        schema_version="v1",
+        payment_status="pending",
+        payment_confirmed_at=None,
+        payment_confirmed_by=None,
+        payload_json={
+            "domain_slug": None,
+            "purchased": {
+                "channels": {"whatsapp": True},
+                "providers": {},
+                "features": {},
+            },
+            "provider_binding": {"whatsapp": {}},
+        },
+        created_by=actor_id,
+        created_at=now,
+        updated_at=now,
+    )
+    capability_record = SimpleNamespace(
+        id=uuid4(),
+        client_id=client_id,
+        branch_id=branch_id,
+        scope="branch",
+        status="active",
+        schema_version="v1",
+        payload_json={
+            "channels": {"whatsapp": True},
+            "providers": {},
+            "features": {},
+        },
+        created_by=actor_id,
+        created_at=now,
+        updated_at=now,
+    )
+
+    db = Mock()
+    db.query.return_value.filter.return_value.first.side_effect = [
+        company,
+        client,
+        None,
+        None,
+        branch,
+    ]
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=client_id, company_id=company_id)],
+            client_id=client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_get_latest_capability", lambda *args, **kwargs: capability_record)
+    monkeypatch.setattr(console_router, "_get_latest_onboarding_contract", lambda *args, **kwargs: contract_record)
+    monkeypatch.setattr(console_router, "_next_available_branch_slug", lambda *args, **kwargs: "branch-a")
+    monkeypatch.setattr(
+        console_router,
+        "_ensure_client_webhook_secret_from_instance",
+        lambda *args, **kwargs: ("whs_test", "https://example.com/webhook", False),
+    )
+    monkeypatch.setattr(console_router, "build_intake_payload", lambda *args, **kwargs: {"client_pack": {}})
+    monkeypatch.setattr(console_router, "upsert_draft", lambda *args, **kwargs: SimpleNamespace(id=uuid4()))
+    monkeypatch.setattr(console_router, "evaluate_intake_payload", lambda *args, **kwargs: ([], []))
+    monkeypatch.setattr(console_router, "build_onboarding_inputs", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_status",
+        lambda *args, **kwargs: SimpleNamespace(
+            current_step=console_router.OnboardingStep.BRANCH_DRAFT,
+            steps=[
+                SimpleNamespace(
+                    id=console_router.OnboardingStep.BRANCH_DRAFT,
+                    status="complete",
+                    required=True,
+                    missing=[],
+                )
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_scorecard",
+        lambda *args, **kwargs: SimpleNamespace(ready=True, missing=[], checks=[]),
+    )
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+
+    response = await console_router.run_onboarding_autopilot(
+        request=Mock(),
+        body=ConsoleOnboardingAutopilotRequest(
+            company_id=company_id,
+            client_id=client_id,
+            branch_id=branch_id,
+            phone="+77001112233",
+            instance_id="inst-autopilot",
+            provider_binding=OnboardingProviderBindingPayload(
+                whatsapp=OnboardingProviderBindingWhatsApp(
+                    provider="chatflow",
+                    webhook_status="configured",
+                    paid_until="2030-02-10",
+                    owner="platform-admin",
+                    rebind_required=False,
+                    alert_state="warn",
+                    notes="new binding from autopilot",
+                )
+            ),
+            activate_branch=False,
+        ),
+        db=db,
+    )
+
+    binding = response.onboarding_contract.payload.provider_binding.whatsapp
+    assert binding is not None
+    assert binding.provider == "chatflow"
+    assert binding.instance_id == "inst-autopilot"
+    assert binding.webhook_status == "configured"
+    assert binding.paid_until == "2030-02-10"
+    assert binding.owner == "platform-admin"
+    assert binding.next_renewal_at == "2030-02-10"
+    assert binding.rebind_required is False
+    assert binding.alert_state == "warn"
+    assert binding.notes == "new binding from autopilot"
+
+
 def test_membership_role_guard_rejects_platform_admin():
     with pytest.raises(ConsoleAPIError) as exc_info:
         console_router._ensure_membership_role_is_assignable("platform_admin")
@@ -1124,3 +1467,60 @@ async def test_waive_branch_go_live_validates_ttl(monkeypatch):
         )
 
     assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.asyncio
+async def test_waive_branch_go_live_requires_prerequisites(monkeypatch):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        go_live_state="pending",
+        go_live_reason=None,
+        go_live_reviewed_at=None,
+        go_live_reviewed_by=None,
+        go_live_waiver_until=None,
+        go_live_waiver_reason=None,
+        go_live_waiver_by=None,
+        updated_at=None,
+    )
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = branch
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=branch.client_id, company_id=uuid4())],
+            client_id=branch.client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_scorecard",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            ready=False,
+            missing=["provider_binding.whatsapp.webhook_status"],
+            checks=[
+                SimpleNamespace(
+                    id=console_router.OnboardingStep.GO_NO_GO,
+                    required=True,
+                    passed=False,
+                )
+            ],
+        ),
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.waive_branch_go_live(
+            branch_id=branch.id,
+            request=Mock(),
+            body=ConsoleBranchGoLiveWaiverRequest(reason="temporary", ttl_hours=24),
+            db=db,
+        )
+
+    assert exc_info.value.code == "GO_LIVE_GATE_REQUIRED"
+    assert exc_info.value.details["operation"] == "branch_go_live_waive"
+    assert exc_info.value.details["missing"] == ["provider_binding.whatsapp.webhook_status"]
+    assert "go_no_go" in exc_info.value.details["failed_checks"]

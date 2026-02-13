@@ -4,7 +4,10 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, StrictStr
 
 from app.schemas.capabilities import CapabilitiesPayload
-from app.schemas.onboarding_contract import OnboardingContractPayload
+from app.schemas.onboarding_contract import (
+    OnboardingContractPayload,
+    OnboardingProviderBindingPayload,
+)
 
 
 class ConsoleError(BaseModel):
@@ -922,6 +925,7 @@ class ConsoleOnboardingAutopilotRequest(ConsoleRequestModel):
     domain_slug: Optional[StrictStr] = None
     purchased: Optional[CapabilitiesPayload] = None
     purchased_services: Optional[list[OnboardingPurchasedService]] = None
+    provider_binding: Optional[OnboardingProviderBindingPayload] = None
     client_data_text: Optional[StrictStr] = None
     client_data_json: Optional[dict] = None
     activate_branch: Optional[bool] = False
@@ -990,6 +994,20 @@ class ConsoleBranchIntegrationStatus(BaseModel):
     integration_checked_at: Optional[str] = None
     integration_degraded_at: Optional[str] = None
     integration_recovered_at: Optional[str] = None
+    provider_binding_provider: Optional[str] = None
+    provider_binding_instance_id: Optional[str] = None
+    provider_binding_webhook_status: Optional[Literal["configured", "pending", "rebind_required"]] = None
+    provider_binding_paid_until: Optional[str] = None
+    provider_binding_owner: Optional[str] = None
+    provider_binding_next_renewal_at: Optional[str] = None
+    provider_binding_last_rebind_at: Optional[str] = None
+    provider_binding_rebind_required: Optional[bool] = None
+    provider_binding_alert_state: Literal["ok", "warn", "critical", "unknown"] = "unknown"
+    provider_binding_notes: Optional[str] = None
+    provider_binding_payment_status: Literal["pending", "confirmed", "rejected", "unknown"] = "unknown"
+    provider_binding_payment_confirmed_at: Optional[str] = None
+    provider_binding_expiry_status: Literal["ok", "expiring_soon", "expired", "unknown"] = "unknown"
+    provider_binding_days_until_expiry: Optional[int] = None
     drift_issues: list[str] = []
     status: Literal["ok", "warn", "error"]
 

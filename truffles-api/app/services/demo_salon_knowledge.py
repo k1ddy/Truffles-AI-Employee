@@ -65,6 +65,11 @@ CONSULT_CLARIFY_TEXT = "Я могу помочь по услугам салон�
 logger = get_logger("demo_salon_knowledge")
 
 
+def _use_local_embeddings() -> bool:
+    value = str(os.environ.get("TEST_MODE", "")).strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class SemanticServiceMatch:
     action: str
@@ -1255,6 +1260,23 @@ def _should_skip_consult(
         return True
     if _looks_like_hours_question(normalized, client_slug=client_slug):
         return True
+    if _signal_contains_any(normalized, client_slug, "aftercare_gel_lac_terms") and _signal_contains_any(
+        normalized,
+        client_slug,
+        "aftercare_gel_lac_care_terms",
+    ):
+        return True
+    if _signal_contains_any(normalized, client_slug, "prep_brows_lashes_prepare_terms") and (
+        _signal_contains_any(normalized, client_slug, "prep_brows_lashes_focus_terms")
+        or _signal_contains_any(normalized, client_slug, "prep_brows_lashes_extra_terms")
+    ):
+        return True
+    if _signal_contains_any(normalized, client_slug, "procedure_combo_require_any") and _signal_contains_any(
+        normalized,
+        client_slug,
+        "procedure_combo_require_all",
+    ):
+        return True
     if _signal_contains_any(normalized, client_slug, "consult_skip_address_phrases"):
         return True
     return False
@@ -1737,20 +1759,22 @@ def semantic_question_type(
             return SemanticQuestionType(kind="duration", score=1.0, second_score=0.0)
 
     query_vector = None
-    use_fallback = False
+    use_fallback = _use_local_embeddings()
     error_detail = None
-    try:
-        query_vector = _coerce_embedding(get_embedding(text))
-    except Exception as exc:
-        error_detail = str(exc)
-        query_vector = None
-    if not query_vector:
+    if not use_fallback:
+        try:
+            query_vector = _coerce_embedding(get_embedding(text))
+        except Exception as exc:
+            error_detail = str(exc)
+            query_vector = None
+    if use_fallback or not query_vector:
         use_fallback = True
         query_vector = _local_text_embedding(text)
-        logger.warning(
-            "question_type fallback to local embedding",
-            extra={"context": {"error": error_detail or "embedding_unavailable"}},
-        )
+        if error_detail:
+            logger.warning(
+                "question_type fallback to local embedding",
+                extra={"context": {"error": error_detail}},
+            )
 
     examples = _question_type_embeddings(slug, use_fallback)
     if not examples and not use_fallback:
@@ -1982,6 +2006,8 @@ def _should_attempt_semantic_match(text: str) -> bool:
 
 def _search_services_index(text: str, client_slug: str, limit: int) -> list[dict[str, Any]]:
     if not text or not client_slug:
+        return []
+    if _use_local_embeddings():
         return []
     try:
         embedding = get_embedding(text)
@@ -2438,6 +2464,31 @@ def _looks_like_service_question(
     if not normalized:
         return False
     slug = _normalize_client_slug(client_slug)
+    # Preparation questions for brows/lashes must bypass service matcher and go to truth prep reply.
+    prep_brows_lashes_signal = (
+        _signal_contains_any(normalized, slug, "prep_brows_lashes_prepare_terms")
+        and (
+            _signal_contains_any(normalized, slug, "prep_brows_lashes_focus_terms")
+            or _signal_contains_any(normalized, slug, "prep_brows_lashes_extra_terms")
+        )
+    ) or (
+        _contains_any(normalized, ["подготов", "перед процедур", "что-то нужно делать"])
+        and _contains_any(normalized, ["ресниц", "бров", "ламинир"])
+    )
+    if prep_brows_lashes_signal:
+        return False
+    if _signal_contains_any(normalized, slug, "aftercare_gel_lac_terms") and _signal_contains_any(
+        normalized,
+        slug,
+        "aftercare_gel_lac_care_terms",
+    ):
+        return False
+    if _signal_contains_any(normalized, slug, "procedure_combo_require_any") and _signal_contains_any(
+        normalized,
+        slug,
+        "procedure_combo_require_all",
+    ):
+        return False
     if not _message_has_service_token(normalized, slug):
         if _signal_contains_any(normalized, slug, "booking_keywords"):
             return False
@@ -3525,10 +3576,17 @@ def get_demo_salon_decision(
         if reply:
             return _build_truth_decision(response=reply, intent="services_overview")
 
+    prep_brows_lashes_heuristic = _contains_any(
+        normalized,
+        ["подготов", "перед процедур", "что-то нужно делать"],
+    ) and _contains_any(
+        normalized,
+        ["ресниц", "бров", "ламинир"],
+    )
     if "prep_brows_lashes" in phrase_intents or (
         _signal_contains_any(normalized, slug, "prep_brows_lashes_prepare_terms")
         and _signal_contains_any(normalized, slug, "prep_brows_lashes_focus_terms")
-    ) or _signal_contains_any(normalized, slug, "prep_brows_lashes_extra_terms"):
+    ) or _signal_contains_any(normalized, slug, "prep_brows_lashes_extra_terms") or prep_brows_lashes_heuristic:
         reply = format_reply_from_truth("prep_brows_lashes", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="prep_brows_lashes")

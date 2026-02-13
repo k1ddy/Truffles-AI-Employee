@@ -159,6 +159,9 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
     }
 
     with patch(
+        "app.routers.webhook.decision.LLM_POLICY_CORE_ENABLED",
+        False,
+    ), patch(
         "app.routers.webhook._legacy._get_policy_handler", return_value=None
     ), patch(
         "app.routers.webhook._legacy.send_bot_response", return_value=True
@@ -191,6 +194,9 @@ def test_booking_chaos_dialog_suite_slot_lock_and_commit_trace():
     ) as create_booking, patch(
         "app.routers.webhook._legacy._reuse_active_handover",
         return_value=(None, True, False),
+    ), patch(
+        "app.routers.webhook._legacy.route_dialogue_controller",
+        return_value={"ok": False, "error": "skipped"},
     ):
         for payload, turn in zip(payloads, dialogue):
             asyncio.run(

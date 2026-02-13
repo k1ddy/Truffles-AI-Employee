@@ -70,6 +70,19 @@ async def test_patch_onboarding_contract_updates_existing_payment_fields(monkeyp
             {
                 "domain_slug": "beauty",
                 "purchased": {"channels": {"whatsapp": True}},
+                "provider_binding": {
+                    "whatsapp": {
+                        "provider": "chatflow",
+                        "instance_id": "instance-123",
+                        "webhook_status": "configured",
+                        "paid_until": "2030-01-01",
+                        "owner": "platform-admin",
+                        "next_renewal_at": "2030-01-01",
+                        "last_rebind_at": "2026-02-01",
+                        "rebind_required": False,
+                        "alert_state": "warn",
+                    }
+                },
             }
         ),
     )
@@ -85,6 +98,13 @@ async def test_patch_onboarding_contract_updates_existing_payment_fields(monkeyp
     assert response.payment_confirmed_by == context.agent.id
     assert response.payment_confirmed_at is not None
     assert response.payload.domain_slug == "beauty"
+    assert response.payload.provider_binding.whatsapp is not None
+    assert response.payload.provider_binding.whatsapp.provider == "chatflow"
+    assert response.payload.provider_binding.whatsapp.owner == "platform-admin"
+    assert response.payload.provider_binding.whatsapp.next_renewal_at == "2030-01-01"
+    assert response.payload.provider_binding.whatsapp.last_rebind_at == "2026-02-01"
+    assert response.payload.provider_binding.whatsapp.rebind_required is False
+    assert response.payload.provider_binding.whatsapp.alert_state == "warn"
     db.commit.assert_called_once()
 
 

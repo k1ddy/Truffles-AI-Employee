@@ -2105,6 +2105,28 @@ export interface components {
             integration_degraded_at?: string | null;
             /** Format: date-time */
             integration_recovered_at?: string | null;
+            provider_binding_provider?: string | null;
+            provider_binding_instance_id?: string | null;
+            /** @enum {string|null} */
+            provider_binding_webhook_status?: "configured" | "pending" | "rebind_required" | null;
+            /** Format: date */
+            provider_binding_paid_until?: string | null;
+            provider_binding_owner?: string | null;
+            /** Format: date */
+            provider_binding_next_renewal_at?: string | null;
+            /** Format: date */
+            provider_binding_last_rebind_at?: string | null;
+            provider_binding_rebind_required?: boolean | null;
+            /** @enum {string} */
+            provider_binding_alert_state?: "ok" | "warn" | "critical" | "unknown";
+            provider_binding_notes?: string | null;
+            /** @enum {string} */
+            provider_binding_payment_status?: "pending" | "confirmed" | "rejected" | "unknown";
+            /** Format: date-time */
+            provider_binding_payment_confirmed_at?: string | null;
+            /** @enum {string} */
+            provider_binding_expiry_status?: "ok" | "expiring_soon" | "expired" | "unknown";
+            provider_binding_days_until_expiry?: number | null;
             drift_issues: string[];
             /** @enum {string} */
             status: "ok" | "warn" | "error";
@@ -2777,6 +2799,27 @@ export interface components {
         OnboardingContractPayload: {
             domain_slug?: string | null;
             purchased?: components["schemas"]["CapabilitiesPayload"];
+            provider_binding?: components["schemas"]["OnboardingProviderBindingPayload"];
+        };
+        OnboardingProviderBindingPayload: {
+            whatsapp?: components["schemas"]["OnboardingProviderBindingWhatsApp"];
+        };
+        OnboardingProviderBindingWhatsApp: {
+            provider?: string | null;
+            instance_id?: string | null;
+            /** @enum {string|null} */
+            webhook_status?: "configured" | "pending" | "rebind_required" | null;
+            /** Format: date */
+            paid_until?: string | null;
+            owner?: string | null;
+            /** Format: date */
+            next_renewal_at?: string | null;
+            /** Format: date */
+            last_rebind_at?: string | null;
+            rebind_required?: boolean | null;
+            /** @enum {string|null} */
+            alert_state?: "ok" | "warn" | "critical" | null;
+            notes?: string | null;
         };
         OnboardingContractRecord: {
             /** Format: uuid */
@@ -2853,6 +2896,7 @@ export interface components {
             domain_slug?: string | null;
             purchased?: components["schemas"]["CapabilitiesPayload"];
             purchased_services?: components["schemas"]["OnboardingPurchasedService"][] | null;
+            provider_binding?: components["schemas"]["OnboardingProviderBindingPayload"];
             client_data_text?: string | null;
             client_data_json?: {
                 [key: string]: unknown;

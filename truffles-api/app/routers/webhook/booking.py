@@ -767,13 +767,17 @@ def _resolve_booking_info_intents(
     elif intent_decomp_used:
         booking_info_intents = sorted(intent_decomp_set & legacy.INFO_INTENTS)
 
-    if expected_reply_shortcircuit and booking_interrupt_text:
+    if booking_interrupt_text:
         anchor_intents, _ = legacy._detect_info_class_intents(
             booking_interrupt_text,
             intent_decomp_set=set(),
             client_slug=client_slug,
         )
-        if anchor_intents:
+        if expected_reply_shortcircuit and anchor_intents:
+            booking_info_intents = sorted(anchor_intents)
+        elif not booking_info_intents and anchor_intents:
+            # Keep booking flow resilient when intent decomposition misses short
+            # info interruptions (parking, duration, etc.).
             booking_info_intents = sorted(anchor_intents)
 
     return booking_info_intents

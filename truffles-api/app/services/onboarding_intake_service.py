@@ -29,18 +29,18 @@ _LANGUAGE_TOKENS: dict[str, tuple[str, ...]] = {
 }
 
 _FIELD_ALIASES: list[tuple[tuple[str, ...], str]] = [
-    (("название", "салон", "name"), "client_pack.salon.name"),
-    (("business name", "company name", "название бизнеса", "компания"), "client_pack.salon.name"),
-    (("город", "city"), "client_pack.salon.city"),
-    (("location city", "город локации"), "client_pack.salon.city"),
-    (("адрес", "address"), "client_pack.salon.address.full"),
-    (("location address", "business address", "адрес локации"), "client_pack.salon.address.full"),
-    (("часы", "график", "hours"), "client_pack.salon.hours"),
-    (("working hours", "operations hours", "режим работы"), "client_pack.salon.hours"),
-    (("язык", "languages", "language"), "client_pack.salon.communication.languages"),
-    (("communication languages", "языки общения"), "client_pack.salon.communication.languages"),
-    (("услуги", "services summary"), "client_pack.salon.services_summary"),
-    (("offerings summary", "products summary", "кратко о продуктах"), "client_pack.salon.services_summary"),
+    (("название", "салон", "name"), "client_pack.business.name"),
+    (("business name", "company name", "название бизнеса", "компания"), "client_pack.business.name"),
+    (("город", "city"), "client_pack.location.city"),
+    (("location city", "город локации"), "client_pack.location.city"),
+    (("адрес", "address"), "client_pack.location.address.full"),
+    (("location address", "business address", "адрес локации"), "client_pack.location.address.full"),
+    (("часы", "график", "hours"), "client_pack.operations.hours"),
+    (("working hours", "operations hours", "режим работы"), "client_pack.operations.hours"),
+    (("язык", "languages", "language"), "client_pack.communication.languages"),
+    (("communication languages", "языки общения"), "client_pack.communication.languages"),
+    (("услуги", "services summary"), "client_pack.catalog.summary"),
+    (("offerings summary", "products summary", "кратко о продуктах"), "client_pack.catalog.summary"),
     (("каталог услуг", "services catalog"), "client_pack.services_catalog.services"),
     (("catalog", "service catalog", "products catalog"), "client_pack.services_catalog.services"),
     (("длительность", "duration"), "client_pack.service_duration_estimates"),
@@ -71,14 +71,6 @@ _MISSING_QUESTIONS: dict[str, str] = {
     "client_pack.operations.hours.close": "Во сколько филиал закрывается?",
     "client_pack.catalog.summary": "Кратко перечислите основные услуги.",
     "client_pack.communication.languages": "Какие языки общения доступны? Обязательно ru и kk.",
-    "client_pack.salon.name": "Как называется бизнес/филиал для клиентов?",
-    "client_pack.salon.city": "В каком городе работает филиал?",
-    "client_pack.salon.address.full": "Какой полный адрес филиала?",
-    "client_pack.salon.hours.days": "В какие дни работает филиал?",
-    "client_pack.salon.hours.open": "Во сколько филиал открывается?",
-    "client_pack.salon.hours.close": "Во сколько филиал закрывается?",
-    "client_pack.salon.services_summary": "Кратко перечислите основные услуги.",
-    "client_pack.salon.communication.languages": "Какие языки общения доступны? Обязательно ru и kk.",
     "client_pack.services_catalog.services": "Дайте список услуг с названиями и ценами.",
     "client_pack.service_duration_estimates": "Укажите длительности услуг.",
     "client_pack.booking.collect_fields": "Какие поля бот обязан собирать для записи?",
@@ -146,6 +138,52 @@ def _append_service(payload: dict[str, Any], service: dict[str, Any]) -> None:
     if service.get("price") is not None:
         price_item["price"] = service["price"]
     price_list.append(price_item)
+
+
+def _copy_if_missing(payload: dict[str, Any], *, source_path: str, target_path: str) -> None:
+    source_keys = source_path.split(".")
+    target_keys = target_path.split(".")
+    source_cursor: Any = payload
+    target_cursor: Any = payload
+    for key in source_keys:
+        if not isinstance(source_cursor, dict) or key not in source_cursor:
+            return
+        source_cursor = source_cursor[key]
+    for key in target_keys[:-1]:
+        existing = target_cursor.get(key)
+        if not isinstance(existing, dict):
+            existing = {}
+            target_cursor[key] = existing
+        target_cursor = existing
+    if target_keys[-1] not in target_cursor or not target_cursor[target_keys[-1]]:
+        target_cursor[target_keys[-1]] = source_cursor
+
+
+def _apply_salon_compatibility_aliases(payload: dict[str, Any]) -> None:
+    # Compatibility bridge for legacy runtime paths until all packs are fully canonical.
+    alias_pairs = (
+        ("client_pack.business.name", "client_pack.salon.name"),
+        ("client_pack.location.city", "client_pack.salon.city"),
+        ("client_pack.location.address.full", "client_pack.salon.address.full"),
+        ("client_pack.operations.hours", "client_pack.salon.hours"),
+        ("client_pack.catalog.summary", "client_pack.salon.services_summary"),
+        ("client_pack.communication.languages", "client_pack.salon.communication.languages"),
+    )
+    for source_path, target_path in alias_pairs:
+        _copy_if_missing(payload, source_path=source_path, target_path=target_path)
+
+
+def _apply_canonical_aliases(payload: dict[str, Any]) -> None:
+    alias_pairs = (
+        ("client_pack.salon.name", "client_pack.business.name"),
+        ("client_pack.salon.city", "client_pack.location.city"),
+        ("client_pack.salon.address.full", "client_pack.location.address.full"),
+        ("client_pack.salon.hours", "client_pack.operations.hours"),
+        ("client_pack.salon.services_summary", "client_pack.catalog.summary"),
+        ("client_pack.salon.communication.languages", "client_pack.communication.languages"),
+    )
+    for source_path, target_path in alias_pairs:
+        _copy_if_missing(payload, source_path=source_path, target_path=target_path)
 
 
 def _detect_languages(value: str) -> list[str]:
@@ -237,12 +275,12 @@ def _parse_key_value_text(text: str) -> dict[str, Any]:
         if not field:
             continue
 
-        if field == "client_pack.salon.hours":
+        if field == "client_pack.operations.hours":
             hours_payload = _parse_hours_value(value)
             if hours_payload:
-                _set_nested_value(payload, "client_pack.salon.hours", hours_payload)
+                _set_nested_value(payload, "client_pack.operations.hours", hours_payload)
             continue
-        if field == "client_pack.salon.communication.languages":
+        if field == "client_pack.communication.languages":
             languages = _detect_languages(value)
             if languages:
                 _set_nested_value(payload, field, languages)
@@ -282,6 +320,8 @@ def build_intake_payload(
 
     normalized_text = (client_data_text or "").strip()
     if not normalized_text:
+        _apply_canonical_aliases(payload)
+        _apply_salon_compatibility_aliases(payload)
         return payload
 
     yaml_payload = _extract_yaml_payload(normalized_text)
@@ -295,23 +335,25 @@ def build_intake_payload(
     if detected_languages:
         existing_languages = (
             payload.get("client_pack", {})
-            .get("salon", {})
             .get("communication", {})
             .get("languages")
         )
         if not isinstance(existing_languages, list) or not existing_languages:
-            _set_nested_value(payload, "client_pack.salon.communication.languages", detected_languages)
+            _set_nested_value(payload, "client_pack.communication.languages", detected_languages)
 
     parsed_services = _parse_services_from_text(normalized_text)
     for service in parsed_services:
         _append_service(payload, service)
 
-    if not payload.get("client_pack", {}).get("salon", {}).get("services_summary") and parsed_services:
+    if not payload.get("client_pack", {}).get("catalog", {}).get("summary") and parsed_services:
         _set_nested_value(
             payload,
-            "client_pack.salon.services_summary",
+            "client_pack.catalog.summary",
             ", ".join(service.get("name", "") for service in parsed_services if service.get("name"))[:500],
         )
+
+    _apply_canonical_aliases(payload)
+    _apply_salon_compatibility_aliases(payload)
 
     return payload
 

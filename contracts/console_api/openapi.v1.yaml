@@ -4141,6 +4141,53 @@ components:
           type: string
           format: date-time
           nullable: true
+        provider_binding_provider:
+          type: string
+          nullable: true
+        provider_binding_instance_id:
+          type: string
+          nullable: true
+        provider_binding_webhook_status:
+          type: string
+          enum: [configured, pending, rebind_required]
+          nullable: true
+        provider_binding_paid_until:
+          type: string
+          format: date
+          nullable: true
+        provider_binding_owner:
+          type: string
+          nullable: true
+        provider_binding_next_renewal_at:
+          type: string
+          format: date
+          nullable: true
+        provider_binding_last_rebind_at:
+          type: string
+          format: date
+          nullable: true
+        provider_binding_rebind_required:
+          type: boolean
+          nullable: true
+        provider_binding_alert_state:
+          type: string
+          enum: [ok, warn, critical, unknown]
+        provider_binding_notes:
+          type: string
+          nullable: true
+        provider_binding_payment_status:
+          type: string
+          enum: [pending, confirmed, rejected, unknown]
+        provider_binding_payment_confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        provider_binding_expiry_status:
+          type: string
+          enum: [ok, expiring_soon, expired, unknown]
+        provider_binding_days_until_expiry:
+          type: integer
+          nullable: true
         drift_issues:
           type: array
           items:
@@ -5634,6 +5681,56 @@ components:
           nullable: true
         purchased:
           $ref: "#/components/schemas/CapabilitiesPayload"
+        provider_binding:
+          $ref: "#/components/schemas/OnboardingProviderBindingPayload"
+
+    OnboardingProviderBindingPayload:
+      type: object
+      additionalProperties: false
+      properties:
+        whatsapp:
+          $ref: "#/components/schemas/OnboardingProviderBindingWhatsApp"
+          nullable: true
+
+    OnboardingProviderBindingWhatsApp:
+      type: object
+      additionalProperties: false
+      properties:
+        provider:
+          type: string
+          nullable: true
+        instance_id:
+          type: string
+          nullable: true
+        webhook_status:
+          type: string
+          enum: [configured, pending, rebind_required]
+          nullable: true
+        paid_until:
+          type: string
+          format: date
+          nullable: true
+        owner:
+          type: string
+          nullable: true
+        next_renewal_at:
+          type: string
+          format: date
+          nullable: true
+        last_rebind_at:
+          type: string
+          format: date
+          nullable: true
+        rebind_required:
+          type: boolean
+          nullable: true
+        alert_state:
+          type: string
+          enum: [ok, warn, critical]
+          nullable: true
+        notes:
+          type: string
+          nullable: true
 
     OnboardingContractRecord:
       type: object
@@ -5810,6 +5907,9 @@ components:
           nullable: true
           items:
             $ref: "#/components/schemas/OnboardingPurchasedService"
+        provider_binding:
+          $ref: "#/components/schemas/OnboardingProviderBindingPayload"
+          nullable: true
         client_data_text:
           type: string
           nullable: true

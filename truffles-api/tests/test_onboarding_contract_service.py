@@ -1,5 +1,12 @@
+import pytest
+
 from app.schemas.capabilities import CapabilitiesPayload
-from app.services.onboarding_contract_service import find_capability_mismatches
+from app.services.console_errors import ConsoleAPIError
+from app.services.onboarding_contract_service import (
+    find_capability_mismatches,
+    merge_onboarding_contract,
+    validate_onboarding_contract_payload,
+)
 
 
 def test_find_capability_mismatches_detects_unpurchased_channel():
@@ -27,3 +34,76 @@ def test_find_capability_mismatches_allows_subset_configuration():
     )
     mismatches = find_capability_mismatches(purchased=purchased, effective=effective)
     assert not mismatches
+
+
+def test_merge_onboarding_contract_merges_provider_binding_whatsapp_fields():
+    merged = merge_onboarding_contract(
+        base={
+            "domain_slug": "beauty",
+            "purchased": {"channels": {"whatsapp": True}},
+            "provider_binding": {
+                "whatsapp": {
+                    "provider": "chatflow",
+                    "instance_id": "instance-old",
+                    "webhook_status": "pending",
+                    "paid_until": "2030-01-01",
+                    "owner": "ops",
+                    "next_renewal_at": "2030-01-01",
+                }
+            },
+        },
+        override={
+            "provider_binding": {
+                "whatsapp": {
+                    "instance_id": "instance-new",
+                    "webhook_status": "configured",
+                    "rebind_required": False,
+                }
+            }
+        },
+    )
+    assert merged["provider_binding"]["whatsapp"]["provider"] == "chatflow"
+    assert merged["provider_binding"]["whatsapp"]["instance_id"] == "instance-new"
+    assert merged["provider_binding"]["whatsapp"]["webhook_status"] == "configured"
+    assert merged["provider_binding"]["whatsapp"]["paid_until"] == "2030-01-01"
+    assert merged["provider_binding"]["whatsapp"]["owner"] == "ops"
+    assert merged["provider_binding"]["whatsapp"]["next_renewal_at"] == "2030-01-01"
+    assert merged["provider_binding"]["whatsapp"]["rebind_required"] is False
+
+
+def test_validate_onboarding_contract_payload_rejects_invalid_provider_binding_date():
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        validate_onboarding_contract_payload(
+            {
+                "domain_slug": "beauty",
+                "purchased": {},
+                "provider_binding": {
+                    "whatsapp": {
+                        "provider": "chatflow",
+                        "instance_id": "instance-123",
+                        "webhook_status": "configured",
+                        "paid_until": "2026-02-31",
+                    }
+                },
+            }
+        )
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
+def test_validate_onboarding_contract_payload_rejects_invalid_next_renewal_date():
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        validate_onboarding_contract_payload(
+            {
+                "domain_slug": "beauty",
+                "purchased": {},
+                "provider_binding": {
+                    "whatsapp": {
+                        "provider": "chatflow",
+                        "instance_id": "instance-123",
+                        "webhook_status": "configured",
+                        "next_renewal_at": "2026-13-01",
+                    }
+                },
+            }
+        )
+    assert exc_info.value.code == "INVALID_PARAM"

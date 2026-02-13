@@ -1,0 +1,30 @@
+# SESSION 2026-02-13-console-provider-onboarding-hardening-a35 — Session 2026-02-13-console-provider-onboarding-hardening-a35
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-13-console-provider-onboarding-hardening-a35.md
+- branch: feat/2026-02-13-console-provider-onboarding-hardening-a35
+- worktree: /home/zhan/worktrees/2026-02-13-console-provider-onboarding-hardening-a35
+- base_ref: origin/main
+- scope: Console onboarding/provider SLA hardening + domain-first intake canonicalization.
+- done:
+  - Added provider binding SLA contract fields (owner/renewal/rebind/alert) in backend schema, OpenAPI, and generated UI types.
+  - Extended Integrations lifecycle backend/UI with provider SLA visibility and drift severity propagation.
+  - Added autopilot provider_binding fields in ProvisioningWizard and payload wiring to `/admin/onboarding/autopilot`.
+  - Enforced additional GO/NO-GO checks for provider binding owner/rebind/renewal requirements.
+  - Migrated intake parsing to canonical domain-first paths; kept salon fields only via explicit compatibility mapper.
+  - Added/updated deterministic tests for onboarding contract, scorecard, integrations lifecycle, branch changes, and intake/validation.
+- next:
+  - Run `scripts/session_check.sh` and prepare commit/PR handoff.
+- evidence:
+  - `pytest -q truffles-api/tests/test_onboarding_contract_service.py`
+  - `pytest -q truffles-api/tests/test_console_onboarding_state.py`
+  - `pytest -q truffles-api/tests/test_onboarding_intake_service.py truffles-api/tests/test_knowledge_validation.py`
+  - `pytest -q truffles-api/tests/test_console_integrations_registry.py`
+  - `pytest -q truffles-api/tests/test_console_onboarding_contract_api.py`
+  - `pytest -q truffles-api/tests/test_console_access_admin_pr2.py`
+  - `pytest -q truffles-api/tests/test_console_*.py`
+  - `python3 truffles-api/scripts/generate_openapi.py --check`
+  - `npm --prefix console-web run generate:api`
+  - `npm --prefix console-web run lint -- --file src/components/ProvisioningWizard.tsx --file src/app/integrations/page.tsx`
+- last_updated: 2026-02-13
