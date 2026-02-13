@@ -1024,6 +1024,9 @@ async def test_run_onboarding_autopilot_autofills_provider_binding_instance_id(m
                     provider="chatflow",
                     webhook_status="configured",
                     paid_until="2030-02-10",
+                    owner="platform-admin",
+                    rebind_required=False,
+                    alert_state="warn",
                     notes="new binding from autopilot",
                 )
             ),
@@ -1038,6 +1041,10 @@ async def test_run_onboarding_autopilot_autofills_provider_binding_instance_id(m
     assert binding.instance_id == "inst-autopilot"
     assert binding.webhook_status == "configured"
     assert binding.paid_until == "2030-02-10"
+    assert binding.owner == "platform-admin"
+    assert binding.next_renewal_at == "2030-02-10"
+    assert binding.rebind_required is False
+    assert binding.alert_state == "warn"
     assert binding.notes == "new binding from autopilot"
 
 

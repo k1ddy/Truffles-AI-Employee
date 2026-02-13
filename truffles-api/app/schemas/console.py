@@ -998,6 +998,11 @@ class ConsoleBranchIntegrationStatus(BaseModel):
     provider_binding_instance_id: Optional[str] = None
     provider_binding_webhook_status: Optional[Literal["configured", "pending", "rebind_required"]] = None
     provider_binding_paid_until: Optional[str] = None
+    provider_binding_owner: Optional[str] = None
+    provider_binding_next_renewal_at: Optional[str] = None
+    provider_binding_last_rebind_at: Optional[str] = None
+    provider_binding_rebind_required: Optional[bool] = None
+    provider_binding_alert_state: Literal["ok", "warn", "critical", "unknown"] = "unknown"
     provider_binding_notes: Optional[str] = None
     provider_binding_payment_status: Literal["pending", "confirmed", "rejected", "unknown"] = "unknown"
     provider_binding_payment_confirmed_at: Optional[str] = None

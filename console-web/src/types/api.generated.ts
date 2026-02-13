@@ -2111,6 +2111,14 @@ export interface components {
             provider_binding_webhook_status?: "configured" | "pending" | "rebind_required" | null;
             /** Format: date */
             provider_binding_paid_until?: string | null;
+            provider_binding_owner?: string | null;
+            /** Format: date */
+            provider_binding_next_renewal_at?: string | null;
+            /** Format: date */
+            provider_binding_last_rebind_at?: string | null;
+            provider_binding_rebind_required?: boolean | null;
+            /** @enum {string} */
+            provider_binding_alert_state?: "ok" | "warn" | "critical" | "unknown";
             provider_binding_notes?: string | null;
             /** @enum {string} */
             provider_binding_payment_status?: "pending" | "confirmed" | "rejected" | "unknown";
@@ -2803,6 +2811,14 @@ export interface components {
             webhook_status?: "configured" | "pending" | "rebind_required" | null;
             /** Format: date */
             paid_until?: string | null;
+            owner?: string | null;
+            /** Format: date */
+            next_renewal_at?: string | null;
+            /** Format: date */
+            last_rebind_at?: string | null;
+            rebind_required?: boolean | null;
+            /** @enum {string|null} */
+            alert_state?: "ok" | "warn" | "critical" | null;
             notes?: string | null;
         };
         OnboardingContractRecord: {

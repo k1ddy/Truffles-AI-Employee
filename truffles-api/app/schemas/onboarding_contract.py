@@ -18,6 +18,11 @@ class OnboardingProviderBindingWhatsApp(BaseModel):
     instance_id: Optional[str] = None
     webhook_status: Optional[Literal["configured", "pending", "rebind_required"]] = None
     paid_until: Optional[str] = None
+    owner: Optional[str] = None
+    next_renewal_at: Optional[str] = None
+    last_rebind_at: Optional[str] = None
+    rebind_required: Optional[bool] = None
+    alert_state: Optional[Literal["ok", "warn", "critical"]] = None
     notes: Optional[str] = None
 
     @field_validator("provider")
@@ -45,17 +50,41 @@ class OnboardingProviderBindingWhatsApp(BaseModel):
     @field_validator("paid_until")
     @classmethod
     def validate_paid_until(cls, value: Optional[str]) -> Optional[str]:
+        return cls._validate_iso_date_field("paid_until", value)
+
+    @field_validator("next_renewal_at")
+    @classmethod
+    def validate_next_renewal_at(cls, value: Optional[str]) -> Optional[str]:
+        return cls._validate_iso_date_field("next_renewal_at", value)
+
+    @field_validator("last_rebind_at")
+    @classmethod
+    def validate_last_rebind_at(cls, value: Optional[str]) -> Optional[str]:
+        return cls._validate_iso_date_field("last_rebind_at", value)
+
+    @classmethod
+    def _validate_iso_date_field(cls, field_name: str, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         cleaned = value.strip()
         if not cleaned:
             return None
         if not _DATE_RE.match(cleaned):
-            raise ValueError("paid_until must be YYYY-MM-DD")
+            raise ValueError(f"{field_name} must be YYYY-MM-DD")
         try:
             date.fromisoformat(cleaned)
         except ValueError as exc:
-            raise ValueError("paid_until must be a valid calendar date") from exc
+            raise ValueError(f"{field_name} must be a valid calendar date") from exc
+        return cleaned
+
+    @field_validator("owner")
+    @classmethod
+    def validate_owner(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            return None
         return cleaned
 
     @field_validator("notes")
