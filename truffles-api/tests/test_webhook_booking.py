@@ -1,6 +1,7 @@
 import pytest
 
 from app.routers import webhook
+from app.routers.webhook import booking as booking_router
 
 
 def test_get_set_expected_reply_type_round_trip():
@@ -71,6 +72,27 @@ def test_match_expected_reply_for_name():
 
     assert matched is True
     assert value == "Лиза"
+
+
+def test_expected_reply_blocked_for_style_reference_text():
+    blocked = webhook._should_block_expected_reply_by_info(
+        expected_reply_type=webhook.EXPECTED_REPLY_NAME,
+        message_text="Вот фото референса",
+        client_slug="demo_salon",
+    )
+
+    assert blocked is True
+
+
+def test_booking_confirmation_deferred_for_info_interrupt():
+    deferred = booking_router._should_defer_booking_confirmation_for_info(
+        confirmation={"slot": "datetime", "value": "12:58"},
+        basic_info_message=True,
+        message_text="Есть ли у вас парковка?",
+        client_slug="demo_salon",
+    )
+
+    assert deferred is True
 
 
 @pytest.mark.parametrize(

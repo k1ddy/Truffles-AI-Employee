@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 
-def _load_openai_key_resolver():
+def _load_openai_key_helpers():
     script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
     source = script_path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(script_path))
@@ -11,6 +11,7 @@ def _load_openai_key_resolver():
     wanted_functions = {
         "_load_env_file",
         "_clean_api_key",
+        "_export_openai_api_key",
         "_openai_key_candidate_env_files",
         "_resolve_openai_api_key",
     }
@@ -21,11 +22,11 @@ def _load_openai_key_resolver():
     namespace = {"os": os}
     exec(compile(module, str(script_path), "exec"), namespace, namespace)
     namespace["_resolve_env_from_container"] = lambda _container, _var: ""
-    return namespace["_resolve_openai_api_key"]
+    return namespace["_resolve_openai_api_key"], namespace["_export_openai_api_key"]
 
 
 def test_openai_key_resolver_reads_local_truffles_api_env(monkeypatch, tmp_path):
-    resolver = _load_openai_key_resolver()
+    resolver, _ = _load_openai_key_helpers()
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     env_dir = tmp_path / "truffles-api"
     env_dir.mkdir(parents=True, exist_ok=True)
@@ -39,7 +40,7 @@ def test_openai_key_resolver_reads_local_truffles_api_env(monkeypatch, tmp_path)
 
 
 def test_openai_key_resolver_uses_container_fallback(monkeypatch, tmp_path):
-    resolver = _load_openai_key_resolver()
+    resolver, _ = _load_openai_key_helpers()
     resolver.__globals__["_openai_key_candidate_env_files"] = lambda: []
     resolver.__globals__["_resolve_env_from_container"] = (
         lambda _container, var: "container-key" if var == "OPENAI_API_KEY" else ""
@@ -51,3 +52,23 @@ def test_openai_key_resolver_uses_container_fallback(monkeypatch, tmp_path):
 
     assert key == "container-key"
     assert source == "container:truffles-api"
+
+
+def test_openai_key_export_sets_env(monkeypatch):
+    _, exporter = _load_openai_key_helpers()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    exported = exporter("  'test-exported-key'  ")
+
+    assert exported is True
+    assert os.environ.get("OPENAI_API_KEY") == "test-exported-key"
+
+
+def test_openai_key_export_rejects_empty(monkeypatch):
+    _, exporter = _load_openai_key_helpers()
+    monkeypatch.setenv("OPENAI_API_KEY", "existing-key")
+
+    exported = exporter("   ")
+
+    assert exported is False
+    assert os.environ.get("OPENAI_API_KEY") == "existing-key"

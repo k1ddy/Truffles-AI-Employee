@@ -587,10 +587,12 @@ def _should_block_expected_reply_by_info(
     info_query = legacy._looks_like_info_query(message_text, client_slug=client_slug)
     price_signal = legacy._has_price_signal(normalized_message, message_text)
     duration_signal = legacy._has_duration_signal(normalized_message, message_text)
+    style_reference_signal = _is_style_reference_request(message_text, has_media=False)
     blocked = bool(
         info_query
         or price_signal
         or duration_signal
+        or style_reference_signal
     )
     if not blocked and expected_reply_type in {
         legacy.EXPECTED_REPLY_TIME,

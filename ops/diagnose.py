@@ -18,6 +18,7 @@ import os
 import random
 import re
 import shlex
+import shutil
 import signal
 import socket
 import subprocess
@@ -5016,6 +5017,42 @@ def _llm_quality_build_default_run_id(timestamp=None):
     return f"{stamp}-{namespace}-p{os.getpid()}-{uuid.uuid4().hex[:6]}"
 
 
+LLM_QUALITY_ARTIFACT_FILES = (
+    "brief.md",
+    "preflight.json",
+    "responses.jsonl",
+    "scenarios.json",
+    "summary.json",
+    "trace_bundle.jsonl",
+)
+
+
+def _llm_quality_prepare_output_dir(path, *, allow_overwrite=False):
+    output_dir = os.path.abspath(os.path.expanduser(path))
+    os.makedirs(output_dir, exist_ok=True)
+    entries = []
+    try:
+        entries = os.listdir(output_dir)
+    except OSError:
+        entries = []
+    if entries and not allow_overwrite:
+        raise SystemExit(
+            "llm-quality: output-dir already contains artifacts; "
+            "use unique --run-id/--output-dir or pass --allow-output-overwrite"
+        )
+    if entries and allow_overwrite:
+        for entry in entries:
+            target = os.path.join(output_dir, entry)
+            if os.path.isdir(target):
+                shutil.rmtree(target, ignore_errors=True)
+                continue
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+    return output_dir
+
+
 def _parse_llm_quality_args(argv):
     parser = argparse.ArgumentParser(
         prog="ops/diagnose.py llm-quality",
@@ -5106,6 +5143,7 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--console-client-id", default=None)
     parser.add_argument("--console-mode", choices=["real", "skip"], default="real")
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--allow-output-overwrite", action="store_true")
     parser.add_argument("--run-id", default=None)
     parser.add_argument(
         "--brief-file",
@@ -5212,6 +5250,14 @@ def _clean_api_key(value):
         return None
     cleaned = str(value).strip().strip('"').strip("'")
     return cleaned or None
+
+
+def _export_openai_api_key(value):
+    cleaned = _clean_api_key(value)
+    if not cleaned:
+        return False
+    os.environ["OPENAI_API_KEY"] = cleaned
+    return True
 
 
 def _parent_env_candidates(start_path):
@@ -7314,8 +7360,10 @@ def _run_llm_quality(args):
     base_url = args.base_url.rstrip("/")
     client_slug = args.client_slug
     webhook_url = f"{base_url}/webhook/{client_slug}"
-    output_dir = args.output_dir or os.path.join("/tmp/booking_quality", run_id)
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir = _llm_quality_prepare_output_dir(
+        args.output_dir or os.path.join("/tmp/booking_quality", run_id),
+        allow_overwrite=bool(getattr(args, "allow_output_overwrite", False)),
+    )
 
     container_name, _ = resolve_container_name()
     allowlist_jids = _resolve_allowlist_jids(args.allowlist_jids, container_name)
@@ -7498,6 +7546,7 @@ def _run_llm_quality(args):
     )
     if llm_api_key:
         args.llm_api_key = llm_api_key
+        _export_openai_api_key(llm_api_key)
     elif args.mode == "llm" and not args.scenarios_file:
         raise SystemExit(
             "llm-quality: missing OPENAI_API_KEY for scenario generation "
@@ -7512,6 +7561,8 @@ def _run_llm_quality(args):
     if not judge_api_key and args.llm_api_key:
         judge_api_key = args.llm_api_key
         judge_api_key_source = f"llm:{llm_api_key_source or 'explicit'}"
+    if judge_api_key:
+        _export_openai_api_key(judge_api_key)
     judge_enabled = judge_mode != "off"
     judge_skip_reason = "judge_mode_off" if judge_mode == "off" else None
     if judge_enabled and not judge_api_key:
