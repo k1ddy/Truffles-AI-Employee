@@ -20,6 +20,7 @@ from app.services.ai_service import (
     FAST_MODEL,
     INTENT_TIMEOUT_SECONDS,
     _append_llm_budget_event,
+    _current_openai_api_key,
     _should_attempt_llm,
     consume_llm_budget,
     get_llm_provider,
@@ -548,7 +549,7 @@ def classify_intent(message: str, *, timing_context: dict | None = None) -> Inte
         if is_human_request_message(message):
             return Intent.HUMAN_REQUEST
 
-        if not os.environ.get("OPENAI_API_KEY"):
+        if not _current_openai_api_key():
             logger.info("Intent classification skipped: OPENAI_API_KEY missing")
             return Intent.OTHER
         if not _should_attempt_llm(
@@ -665,7 +666,7 @@ def route_dialogue_controller(
         }
         return payload
 
-    if not os.environ.get("OPENAI_API_KEY"):
+    if not _current_openai_api_key():
         result["error"] = "no_api_key"
         result["payload"] = _build_payload(
             controller_class=OFFLINE_CONTROLLER_CLASS,
@@ -1004,7 +1005,7 @@ def route_llm_policy_core(
     if not prompt:
         result["error"] = "prompt_missing"
         return result
-    if not os.environ.get("OPENAI_API_KEY"):
+    if not _current_openai_api_key():
         result["error"] = "no_api_key"
         return result
     if not _should_attempt_llm(

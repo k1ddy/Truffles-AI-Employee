@@ -208,7 +208,8 @@ TEST_MODE=1 python3 ops/diagnose.py llm-quality \
   --jid-mode unique \
   --manager-mode skip \
   --pending-mode skip \
-  --tool-hooks check \
+  --tool-hooks auto \
+  --tool-evidence-policy strict \
   --skip-outbox \
   --judge-mode all \
   --baseline-summary /tmp/booking_quality/<canonical-baseline>/summary.json \
@@ -220,6 +221,7 @@ Why this profile
 - `--skip-outbox` removes outbox latency from logic-focused debugging; keep full outbox checks for acceptance runs.
 - `manager-mode/pending-mode=skip` avoids synthetic manager races while fixing core dialog logic.
 - `--timeout-profile realistic` keeps non-aggressive network/poll windows.
+- `--tool-evidence-policy strict` marks run `INVALID` when booking/calendar/confirm evidence is missing (`tool_evidence:*` in `infra_reasons`).
 
 Realistic timeout profile (recommended for stable evidence)
 ```bash

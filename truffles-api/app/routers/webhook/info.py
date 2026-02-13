@@ -157,6 +157,8 @@ def _detect_info_class_intents(
             "кто делает",
             "кто будет делать",
             "кто будет проводить",
+            "кто будет дела",
+            "кто выполняет",
             "шебер",
             "маман",
             "ким жасайд",
@@ -293,6 +295,63 @@ def _looks_like_info_query(message_text: str | None, *, client_slug: str | None 
                 for token in ("какие дан", "дан", "что нужно", "нужно для", "какие нужны", "нужн")
             ):
                 return True
+    return False
+
+
+def _truth_gate_expected_reply_prompt(expected_reply_type: str | None) -> tuple[str | None, str | None]:
+    from . import _legacy as legacy
+
+    if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
+        return legacy.MSG_EXPECTED_SERVICE_OFF_TOPIC, "service_clarify"
+    if expected_reply_type == legacy.EXPECTED_REPLY_TIME:
+        return legacy.MSG_BOOKING_ASK_DATETIME, "booking_followup"
+    if expected_reply_type == legacy.EXPECTED_REPLY_NAME:
+        return legacy.MSG_BOOKING_ASK_NAME, "booking_followup"
+    return None, None
+
+
+def _should_override_truth_gate_off_topic(
+    *,
+    expected_reply_type: str | None,
+    expected_reply_matched: bool | None,
+    message_text: str | None,
+    current_goal: str | None,
+    client_slug: str | None,
+) -> bool:
+    from . import _legacy as legacy
+
+    if expected_reply_type not in {
+        legacy.EXPECTED_REPLY_SERVICE,
+        legacy.EXPECTED_REPLY_TIME,
+        legacy.EXPECTED_REPLY_NAME,
+    }:
+        return False
+    if current_goal == "booking":
+        return True
+    if expected_reply_matched is False:
+        return True
+    if not message_text:
+        return False
+    if legacy._is_short_reply(message_text):
+        return True
+    if legacy._is_booking_slot_signal(message_text, client_slug=client_slug):
+        return True
+    if get_pack_service_hint(message_text, client_slug=client_slug):
+        return True
+    if (
+        expected_reply_type == legacy.EXPECTED_REPLY_TIME
+        and legacy._extract_datetime(message_text)
+    ):
+        return True
+    if (
+        expected_reply_type == legacy.EXPECTED_REPLY_NAME
+        and legacy._validate_name_slot(
+            message_text,
+            allow_freeform=True,
+            client_slug=client_slug,
+        )
+    ):
+        return True
     return False
 
 
@@ -1650,6 +1709,76 @@ def _handle_truth_gate_fallback(
 
         if decision.intent == "off_topic":
             context = legacy._get_conversation_context(conversation)
+            expected_reply_type = legacy._get_expected_reply_type(context)
+            saved_meta = None
+            if saved_message is not None:
+                # Tests may pass lightweight message doubles that only expose
+                # `message_metadata` (without SQLAlchemy `.metadata`).
+                raw_meta = getattr(saved_message, "message_metadata", None)
+                if isinstance(raw_meta, dict):
+                    saved_meta = raw_meta
+                else:
+                    legacy_meta = getattr(saved_message, "metadata", None)
+                    if isinstance(legacy_meta, dict):
+                        saved_meta = legacy_meta
+            saved_decision_meta = (
+                saved_meta.get("decision_meta")
+                if isinstance(saved_meta, dict)
+                else None
+            )
+            expected_reply_matched = (
+                saved_decision_meta.get("expected_reply_matched")
+                if isinstance(saved_decision_meta, dict)
+                else None
+            )
+            if _should_override_truth_gate_off_topic(
+                expected_reply_type=expected_reply_type,
+                expected_reply_matched=expected_reply_matched,
+                message_text=message_text,
+                current_goal=current_goal,
+                client_slug=client_slug,
+            ):
+                followup_prompt, followup_intent = _truth_gate_expected_reply_prompt(
+                    expected_reply_type
+                )
+                if followup_prompt and followup_intent:
+                    context = legacy._set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=expected_reply_type,
+                        reason="truth_gate_off_topic_override",
+                        now=now,
+                    )
+                    override_meta = (
+                        dict(decision.meta)
+                        if isinstance(getattr(decision, "meta", None), dict)
+                        else {}
+                    )
+                    override_meta.update(
+                        {
+                            "expected_reply_type": expected_reply_type,
+                            "expected_reply_guard": "truth_gate_off_topic_override",
+                        }
+                    )
+                    if isinstance(expected_reply_matched, bool):
+                        override_meta["expected_reply_matched"] = expected_reply_matched
+                    decision = PackDecision(
+                        action="reply",
+                        response=followup_prompt,
+                        intent=followup_intent,
+                        meta=override_meta,
+                    )
+                    bot_response = decision.response
+                    legacy._record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "truth_gate",
+                            "decision": "expected_reply_override",
+                            "expected_reply_type": expected_reply_type,
+                            "expected_reply_matched": expected_reply_matched,
+                        },
+                    )
             context_manager = legacy._get_context_manager(context)
             class_carryover = legacy._get_class_carryover(
                 context_manager,
@@ -1833,13 +1962,11 @@ def _handle_offline_info_class(
     maybe_apply_fact_guard: Callable[..., Any],
     send_and_save: Callable[..., tuple[str, bool]],
 ) -> WebhookResponse | None:
-    import os
-
     from . import _legacy as legacy
 
     controller_meta = class_router_result.get("controller") if isinstance(class_router_result, dict) else None
     controller_error = controller_meta.get("error") if isinstance(controller_meta, dict) else None
-    offline_controller = (not os.environ.get("OPENAI_API_KEY")) or controller_error == "no_api_key"
+    offline_controller = (not legacy._current_openai_api_key()) or controller_error == "no_api_key"
     info_intents_for_reply: set[str] = set(class_router_result.get("intents") or [])
     for item in class_router_result.get("carryover_intents") or []:
         if isinstance(item, str) and item.strip():

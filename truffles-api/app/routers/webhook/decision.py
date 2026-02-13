@@ -283,6 +283,7 @@ from app.services.ai_service import (
     MID_CONFIDENCE_THRESHOLD,
     OUT_OF_DOMAIN_RESPONSE,
     THANKS_RESPONSE,
+    _current_openai_api_key,
     classify_confirmation,
     detect_multi_intent,
     detect_refusal_flags,
@@ -387,6 +388,22 @@ def _normalize_message_text(message_text: str | None) -> str:
 
 def _compact_signal_snapshot(values: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value is not None}
+
+
+def _has_lateness_signal(message_text: str | None, *, client_slug: str | None) -> bool:
+    if not message_text:
+        return False
+    normalized = normalize_for_matching(message_text)
+    if not normalized:
+        return False
+    phrases = get_signal_lexicon_list(client_slug, "lateness_phrases")
+    for phrase in phrases:
+        if not isinstance(phrase, str):
+            continue
+        token = normalize_for_matching(phrase)
+        if token and token in normalized:
+            return True
+    return any(marker in normalized for marker in ("опозд", "опаздыв", "задерж"))
 
 
 def _extract_pack_index_meta(client_config: dict | None) -> dict[str, Any] | None:
@@ -1144,7 +1161,7 @@ def _run_intent_decomposition(
         and not bypass_domain_flows
         and message_text
         and not expected_reply_shortcircuit
-        and os.environ.get("OPENAI_API_KEY")
+        and _current_openai_api_key()
     ):
         controller_reserve_ms = max(float(CONTROLLER_TIMEOUT_SECONDS) * 1000, 0.0)
         controller_reserve_ms += max(float(POLICY_CORE_TIMEOUT_SECONDS) * 1000, 0.0)
@@ -1379,8 +1396,7 @@ def _run_intent_decomposition(
         and not service_request_signal
         and not explicit_service_signal
     )
-    openai_key = os.environ.get("OPENAI_API_KEY")
-    openai_key_missing = not openai_key or openai_key.strip().casefold() in {"none", "null"}
+    openai_key_missing = not _current_openai_api_key()
     short_noisy_followup = False
     if (
         openai_key_missing
@@ -1787,7 +1803,7 @@ def _build_router_state(
         and message_text
         and not booking_wants_flow
         and not expected_reply_shortcircuit
-        and os.environ.get("OPENAI_API_KEY")
+        and _current_openai_api_key()
     )
     if controller_should_attempt:
         controller_state["attempted"] = True
@@ -5208,7 +5224,7 @@ async def _handle_webhook_payload(
         LLM_POLICY_CORE_ENABLED
         and routing.get("allow_bot_reply", False)
         and message_text
-        and os.environ.get("OPENAI_API_KEY")
+        and _current_openai_api_key()
     )
     if llm_policy_core_guard_only:
         timing_context["llm_policy_core_enabled"] = True
@@ -7706,6 +7722,10 @@ async def _handle_webhook_payload(
         and not bypass_domain_flows
         and message_text
     ):
+        lateness_signal = _has_lateness_signal(
+            message_text,
+            client_slug=payload.client_slug,
+        )
         early_info_intents, early_info_meta = _detect_info_class_intents(
             message_text,
             intent_decomp_set=intent_decomp_set,
@@ -7744,6 +7764,7 @@ async def _handle_webhook_payload(
                 strict_in_hits > 0
                 or booking_signal
                 or booking_wants_flow
+                or lateness_signal
                 or early_info_intents
                 or explicit_service_signal
                 or controller_booking_hint
@@ -8687,6 +8708,43 @@ async def _handle_webhook_payload(
                         EXPECTED_REPLY_NAME,
                     }:
                         booking_followup_expected = derived_reply
+                elif policy_tool_action.startswith("calendar."):
+                    booking_for_followup = dict(booking_state) if isinstance(booking_state, dict) else {}
+                    if booking_for_followup.get("active") is not True:
+                        booking_for_followup["active"] = True
+                    for key, value in merged_slots.items():
+                        if not booking_for_followup.get(key):
+                            booking_for_followup[key] = value
+                    booking_for_followup, _ = _next_booking_prompt(booking_for_followup)
+                    derived_reply = _expected_reply_for_booking_question(
+                        booking_for_followup.get("last_question")
+                    )
+                    if derived_reply in {
+                        EXPECTED_REPLY_SERVICE,
+                        EXPECTED_REPLY_TIME,
+                        EXPECTED_REPLY_NAME,
+                    }:
+                        booking_followup_expected = derived_reply
+                if (
+                    policy_tool_action.startswith("calendar.")
+                    and merged_slots.get("service")
+                    and booking_followup_expected == EXPECTED_REPLY_SERVICE
+                ):
+                    booking_for_followup = dict(booking_state) if isinstance(booking_state, dict) else {}
+                    if booking_for_followup.get("active") is not True:
+                        booking_for_followup["active"] = True
+                    for key, value in merged_slots.items():
+                        if not booking_for_followup.get(key):
+                            booking_for_followup[key] = value
+                    booking_for_followup, _ = _next_booking_prompt(booking_for_followup)
+                    derived_reply = _expected_reply_for_booking_question(
+                        booking_for_followup.get("last_question")
+                    )
+                    if derived_reply in {
+                        EXPECTED_REPLY_TIME,
+                        EXPECTED_REPLY_NAME,
+                    }:
+                        booking_followup_expected = derived_reply
                 booking_interrupt_prompt = None
                 tool_decision = (tool_result.decision_meta or {}).get("tool_decision")
                 if (
@@ -8732,12 +8790,17 @@ async def _handle_webhook_payload(
                         }
                     )
                 )
+                suppress_booking_lookup_followup = bool(
+                    policy_tool_action == "calendar.get_booking"
+                    and tool_decision in {"not_found", "time_mismatch"}
+                )
                 if (
-                    booking_wants_flow
+                    (booking_wants_flow or policy_tool_action.startswith("calendar."))
                     and booking_followup_expected
                     in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
                     and booking_followup_allowed
                     and not tool_result.expected_reply_type
+                    and not suppress_booking_lookup_followup
                 ):
                     if booking_followup_expected == EXPECTED_REPLY_SERVICE:
                         booking_interrupt_prompt = MSG_BOOKING_ASK_SERVICE
@@ -10751,6 +10814,44 @@ async def _handle_webhook_payload(
         )
 
     if decision.action == "out_of_domain":
+        if _has_lateness_signal(message_text, client_slug=payload.client_slug):
+            bot_response = (
+                format_reply_from_truth("lateness_ok", client_slug=payload.client_slug)
+                or "Если опоздание до 10-15 минут, постараемся принять; если больше, администратор уточнит."
+            )
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy",
+                    "decision": "lateness_reply",
+                    "state": conversation.state,
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="reply",
+                intent="lateness_ok",
+                source="policy_pack",
+                fast_intent=False,
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {"info_sections": ["hours"], "fact_intents": ["lateness_ok"]},
+                )
+            bot_response, sent = _send_and_save(bot_response, allow_quiet_hours=False)
+            result_message = (
+                "Lateness policy response sent"
+                if sent
+                else "Lateness policy response failed"
+            )
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
         bot_response = OUT_OF_DOMAIN_RESPONSE
         _reset_low_confidence_retry(conversation)
         ood_source = "router_low_confidence" if signals.is_low_signal else "domain_router"
@@ -11064,6 +11165,22 @@ async def _handle_webhook_payload(
                 bot_response=bot_response,
             )
         result_message = f"Unknown state: {conversation.state}"
+
+    if (
+        routing.get("allow_bot_reply", False)
+        and conversation.state == ConversationState.BOT_ACTIVE.value
+        and not bot_response
+    ):
+        fallback_response = MSG_FACT_GUARD_CLARIFY
+        bot_response, sent = _send_and_save(fallback_response, allow_quiet_hours=False)
+        result_message = (
+            "Final fallback clarify sent"
+            if sent
+            else "Final fallback clarify failed"
+        )
+
+    if not isinstance(result_message, str) or not result_message.strip():
+        result_message = "Response sent" if bot_response else "Response skipped"
 
     _ensure_action_gate()
     _persist_timing_snapshot()

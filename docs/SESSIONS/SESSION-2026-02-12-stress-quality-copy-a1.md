@@ -60,10 +60,38 @@
     - run-id `booking-replay-20260212-a1-fix28-realistic` (base-url `127.0.0.1:18096`, `jid_mode=unique`, `skip_outbox`, `judge_mode=all`).
     - Result: `infra_valid=true`, `strict_pass_rate=0.968`, `hard_fail_rate=0.0`, `info_answer_rate=0.96`, `turns_strict_failed=4`.
     - Improvement: previous `expected_info_section_miss/info_section_miss` failures were removed; new remaining strict failures are now concentrated in `judge_fail` and `expected_reply_type_mismatch` for consult/off-topic turns.
+  - Re-validated previously failing master-info turn with targeted replay:
+    - run-id `booking-replay-20260212-a1copy-fix31d-target` (`/tmp/booking_quality/booking-fix31c-target-scenarios.json`).
+    - Result: `infra_valid=true`, `semantic_valid=true`, `strict_pass_rate=1.0`, `hard_fail_rate=0.0`, `missing_bot_reply=0`.
+    - Prior red path (`ValidationError` + `"Fallback response skipped"` + `bot_response=null`) no longer reproduced.
+  - Completed full realistic replay on frozen lock scenarios with regression gate:
+    - run-id `booking-replay-20260212-a1copy-fix31d-realistic` (`--scenarios-file /tmp/booking_quality/booking-lock-20260212-a1b/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-20260212-a1b/summary.json`).
+    - Result: `infra_valid=true`, `semantic_valid=true`, `strict_pass_rate=0.9609`, `hard_fail_rate=0.0`, `turns_missing_response=0`, `decision_meta_errors=0`.
+    - Delta vs lock baseline `booking-lock-20260212-a1b`: strict `0.875 -> 0.9609`, judge fails `13 -> 3`, expected-info-section misses `7 -> 1`.
+  - Closed the tool-evidence blind spot in `llm-quality` (`ops/diagnose.py`):
+    - `calendar` tool signals are now extracted from `intent + tool_decision` (not only `appointment_id/appointment_status`), so calendar calls with `provider_unavailable/not_found/time_mismatch` are counted.
+    - Added strict `tool_evidence` validity gate (`--tool-evidence-policy off|auto|strict`, default `strict`) and surfaced reasons in `quality_status` + `infra_reasons` (`tool_evidence:*`).
+    - Added `coverage.tool_hooks` counters (`sent_total/errors/by_action`) and integrated them into gate logic.
+  - Added regression tests for the new gate and signal extraction:
+    - `truffles-api/tests/test_booking_quality_tool_evidence_gate.py`.
+  - Validated the new gate on live LLM smoke replay:
+    - run-id `booking-replay-20260213-a1-toolgate1-fast` (`count=1`, `tool_hooks=auto`, `tool_evidence_policy=strict`, `judge_mode=all`).
+    - Result: `infra_valid=false` with explicit reasons `tool_evidence:confirm_evidence_missing`, `tool_evidence:confirm_hook_missing` while calendar evidence is now present (`coverage.tools.events.calendar=1`, `coverage.tool_hooks.by_action.calendar=1`).
+  - Closed confirm-evidence gap for check-booking dialogs:
+    - `ops/diagnose.py`: `calendar.get_booking` now emits `confirm` tool signal, so `tool_hooks=auto` triggers confirm simulation and strict gate sees confirm evidence.
+    - Regression validated by `booking-replay-20260213-a1-toolgate2-fast`: `tool_evidence.valid=true`, `confirm_tool_events=1`, `confirm_hook_events=1`.
+  - Fixed over-strict calendar contract penalty:
+    - `calendar_tool_contract_miss` no longer fires for plain slot lookup (`calendar.list_slots`) with `provider_unavailable`.
+    - Contract miss still enforced for true confirmation/check-booking paths (`calendar.get_booking`, booking confirmation text, appointment statuses).
+    - Added response-guard regression tests for both sides.
+  - Re-ran live LLM smoke on local API from this worktree (`127.0.0.1:18096`):
+    - `booking-replay-20260213-a1-toolgate3-fast-local`: tool evidence passes, degraded fallback dropped to `0.1538`, but strict failed due `calendar_tool_contract_miss` (fixed after).
+    - `booking-replay-20260213-a1-toolgate4-fast-local`: tool evidence passes, `calendar_tool_contract_miss=0`, `hard_fail_rate=0.0`, degraded fallback `0.0769`; residual strict failures are `judge_fail` + one `expected_reply_type_mismatch`.
 - next:
-  - Re-run full `count=10` lock with `--jid-mode unique` and publish canonical-valid evidence (`infra_valid=true`, `semantic_valid=true`, `judge.enabled=true`).
-  - Run replay against that lock (`--baseline-summary <lock>/summary.json --fail-on-regression --max-failures 20`) and collect top-failures delta.
-  - Keep baseline update blocked until canonical-valid all-run.
+  - Run one full `count=10` lock/replay with `tool_hooks=auto` + `tool_evidence_policy=strict` on stable local API port and collect canonical-valid evidence.
+  - Implement targeted semantic fixes for remaining strict failures (`judge_fail` on photo/reschedule turns and one `expected_reply_type_mismatch`).
+  - Open/refresh PR status with strict gate evidence and top-failures diff table.
+  - Keep canonical baseline update gated until explicit decision by Brain/Top Architect.
 - evidence:
   - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-critical2/summary.json
   - /tmp/booking_quality/booking-replay-20260211-a1copy-v23-all1/summary.json
@@ -77,6 +105,18 @@
   - /tmp/booking_quality/booking-keysource-check3/brief.md
   - /tmp/booking_quality/booking-replay-20260212-a1-fix28-realistic/summary.json
   - /tmp/booking_quality/booking-replay-20260212-a1-fix28-realistic/brief.md
+  - /tmp/booking_quality/booking-replay-20260212-a1copy-fix31d-target/summary.json
+  - /tmp/booking_quality/booking-replay-20260212-a1copy-fix31d-target/brief.md
+  - /tmp/booking_quality/booking-replay-20260212-a1copy-fix31d-realistic/summary.json
+  - /tmp/booking_quality/booking-replay-20260212-a1copy-fix31d-realistic/brief.md
+  - /tmp/booking_quality/booking-replay-20260213-a1-toolgate1-fast/summary.json
+  - /tmp/booking_quality/booking-replay-20260213-a1-toolgate1-fast/brief.md
+  - /tmp/booking_quality/booking-replay-20260213-a1-toolgate2-fast/summary.json
+  - /tmp/booking_quality/booking-replay-20260213-a1-toolgate2-fast/brief.md
+  - /tmp/booking_quality/booking-replay-20260213-a1-toolgate3-fast-local/summary.json
+  - /tmp/booking_quality/booking-replay-20260213-a1-toolgate3-fast-local/brief.md
+  - /tmp/booking_quality/booking-replay-20260213-a1-toolgate4-fast-local/summary.json
+  - /tmp/booking_quality/booking-replay-20260213-a1-toolgate4-fast-local/brief.md
   - Local checks:
     - `ruff check truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/trace.py`
     - `python3 -m py_compile truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/decision.py`
@@ -89,4 +129,8 @@
     - `bash scripts/session_gate.sh --mode ci --target-branch main --base origin/main --head HEAD`
     - `env -u OPENAI_API_KEY pytest -q truffles-api/tests/test_demo_salon_eval.py -k "booking_flow_expected_reply_and_interrupt or booking_flow_info_interrupt_sections_location_hours_parking_promo or booking_flow_info_interrupt_parking_colloquial_phrase"`
     - `python3 -m py_compile truffles-api/app/services/tool_registry_service.py truffles-api/app/routers/webhook/decision.py truffles-api/app/services/demo_salon_knowledge.py ops/diagnose.py`
-- last_updated: 2026-02-12T10:05:00Z
+    - `python3 -m py_compile ops/diagnose.py`
+    - `pytest -q truffles-api/tests/test_booking_quality_tool_evidence_gate.py truffles-api/tests/test_booking_quality_status_gate.py`
+    - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_booking_quality_judge_gate.py truffles-api/tests/test_booking_quality_openai_key_resolution.py`
+    - `pytest -q truffles-api/tests/test_booking_quality_tool_evidence_gate.py truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_booking_quality_response_guard.py`
+- last_updated: 2026-02-13T05:20:00Z

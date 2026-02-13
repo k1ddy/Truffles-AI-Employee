@@ -540,6 +540,62 @@ def test_calendar_contract_passes_when_calendar_success_present():
     assert "calendar_tool_contract_miss" not in reasons
 
 
+def test_calendar_contract_miss_not_reported_for_slot_lookup_provider_unavailable():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "reply", "intent": "calendar.list_slots", "tool_decision": "provider_unavailable"},
+        trace_entries=[{"stage": "booking"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=True,
+        booking_progressed=False,
+        allow_booking_stall=True,
+        outbox_text="Сейчас календарь недоступен. Напишите удобное время, и мы уточним.",
+        tool_signals={"calendar": {"outcome": "failure"}},
+    )
+    assert "calendar_tool_contract_miss" not in reasons
+
+
+def test_calendar_contract_miss_reported_for_get_booking_without_success():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "reply", "intent": "calendar.get_booking", "tool_decision": "provider_unavailable"},
+        trace_entries=[{"stage": "booking"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Не вижу активной записи. Уточните номер телефона и дату/время.",
+        tool_signals={"calendar": {"outcome": "failure"}},
+    )
+    assert "calendar_tool_contract_miss" in reasons
+
+
 def test_state_fallback_allows_pending_when_expected_bot_active():
     helpers = _load_expectation_helpers()
     fn = helpers["_llm_quality_state_matches_expected"]

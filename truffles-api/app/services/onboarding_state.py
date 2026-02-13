@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Optional
 from uuid import UUID
@@ -84,6 +84,7 @@ class OnboardingInputs:
     reference_pack_integrity_missing: list[str]
     reference_pack_domain_slug: Optional[str]
     capability_mismatches: list[str]
+    instance_id: Optional[str]
     has_instance_id: bool
     has_phone: bool
     branch_is_active: bool
@@ -255,6 +256,18 @@ def _has_non_empty_dict(value: Optional[dict]) -> bool:
     return bool(value)
 
 
+def _parse_iso_date(value: Optional[str]) -> Optional[date]:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    try:
+        return date.fromisoformat(cleaned)
+    except ValueError:
+        return None
+
+
 def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
     capabilities = _load_capabilities(db, branch)
     onboarding_contract = _load_onboarding_contract(db, branch)
@@ -327,6 +340,7 @@ def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
             domain_slug=reference_pack_domain_slug,
             require_booking=booking_required,
         )
+    instance_id = (branch.instance_id or "").strip() or None
 
     return OnboardingInputs(
         has_capabilities=capabilities.has_records,
@@ -343,7 +357,8 @@ def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
         reference_pack_integrity_missing=reference_pack_integrity_missing,
         reference_pack_domain_slug=reference_pack_domain_slug,
         capability_mismatches=capability_mismatches,
-        has_instance_id=bool(branch.instance_id),
+        instance_id=instance_id,
+        has_instance_id=bool(instance_id),
         has_phone=bool(branch.phone),
         branch_is_active=bool(branch.is_active),
         has_team=has_team,
@@ -439,6 +454,24 @@ def missing_prerequisites(step: OnboardingStep, inputs: OnboardingInputs) -> lis
                 missing.append("phone")
             if not inputs.branch_is_active:
                 missing.append("branch_active")
+            whatsapp_binding = inputs.onboarding_contract.provider_binding.whatsapp
+            if not whatsapp_binding:
+                missing.append("provider_binding.whatsapp")
+            else:
+                if not whatsapp_binding.provider:
+                    missing.append("provider_binding.whatsapp.provider")
+                if not whatsapp_binding.instance_id:
+                    missing.append("provider_binding.whatsapp.instance_id")
+                elif inputs.instance_id and whatsapp_binding.instance_id != inputs.instance_id:
+                    missing.append("provider_binding.whatsapp.instance_id_mismatch")
+                if whatsapp_binding.webhook_status != "configured":
+                    missing.append("provider_binding.whatsapp.webhook_status")
+
+                paid_until = _parse_iso_date(whatsapp_binding.paid_until)
+                if not paid_until:
+                    missing.append("provider_binding.whatsapp.paid_until")
+                elif paid_until < datetime.now(timezone.utc).date():
+                    missing.append("provider_binding.whatsapp.paid_until_expired")
 
         if (
             inputs.has_capabilities
