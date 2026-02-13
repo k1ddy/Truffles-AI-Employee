@@ -8,6 +8,7 @@ import pytest
 from app.models.appointment import Appointment
 from app.models.branch import Branch
 from app.models.service import Service
+from app.services import demo_salon_knowledge
 from app.services import tool_registry_service
 
 pytest.importorskip("dateparser")
@@ -422,6 +423,122 @@ def test_tool_registry_book_slot_allows_missing_specialist_when_not_explicit():
     assert kwargs["specialist_id"] is None
 
 
+def test_tool_registry_list_slots_allows_sync_stale_provider_health():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "get_provider_health",
+        return_value=SimpleNamespace(ready=False, reason="sync_stale"),
+    ), patch.object(
+        tool_registry_service,
+        "_list_slots",
+        return_value=("Свободные слоты: мастер A 10:00", None),
+    ) as list_slots_mock:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.list_slots",
+            tool_args={"date": "2026-02-20", "duration_min": 30},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.decision_meta.get("tool_decision") == "ok"
+    assert result.decision_meta.get("provider_health_reason") == "sync_stale"
+    assert result.decision_meta.get("provider_health_degraded") is True
+    assert result.trace.get("provider_health_reason") == "sync_stale"
+    assert list_slots_mock.called
+
+
+def test_tool_registry_book_slot_allows_sync_missing_provider_health():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+    specialist = SimpleNamespace(id=uuid4(), name="Алия")
+    appointment = SimpleNamespace(id=uuid4(), specialist_id=specialist.id)
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "get_provider_health",
+        return_value=SimpleNamespace(ready=False, reason="sync_missing"),
+    ), patch.object(
+        tool_registry_service,
+        "_resolve_specialist_for_booking",
+        return_value=(specialist, "service_default", None),
+    ), patch.object(
+        tool_registry_service,
+        "_book_slot",
+        return_value=(appointment, None),
+    ), patch.object(
+        tool_registry_service, "enqueue_appointment_sync", return_value=None
+    ), patch.object(
+        tool_registry_service, "schedule_default_reminders", return_value=[]
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.book_slot",
+            tool_args={"start_at": "2026-02-20T10:00:00"},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+            user_name="Лена",
+            user_phone="+77011112233",
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.decision_meta.get("tool_decision") == "ok"
+    assert result.decision_meta.get("provider_health_reason") == "sync_missing"
+    assert result.decision_meta.get("provider_health_degraded") is True
+    assert result.trace.get("provider_health_reason") == "sync_missing"
+
+
+def test_tool_registry_book_slot_blocks_on_token_expired_provider_health():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "get_provider_health",
+        return_value=SimpleNamespace(ready=False, reason="token_expired"),
+    ), patch.object(tool_registry_service, "_book_slot") as book_slot_mock:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.book_slot",
+            tool_args={"start_at": "2026-02-20T10:00:00"},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "provider_unavailable"
+    assert result.decision_meta.get("provider_reason") == "token_expired"
+    assert book_slot_mock.called is False
+
+
 def test_tool_registry_catalog_location_includes_parking_section():
     db = Mock()
 
@@ -461,6 +578,8 @@ def test_tool_registry_catalog_location_uses_parking_hint_without_message_text()
     assert result.handled is True
     assert result.ok is True
     assert "parking" in (result.decision_meta.get("info_sections") or [])
+
+
 def test_tool_registry_catalog_service_query_avoids_unrelated_semantic_fallback():
     db = Mock()
     branch = SimpleNamespace(
@@ -483,9 +602,78 @@ def test_tool_registry_catalog_service_query_avoids_unrelated_semantic_fallback(
             conversation_id=uuid4(),
             branch_id=branch.id,
             client_slug="demo_salon",
-            service_query="укладка",
+            service_query="криомассаж",
         )
 
     assert result.handled is True
     assert result.ok is True
     assert result.decision_meta.get("tool_decision") == "not_found_fallback"
+
+
+def test_tool_registry_catalog_service_query_pricing_uses_price_item_fallback():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service, "_catalog_service_query", return_value=(None, "service_not_found")
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="catalog.service_query",
+            tool_args={},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="укладка",
+            info_sections_hint=["pricing"],
+            message_text="А сколько стоит укладка?",
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.decision_meta.get("tool_decision") == "price_item_fallback"
+    assert "укладка" in (result.response_text or "").lower()
+
+
+def test_tool_registry_catalog_service_query_duration_prefers_message_service_over_stale_slot():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="catalog.service_query",
+            tool_args={},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+            info_sections_hint=["duration"],
+            message_text="Сколько времени занимает укладка?",
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.decision_meta.get("tool_decision") == "duration"
+    assert "укладка" in (result.response_text or "").lower()
+    assert "маникюр" not in (result.response_text or "").lower()
+
+
+def test_demo_salon_price_item_match_ignores_booking_datetime_phrase():
+    matched = demo_salon_knowledge._find_best_price_item("в субботу вечером", "demo_salon")
+    assert matched is None
+
+
+def test_demo_salon_price_item_match_rejects_unrelated_fuzzy_overlap():
+    matched = demo_salon_knowledge._find_best_price_item("подравнять бороду сколько стоит", "demo_salon")
+    assert matched is None

@@ -58,6 +58,27 @@ def _log_timing(
         timing_context["timing"] = timing
     logger.info("Timing", extra={"context": context})
 
+
+def _classify_llm_error(exc: Exception) -> str:
+    raw = str(exc or "")
+    token = normalize_for_matching(raw)
+    combined = " ".join(part for part in (raw.casefold(), token) if part).strip()
+    if not combined:
+        return "error"
+    if "insufficient_quota" in combined or "insufficient quota" in combined:
+        return "insufficient_quota"
+    if "rate_limit" in combined or "rate limit" in combined:
+        return "rate_limit"
+    if "invalid_api_key" in combined or "invalid api key" in combined:
+        return "invalid_api_key"
+    if (
+        "unauthorized" in combined
+        or "authentication" in combined
+        or " 401 " in f" {combined} "
+    ):
+        return "unauthorized"
+    return "error"
+
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "truffles_knowledge")
@@ -738,7 +759,7 @@ def route_dialogue_controller(
             result["error"] = "no_api_key"
             return result
         logger.warning(f"Controller provider init failed: {exc}")
-        result["error"] = "error"
+        result["error"] = _classify_llm_error(exc)
         return result
     messages = [
         {"role": "system", "content": prompt},
@@ -1061,7 +1082,7 @@ def route_llm_policy_core(
             result["error"] = "no_api_key"
             return result
         logger.warning(f"Policy core provider init failed: {exc}")
-        result["error"] = "error"
+        result["error"] = _classify_llm_error(exc)
         return result
     temperature = 0.0
     model_name = POLICY_CORE_MODEL.strip().lower()
@@ -1117,7 +1138,7 @@ def route_llm_policy_core(
             continue
         except Exception as exc:
             logger.warning(f"LLM policy core failed: {exc}")
-            error = "error"
+            error = _classify_llm_error(exc)
             break
 
     elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
@@ -1227,7 +1248,7 @@ def interpret_expected_reply(
             result["error"] = "no_api_key"
             return result
         logger.warning(f"Answer interpreter provider init failed: {exc}")
-        result["error"] = "error"
+        result["error"] = _classify_llm_error(exc)
         return result
     messages = [
         {"role": "system", "content": prompt},
@@ -1286,7 +1307,7 @@ def interpret_expected_reply(
         )
         record_llm_time(client_slug, "answer_interpreter_llm_ms", elapsed_ms)
         logger.warning(f"Answer interpreter failed: {exc}")
-        result["error"] = "error"
+        result["error"] = _classify_llm_error(exc)
         return result
 
     elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)

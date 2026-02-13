@@ -868,6 +868,7 @@ def _run_webhook_case(
                 "OPENAI_API_KEY": "",
             },
         ),
+        patch("app.services.ai_service.OPENAI_API_KEY", ""),
         patch("app.routers.webhook.decision.LLM_POLICY_CORE_ENABLED", False),
         patch("app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message),
         patch("app.routers.webhook._legacy._get_user_branch_preference", return_value=None),
@@ -1007,6 +1008,7 @@ def _run_webhook_conversation_turns(
                 "OPENAI_API_KEY": "",
             },
         ),
+        patch("app.services.ai_service.OPENAI_API_KEY", ""),
         patch("app.routers.webhook.decision.LLM_POLICY_CORE_ENABLED", False),
         patch("app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message),
         patch("app.routers.webhook._legacy._get_user_branch_preference", return_value=None),
@@ -1671,15 +1673,13 @@ def test_llm_guard_records_trace_and_meta():
     assert meta.get("source") == "llm_guard"
 
 
-def test_budget_gate_trace_records_on_budget_exceeded():
+def test_budget_gate_trace_records_on_budget_exceeded(monkeypatch):
     conversation = SimpleNamespace(context={})
     saved_message = SimpleNamespace(message_metadata={"decision_meta": {}})
     timing_context: dict = {}
 
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     with patch(
-        "app.services.ai_service.OPENAI_API_KEY",
-        "test-key",
-    ), patch(
         "app.services.ai_service.consume_llm_budget",
         return_value={
             "active": True,

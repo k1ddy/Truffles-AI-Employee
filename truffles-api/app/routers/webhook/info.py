@@ -135,9 +135,24 @@ def _detect_info_class_intents(
         "location_keywords",
         "location_phrases",
     )
+    address_hint_signal = False
+    if client_slug:
+        truth = load_yaml_truth(client_slug)
+        address = truth.get("salon", {}).get("address", {}) if isinstance(truth, dict) else {}
+        address_full = address.get("full") if isinstance(address, dict) else None
+        if isinstance(address_full, str) and address_full.strip():
+            address_tokens = [
+                token
+                for token in legacy.normalize_for_matching(address_full).split()
+                if len(token) >= 4 and not token.isdigit()
+            ]
+            if address_tokens:
+                address_hint_signal = any(token in normalized for token in address_tokens)
     location_signal = parking_signal or (
         bool(location_phrases) and any(phrase in normalized for phrase in location_phrases)
     )
+    if address_hint_signal:
+        location_signal = True
     hours_phrases = _signal_phrase_list(client_slug, "hours_keywords")
     hours_signal = bool(hours_phrases) and any(phrase in normalized for phrase in hours_phrases)
     pricing_signal = _has_price_signal(normalized, message_text, client_slug=client_slug)
@@ -229,6 +244,7 @@ def _detect_info_class_intents(
         "contact": contact_signal,
         "guest": guest_signal,
         "location": location_signal,
+        "location_address_hint": address_hint_signal,
         "hours": hours_signal,
         "master": master_signal,
     }

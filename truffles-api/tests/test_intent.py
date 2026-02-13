@@ -120,7 +120,7 @@ class TestFrustrationHeuristics:
 
 class TestDialogueControllerOffline:
     def test_returns_fixed_class_and_goal_without_key(self, monkeypatch):
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "")
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
             result = route_dialogue_controller("Привет")
 
@@ -248,3 +248,17 @@ class TestPolicyCoreTimeoutRetry:
         assert result["ok"] is True
         assert result["error"] is None
         assert mock_llm.return_value.generate.call_count == 2
+
+
+class TestPolicyCoreErrorClassification:
+    def test_maps_insufficient_quota_error(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = Exception(
+                "OpenAI API error: 429 - "
+                "{\"error\":{\"message\":\"quota\",\"type\":\"insufficient_quota\",\"code\":\"insufficient_quota\"}}"
+            )
+            result = route_llm_policy_core("нужна запись")
+
+        assert result["ok"] is False
+        assert result["error"] == "insufficient_quota"

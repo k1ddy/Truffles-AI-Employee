@@ -2205,6 +2205,99 @@ def _handle_ai_response_action(
                 }
                 info_intent_hint = bool(normalized_router_intents & info_signal_intents)
         if info_intent_hint:
+            direct_info_intent = None
+            preferred_info_order = (
+                "hours",
+                "location",
+                "parking",
+                "contact",
+                "master",
+                "promotions",
+                "promo",
+            )
+            normalized_info_class = [
+                item.strip().casefold()
+                for item in (info_class_intents or [])
+                if isinstance(item, str) and item.strip()
+            ]
+            for candidate in preferred_info_order:
+                if candidate in normalized_info_class:
+                    direct_info_intent = candidate
+                    break
+            if not direct_info_intent and isinstance(intent_decomp_payload, dict):
+                raw_intents = intent_decomp_payload.get("intents")
+                normalized_intents = (
+                    {
+                        item.strip().casefold()
+                        for item in raw_intents
+                        if isinstance(item, str) and item.strip()
+                    }
+                    if isinstance(raw_intents, list)
+                    else set()
+                )
+                for candidate in preferred_info_order:
+                    if candidate in normalized_intents:
+                        direct_info_intent = candidate
+                        break
+            if direct_info_intent == "promo":
+                direct_info_intent = "promotions"
+            if direct_info_intent:
+                try:
+                    from app.services import demo_salon_knowledge as knowledge
+
+                    info_reply = knowledge.format_reply_from_truth(
+                        direct_info_intent,
+                        client_slug=client_slug,
+                    )
+                except Exception:
+                    info_reply = None
+                if isinstance(info_reply, str) and info_reply.strip():
+                    bot_response = info_reply.strip()
+                    legacy._reset_low_confidence_retry(conversation)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "info_class",
+                            "decision": "low_confidence_info_fallback",
+                            "state": conversation.state,
+                            "intent": direct_info_intent,
+                        },
+                    )
+                    _record_message_decision_meta(
+                        saved_message,
+                        action="reply",
+                        intent=direct_info_intent,
+                        source="low_confidence_guard",
+                        fast_intent=False,
+                    )
+                    if saved_message:
+                        _update_message_decision_metadata(
+                            saved_message,
+                            {
+                                "info_sections": [direct_info_intent],
+                                "fact_intents": [direct_info_intent],
+                                "low_confidence_guard": "info_fallback",
+                            },
+                        )
+                    bot_response, sent = send_and_save(bot_response)
+                    result_message = (
+                        "Low-confidence info fallback sent"
+                        if sent
+                        else "Low-confidence info fallback send failed"
+                    )
+                    db.commit()
+                    return AiResponseOutcome(
+                        response=WebhookResponse(
+                            success=True,
+                            message=result_message,
+                            conversation_id=conversation.id,
+                            bot_response=bot_response,
+                        ),
+                        bot_response=bot_response,
+                        result_message=result_message,
+                        llm_primary_failed=llm_primary_failed,
+                        llm_primary_reason=llm_primary_reason,
+                    )
             llm_primary_failed = True
             llm_primary_reason = "low_confidence"
         else:

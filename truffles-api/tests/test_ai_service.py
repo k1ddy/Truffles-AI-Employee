@@ -2,6 +2,7 @@ import time
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
+import app.services.ai_service as ai_service
 from app.services.ai_service import (
     ACKNOWLEDGEMENT_RESPONSE,
     GREETING_RESPONSE,
@@ -325,3 +326,22 @@ class TestDetectMultiIntentBudgetReserve:
         assert result is not None
         assert timing_context.get("llm_degradation_reason") == "controller_reserved"
         mock_llm.assert_not_called()
+
+
+class TestOpenAIKeyResolution:
+    def test_empty_env_key_disables_fallback_key(self, monkeypatch):
+        monkeypatch.setattr(ai_service, "OPENAI_API_KEY", "fallback-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "")
+
+        resolved = ai_service._current_openai_api_key()
+
+        assert resolved is None
+        assert ai_service.OPENAI_API_KEY is None
+
+    def test_missing_env_uses_fallback_key(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setattr(ai_service, "OPENAI_API_KEY", "fallback-key")
+
+        resolved = ai_service._current_openai_api_key()
+
+        assert resolved == "fallback-key"

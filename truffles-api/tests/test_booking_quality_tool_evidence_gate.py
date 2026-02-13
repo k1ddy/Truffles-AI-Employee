@@ -18,6 +18,7 @@ def _load_tool_evidence_helpers():
         "_llm_quality_tool_outcome_from_decision",
         "_llm_quality_calendar_outcome_from_meta",
         "_llm_quality_extract_tool_signals",
+        "_llm_quality_should_send_calendar_hook",
         "_llm_quality_parse_coverage_tokens",
         "_llm_quality_build_tool_evidence_status",
         "_llm_quality_build_infra_status",
@@ -71,6 +72,48 @@ def test_extract_tool_signals_marks_get_booking_not_found_as_successful_tool_cal
 
     assert signals["calendar"]["outcome"] == "success"
     assert signals["confirm"]["required"] is True
+
+
+def test_calendar_hook_skips_list_slots_success_signal():
+    ns = _load_tool_evidence_helpers()
+    should_send = ns["_llm_quality_should_send_calendar_hook"]
+
+    signal = {
+        "calendar": {
+            "intent": "calendar.list_slots",
+            "tool_decision": "ok",
+            "outcome": "success",
+        }
+    }
+    assert should_send(signal, []) is False
+
+
+def test_calendar_hook_allows_success_for_non_list_slots():
+    ns = _load_tool_evidence_helpers()
+    should_send = ns["_llm_quality_should_send_calendar_hook"]
+
+    signal = {
+        "calendar": {
+            "intent": "calendar.get_booking",
+            "tool_decision": "ok",
+            "outcome": "success",
+        }
+    }
+    assert should_send(signal, []) is True
+
+
+def test_calendar_hook_blocks_non_success_outcome():
+    ns = _load_tool_evidence_helpers()
+    should_send = ns["_llm_quality_should_send_calendar_hook"]
+
+    signal = {
+        "calendar": {
+            "intent": "calendar.get_booking",
+            "tool_decision": "provider_unavailable",
+            "outcome": "failure",
+        }
+    }
+    assert should_send(signal, []) is False
 
 
 def test_tool_evidence_strict_policy_blocks_missing_calendar_and_confirm_evidence():
