@@ -295,6 +295,7 @@ def _record_message_decision_meta(
         "action": action,
         "intent": intent,
         "source": source,
+        "action_source": source,
         "fast_intent": fast_intent,
         "llm_primary_used": False,
         "llm_used": False,

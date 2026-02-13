@@ -38,6 +38,7 @@ def test_consult_controller_uses_supported_temperature_for_gpt5(monkeypatch):
             captured["temperature"] = kwargs.get("temperature")
             return SimpleNamespace(content=_controller_json())
 
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(ai_service, "OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(ai_service, "FAST_MODEL", "gpt-5-mini")
     monkeypatch.setattr(ai_service, "_should_attempt_llm", lambda *_a, **_k: True)
@@ -63,6 +64,7 @@ def test_consult_controller_keeps_zero_temperature_for_non_gpt5(monkeypatch):
             captured["temperature"] = kwargs.get("temperature")
             return SimpleNamespace(content=_controller_json())
 
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(ai_service, "OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(ai_service, "FAST_MODEL", "gpt-4o-mini")
     monkeypatch.setattr(ai_service, "_should_attempt_llm", lambda *_a, **_k: True)

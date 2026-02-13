@@ -1345,17 +1345,28 @@ def _run_intent_decomposition(
                 info_signals = {}
             info_signals["guest"] = True
             info_class_meta["info_signals"] = info_signals
-    if (
-        not info_class_intents
-        and expected_reply_shortcircuit
-        and current_goal != "booking"
-        and isinstance(class_carryover, dict)
-    ):
-        carryover_intents = class_carryover.get("intents")
-        if isinstance(carryover_intents, list):
-            for intent_name in carryover_intents:
-                if isinstance(intent_name, str) and intent_name.strip():
-                    info_class_intents.add(intent_name.strip().casefold())
+    openai_key_missing = not _current_openai_api_key()
+    if not info_class_intents and isinstance(class_carryover, dict):
+        use_carryover_intents = bool(
+            expected_reply_shortcircuit and current_goal != "booking"
+        )
+        if not use_carryover_intents and legacy._looks_like_carryover_followup(message_text):
+            use_carryover_intents = True
+        if use_carryover_intents:
+            carryover_intents = class_carryover.get("intents")
+            if isinstance(carryover_intents, list):
+                for intent_name in carryover_intents:
+                    if isinstance(intent_name, str) and intent_name.strip():
+                        info_class_intents.add(intent_name.strip().casefold())
+            if not info_class_intents:
+                carryover_sections = class_carryover.get("info_sections")
+                if isinstance(carryover_sections, list):
+                    for section_name in carryover_sections:
+                        if not isinstance(section_name, str) or not section_name.strip():
+                            continue
+                        normalized_section = section_name.strip().casefold()
+                        if normalized_section in INFO_INTENTS:
+                            info_class_intents.add(normalized_section)
     info_signals = (
         info_class_meta.get("info_signals")
         if isinstance(info_class_meta, dict)
@@ -1406,7 +1417,6 @@ def _run_intent_decomposition(
         and not service_request_signal
         and not explicit_service_signal
     )
-    openai_key_missing = not _current_openai_api_key()
     short_noisy_followup = False
     if (
         openai_key_missing
@@ -1424,8 +1434,7 @@ def _run_intent_decomposition(
             )
             short_noisy_followup = not has_digits and "?" not in message_text and not has_service_hint
     preserve_info_carryover = bool(
-        openai_key_missing
-        and (carryover_followup or hours_followup or short_noisy_followup)
+        (carryover_followup or hours_followup or (openai_key_missing and short_noisy_followup))
         and not explicit_service_signal
         and isinstance(class_carryover, dict)
         and class_carryover.get("class") == "info_bundle"
@@ -2746,7 +2755,7 @@ DATE_KEYWORDS = [
     "вечером",
 ]
 
-TIME_PATTERN = re.compile(r"\b\d{1,2}[:.]\d{2}\b")
+TIME_PATTERN = re.compile(r"(?<!\d)(?:[01]?\d|2[0-3])[:.][0-5]\d(?!\d)")
 TIME_HOUR_PATTERN = re.compile(r"\b(?:в|к)\s*(?:[01]?\d|2[0-3])\b", re.IGNORECASE)
 TIME_ONLY_AMPM_PATTERN = re.compile(r"^\d{1,2}(?:am|pm)$", re.IGNORECASE)
 TIME_ONLY_ALLOWED_TOKENS = {
@@ -3307,7 +3316,6 @@ BOOKING_VERIFICATION_PATTERNS = (
     re.compile(r"\bподтверд\w*\b.*\b(запис|брон|бронир)\w*"),
     re.compile(r"\bподтверд\w*\b.*\b(дат|врем)\w*"),
     re.compile(r"\b(жду|ожидаю|не получил\w*)\b.*\b(подтвержд|ответ)\w*"),
-    re.compile(r"\b(изменить|поменять|перенести)\b.*\b(время|запис)\w*"),
     re.compile(r"\b(check|verify|confirm)\b.*\b(booking|appointment|reservation)\b"),
 )
 BOOKING_VERIFICATION_HANDOFF_INTENTS = {
@@ -3523,6 +3531,16 @@ def _merge_booking_plan_slots(
 
 def _plan_has_complete_booking_slots(slot_state: dict[str, str]) -> bool:
     return all(isinstance(slot_state.get(slot_key), str) and slot_state.get(slot_key).strip() for slot_key in BOOKING_SLOT_ORDER)
+
+
+def _booking_has_reference(booking_state: dict[str, Any] | None) -> bool:
+    if not isinstance(booking_state, dict):
+        return False
+    for key in ("appointment_id", "booking_id", "external_booking_id"):
+        value = booking_state.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+    return False
 
 
 def _collect_plan_consult_refs(client_slug: str | None) -> tuple[list[str], str | None]:
@@ -7130,6 +7148,15 @@ async def _handle_webhook_payload(
                         plan_slots=policy_slot_state_validated,
                     )
                     low_confidence_allowed = _plan_has_complete_booking_slots(merged_policy_slots)
+                if (
+                    not low_confidence_allowed
+                    and policy_action == "handoff"
+                    and policy_tool_action == "handoff"
+                ):
+                    low_confidence_allowed = bool(
+                        policy_needs_manager
+                        or (message_text and is_human_request_message(message_text))
+                    )
                 if low_confidence_allowed:
                     policy_low_confidence_ok = True
                 else:
@@ -7584,6 +7611,11 @@ async def _handle_webhook_payload(
             collect_prompt = MSG_BOOKING_ASK_NAME
             collect_action = "booking_prompt"
             collect_intent = "booking"
+        style_signal_for_collect = bool(
+            message_text and _is_style_reference_request(message_text, has_media=has_media)
+        )
+        if style_signal_for_collect and not has_media:
+            collect_prompt = _combine_sidecar(MSG_STYLE_REFERENCE_NEED_MEDIA, collect_prompt)
 
         context = _get_conversation_context(conversation)
         if collect_slot:
@@ -7637,10 +7669,12 @@ async def _handle_webhook_payload(
             bot_response=bot_response,
         )
 
+    booking_has_reference = _booking_has_reference(booking)
     if (
         booking_verification_request
         and conversation.state == ConversationState.BOT_ACTIVE.value
         and routing.get("allow_handover_create", False)
+        and (not booking_active and not booking_has_reference)
     ):
         handover_message = message_text or "Клиент просит проверить статус записи."
         _, reused, telegram_sent = _reuse_active_handover(
@@ -7788,6 +7822,12 @@ async def _handle_webhook_payload(
             )
             out_hits = int(early_domain_meta.get("out_hits") or 0)
             strict_in_hits = int(early_domain_meta.get("strict_in_hits") or 0)
+            carryover_info_followup = bool(
+                isinstance(class_carryover, dict)
+                and class_carryover.get("class") == "info_bundle"
+                and class_carryover.get("info_sections")
+                and _looks_like_carryover_followup(message_text)
+            )
             early_in_signals = bool(
                 strict_in_hits > 0
                 or booking_signal
@@ -7796,6 +7836,7 @@ async def _handle_webhook_payload(
                 or early_info_intents
                 or explicit_service_signal
                 or controller_booking_hint
+                or carryover_info_followup
             )
             early_out_of_domain = bool(out_hits > 0 and not early_in_signals)
             if early_out_of_domain and _is_short_reply(message_text):
@@ -8432,6 +8473,16 @@ async def _handle_webhook_payload(
                     client_slug=payload.client_slug,
                 )
                 info_sections_hint = [intent for intent in fallback_info_intents if intent in INFO_INTENTS]
+            elif message_text:
+                # Merge explicit message-level info signals even when pack refs were already provided.
+                fallback_info_intents, _fallback_info_meta = _detect_info_class_intents(
+                    message_text,
+                    intent_decomp_set=set(),
+                    client_slug=payload.client_slug,
+                )
+                for intent in fallback_info_intents:
+                    if intent in INFO_INTENTS and intent not in info_sections_hint:
+                        info_sections_hint.append(intent)
             # Guard parking/location/hours asks from being routed to service_query.
             if policy_tool_action == "catalog.service_query":
                 info_route_set = set(info_sections_hint)
@@ -8819,6 +8870,20 @@ async def _handle_webhook_payload(
                         }
                     )
                 )
+                if (
+                    policy_tool_action == "catalog.service_query"
+                    and tool_decision
+                    in {
+                        "ok",
+                        "truth_fallback",
+                        "duration",
+                        "promotions",
+                        "presence_fallback",
+                    }
+                    and booking_followup_expected == EXPECTED_REPLY_SERVICE
+                ):
+                    # Keep booking progression on time slot after a factual info answer.
+                    booking_followup_expected = EXPECTED_REPLY_TIME
                 suppress_booking_lookup_followup = bool(
                     policy_tool_action == "calendar.get_booking"
                     and tool_decision in {"not_found", "time_mismatch"}
@@ -8847,6 +8912,10 @@ async def _handle_webhook_payload(
                         now=now,
                     )
                 active_handover_exists = get_active_handover(db, conversation.id) is not None
+                has_booking_reference = _booking_has_reference(booking_state)
+                policy_appointment_id = policy_tool_args.get("appointment_id")
+                if isinstance(policy_appointment_id, str) and policy_appointment_id.strip():
+                    has_booking_reference = True
                 booking_verification_handoff = (
                     (
                         policy_tool_action == "calendar.get_booking"
@@ -8854,6 +8923,7 @@ async def _handle_webhook_payload(
                             _is_booking_verification_handoff_intent(policy_intent, policy_tool_action)
                             or _looks_like_booking_verification_request(message_text)
                         )
+                        and has_booking_reference
                     )
                     or (
                         policy_tool_action == "calendar.reschedule"
@@ -8863,7 +8933,7 @@ async def _handle_webhook_payload(
                         booking_verification_text_signal
                         and (
                             conversation.state == ConversationState.PENDING.value
-                            or booking_wants_flow
+                            or has_booking_reference
                             or active_handover_exists
                         )
                     )
@@ -8992,14 +9062,19 @@ async def _handle_webhook_payload(
                             bot_response=bot_response,
                         )
                 bot_response = tool_result.response_text or MSG_FACT_GUARD_CLARIFY
-                if (
-                    policy_tool_action == "catalog.portfolio"
-                    and style_reference_text_signal
-                    and not has_media
-                ):
-                    bot_response = MSG_STYLE_REFERENCE_NEED_MEDIA
+                if style_reference_text_signal and not has_media:
+                    if policy_tool_action == "catalog.portfolio":
+                        bot_response = MSG_STYLE_REFERENCE_NEED_MEDIA
+                    else:
+                        bot_response = _combine_sidecar(
+                            MSG_STYLE_REFERENCE_NEED_MEDIA,
+                            bot_response,
+                        )
                 if booking_interrupt_prompt:
-                    bot_response = _combine_sidecar(bot_response, booking_interrupt_prompt)
+                    if policy_tool_action == "catalog.service_query" and info_sections:
+                        bot_response = _append_followup(bot_response, booking_interrupt_prompt)
+                    else:
+                        bot_response = _combine_sidecar(bot_response, booking_interrupt_prompt)
                 _record_message_decision_meta(
                     saved_message,
                     action="reply",
@@ -9032,6 +9107,99 @@ async def _handle_webhook_payload(
                     message_text=message_text,
                     client_slug=payload.client_slug,
                 )
+            if message_text and _has_lateness_signal(
+                message_text,
+                client_slug=payload.client_slug,
+            ):
+                lateness_reply = format_reply_from_truth(
+                    "lateness_ok",
+                    client_slug=payload.client_slug,
+                )
+                if lateness_reply:
+                    booking_followup_prompt = None
+                    if booking_wants_flow:
+                        booking_followup_expected = (
+                            expected_reply_type
+                            if expected_reply_type
+                            in {
+                                EXPECTED_REPLY_SERVICE,
+                                EXPECTED_REPLY_TIME,
+                                EXPECTED_REPLY_NAME,
+                            }
+                            else EXPECTED_REPLY_TIME
+                        )
+                        if booking_followup_expected == EXPECTED_REPLY_SERVICE:
+                            booking_followup_prompt = MSG_BOOKING_ASK_SERVICE
+                        elif booking_followup_expected == EXPECTED_REPLY_TIME:
+                            booking_followup_prompt = MSG_BOOKING_ASK_DATETIME
+                        elif booking_followup_expected == EXPECTED_REPLY_NAME:
+                            booking_followup_prompt = MSG_BOOKING_ASK_NAME
+                        if booking_followup_expected:
+                            context = _get_conversation_context(conversation)
+                            _set_expected_reply_context(
+                                conversation=conversation,
+                                saved_message=saved_message,
+                                context=context,
+                                expected_reply_type=booking_followup_expected,
+                                reason="booking_interrupt",
+                                now=now,
+                            )
+                    bot_response = _combine_sidecar(
+                        booking_followup_prompt or "",
+                        lateness_reply,
+                    ).strip()
+                    trace_payload = {
+                        "stage": "truth_gate",
+                        "decision": "reply",
+                        "intent": "lateness_ok",
+                        "state": conversation.state,
+                        "policy_type": policy_type,
+                    }
+                    if booking_wants_flow:
+                        trace_payload["booking_wants_flow"] = True
+                    _record_decision_trace(conversation, trace_payload)
+                    if booking_wants_flow:
+                        booking_trace = {
+                            "stage": "booking_interrupt",
+                            "decision": "info_reply",
+                            "state": conversation.state,
+                            "booking_interrupt_info": True,
+                            "info_intents": ["lateness_ok"],
+                            "info_sections": ["hours"],
+                        }
+                        if booking_followup_prompt:
+                            booking_trace["booking_prompt"] = booking_followup_prompt
+                        _record_decision_trace(conversation, booking_trace)
+                    _record_message_decision_meta(
+                        saved_message,
+                        action="reply",
+                        intent="lateness_ok",
+                        source="truth_gate",
+                        fast_intent=False,
+                    )
+                    if saved_message:
+                        meta_updates = {
+                            "info_sections": ["hours"],
+                            "fact_intents": ["lateness_ok"],
+                        }
+                        if booking_wants_flow:
+                            meta_updates["booking_info_interrupt"] = True
+                            meta_updates["booking_interrupt_info"] = True
+                            meta_updates["booking_info_intents"] = ["lateness_ok"]
+                        _update_message_decision_metadata(saved_message, meta_updates)
+                    bot_response, sent = _send_and_save(bot_response)
+                    result_message = (
+                        "LLM policy core lateness reply sent"
+                        if sent
+                        else "LLM policy core lateness reply failed"
+                    )
+                    db.commit()
+                    return WebhookResponse(
+                        success=True,
+                        message=result_message,
+                        conversation_id=conversation.id,
+                        bot_response=bot_response,
+                    )
             policy_info_set = set(policy_info_intents)
             if policy_info_set & INFO_NON_SERVICE_INTENTS:
                 policy_info_intents = [
@@ -10395,6 +10563,7 @@ async def _handle_webhook_payload(
         and intent_decomp_set == {"other"}
         and not expected_reply_shortcircuit
         and not explicit_service_signal
+        and not info_class_intents
     ):
         info_policy_handler = None
     info_flow_result = _handle_info_flow(

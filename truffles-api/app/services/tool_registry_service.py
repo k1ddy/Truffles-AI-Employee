@@ -43,6 +43,12 @@ CATALOG_TOOL_ACTIONS = {
 
 TOOL_ACTIONS = CALENDAR_TOOL_ACTIONS | CATALOG_TOOL_ACTIONS
 
+_CALENDAR_PROVIDER_HARD_FAILURES = {
+    "connection_missing",
+    "token_missing",
+    "token_expired",
+}
+
 
 @dataclass(frozen=True)
 class ToolExecutionResult:
@@ -57,6 +63,27 @@ class ToolExecutionResult:
 
 def is_tool_action(action: str | None) -> bool:
     return bool(action) and action in TOOL_ACTIONS
+
+
+def _calendar_provider_should_block(reason: str | None) -> bool:
+    return (reason or "") in _CALENDAR_PROVIDER_HARD_FAILURES
+
+
+def _with_provider_health_meta(
+    decision_meta: dict[str, Any],
+    trace: dict[str, Any],
+    *,
+    reason: str | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if not reason:
+        return decision_meta, trace
+    decision_meta = dict(decision_meta)
+    trace = dict(trace)
+    decision_meta["provider_health_reason"] = reason
+    trace["provider_health_reason"] = reason
+    if reason in {"sync_missing", "sync_stale"}:
+        decision_meta["provider_health_degraded"] = True
+    return decision_meta, trace
 
 
 def _parse_datetime(value: str | None, *, fallback_tz: str | None = None) -> datetime | None:
@@ -737,6 +764,7 @@ def execute_tool_action(
 
     if tool_action == "calendar.list_slots":
         availability_provider = None
+        provider_health_reason: str | None = None
         if isinstance(branch.booking_settings, dict):
             availability_provider = branch.booking_settings.get("availability_provider")
             if isinstance(availability_provider, str) and not availability_provider.strip():
@@ -751,7 +779,7 @@ def execute_tool_action(
                 client_id=branch.client_id,
                 branch_id=branch.id,
             )
-            if not health.ready:
+            if not health.ready and _calendar_provider_should_block(health.reason):
                 return ToolExecutionResult(
                     handled=True,
                     ok=False,
@@ -771,6 +799,8 @@ def execute_tool_action(
                         "provider_reason": health.reason,
                     },
                 )
+            if not health.ready:
+                provider_health_reason = health.reason
         raw_date = tool_args.get("date") or tool_args.get("start_at")
         duration = tool_args.get("duration_min") or _resolve_service_duration(
             db, service_name=service_query, branch=branch
@@ -842,13 +872,18 @@ def execute_tool_action(
                 },
                 expected_reply_type=expected_reply_type,
             )
+        decision_meta, trace = _with_provider_health_meta(
+            {"tool_action": tool_action, "tool_decision": "ok"},
+            {"stage": "tool_registry", "decision": "ok", "tool_action": tool_action},
+            reason=provider_health_reason,
+        )
         return ToolExecutionResult(
             handled=True,
             ok=True,
             response_text=response,
             error_code=None,
-            decision_meta={"tool_action": tool_action, "tool_decision": "ok"},
-            trace={"stage": "tool_registry", "decision": "ok", "tool_action": tool_action},
+            decision_meta=decision_meta,
+            trace=trace,
         )
 
     if tool_action == "calendar.get_booking":
@@ -926,12 +961,13 @@ def execute_tool_action(
         )
 
     if tool_action == "calendar.book_slot":
+        provider_health_reason: str | None = None
         health = get_provider_health(
             db,
             client_id=branch.client_id,
             branch_id=branch.id,
         )
-        if not health.ready:
+        if not health.ready and _calendar_provider_should_block(health.reason):
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
@@ -949,6 +985,8 @@ def execute_tool_action(
                     "provider_reason": health.reason,
                 },
             )
+        if not health.ready:
+            provider_health_reason = health.reason
 
         start_at = _parse_datetime(tool_args.get("start_at"), fallback_tz=branch.timezone)
         end_at = _parse_datetime(tool_args.get("end_at"), fallback_tz=branch.timezone)
@@ -1047,12 +1085,8 @@ def execute_tool_action(
             appointment=appointment,
             commit=True,
         )
-        return ToolExecutionResult(
-            handled=True,
-            ok=True,
-            response_text="Запись создана. Хотите что-то изменить?",
-            error_code=None,
-            decision_meta={
+        decision_meta, trace = _with_provider_health_meta(
+            {
                 "tool_action": tool_action,
                 "tool_decision": "ok",
                 "appointment_id": str(appointment.id),
@@ -1061,7 +1095,7 @@ def execute_tool_action(
                 "specialist_name": specialist.name if specialist else None,
                 "specialist_selection": specialist_selection,
             },
-            trace={
+            {
                 "stage": "tool_registry",
                 "decision": "ok",
                 "tool_action": tool_action,
@@ -1070,6 +1104,15 @@ def execute_tool_action(
                 "specialist_id": str(specialist.id) if specialist else None,
                 "specialist_selection": specialist_selection,
             },
+            reason=provider_health_reason,
+        )
+        return ToolExecutionResult(
+            handled=True,
+            ok=True,
+            response_text="Запись создана. Хотите что-то изменить?",
+            error_code=None,
+            decision_meta=decision_meta,
+            trace=trace,
         )
 
     if tool_action == "calendar.reschedule":
@@ -1346,6 +1389,24 @@ def execute_tool_action(
 
                 slug = knowledge._normalize_client_slug(client_slug)
                 normalized = knowledge._normalize_text(message_text)
+                message_tokens = set(normalized.split()) if normalized else set()
+                inferred_price_item = knowledge._find_best_price_item(message_text, slug)
+                inferred_service_name = None
+                if isinstance(inferred_price_item, dict):
+                    candidate_name = inferred_price_item.get("name")
+                    if isinstance(candidate_name, str) and candidate_name.strip():
+                        inferred_service_name = candidate_name.strip()
+                if inferred_service_name:
+                    inferred_tokens = set(knowledge._normalize_text(inferred_service_name).split())
+                    current_tokens = (
+                        set(knowledge._normalize_text(service_query).split())
+                        if isinstance(service_query, str) and service_query.strip()
+                        else set()
+                    )
+                    inferred_overlap = bool(inferred_tokens & message_tokens)
+                    current_overlap = bool(current_tokens & message_tokens)
+                    if inferred_overlap and (not current_tokens or not current_overlap):
+                        service_query = inferred_service_name
                 promo_intent = None
                 if promo_hint:
                     promo_intent = "promotions"
@@ -1475,6 +1536,32 @@ def execute_tool_action(
                                     "stage": "tool_registry",
                                     "decision": "presence_fallback",
                                     "tool_action": tool_action,
+                                },
+                            )
+                price_item = knowledge._find_best_price_item(
+                    message_text or service_query or "",
+                    slug,
+                )
+                if isinstance(price_item, dict):
+                    raw_item = price_item.get("item")
+                    if isinstance(raw_item, dict):
+                        reply = knowledge._format_price_reply(raw_item)
+                        if reply:
+                            return ToolExecutionResult(
+                                handled=True,
+                                ok=True,
+                                response_text=reply,
+                                error_code=None,
+                                decision_meta={
+                                    "tool_action": tool_action,
+                                    "tool_decision": "price_item_fallback",
+                                    "info_sections": ["pricing"],
+                                },
+                                trace={
+                                    "stage": "tool_registry",
+                                    "decision": "price_item_fallback",
+                                    "tool_action": tool_action,
+                                    "info_sections": ["pricing"],
                                 },
                             )
                 not_found = knowledge._format_service_not_found_reply(truth)

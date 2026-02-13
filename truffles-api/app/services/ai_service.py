@@ -292,15 +292,20 @@ def _normalize_api_key(value: str | None) -> str | None:
     if not isinstance(value, str):
         return None
     cleaned = value.strip()
+    if cleaned.casefold() in {"none", "null"}:
+        return None
     return cleaned or None
 
 
 def _current_openai_api_key() -> str | None:
     """Resolve API key from env first and keep provider in sync."""
     global OPENAI_API_KEY, _llm_provider
-    env_key = _normalize_api_key(os.environ.get("OPENAI_API_KEY"))
+    raw_env_key = os.environ.get("OPENAI_API_KEY")
+    env_override = raw_env_key is not None
+    env_key = _normalize_api_key(raw_env_key)
     fallback_key = _normalize_api_key(OPENAI_API_KEY)
-    resolved_key = env_key or fallback_key
+    # Explicit env override (including empty string) should disable fallback key.
+    resolved_key = env_key if env_override else fallback_key
     if resolved_key != fallback_key:
         OPENAI_API_KEY = resolved_key
         _llm_provider = None

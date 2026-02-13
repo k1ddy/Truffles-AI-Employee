@@ -31,14 +31,25 @@
     - `session-gate` (missing session log/index updates in diff),
     - `lint` (F601 duplicate dict keys + import ordering),
     - `unit-tests` (booking interrupt anchor fallback + missing timeout classifier helper).
+  - Synced current branch with `origin/main` and resolved merge conflicts in:
+    - `ops/diagnose.py`,
+    - `truffles-api/tests/test_booking_quality_tool_evidence_gate.py`,
+    - `truffles-api/tests/test_message_endpoint.py`.
+  - Fixed red CI in PR #655:
+    - `lint`: auto-sorted imports in `truffles-api/tests/test_booking_appointments.py`;
+    - `unit-tests`: restored explicit test env key wiring for LLM controller tests in
+      `truffles-api/tests/test_ai_service.py` and
+      `truffles-api/tests/test_ai_service_consult_controller_temperature.py`;
+    - `session-gate`: refreshed this session log and `docs/SESSION_INDEX.md`.
 - next:
-  - Green PR #647 checks (`session-gate`, `lint`, `unit-tests`) after sync conflict fallout.
+  - Green PR #655 checks (`session-gate`, `lint`, `unit-tests`) after sync conflict fallout.
   - Run canonical replay against judge-enabled baseline (`semantic_valid=true`) and collect full trace/meta/appointment evidence.
   - Continue complex LLM-dialog + booking-confirm realism runs with evidence (trace/meta/appointment artifacts) before merge.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-10-stress-quality-hardening.md
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/616
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/647
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/655
   - /tmp/booking_quality/booking-replay-20260213-a1/summary.json
   - /tmp/booking_quality/booking-replay-20260213-a1/brief.md
-- last_updated: 2026-02-13T04:10:00Z
+- last_updated: 2026-02-13T12:13:28Z

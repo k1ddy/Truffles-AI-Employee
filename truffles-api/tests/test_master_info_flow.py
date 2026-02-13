@@ -46,6 +46,18 @@ def test_detect_info_class_intents_location_phrase_signal():
     assert meta.get("info_signals", {}).get("location") is True
 
 
+def test_detect_info_class_intents_location_signal_from_address_hint():
+    intents, meta = _detect_info_class_intents(
+        "Портал на Абая сегодня открыт?",
+        intent_decomp_set=set(),
+        client_slug="demo_salon",
+    )
+
+    assert "location" in intents
+    assert meta.get("info_signals", {}).get("location") is True
+    assert meta.get("info_signals", {}).get("location_address_hint") is True
+
+
 def test_detect_info_class_intents_duration_signal():
     intents, meta = _detect_info_class_intents(
         "Какое время займет маникюр?",

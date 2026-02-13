@@ -800,6 +800,26 @@ _SERVICE_STOPWORDS = {
     "со",
 }
 
+_PRICE_ITEM_GENERIC_TOKENS = {
+    "услуга",
+    "услуги",
+    "процедура",
+    "процедуры",
+    "процедур",
+    "service",
+    # Time-of-day words can appear in booking datetime answers and must not
+    # force a price-item match (e.g. "в субботу вечером" during booking flow).
+    "вечер",
+    "вечером",
+    "вечерняя",
+    "утро",
+    "утром",
+    "день",
+    "днем",
+    "ночь",
+    "ночью",
+}
+
 _OFFTOPIC_FALLBACK_ACKS = {
     "ок",
     "окей",
@@ -1017,26 +1037,125 @@ def _find_best_price_item(message: str, client_slug: str) -> dict[str, Any] | No
         return None
     message_tokens = normalized.split()
     message_token_set = set(message_tokens)
+    if len(message_tokens) == 1:
+        matched_entries = 0
+        for entry in _build_price_index(client_slug):
+            tokens = entry.get("tokens") or []
+            if any(_token_matches(token, message_tokens) for token in tokens):
+                matched_entries += 1
+                if matched_entries > 1:
+                    # Ambiguous single-token query ("маникюр", "окрашивание", etc.).
+                    # Let higher-level service resolver decide instead of picking a random subtype.
+                    return None
     best = None
-    best_score: tuple[int, int, int, int] | None = None
+    combo_request = "+" in (message or "")
+    best_score: tuple[int, int, int, int, int, int, int, int] | None = None
+    best_full_match = 0
+    best_matched_tokens: tuple[str, ...] = ()
+    candidate_keys: list[tuple[int, tuple[str, ...]]] = []
     for entry in _build_price_index(client_slug):
         tokens = entry["tokens"]
         if not tokens:
             continue
-        if all(_token_matches(token, message_tokens) for token in tokens):
-            normalized_name = _normalize_text(entry.get("name") or "")
-            exact_phrase_hit = int(bool(normalized_name and normalized_name in normalized))
-            exact_token_hits = sum(1 for token in tokens if token in message_token_set)
-            score = (
-                len(tokens),
-                exact_phrase_hit,
-                exact_token_hits,
-                len(normalized_name),
-            )
-            if best_score is None or score > best_score:
-                best = entry
-                best_score = score
+        matched_tokens = [token for token in tokens if _token_matches(token, message_tokens)]
+        matched_count = len(matched_tokens)
+        if matched_count <= 0:
+            continue
+        informative_matches = [
+            token for token in matched_tokens if token not in _PRICE_ITEM_GENERIC_TOKENS
+        ]
+        normalized_name = _normalize_text(entry.get("name") or "")
+        combo_name_hit = int(combo_request and "+" in str(entry.get("name") or ""))
+        exact_phrase_hit = int(bool(normalized_name and normalized_name in normalized))
+        exact_token_hits = sum(1 for token in tokens if token in message_token_set)
+        full_match = int(matched_count == len(tokens))
+        longest_match = max((len(token) for token in informative_matches), default=0)
+        if not full_match:
+            if exact_phrase_hit:
+                pass
+            elif len(tokens) <= 2:
+                # Allow one-token service asks like "укладка" to resolve to "Укладка феном",
+                # but avoid weak one-character overlap.
+                if longest_match < 6 or not informative_matches:
+                    continue
+                # For partial fuzzy matches we still require at least one exact token hit.
+                # This prevents unrelated guesses like "подравнять бороду" ->
+                # "Подравнивание кончиков".
+                if exact_token_hits <= 0:
+                    continue
+            elif matched_count < 2:
+                continue
+        score = (
+            full_match,
+            matched_count,
+            combo_name_hit,
+            exact_phrase_hit,
+            exact_token_hits,
+            longest_match,
+            -len(tokens),
+            -len(normalized_name),
+        )
+        matched_key = tuple(sorted(set(informative_matches)))
+        candidate_keys.append((full_match, matched_key))
+        if best_score is None or score > best_score:
+            best = entry
+            best_score = score
+            best_full_match = full_match
+            best_matched_tokens = matched_key
+    if best is None:
+        return None
+    if not best_full_match and best_matched_tokens:
+        ambiguous = sum(
+            1
+            for full_match, matched_key in candidate_keys
+            if not full_match and matched_key == best_matched_tokens
+        )
+        if ambiguous > 1:
+            return None
     return best
+
+
+def _duration_range_hint(client_slug: str | None) -> str | None:
+    truth = load_yaml_truth(client_slug)
+    estimates = truth.get("service_duration_estimates") if isinstance(truth, dict) else None
+    if not isinstance(estimates, dict):
+        return None
+    durations: list[int] = []
+    for key, raw_value in estimates.items():
+        if raw_value is None:
+            continue
+        raw_text = str(raw_value).strip().lower().replace(",", ".")
+        if not raw_text:
+            continue
+        numbers: list[float] = []
+        for match in re.findall(r"\d+(?:\.\d+)?", raw_text):
+            try:
+                numbers.append(float(match))
+            except ValueError:
+                continue
+        if not numbers:
+            continue
+        key_text = str(key).lower()
+        looks_like_hours = (
+            "час" in raw_text
+            or "hour" in raw_text
+            or "_час" in key_text
+            or "_hour" in key_text
+            or "_hr" in key_text
+        )
+        for value in numbers[:2]:
+            minutes = int(round(value * 60)) if looks_like_hours else int(round(value))
+            if minutes > 0:
+                durations.append(minutes)
+    if not durations:
+        return None
+    short = [value for value in durations if value <= 120]
+    pool = short or durations
+    min_minutes = max(5, min(pool))
+    max_minutes = max(min_minutes, max(pool))
+    if min_minutes == max_minutes:
+        return f"около {min_minutes} минут"
+    return f"{min_minutes}–{max_minutes} минут"
 
 
 def _contains_any(normalized: str, keywords: list[str]) -> bool:
@@ -1882,6 +2001,21 @@ def _format_service_duration_reply(
             name = label or name_override or service.get("name") or "Услуга"
             suffix = "" if duration_text.endswith((".", "!", "?")) else "."
             return f"{name} — {duration_text}{suffix}"
+
+    slug = _normalize_client_slug(client_slug)
+    inferred_item = None
+    if isinstance(service_label, str) and service_label.strip():
+        inferred_item = _find_best_price_item(service_label.strip(), slug)
+    if inferred_item is None and message:
+        inferred_item = _find_best_price_item(message, slug)
+    if isinstance(inferred_item, dict):
+        inferred_name = inferred_item.get("name")
+        duration_hint = _duration_range_hint(slug)
+        if isinstance(inferred_name, str) and inferred_name.strip() and duration_hint:
+            return (
+                f"{inferred_name.strip()} — Обычно {duration_hint}, "
+                "зависит от длины и сложности."
+            )
 
     if isinstance(catalog, dict):
         clarify = catalog.get("duration_clarify")
@@ -3464,7 +3598,9 @@ def get_demo_salon_decision(
                 meta=decision_meta,
             )
 
-    if location_signal and not guest_signal and (not price_signal or (price_signal and not price_item)):
+    if location_signal and not guest_signal and (
+        not price_signal or (price_signal and not price_item) or (price_signal and duration_signal)
+    ):
         reply, meta = build_info_combined_reply(
             include_parking=parking_signal,
             include_guest=guest_signal,

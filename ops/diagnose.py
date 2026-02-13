@@ -2730,6 +2730,29 @@ def _llm_quality_should_expect_booking_progress(expected_reply_type, turn_tags, 
     if isinstance(meta, dict):
         intent_value = _llm_quality_effective_intent(meta)
         tool_decision_value = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+        info_sections = meta.get("info_sections")
+        if not intent_value.startswith("calendar."):
+            if isinstance(info_sections, list) and any(
+                isinstance(item, str) and item.strip() for item in info_sections
+            ):
+                # Info interrupts during booking should not be treated as slot-progress stalls.
+                return False
+            if intent_value in {
+                "question",
+                "consult_reply",
+                "service_clarify",
+                "duration_or_price_clarify",
+                "discounts",
+                "hours",
+                "location",
+                "parking",
+                "master",
+                "promotions",
+                "lateness_ok",
+                "catalog.service_query",
+                "catalog.location",
+            }:
+                return False
         if (
             intent_value == "calendar.list_slots"
             and tool_decision_value in {"missing_slot", "slot_mismatch"}
@@ -3394,6 +3417,23 @@ def _llm_quality_is_timeout_degrade_reason(reason: object | None) -> bool:
     )
 
 
+def _llm_quality_is_policy_core_infra_reason(reason: object | None) -> bool:
+    token = _llm_quality_normalize_tool_token(reason)
+    if not token:
+        return False
+    return any(
+        marker in token
+        for marker in (
+            "no_api_key",
+            "insufficient_quota",
+            "rate_limit",
+            "invalid_api_key",
+            "unauthorized",
+            "authentication",
+        )
+    )
+
+
 def _llm_quality_tool_outcome_from_decision(decision: object | None) -> str:
     if decision is True:
         return "success"
@@ -3490,6 +3530,23 @@ def _llm_quality_extract_tool_signals(meta, trace_entries):
             "outcome": outcome,
         }
     return signals
+
+
+def _llm_quality_should_send_calendar_hook(tool_signals, turn_tags):
+    signal = (tool_signals or {}).get("calendar")
+    if not isinstance(signal, dict):
+        return False
+    if "calendar" in (turn_tags or []):
+        return False
+    outcome = _llm_quality_normalize_tool_token(signal.get("outcome"))
+    if outcome != "success":
+        return False
+    # Slot lookup is an intermediate step and should not trigger
+    # synthetic "check booking" messages that derail booking progression.
+    intent = _llm_quality_normalize_tool_token(signal.get("intent"))
+    if intent == "calendar.list_slots":
+        return False
+    return True
 
 
 def _llm_quality_current_turn_trace_entries(meta, trace_entries):
@@ -4236,6 +4293,128 @@ def _llm_quality_call_judge(
     return _llm_quality_parse_llm_json(content)
 
 
+def _llm_quality_openai_chat_endpoint(base_url: str) -> str:
+    normalized = (base_url or "https://api.openai.com").rstrip("/")
+    if normalized.endswith("/v1"):
+        return f"{normalized}/chat/completions"
+    return f"{normalized}/v1/chat/completions"
+
+
+def _llm_quality_openai_probe_reason(status_code: int | None, body: object | None) -> str:
+    payload = body if isinstance(body, dict) else {}
+    error = payload.get("error") if isinstance(payload, dict) else {}
+    error_code = ""
+    error_type = ""
+    error_message = ""
+    if isinstance(error, dict):
+        error_code = _llm_quality_normalize_tool_token(error.get("code"))
+        error_type = _llm_quality_normalize_tool_token(error.get("type"))
+        error_message = _llm_quality_normalize_tool_token(error.get("message"))
+    tokens = " ".join(part for part in (error_code, error_type, error_message) if part).strip()
+    if "insufficient_quota" in tokens:
+        return "insufficient_quota"
+    if "rate_limit" in tokens or "rate limit" in tokens:
+        return "rate_limit"
+    if "invalid_api_key" in tokens:
+        return "invalid_api_key"
+    if "authentication" in tokens or "unauthorized" in tokens:
+        return "unauthorized"
+    if status_code == 401:
+        return "unauthorized"
+    if status_code == 429:
+        return "rate_limit"
+    if status_code:
+        return f"http_{status_code}"
+    return "request_failed"
+
+
+def _llm_quality_openai_key_preflight(
+    *,
+    purpose: str,
+    api_key: str,
+    model: str,
+    base_url: str,
+    timeout: float,
+) -> dict:
+    endpoint = _llm_quality_openai_chat_endpoint(base_url)
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+    }
+    req = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+    effective_timeout = max(2.0, min(float(timeout or 8.0), 15.0))
+    started = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=effective_timeout) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            elapsed_ms = round((time.monotonic() - started) * 1000, 2)
+            parsed = None
+            if body:
+                try:
+                    parsed = json.loads(body)
+                except Exception:
+                    parsed = None
+            valid = bool(isinstance(parsed, dict) and parsed.get("choices"))
+            return {
+                "purpose": purpose,
+                "valid": valid,
+                "reason": None if valid else "invalid_response",
+                "status": getattr(resp, "status", 200),
+                "elapsed_ms": elapsed_ms,
+                "endpoint": endpoint,
+                "model": model,
+            }
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else ""
+        parsed = None
+        if raw:
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                parsed = None
+        elapsed_ms = round((time.monotonic() - started) * 1000, 2)
+        return {
+            "purpose": purpose,
+            "valid": False,
+            "reason": _llm_quality_openai_probe_reason(exc.code, parsed),
+            "status": exc.code,
+            "elapsed_ms": elapsed_ms,
+            "endpoint": endpoint,
+            "model": model,
+        }
+    except urllib.error.URLError as exc:
+        elapsed_ms = round((time.monotonic() - started) * 1000, 2)
+        return {
+            "purpose": purpose,
+            "valid": False,
+            "reason": f"url_error:{str(exc.reason) if getattr(exc, 'reason', None) else str(exc)}",
+            "status": None,
+            "elapsed_ms": elapsed_ms,
+            "endpoint": endpoint,
+            "model": model,
+        }
+    except Exception as exc:
+        elapsed_ms = round((time.monotonic() - started) * 1000, 2)
+        return {
+            "purpose": purpose,
+            "valid": False,
+            "reason": f"probe_error:{exc.__class__.__name__}",
+            "status": None,
+            "elapsed_ms": elapsed_ms,
+            "endpoint": endpoint,
+            "model": model,
+        }
+
+
 def _llm_quality_secret_fingerprint(secret):
     cleaned = _clean_webhook_secret(secret)
     if not cleaned:
@@ -4500,7 +4679,7 @@ def _llm_quality_build_tool_evidence_status(
     }
 
 
-def _llm_quality_build_infra_status(stats, secret_preflight, tool_evidence_status=None):
+def _llm_quality_build_infra_status(stats, secret_preflight, tool_evidence_status=None, openai_preflight=None):
     reasons = []
     if isinstance(secret_preflight, dict) and not secret_preflight.get("valid", False):
         preflight_reasons = secret_preflight.get("reasons") or []
@@ -4517,6 +4696,17 @@ def _llm_quality_build_infra_status(stats, secret_preflight, tool_evidence_statu
         reasons.append("decision_meta_errors")
     if (stats or {}).get("decision_trace_errors", 0):
         reasons.append("decision_trace_errors")
+    if (stats or {}).get("policy_core_infra_errors", 0):
+        reasons.append("policy_core_infra_errors")
+    if isinstance(openai_preflight, list):
+        for item in openai_preflight:
+            if not isinstance(item, dict):
+                continue
+            if item.get("valid", False):
+                continue
+            purpose = item.get("purpose") or "unknown"
+            reason = item.get("reason") or "unknown"
+            reasons.append(f"openai_preflight:{purpose}:{reason}")
     if isinstance(tool_evidence_status, dict) and not tool_evidence_status.get("valid", True):
         tool_reasons = tool_evidence_status.get("reasons") or []
         if tool_reasons:
@@ -7022,7 +7212,9 @@ def _poll_decision_meta(
         conversation_id, meta, error = _fetch_message_meta(
             db_user,
             message_id,
-            timeout=min(8.0, max(interval * 4, 1.0)),
+            # Avoid tiny per-query timeouts (1-2s) that create false
+            # decision_meta_missing/decision_trace_missing under normal docker latency.
+            timeout=None,
             conversation_id_hint=conversation_id_hint,
         )
         if error:
@@ -7796,6 +7988,66 @@ def _run_llm_quality(args):
             args.judge_model, args.judge_base_url
         )
         judge_cache = _llm_quality_load_judge_cache(judge_cache_file)
+    openai_preflight = []
+    preflight_fingerprint_seen = set()
+
+    def _run_openai_preflight_check(*, purpose, api_key, model, base_url, timeout):
+        if not api_key:
+            return None
+        fingerprint = hashlib.sha256(
+            f"{purpose}|{model}|{base_url}|{api_key}".encode("utf-8")
+        ).hexdigest()
+        if fingerprint in preflight_fingerprint_seen:
+            return None
+        preflight_fingerprint_seen.add(fingerprint)
+        result = _llm_quality_openai_key_preflight(
+            purpose=purpose,
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            timeout=timeout,
+        )
+        openai_preflight.append(result)
+        print(
+            json.dumps(
+                {
+                    "stage": "llm_quality_openai_preflight",
+                    "purpose": purpose,
+                    "valid": result.get("valid"),
+                    "reason": result.get("reason"),
+                    "status": result.get("status"),
+                    "elapsed_ms": result.get("elapsed_ms"),
+                    "model": model,
+                    "base_url": base_url,
+                },
+                ensure_ascii=False,
+            )
+        )
+        if not result.get("valid"):
+            raise SystemExit(
+                "llm-quality: INVALID RUN - openai preflight failed "
+                f"(purpose={purpose}, reason={result.get('reason')}, status={result.get('status')})"
+            )
+        return result
+
+    # Hard preflight: if LLM mode is selected, verify key/quota before run.
+    # For replay this still catches shared-key quota outages early.
+    if args.mode == "llm" and args.llm_api_key:
+        _run_openai_preflight_check(
+            purpose="llm",
+            api_key=args.llm_api_key,
+            model=args.llm_model,
+            base_url=args.llm_base_url,
+            timeout=args.timeout,
+        )
+    if judge_enabled and judge_api_key:
+        _run_openai_preflight_check(
+            purpose="judge",
+            api_key=judge_api_key,
+            model=args.judge_model,
+            base_url=args.judge_base_url,
+            timeout=args.judge_timeout,
+        )
 
     dialogs = []
     warnings = {}
@@ -7907,6 +8159,7 @@ def _run_llm_quality(args):
         "info_mismatch": 0,
         "policy_core_turns": 0,
         "policy_core_degraded_turns": 0,
+        "policy_core_infra_errors": 0,
     }
     state_stats = {}
     info_stats = {
@@ -8580,6 +8833,13 @@ def _run_llm_quality(args):
                     stats["policy_core_turns"] += 1
                     if policy_core_mode == "degraded_fallback":
                         stats["policy_core_degraded_turns"] += 1
+                        degrade_reason = (
+                            (meta or {}).get("policy_core_degrade_reason")
+                            if isinstance(meta, dict)
+                            else None
+                        )
+                        if _llm_quality_is_policy_core_infra_reason(degrade_reason):
+                            stats["policy_core_infra_errors"] += 1
                 action_value = (meta or {}).get("action") if isinstance(meta, dict) else None
                 if action_value:
                     coverage_stats["actions"][action_value] = (
@@ -9067,7 +9327,7 @@ def _run_llm_quality(args):
                                 )
                             )
                             hook_state["cancel"] += 1
-                    if tool_signals.get("calendar") and "calendar" not in turn_tags:
+                    if _llm_quality_should_send_calendar_hook(tool_signals, turn_tags):
                         if hook_state["calendar"] < hook_limit:
                             tool_hook_results.append(
                                 _send_tool_hook(
@@ -9181,6 +9441,9 @@ def _run_llm_quality(args):
                     )
                     + "\n"
                 )
+                if stats["policy_core_infra_errors"] >= 3:
+                    stop_reason = "policy_core_infra_errors"
+                    break
                 if args.max_failures > 0 and stats["turns_strict_failed"] >= args.max_failures:
                     stop_reason = f"max_failures_reached:{args.max_failures}"
                     break
@@ -9239,6 +9502,7 @@ def _run_llm_quality(args):
             "info_mismatch": stats["info_mismatch"],
             "policy_core_turns": stats["policy_core_turns"],
             "policy_core_degraded_turns": stats["policy_core_degraded_turns"],
+            "policy_core_infra_errors": stats["policy_core_infra_errors"],
         },
         "state": {
             "counts": state_counts,
@@ -9357,7 +9621,10 @@ def _run_llm_quality(args):
         coverage_stats=coverage_stats,
     )
     infra_status = _llm_quality_build_infra_status(
-        stats, secret_preflight, tool_evidence_status=tool_evidence_status
+        stats,
+        secret_preflight,
+        tool_evidence_status=tool_evidence_status,
+        openai_preflight=openai_preflight,
     )
     comparison_enforced = bool(args.fail_on_regression)
     comparison_block_reasons = []
@@ -9451,6 +9718,7 @@ def _run_llm_quality(args):
         "tool_evidence": tool_evidence_status,
         "judge": judge_stats,
         "webhook_secret_preflight": secret_preflight,
+        "openai_preflight": openai_preflight,
         "infra_valid": infra_status["valid"],
         "semantic_valid": semantic_status["valid"],
         "quality_status": {
