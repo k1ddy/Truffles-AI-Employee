@@ -9,10 +9,15 @@ from app.services.console_confirmations import create_confirmation, mark_confirm
 from app.services.console_errors import ConsoleAPIError
 
 
-def _make_context(client_id, branch_id, agent_id):
+def _make_context(client_id, branch_id, agent_id, accessible_clients=None):
     agent = SimpleNamespace(id=agent_id, name="Agent", client_id=client_id, branch_id=branch_id)
     client = SimpleNamespace(id=client_id)
-    return SimpleNamespace(agent=agent, client=client, effective_branch_id=branch_id)
+    return SimpleNamespace(
+        agent=agent,
+        client=client,
+        effective_branch_id=branch_id,
+        accessible_clients=accessible_clients or [client],
+    )
 
 
 def test_create_confirmation_invalid_action():
@@ -130,3 +135,67 @@ def test_mark_confirmation_used_sets_timestamp():
     )
 
     assert confirmation.used_at is not None
+
+
+def test_create_confirmation_allows_accessible_client_target():
+    db = Mock()
+    selected_client_id = uuid4()
+    target_client_id = uuid4()
+    branch_id = uuid4()
+    agent_id = uuid4()
+    branch = SimpleNamespace(id=branch_id, client_id=target_client_id)
+    db.query.return_value.filter.return_value.first.return_value = branch
+    context = _make_context(
+        selected_client_id,
+        None,
+        agent_id,
+        accessible_clients=[SimpleNamespace(id=selected_client_id), SimpleNamespace(id=target_client_id)],
+    )
+
+    confirmation = create_confirmation(
+        db,
+        context,
+        action="provider_ops_execute",
+        target_type="branch",
+        target_id=branch_id,
+        reason="provider ops execute",
+    )
+
+    assert confirmation.action == "provider_ops_execute"
+    assert confirmation.client_id == target_client_id
+
+
+def test_require_confirmation_allows_accessible_client_confirmation():
+    db = Mock()
+    selected_client_id = uuid4()
+    target_client_id = uuid4()
+    branch_id = uuid4()
+    agent_id = uuid4()
+    confirmation = SimpleNamespace(
+        id=uuid4(),
+        action="provider_ops_execute",
+        target_type="branch",
+        target_id=branch_id,
+        actor_id=agent_id,
+        client_id=target_client_id,
+        branch_id=None,
+        used_at=None,
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=120),
+    )
+    db.query.return_value.filter.return_value.first.return_value = confirmation
+    context = _make_context(
+        selected_client_id,
+        None,
+        agent_id,
+        accessible_clients=[SimpleNamespace(id=selected_client_id), SimpleNamespace(id=target_client_id)],
+    )
+
+    resolved = require_confirmation(
+        db,
+        context,
+        confirmation_id=confirmation.id,
+        action="provider_ops_execute",
+        target_type="branch",
+        target_id=branch_id,
+    )
+    assert resolved is confirmation

@@ -2131,11 +2131,44 @@ export interface components {
             /** @enum {string} */
             status: "ok" | "warn" | "error";
         };
+        /** @enum {string} */
+        ProviderOpsAction: "integration_reconcile" | "provider_start_rebind" | "provider_complete_rebind" | "provider_renewal_confirmed" | "provider_webhook_updated" | "provider_send_reminder";
+        /** @enum {string} */
+        ProviderOpsQueuePriority: "p0" | "p1" | "p2";
+        ProviderOpsQueueItem: {
+            /** Format: uuid */
+            client_id: string;
+            client_slug: string;
+            /** Format: uuid */
+            branch_id: string;
+            branch_slug: string;
+            branch_name: string;
+            priority: components["schemas"]["ProviderOpsQueuePriority"];
+            recommended_action: components["schemas"]["ProviderOpsAction"];
+            reasons: string[];
+            requires_confirmation: boolean;
+            provider_binding_owner?: string | null;
+            /** Format: date */
+            provider_binding_next_renewal_at?: string | null;
+            /** Format: date */
+            provider_binding_last_rebind_at?: string | null;
+            /** @enum {string} */
+            provider_binding_alert_state?: "ok" | "warn" | "critical" | "unknown";
+            /** @enum {string} */
+            provider_binding_expiry_status?: "ok" | "expiring_soon" | "expired" | "unknown";
+            provider_binding_days_until_expiry?: number | null;
+            provider_binding_rebind_required?: boolean | null;
+            /** Format: date-time */
+            generated_at?: string | null;
+        };
         IntegrationsListResponse: {
             stale_after_minutes: number;
             items: components["schemas"]["BranchIntegrationStatus"][];
+            provider_ops_queue: components["schemas"]["ProviderOpsQueueItem"][];
         };
         IntegrationBranchActionRequest: {
+            /** @default integration_reconcile */
+            action: components["schemas"]["ProviderOpsAction"];
             /**
              * @default dry_run
              * @enum {string}
@@ -2143,10 +2176,20 @@ export interface components {
             mode: "dry_run" | "execute";
             /** Format: uuid */
             confirmation_id?: string | null;
+            owner?: string | null;
+            notes?: string | null;
+            /** Format: date */
+            paid_until?: string | null;
+            /** Format: date */
+            next_renewal_at?: string | null;
+            instance_id?: string | null;
+            /** @enum {string|null} */
+            webhook_status?: "configured" | "pending" | "rebind_required" | null;
         };
         IntegrationBranchActionResponse: {
             /** Format: uuid */
             branch_id: string;
+            action: components["schemas"]["ProviderOpsAction"];
             /** @enum {string} */
             mode: "dry_run" | "execute";
             result: Record<string, never>;
@@ -2193,7 +2236,7 @@ export interface components {
             step_id: "branch_draft" | "integrations" | "team" | "telegram" | "knowledge" | "booking" | "go_no_go";
         };
         /** @enum {string} */
-        ConfirmationAction: "knowledge_rollback" | "branch_deactivate" | "integration_reconcile";
+        ConfirmationAction: "knowledge_rollback" | "branch_deactivate" | "integration_reconcile" | "provider_ops_execute";
         /** @enum {string} */
         ConfirmationTargetType: "knowledge_version" | "branch";
         ConfirmationCreateRequest: {

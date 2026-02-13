@@ -405,6 +405,7 @@ async def test_run_integration_reconcile_for_branch_dry_run(monkeypatch):
     )
 
     assert response.branch_id == branch_id
+    assert response.action == "integration_reconcile"
     assert response.mode == "dry_run"
     assert response.result["checked"] == 1
     db.commit.assert_not_called()
@@ -492,7 +493,241 @@ async def test_run_integration_reconcile_for_branch_execute_marks_confirmation(m
     )
 
     assert response.branch_id == branch_id
+    assert response.action == "integration_reconcile"
     assert response.mode == "execute"
     assert response.result["degraded"] == 1
+    assert marked == ["used"]
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_list_integrations_builds_provider_ops_queue(monkeypatch):
+    request = SimpleNamespace(query_params={})
+    client_id = uuid4()
+    branch_id = uuid4()
+    db = Mock()
+
+    context = SimpleNamespace(
+        role="platform_admin",
+        accessible_clients=[SimpleNamespace(id=client_id, name="demo", status="active")],
+    )
+    branch_rows = [
+        SimpleNamespace(
+            id=branch_id,
+            client_id=client_id,
+            slug="branch-a",
+            name="Branch A",
+            is_active=True,
+            instance_id="instance-1",
+            telegram_chat_id="12345",
+            webhook_secret="secret",
+        )
+    ]
+
+    def _query_side_effect(*entities):
+        if len(entities) == 1 and entities[0] is console_router.Branch:
+            return _QueryMock(branch_rows)
+        if len(entities) == 2:
+            return _QueryMock([(client_id, "token-a")])
+        raise AssertionError(f"unexpected query entities: {entities}")
+
+    db.query.side_effect = _query_side_effect
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(
+        console_router,
+        "_load_latest_branch_inbound_observations_for_clients",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_provider_binding_lifecycle_map",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_branch_integration_status",
+        lambda **kwargs: ConsoleBranchIntegrationStatus(
+            client_id=kwargs["client_id"],
+            client_slug=kwargs["client_slug"],
+            branch_id=kwargs["branch"].id,
+            branch_slug=kwargs["branch"].slug,
+            branch_name=kwargs["branch"].name,
+            is_active=True,
+            instance_id="instance-1",
+            telegram_chat_id="12345",
+            webhook_url="https://api.truffles.kz/webhook/demo?webhook_secret=abc",
+            webhook_url_valid=True,
+            whatsapp_status="instance_id_mismatch",
+            telegram_status="ok",
+            provider_binding_rebind_required=True,
+            provider_binding_alert_state="critical",
+            provider_binding_expiry_status="expired",
+            drift_issues=["instance_id_mismatch", "provider_binding_rebind_required", "provider_binding_expired"],
+            status="error",
+        ),
+    )
+
+    response = await console_router.list_integrations(
+        request=request,
+        stale_after_minutes=60,
+        db=db,
+    )
+
+    assert len(response.provider_ops_queue) == 1
+    queue_item = response.provider_ops_queue[0]
+    assert queue_item.branch_id == branch_id
+    assert queue_item.priority == "p0"
+    assert queue_item.recommended_action == "provider_complete_rebind"
+    assert "provider_binding_rebind_required" in queue_item.reasons
+
+
+@pytest.mark.asyncio
+async def test_run_provider_ops_action_dry_run(monkeypatch):
+    request = SimpleNamespace(query_params={})
+    client_id = uuid4()
+    branch_id = uuid4()
+    branch = SimpleNamespace(id=branch_id, client_id=client_id, is_active=True, instance_id="instance-1")
+    db = Mock()
+    db.query.return_value = _QueryMock([branch])
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            role="platform_admin",
+            client=SimpleNamespace(id=client_id),
+            accessible_clients=[SimpleNamespace(id=client_id, status="active")],
+        ),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_provider_binding_lifecycle_map",
+        lambda *_args, **_kwargs: {
+            branch_id: console_router._ProviderBindingLifecycle(
+                provider="chatflow",
+                instance_id="instance-1",
+                webhook_status="pending",
+                owner="platform-admin",
+                next_renewal_at="2030-01-01",
+            )
+        },
+    )
+
+    response = await console_router.run_integration_reconcile_for_branch(
+        branch_id=branch_id,
+        body=ConsoleIntegrationBranchActionRequest(action="provider_start_rebind", mode="dry_run"),
+        request=request,
+        db=db,
+    )
+
+    assert response.branch_id == branch_id
+    assert response.action == "provider_start_rebind"
+    assert response.mode == "dry_run"
+    assert response.result["dry_run"] is True
+    assert response.result["binding_patch"]["webhook_status"] == "rebind_required"
+    assert response.result["binding_patch"]["rebind_required"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_provider_ops_action_execute_requires_confirmation(monkeypatch):
+    request = SimpleNamespace(query_params={})
+    client_id = uuid4()
+    branch_id = uuid4()
+    branch = SimpleNamespace(id=branch_id, client_id=client_id, is_active=True, instance_id="instance-1")
+    db = Mock()
+    db.query.return_value = _QueryMock([branch])
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            role="platform_admin",
+            client=SimpleNamespace(id=client_id),
+            accessible_clients=[SimpleNamespace(id=client_id, status="active")],
+            agent=SimpleNamespace(id=uuid4()),
+            effective_branch_id=None,
+        ),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_provider_binding_lifecycle_map",
+        lambda *_args, **_kwargs: {branch_id: console_router._ProviderBindingLifecycle()},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "require_confirmation",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ConsoleAPIError(409, "CONFIRMATION_REQUIRED", "Confirmation required")
+        ),
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.run_integration_reconcile_for_branch(
+            branch_id=branch_id,
+            body=ConsoleIntegrationBranchActionRequest(action="provider_send_reminder", mode="execute"),
+            request=request,
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.code == "CONFIRMATION_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_run_provider_ops_reminder_execute_marks_confirmation(monkeypatch):
+    request = SimpleNamespace(query_params={})
+    client_id = uuid4()
+    branch_id = uuid4()
+    actor_id = uuid4()
+    branch = SimpleNamespace(id=branch_id, client_id=client_id, is_active=True, instance_id="instance-1")
+    db = Mock()
+    db.query.return_value = _QueryMock([branch])
+
+    context = SimpleNamespace(
+        role="platform_admin",
+        client=SimpleNamespace(id=client_id),
+        accessible_clients=[SimpleNamespace(id=client_id, status="active")],
+        agent=SimpleNamespace(id=actor_id),
+        effective_branch_id=None,
+    )
+    confirmation = SimpleNamespace(id=uuid4())
+    marked: list[str] = []
+    require_calls: list[dict] = []
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(
+        console_router,
+        "_build_provider_binding_lifecycle_map",
+        lambda *_args, **_kwargs: {branch_id: console_router._ProviderBindingLifecycle()},
+    )
+
+    def _fake_require_confirmation(*_args, **kwargs):
+        require_calls.append(kwargs)
+        return confirmation
+
+    monkeypatch.setattr(console_router, "require_confirmation", _fake_require_confirmation)
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "mark_confirmation_used",
+        lambda *_args, **_kwargs: marked.append("used"),
+    )
+
+    response = await console_router.run_integration_reconcile_for_branch(
+        branch_id=branch_id,
+        body=ConsoleIntegrationBranchActionRequest(
+            action="provider_send_reminder",
+            mode="execute",
+            confirmation_id=uuid4(),
+            notes="manual provider reminder",
+        ),
+        request=request,
+        db=db,
+    )
+
+    assert response.branch_id == branch_id
+    assert response.action == "provider_send_reminder"
+    assert response.mode == "execute"
+    assert require_calls and require_calls[0]["action"] == "provider_ops_execute"
     assert marked == ["used"]
     db.commit.assert_called_once()

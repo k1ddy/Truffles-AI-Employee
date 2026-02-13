@@ -395,7 +395,12 @@ class ConsoleOnboardingAdvanceRequest(BaseModel):
     step_id: OnboardingStepId
 
 
-ConfirmationAction = Literal["knowledge_rollback", "branch_deactivate", "integration_reconcile"]
+ConfirmationAction = Literal[
+    "knowledge_rollback",
+    "branch_deactivate",
+    "integration_reconcile",
+    "provider_ops_execute",
+]
 ConfirmationTargetType = Literal["knowledge_version", "branch"]
 
 
@@ -1012,18 +1017,58 @@ class ConsoleBranchIntegrationStatus(BaseModel):
     status: Literal["ok", "warn", "error"]
 
 
+ConsoleProviderOpsAction = Literal[
+    "integration_reconcile",
+    "provider_start_rebind",
+    "provider_complete_rebind",
+    "provider_renewal_confirmed",
+    "provider_webhook_updated",
+    "provider_send_reminder",
+]
+ConsoleProviderOpsQueuePriority = Literal["p0", "p1", "p2"]
+
+
+class ConsoleProviderOpsQueueItem(BaseModel):
+    client_id: UUID
+    client_slug: str
+    branch_id: UUID
+    branch_slug: str
+    branch_name: str
+    priority: ConsoleProviderOpsQueuePriority
+    recommended_action: ConsoleProviderOpsAction
+    reasons: list[str] = []
+    requires_confirmation: bool = True
+    provider_binding_owner: Optional[str] = None
+    provider_binding_next_renewal_at: Optional[str] = None
+    provider_binding_last_rebind_at: Optional[str] = None
+    provider_binding_alert_state: Literal["ok", "warn", "critical", "unknown"] = "unknown"
+    provider_binding_expiry_status: Literal["ok", "expiring_soon", "expired", "unknown"] = "unknown"
+    provider_binding_days_until_expiry: Optional[int] = None
+    provider_binding_rebind_required: Optional[bool] = None
+    generated_at: Optional[str] = None
+
+
 class ConsoleIntegrationsListResponse(BaseModel):
     stale_after_minutes: int
     items: list[ConsoleBranchIntegrationStatus]
+    provider_ops_queue: list[ConsoleProviderOpsQueueItem] = []
 
 
 class ConsoleIntegrationBranchActionRequest(BaseModel):
+    action: ConsoleProviderOpsAction = "integration_reconcile"
     mode: ConsoleOpsJobMode = "dry_run"
     confirmation_id: Optional[UUID] = None
+    owner: Optional[str] = None
+    notes: Optional[str] = None
+    paid_until: Optional[str] = None
+    next_renewal_at: Optional[str] = None
+    instance_id: Optional[str] = None
+    webhook_status: Optional[Literal["configured", "pending", "rebind_required"]] = None
 
 
 class ConsoleIntegrationBranchActionResponse(BaseModel):
     branch_id: UUID
+    action: ConsoleProviderOpsAction
     mode: ConsoleOpsJobMode
     result: dict
 

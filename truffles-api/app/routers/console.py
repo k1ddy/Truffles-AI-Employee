@@ -152,6 +152,7 @@ from app.schemas.console import (
     ConsoleOutboxListResponse,
     ConsoleOutboxRetryRequest,
     ConsoleOutboxRetryResponse,
+    ConsoleProviderOpsQueueItem,
     ConsoleReferencePack,
     ConsoleReferencePackListResponse,
     ConsoleReferencePackUpsertRequest,
@@ -171,7 +172,11 @@ from app.schemas.console import (
 from app.schemas.console import (
     ConsoleMacro as ConsoleMacroSchema,
 )
-from app.schemas.onboarding_contract import ONBOARDING_CONTRACT_SCHEMA_VERSION, OnboardingContractPayload
+from app.schemas.onboarding_contract import (
+    ONBOARDING_CONTRACT_SCHEMA_VERSION,
+    OnboardingContractPayload,
+    OnboardingProviderBindingWhatsApp,
+)
 from app.schemas.outbox_payload import validate_outbox_payload
 from app.services.agent_link_service import build_telegram_deep_link, create_agent_link_token
 from app.services.alert_service import alert_warning
@@ -1248,12 +1253,25 @@ _INTEGRATION_DEFAULT_STALE_MINUTES = 60
 _INTEGRATION_MIN_STALE_MINUTES = 5
 _INTEGRATION_MAX_STALE_MINUTES = 24 * 60
 _PROVIDER_BINDING_EXPIRING_SOON_DAYS = 7
+_PROVIDER_OPS_EXECUTE_CONFIRMATION_ACTION = "provider_ops_execute"
+_PROVIDER_OPS_RECONCILE_ACTION = "integration_reconcile"
+_PROVIDER_OPS_ACTIONS = {
+    "integration_reconcile",
+    "provider_start_rebind",
+    "provider_complete_rebind",
+    "provider_renewal_confirmed",
+    "provider_webhook_updated",
+    "provider_send_reminder",
+}
 _INTEGRATION_ALERT_ISSUES = {
     "instance_id_mismatch",
     "invalid_webhook_url",
     "invalid_webhook_secret",
     "inbound_without_outbound",
     "no_recent_inbound",
+    "provider_binding_rebind_required",
+    "provider_binding_expired",
+    "provider_binding_expiring_soon",
 }
 _INTEGRATION_DRIFT_STATE: dict[str, str] = {}
 _INTEGRATION_DRIFT_LOCK = Lock()
@@ -2877,6 +2895,171 @@ def _build_branch_integration_status(
         drift_issues=drift_issues,
         status=status,
     )
+
+
+def _build_provider_ops_queue(
+    items: list[ConsoleBranchIntegrationStatus],
+    *,
+    generated_at: datetime,
+) -> list[ConsoleProviderOpsQueueItem]:
+    priority_rank = {"p0": 0, "p1": 1, "p2": 2}
+    queue_items: list[ConsoleProviderOpsQueueItem] = []
+    for item in items:
+        if not item.is_active:
+            continue
+
+        reasons: list[str] = []
+        priority = "p2"
+        recommended_action = "provider_send_reminder"
+
+        def _promote(level: str) -> None:
+            nonlocal priority
+            if priority_rank[level] < priority_rank[priority]:
+                priority = level
+
+        if item.provider_binding_rebind_required:
+            reasons.append("provider_binding_rebind_required")
+            recommended_action = "provider_complete_rebind"
+            _promote("p0")
+
+        if item.provider_binding_expiry_status == "expired":
+            reasons.append("provider_binding_expired")
+            if recommended_action == "provider_send_reminder":
+                recommended_action = "provider_renewal_confirmed"
+            _promote("p0")
+        elif item.provider_binding_expiry_status == "expiring_soon":
+            reasons.append("provider_binding_expiring_soon")
+            if recommended_action == "provider_send_reminder":
+                recommended_action = "provider_renewal_confirmed"
+            _promote("p1")
+
+        if item.whatsapp_status in {"missing_instance_id", "instance_id_mismatch", "invalid_webhook_url"}:
+            reasons.append(item.whatsapp_status)
+            if recommended_action == "provider_send_reminder":
+                recommended_action = "provider_webhook_updated"
+            _promote("p0")
+
+        if item.provider_binding_alert_state == "critical":
+            reasons.append("provider_binding_alert_critical")
+            if recommended_action == "provider_send_reminder":
+                recommended_action = "provider_start_rebind"
+            _promote("p0")
+        elif item.provider_binding_alert_state == "warn":
+            reasons.append("provider_binding_alert_warn")
+            _promote("p1")
+
+        if not reasons:
+            continue
+
+        dedup_reasons = list(dict.fromkeys(reasons))
+        queue_items.append(
+            ConsoleProviderOpsQueueItem(
+                client_id=item.client_id,
+                client_slug=item.client_slug,
+                branch_id=item.branch_id,
+                branch_slug=item.branch_slug,
+                branch_name=item.branch_name,
+                priority=priority,
+                recommended_action=recommended_action,
+                reasons=dedup_reasons,
+                requires_confirmation=True,
+                provider_binding_owner=item.provider_binding_owner,
+                provider_binding_next_renewal_at=item.provider_binding_next_renewal_at,
+                provider_binding_last_rebind_at=item.provider_binding_last_rebind_at,
+                provider_binding_alert_state=item.provider_binding_alert_state,
+                provider_binding_expiry_status=item.provider_binding_expiry_status,
+                provider_binding_days_until_expiry=item.provider_binding_days_until_expiry,
+                provider_binding_rebind_required=item.provider_binding_rebind_required,
+                generated_at=generated_at.isoformat(),
+            )
+        )
+
+    queue_items.sort(
+        key=lambda queue_item: (
+            priority_rank.get(queue_item.priority, 99),
+            queue_item.client_slug,
+            queue_item.branch_name,
+        )
+    )
+    return queue_items
+
+
+def _build_provider_ops_effective_payload(
+    *,
+    action: str,
+    request_payload: ConsoleIntegrationBranchActionRequest,
+    branch: Branch,
+    binding: _ProviderBindingLifecycle,
+    now_date: dt_date,
+) -> tuple[dict[str, object], Optional[dict[str, object]], Optional[str]]:
+    notes = _normalize_optional_text(request_payload.notes)
+    owner = _normalize_optional_text(request_payload.owner) or binding.owner
+    requested_instance = _normalize_optional_text(request_payload.instance_id)
+    requested_webhook_status = request_payload.webhook_status
+    reminder_note = None
+
+    binding_patch: dict[str, object] = {
+        "provider": binding.provider or "chatflow",
+        "instance_id": requested_instance or binding.instance_id or _normalize_optional_text(branch.instance_id),
+        "webhook_status": binding.webhook_status or "pending",
+        "paid_until": binding.paid_until,
+        "owner": owner,
+        "next_renewal_at": binding.next_renewal_at,
+        "last_rebind_at": binding.last_rebind_at,
+        "rebind_required": bool(binding.rebind_required),
+        "alert_state": binding.alert_state if binding.alert_state in {"ok", "warn", "critical"} else "warn",
+        "notes": notes or binding.notes,
+    }
+    branch_patch: Optional[dict[str, object]] = None
+
+    if action == "provider_start_rebind":
+        binding_patch["webhook_status"] = "rebind_required"
+        binding_patch["rebind_required"] = True
+        binding_patch["alert_state"] = "critical"
+        if notes:
+            binding_patch["notes"] = notes
+    elif action == "provider_complete_rebind":
+        binding_patch["webhook_status"] = requested_webhook_status or "configured"
+        binding_patch["rebind_required"] = False
+        binding_patch["alert_state"] = "ok"
+        binding_patch["last_rebind_at"] = now_date.isoformat()
+        if requested_instance:
+            binding_patch["instance_id"] = requested_instance
+            branch_patch = {"instance_id": requested_instance}
+    elif action == "provider_renewal_confirmed":
+        paid_until_value = _normalize_optional_text(request_payload.paid_until)
+        next_renewal_value = _normalize_optional_text(request_payload.next_renewal_at)
+        if not paid_until_value and not next_renewal_value:
+            raise ConsoleAPIError(
+                400,
+                "INVALID_PARAM",
+                "paid_until or next_renewal_at is required for provider_renewal_confirmed",
+            )
+        paid_until_date = _parse_date_param("paid_until", paid_until_value)
+        next_renewal_date = _parse_date_param("next_renewal_at", next_renewal_value)
+        if paid_until_date:
+            binding_patch["paid_until"] = paid_until_date.isoformat()
+        if next_renewal_date:
+            binding_patch["next_renewal_at"] = next_renewal_date.isoformat()
+        elif paid_until_date:
+            binding_patch["next_renewal_at"] = paid_until_date.isoformat()
+        binding_patch["alert_state"] = "ok"
+        binding_patch["rebind_required"] = False
+    elif action == "provider_webhook_updated":
+        if requested_instance:
+            binding_patch["instance_id"] = requested_instance
+            branch_patch = {"instance_id": requested_instance}
+        binding_patch["webhook_status"] = requested_webhook_status or "configured"
+        if binding_patch["webhook_status"] != "rebind_required":
+            binding_patch["rebind_required"] = False
+            if binding_patch["alert_state"] == "critical":
+                binding_patch["alert_state"] = "warn"
+    elif action == "provider_send_reminder":
+        reminder_note = notes or "provider lifecycle reminder"
+    else:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported provider ops action")
+
+    return binding_patch, branch_patch, reminder_note
 
 
 def _emit_integration_drift_signals(
@@ -7567,6 +7750,7 @@ async def list_integrations(
         return ConsoleIntegrationsListResponse(
             stale_after_minutes=stale_after_minutes,
             items=[],
+            provider_ops_queue=[],
         )
 
     client_ids = [client.id for client in active_clients]
@@ -7624,9 +7808,14 @@ async def list_integrations(
         )
         items.append(item)
 
+    provider_ops_queue = _build_provider_ops_queue(
+        items,
+        generated_at=now,
+    )
     return ConsoleIntegrationsListResponse(
         stale_after_minutes=stale_after_minutes,
         items=items,
+        provider_ops_queue=provider_ops_queue,
     )
 
 
@@ -7657,54 +7846,281 @@ async def run_integration_reconcile_for_branch(
     if not branch.is_active:
         raise ConsoleAPIError(409, "INVALID_STATE", "Branch is inactive")
 
+    action = body.action or _PROVIDER_OPS_RECONCILE_ACTION
+    if action not in _PROVIDER_OPS_ACTIONS:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported integrations action")
+
+    if action == _PROVIDER_OPS_RECONCILE_ACTION:
+        confirmation = None
+        if body.mode == "execute":
+            confirmation = require_confirmation(
+                db,
+                context,
+                confirmation_id=body.confirmation_id,
+                action="integration_reconcile",
+                target_type="branch",
+                target_id=branch.id,
+            )
+
+        result = run_integration_watchdog_scoped(
+            db,
+            client_id=branch.client_id,
+            branch_ids=[branch.id],
+            dry_run=(body.mode == "dry_run"),
+        )
+
+        if body.mode == "execute":
+            if confirmation:
+                mark_confirmation_used(
+                    db,
+                    context,
+                    confirmation,
+                    action="integration_reconcile",
+                    target_type="branch",
+                    target_id=branch.id,
+                )
+            record_audit_event(
+                db,
+                actor=context.agent,
+                event_type="integration_reconcile_run",
+                entity_type="branch",
+                entity_id=branch.id,
+                payload={
+                    "mode": body.mode,
+                    "checked": result.get("checked"),
+                    "degraded": result.get("degraded"),
+                    "recovered": result.get("recovered"),
+                    "remediated": result.get("remediated"),
+                },
+                client_id=branch.client_id,
+                branch_id=branch.id,
+            )
+            db.commit()
+        return ConsoleIntegrationBranchActionResponse(
+            branch_id=branch.id,
+            action=action,
+            mode=body.mode,
+            result=result,
+        )
+
+    now = datetime.now(timezone.utc)
+    lifecycle_map = _build_provider_binding_lifecycle_map(
+        db,
+        client_ids=[branch.client_id],
+        branches=[branch],
+        now=now,
+    )
+    binding = lifecycle_map.get(branch.id, _ProviderBindingLifecycle())
+    binding_patch, branch_patch, reminder_note = _build_provider_ops_effective_payload(
+        action=action,
+        request_payload=body,
+        branch=branch,
+        binding=binding,
+        now_date=now.date(),
+    )
+
+    result: dict[str, object] = {
+        "action": action,
+        "binding_before": {
+            "provider": binding.provider,
+            "instance_id": binding.instance_id,
+            "webhook_status": binding.webhook_status,
+            "paid_until": binding.paid_until,
+            "owner": binding.owner,
+            "next_renewal_at": binding.next_renewal_at,
+            "last_rebind_at": binding.last_rebind_at,
+            "rebind_required": binding.rebind_required,
+            "alert_state": binding.alert_state,
+            "notes": binding.notes,
+            "payment_status": binding.payment_status,
+            "payment_confirmed_at": binding.payment_confirmed_at,
+            "expiry_status": binding.expiry_status,
+            "days_until_expiry": binding.days_until_expiry,
+        },
+        "binding_patch": binding_patch,
+        "branch_patch": branch_patch,
+        "requires_confirmation": True,
+    }
+
     confirmation = None
     if body.mode == "execute":
         confirmation = require_confirmation(
             db,
             context,
             confirmation_id=body.confirmation_id,
-            action="integration_reconcile",
+            action=_PROVIDER_OPS_EXECUTE_CONFIRMATION_ACTION,
             target_type="branch",
             target_id=branch.id,
         )
 
-    result = run_integration_watchdog_scoped(
-        db,
-        client_id=branch.client_id,
-        branch_ids=[branch.id],
-        dry_run=(body.mode == "dry_run"),
-    )
+        if action == "provider_send_reminder":
+            record_audit_event(
+                db,
+                actor=context.agent,
+                event_type="provider_ops_reminder_sent",
+                entity_type="branch",
+                entity_id=branch.id,
+                payload={
+                    "mode": body.mode,
+                    "action": action,
+                    "note": reminder_note,
+                    "binding_snapshot": result["binding_before"],
+                },
+                client_id=branch.client_id,
+                branch_id=branch.id,
+            )
+        else:
+            contract_record = _get_latest_onboarding_contract(
+                db,
+                client_id=branch.client_id,
+                scope="branch",
+                branch_id=branch.id,
+            )
+            base_payload: Optional[dict] = None
+            if (
+                contract_record
+                and contract_record.status == "active"
+                and isinstance(contract_record.payload_json, dict)
+            ):
+                base_payload = contract_record.payload_json
+            if base_payload is None:
+                client_record = _get_latest_onboarding_contract(
+                    db,
+                    client_id=branch.client_id,
+                    scope="client",
+                    branch_id=None,
+                )
+                client_payload = (
+                    client_record.payload_json
+                    if client_record and client_record.status == "active" and isinstance(client_record.payload_json, dict)
+                    else None
+                )
+                base_payload = merge_onboarding_contract(client_payload, None)
 
-    if body.mode == "execute":
+            effective_payload = OnboardingContractPayload.model_validate(base_payload)
+            existing_binding = effective_payload.provider_binding.whatsapp
+            base_binding_payload = (
+                existing_binding.model_dump(exclude_none=True, mode="json")
+                if existing_binding
+                else {}
+            )
+            merged_binding_payload = {
+                **base_binding_payload,
+                **{key: value for key, value in binding_patch.items() if value is not None},
+            }
+            normalized_binding = OnboardingProviderBindingWhatsApp.model_validate(merged_binding_payload)
+            if normalized_binding.webhook_status == "rebind_required":
+                normalized_binding.rebind_required = True
+            next_binding_payload = normalized_binding.model_dump(exclude_none=True, mode="json")
+            effective_dict = onboarding_contract_payload_to_dict(effective_payload)
+            contract_payload = OnboardingContractPayload.model_validate(
+                merge_onboarding_contract(
+                    effective_dict,
+                    {
+                        "provider_binding": {
+                            "whatsapp": next_binding_payload,
+                        }
+                    },
+                )
+            )
+
+            if not contract_record:
+                contract_record = ClientOnboardingContract(
+                    client_id=branch.client_id,
+                    branch_id=branch.id,
+                    scope="branch",
+                    payload_json=onboarding_contract_payload_to_dict(contract_payload),
+                    schema_version=ONBOARDING_CONTRACT_SCHEMA_VERSION,
+                    status="active",
+                    payment_status="pending",
+                    created_by=context.agent.id,
+                )
+                db.add(contract_record)
+            else:
+                contract_record.payload_json = onboarding_contract_payload_to_dict(contract_payload)
+                contract_record.schema_version = ONBOARDING_CONTRACT_SCHEMA_VERSION
+                contract_record.status = "active"
+
+            if action == "provider_renewal_confirmed":
+                contract_record.payment_status = "confirmed"
+                contract_record.payment_confirmed_at = now
+                contract_record.payment_confirmed_by = context.agent.id
+
+            webhook_secret_changed = False
+            webhook_url = None
+            if branch_patch and isinstance(branch_patch.get("instance_id"), str):
+                next_instance_id = _normalize_optional_text(branch_patch.get("instance_id"))
+                if next_instance_id:
+                    _ensure_unique_branch_field(
+                        db,
+                        client_id=branch.client_id,
+                        field_name="instance_id",
+                        value=next_instance_id,
+                        exclude_branch_id=branch.id,
+                    )
+                    branch.instance_id = next_instance_id
+                    client = db.query(Client).filter(Client.id == branch.client_id).first()
+                    if not client:
+                        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+                    webhook_secret, webhook_url, webhook_secret_changed = _ensure_client_webhook_secret_from_instance(
+                        db,
+                        client=client,
+                        branch=branch,
+                        instance_id=next_instance_id,
+                    )
+                    result["webhook_secret_generated"] = webhook_secret_changed
+                    result["webhook_secret"] = webhook_secret
+                    result["webhook_url"] = webhook_url
+
+            result["binding_after"] = next_binding_payload
+            result["payment_status_after"] = contract_record.payment_status
+            result["payment_confirmed_at_after"] = (
+                contract_record.payment_confirmed_at.isoformat()
+                if contract_record.payment_confirmed_at
+                else None
+            )
+            result["webhook_secret_changed"] = webhook_secret_changed
+
+            record_audit_event(
+                db,
+                actor=context.agent,
+                event_type="provider_ops_action_run",
+                entity_type="branch",
+                entity_id=branch.id,
+                payload={
+                    "mode": body.mode,
+                    "action": action,
+                    "binding_patch": binding_patch,
+                    "branch_patch": branch_patch,
+                    "reminder_note": reminder_note,
+                    "result": {
+                        "payment_status_after": result.get("payment_status_after"),
+                        "payment_confirmed_at_after": result.get("payment_confirmed_at_after"),
+                        "webhook_secret_changed": result.get("webhook_secret_changed"),
+                        "webhook_url": result.get("webhook_url"),
+                    },
+                },
+                client_id=branch.client_id,
+                branch_id=branch.id,
+            )
+
         if confirmation:
             mark_confirmation_used(
                 db,
                 context,
                 confirmation,
-                action="integration_reconcile",
+                action=_PROVIDER_OPS_EXECUTE_CONFIRMATION_ACTION,
                 target_type="branch",
                 target_id=branch.id,
             )
-        record_audit_event(
-            db,
-            actor=context.agent,
-            event_type="integration_reconcile_run",
-            entity_type="branch",
-            entity_id=branch.id,
-            payload={
-                "mode": body.mode,
-                "checked": result.get("checked"),
-                "degraded": result.get("degraded"),
-                "recovered": result.get("recovered"),
-                "remediated": result.get("remediated"),
-            },
-            client_id=branch.client_id,
-            branch_id=branch.id,
-        )
         db.commit()
+    else:
+        result["dry_run"] = True
+        result["reminder_note"] = reminder_note
 
     return ConsoleIntegrationBranchActionResponse(
         branch_id=branch.id,
+        action=action,
         mode=body.mode,
         result=result,
     )

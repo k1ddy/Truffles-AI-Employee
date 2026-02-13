@@ -4196,9 +4196,80 @@ components:
           type: string
           enum: [ok, warn, error]
 
+    ProviderOpsAction:
+      type: string
+      enum:
+        [
+          integration_reconcile,
+          provider_start_rebind,
+          provider_complete_rebind,
+          provider_renewal_confirmed,
+          provider_webhook_updated,
+          provider_send_reminder,
+        ]
+
+    ProviderOpsQueuePriority:
+      type: string
+      enum: [p0, p1, p2]
+
+    ProviderOpsQueueItem:
+      type: object
+      required:
+        [client_id, client_slug, branch_id, branch_slug, branch_name, priority, recommended_action, reasons, requires_confirmation]
+      properties:
+        client_id:
+          type: string
+          format: uuid
+        client_slug:
+          type: string
+        branch_id:
+          type: string
+          format: uuid
+        branch_slug:
+          type: string
+        branch_name:
+          type: string
+        priority:
+          $ref: "#/components/schemas/ProviderOpsQueuePriority"
+        recommended_action:
+          $ref: "#/components/schemas/ProviderOpsAction"
+        reasons:
+          type: array
+          items:
+            type: string
+        requires_confirmation:
+          type: boolean
+        provider_binding_owner:
+          type: string
+          nullable: true
+        provider_binding_next_renewal_at:
+          type: string
+          format: date
+          nullable: true
+        provider_binding_last_rebind_at:
+          type: string
+          format: date
+          nullable: true
+        provider_binding_alert_state:
+          type: string
+          enum: [ok, warn, critical, unknown]
+        provider_binding_expiry_status:
+          type: string
+          enum: [ok, expiring_soon, expired, unknown]
+        provider_binding_days_until_expiry:
+          type: integer
+          nullable: true
+        provider_binding_rebind_required:
+          type: boolean
+          nullable: true
+        generated_at:
+          type: string
+          format: date-time
+          nullable: true
+
     IntegrationsListResponse:
       type: object
-      required: [stale_after_minutes, items]
+      required: [stale_after_minutes, items, provider_ops_queue]
       properties:
         stale_after_minutes:
           type: integer
@@ -4206,10 +4277,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/BranchIntegrationStatus"
+        provider_ops_queue:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProviderOpsQueueItem"
 
     IntegrationBranchActionRequest:
       type: object
       properties:
+        action:
+          $ref: "#/components/schemas/ProviderOpsAction"
+          default: integration_reconcile
         mode:
           type: string
           enum: [dry_run, execute]
@@ -4218,14 +4296,37 @@ components:
           type: string
           format: uuid
           nullable: true
+        owner:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        paid_until:
+          type: string
+          format: date
+          nullable: true
+        next_renewal_at:
+          type: string
+          format: date
+          nullable: true
+        instance_id:
+          type: string
+          nullable: true
+        webhook_status:
+          type: string
+          enum: [configured, pending, rebind_required]
+          nullable: true
 
     IntegrationBranchActionResponse:
       type: object
-      required: [branch_id, mode, result]
+      required: [branch_id, action, mode, result]
       properties:
         branch_id:
           type: string
           format: uuid
+        action:
+          $ref: "#/components/schemas/ProviderOpsAction"
         mode:
           type: string
           enum: [dry_run, execute]
@@ -4321,7 +4422,7 @@ components:
 
     ConfirmationAction:
       type: string
-      enum: [knowledge_rollback, branch_deactivate, integration_reconcile]
+      enum: [knowledge_rollback, branch_deactivate, integration_reconcile, provider_ops_execute]
 
     ConfirmationTargetType:
       type: string
