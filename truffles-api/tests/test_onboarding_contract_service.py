@@ -47,6 +47,8 @@ def test_merge_onboarding_contract_merges_provider_binding_whatsapp_fields():
                     "instance_id": "instance-old",
                     "webhook_status": "pending",
                     "paid_until": "2030-01-01",
+                    "owner": "ops",
+                    "next_renewal_at": "2030-01-01",
                 }
             },
         },
@@ -55,6 +57,7 @@ def test_merge_onboarding_contract_merges_provider_binding_whatsapp_fields():
                 "whatsapp": {
                     "instance_id": "instance-new",
                     "webhook_status": "configured",
+                    "rebind_required": False,
                 }
             }
         },
@@ -63,6 +66,9 @@ def test_merge_onboarding_contract_merges_provider_binding_whatsapp_fields():
     assert merged["provider_binding"]["whatsapp"]["instance_id"] == "instance-new"
     assert merged["provider_binding"]["whatsapp"]["webhook_status"] == "configured"
     assert merged["provider_binding"]["whatsapp"]["paid_until"] == "2030-01-01"
+    assert merged["provider_binding"]["whatsapp"]["owner"] == "ops"
+    assert merged["provider_binding"]["whatsapp"]["next_renewal_at"] == "2030-01-01"
+    assert merged["provider_binding"]["whatsapp"]["rebind_required"] is False
 
 
 def test_validate_onboarding_contract_payload_rejects_invalid_provider_binding_date():
@@ -77,6 +83,25 @@ def test_validate_onboarding_contract_payload_rejects_invalid_provider_binding_d
                         "instance_id": "instance-123",
                         "webhook_status": "configured",
                         "paid_until": "2026-02-31",
+                    }
+                },
+            }
+        )
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
+def test_validate_onboarding_contract_payload_rejects_invalid_next_renewal_date():
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        validate_onboarding_contract_payload(
+            {
+                "domain_slug": "beauty",
+                "purchased": {},
+                "provider_binding": {
+                    "whatsapp": {
+                        "provider": "chatflow",
+                        "instance_id": "instance-123",
+                        "webhook_status": "configured",
+                        "next_renewal_at": "2026-13-01",
                     }
                 },
             }

@@ -41,6 +41,9 @@ function statusLabel(status: string): string {
         inbound_without_outbound: "Inbound without outbound",
         missing_bot_token: "Missing bot token",
         missing_chat_id: "Missing chat id",
+        provider_binding_rebind_required: "Provider rebind required",
+        provider_binding_expired: "Provider binding expired",
+        provider_binding_expiring_soon: "Provider binding expiring soon",
     };
     return labels[status] ?? status;
 }
@@ -76,6 +79,32 @@ function providerBindingExpiryBadgeClass(status?: string | null): string {
         return "bg-red-100 text-red-800";
     }
     if (status === "expiring_soon") {
+        return "bg-amber-100 text-amber-800";
+    }
+    if (status === "ok") {
+        return "bg-green-100 text-green-800";
+    }
+    return "bg-muted text-muted-foreground";
+}
+
+function providerBindingAlertLabel(status?: string | null): string {
+    if (status === "ok") {
+        return "Alert OK";
+    }
+    if (status === "warn") {
+        return "Alert Warn";
+    }
+    if (status === "critical") {
+        return "Alert Critical";
+    }
+    return "Alert Unknown";
+}
+
+function providerBindingAlertBadgeClass(status?: string | null): string {
+    if (status === "critical") {
+        return "bg-red-100 text-red-800";
+    }
+    if (status === "warn") {
         return "bg-amber-100 text-amber-800";
     }
     if (status === "ok") {
@@ -345,17 +374,36 @@ export default function IntegrationsPage() {
                                     <div className="text-xs text-muted-foreground">
                                         webhook: {item.provider_binding_webhook_status ?? "—"}
                                     </div>
+                                    <div className="text-xs text-muted-foreground">
+                                        owner: {item.provider_binding_owner ?? "—"}
+                                    </div>
                                 </td>
                                 <td className="p-4 text-sm">
                                     <div>{paymentStatusLabel(item.provider_binding_payment_status)}</div>
                                     <div className="text-xs text-muted-foreground">
                                         paid_until: {item.provider_binding_paid_until ?? "—"}
                                     </div>
+                                    <div className="text-xs text-muted-foreground">
+                                        next_renewal: {item.provider_binding_next_renewal_at ?? "—"}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                        last_rebind: {item.provider_binding_last_rebind_at ?? "—"}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                        rebind_required: {item.provider_binding_rebind_required ? "yes" : "no"}
+                                    </div>
                                     <div className="mt-1">
                                         <span
                                             className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerBindingExpiryBadgeClass(item.provider_binding_expiry_status)}`}
                                         >
                                             {providerBindingExpiryLabel(item.provider_binding_expiry_status)}
+                                        </span>
+                                    </div>
+                                    <div className="mt-1">
+                                        <span
+                                            className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerBindingAlertBadgeClass(item.provider_binding_alert_state)}`}
+                                        >
+                                            {providerBindingAlertLabel(item.provider_binding_alert_state)}
                                         </span>
                                     </div>
                                     <div className="text-xs text-muted-foreground mt-1">

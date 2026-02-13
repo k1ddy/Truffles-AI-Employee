@@ -12,14 +12,11 @@ from app.services.knowledge_validation import (
 def _base_payload() -> dict:
     return {
         "client_pack": {
-            "salon": {
-                "name": "Demo Salon",
-                "city": "Almaty",
-                "address": {"full": "Main street, 1"},
-                "hours": {"days": ["mon"], "open": "09:00", "close": "18:00"},
-                "services_summary": "Hair and nails",
-                "communication": {"languages": ["ru", "kk"]},
-            },
+            "business": {"name": "Demo Salon"},
+            "location": {"city": "Almaty", "address": {"full": "Main street, 1"}},
+            "operations": {"hours": {"days": ["mon"], "open": "09:00", "close": "18:00"}},
+            "catalog": {"summary": "Hair and nails"},
+            "communication": {"languages": ["ru", "kk"]},
             "services_catalog": {
                 "services": [
                     {"name": "Haircut", "price_items": ["Haircut"]},
@@ -66,7 +63,7 @@ def test_parse_draft_text_accepts_yaml():
 
 def test_validate_payload_missing_required_field():
     payload = _base_payload()
-    payload["client_pack"]["salon"].pop("name")
+    payload["client_pack"]["business"].pop("name")
     errors, warnings = validate_payload(payload)
     assert any("client_pack.business.name" in err for err in errors)
     assert warnings == []
@@ -74,7 +71,7 @@ def test_validate_payload_missing_required_field():
 
 def test_validate_payload_requires_ru_kk_languages():
     payload = _base_payload()
-    payload["client_pack"]["salon"]["communication"]["languages"] = ["ru"]
+    payload["client_pack"]["communication"]["languages"] = ["ru"]
     errors, warnings = validate_payload(payload)
     assert any("client_pack.communication.languages" in err for err in errors)
     assert warnings == []
@@ -92,7 +89,7 @@ def test_validate_payload_warns_on_reduced_services():
 def test_build_diff_returns_text():
     previous = _base_payload()
     payload = copy.deepcopy(previous)
-    payload["client_pack"]["salon"]["city"] = "Astana"
+    payload["client_pack"]["location"]["city"] = "Astana"
     diff = build_diff(previous, payload)
     assert "Astana" in diff
 

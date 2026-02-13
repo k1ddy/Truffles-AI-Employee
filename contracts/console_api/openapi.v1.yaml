@@ -4155,6 +4155,23 @@ components:
           type: string
           format: date
           nullable: true
+        provider_binding_owner:
+          type: string
+          nullable: true
+        provider_binding_next_renewal_at:
+          type: string
+          format: date
+          nullable: true
+        provider_binding_last_rebind_at:
+          type: string
+          format: date
+          nullable: true
+        provider_binding_rebind_required:
+          type: boolean
+          nullable: true
+        provider_binding_alert_state:
+          type: string
+          enum: [ok, warn, critical, unknown]
         provider_binding_notes:
           type: string
           nullable: true
@@ -5692,6 +5709,24 @@ components:
         paid_until:
           type: string
           format: date
+          nullable: true
+        owner:
+          type: string
+          nullable: true
+        next_renewal_at:
+          type: string
+          format: date
+          nullable: true
+        last_rebind_at:
+          type: string
+          format: date
+          nullable: true
+        rebind_required:
+          type: boolean
+          nullable: true
+        alert_state:
+          type: string
+          enum: [ok, warn, critical]
           nullable: true
         notes:
           type: string

@@ -38,6 +38,7 @@ def test_normalize_branch_change_patch_requires_instance_for_activation(monkeypa
     )
     monkeypatch.setattr(console_router, "_ensure_unique_branch_field", lambda *args, **kwargs: None)
     monkeypatch.setattr(console_router, "_require_branch_go_live_gate", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_require_branch_scorecard_ready", lambda *args, **kwargs: None)
 
     normalized, errors = console_router._normalize_branch_change_patch(
         db=SimpleNamespace(),
@@ -71,6 +72,7 @@ def test_normalize_branch_change_patch_rejects_invalid_inputs(monkeypatch, patch
     )
     monkeypatch.setattr(console_router, "_ensure_unique_branch_field", lambda *args, **kwargs: None)
     monkeypatch.setattr(console_router, "_require_branch_go_live_gate", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_require_branch_scorecard_ready", lambda *args, **kwargs: None)
 
     _normalized, errors = console_router._normalize_branch_change_patch(
         db=SimpleNamespace(),
@@ -93,6 +95,7 @@ def test_normalize_branch_change_patch_normalizes_knowledge_tag(monkeypatch):
     )
     monkeypatch.setattr(console_router, "_ensure_unique_branch_field", lambda *args, **kwargs: None)
     monkeypatch.setattr(console_router, "_require_branch_go_live_gate", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_require_branch_scorecard_ready", lambda *args, **kwargs: None)
 
     normalized, errors = console_router._normalize_branch_change_patch(
         db=SimpleNamespace(),

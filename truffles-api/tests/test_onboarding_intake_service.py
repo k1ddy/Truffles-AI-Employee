@@ -18,13 +18,18 @@ def test_build_intake_payload_parses_text_into_pack_fields():
         """,
     )
 
-    salon = payload.get("client_pack", {}).get("salon", {})
-    assert salon.get("name") == "Demo Salon"
-    assert salon.get("city") == "Алматы"
-    assert salon.get("address", {}).get("full") == "Абая 10"
-    assert salon.get("hours", {}).get("open") == "09:00"
-    assert salon.get("hours", {}).get("close") == "21:00"
-    assert set(salon.get("communication", {}).get("languages", [])) == {"ru", "kk"}
+    business = payload.get("client_pack", {}).get("business", {})
+    location = payload.get("client_pack", {}).get("location", {})
+    operations = payload.get("client_pack", {}).get("operations", {})
+    communication = payload.get("client_pack", {}).get("communication", {})
+    catalog = payload.get("client_pack", {}).get("catalog", {})
+    assert business.get("name") == "Demo Salon"
+    assert location.get("city") == "Алматы"
+    assert location.get("address", {}).get("full") == "Абая 10"
+    assert operations.get("hours", {}).get("open") == "09:00"
+    assert operations.get("hours", {}).get("close") == "21:00"
+    assert set(communication.get("languages", [])) == {"ru", "kk"}
+    assert "Маникюр" in (catalog.get("summary") or "")
 
     services = payload.get("client_pack", {}).get("services_catalog", {}).get("services", [])
     assert len(services) >= 2
@@ -43,13 +48,36 @@ def test_build_intake_payload_parses_neutral_business_aliases():
         """,
     )
 
+    business = payload.get("client_pack", {}).get("business", {})
+    location = payload.get("client_pack", {}).get("location", {})
+    operations = payload.get("client_pack", {}).get("operations", {})
+    communication = payload.get("client_pack", {}).get("communication", {})
+    assert business.get("name") == "Demo Clinic"
+    assert location.get("city") == "Astana"
+    assert location.get("address", {}).get("full") == "Abay 10"
+    assert operations.get("hours", {}).get("open") == "09:00"
+    assert operations.get("hours", {}).get("close") == "18:00"
+    assert set(communication.get("languages", [])) == {"ru", "kk"}
+
+
+def test_build_intake_payload_keeps_salon_compatibility_aliases():
+    payload = build_intake_payload(
+        client_data_json={
+            "client_pack": {
+                "business": {"name": "Demo Beauty"},
+                "location": {"city": "Almaty", "address": {"full": "Abay 10"}},
+                "operations": {"hours": {"days": ["mon"], "open": "09:00", "close": "18:00"}},
+                "catalog": {"summary": "Hair and nails"},
+                "communication": {"languages": ["ru", "kk"]},
+            }
+        },
+        client_data_text=None,
+    )
+
     salon = payload.get("client_pack", {}).get("salon", {})
-    assert salon.get("name") == "Demo Clinic"
-    assert salon.get("city") == "Astana"
+    assert salon.get("name") == "Demo Beauty"
+    assert salon.get("city") == "Almaty"
     assert salon.get("address", {}).get("full") == "Abay 10"
-    assert salon.get("hours", {}).get("open") == "09:00"
-    assert salon.get("hours", {}).get("close") == "18:00"
-    assert set(salon.get("communication", {}).get("languages", [])) == {"ru", "kk"}
 
 
 def test_evaluate_intake_payload_returns_missing_questions():
@@ -63,14 +91,11 @@ def test_evaluate_intake_payload_returns_missing_questions():
 def test_evaluate_intake_payload_skips_booking_for_non_booking_domain():
     payload = {
         "client_pack": {
-            "salon": {
-                "name": "Demo Legal",
-                "city": "Almaty",
-                "address": {"full": "Main street, 1"},
-                "hours": {"days": ["mon"], "open": "09:00", "close": "18:00"},
-                "services_summary": "Legal consultations",
-                "communication": {"languages": ["ru", "kk"]},
-            },
+            "business": {"name": "Demo Legal"},
+            "location": {"city": "Almaty", "address": {"full": "Main street, 1"}},
+            "operations": {"hours": {"days": ["mon"], "open": "09:00", "close": "18:00"}},
+            "catalog": {"summary": "Legal consultations"},
+            "communication": {"languages": ["ru", "kk"]},
             "services_catalog": {"services": [{"name": "Consultation"}]},
             "guest_policy": {"allowed_guests": "no"},
             "safety": {"medical_note": "n/a"},

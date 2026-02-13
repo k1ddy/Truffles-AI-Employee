@@ -193,6 +193,33 @@ def test_go_no_go_requires_provider_binding_for_whatsapp():
     assert "provider_binding.whatsapp" in missing
 
 
+def test_go_no_go_requires_provider_binding_owner():
+    capabilities = CapabilitiesPayload.model_validate({"channels": {"whatsapp": True}})
+    inputs = _make_inputs(
+        capabilities=capabilities,
+        has_instance_id=True,
+        instance_id="instance-123",
+        has_phone=True,
+        branch_is_active=True,
+        onboarding_contract=OnboardingContractPayload.model_validate(
+            {
+                "purchased": {"channels": {"whatsapp": True}},
+                "provider_binding": {
+                    "whatsapp": {
+                        "provider": "chatflow",
+                        "instance_id": "instance-123",
+                        "webhook_status": "configured",
+                        "paid_until": (date.today() + timedelta(days=5)).isoformat(),
+                    }
+                },
+            }
+        ),
+    )
+
+    missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
+    assert "provider_binding.whatsapp.owner" in missing
+
+
 def test_go_no_go_requires_non_expired_provider_binding():
     capabilities = CapabilitiesPayload.model_validate({"channels": {"whatsapp": True}})
     inputs = _make_inputs(
@@ -210,6 +237,7 @@ def test_go_no_go_requires_non_expired_provider_binding():
                         "instance_id": "instance-123",
                         "webhook_status": "configured",
                         "paid_until": "2020-01-01",
+                        "owner": "platform-admin",
                     }
                 },
             }
@@ -217,6 +245,34 @@ def test_go_no_go_requires_non_expired_provider_binding():
     )
     missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
     assert "provider_binding.whatsapp.paid_until_expired" in missing
+
+
+def test_go_no_go_requires_rebind_resolved():
+    capabilities = CapabilitiesPayload.model_validate({"channels": {"whatsapp": True}})
+    inputs = _make_inputs(
+        capabilities=capabilities,
+        has_instance_id=True,
+        instance_id="instance-123",
+        has_phone=True,
+        branch_is_active=True,
+        onboarding_contract=OnboardingContractPayload.model_validate(
+            {
+                "purchased": {"channels": {"whatsapp": True}},
+                "provider_binding": {
+                    "whatsapp": {
+                        "provider": "chatflow",
+                        "instance_id": "instance-123",
+                        "webhook_status": "rebind_required",
+                        "paid_until": (date.today() + timedelta(days=30)).isoformat(),
+                        "owner": "platform-admin",
+                        "rebind_required": True,
+                    }
+                },
+            }
+        ),
+    )
+    missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
+    assert "provider_binding.whatsapp.rebind_required" in missing
 
 
 def test_ensure_onboarding_step_requires_previous(monkeypatch):
@@ -263,6 +319,8 @@ def test_onboarding_scorecard_passes_when_go_no_go_requirements_are_satisfied():
                         "instance_id": "instance-123",
                         "webhook_status": "configured",
                         "paid_until": (date.today() + timedelta(days=30)).isoformat(),
+                        "owner": "platform-admin",
+                        "next_renewal_at": (date.today() + timedelta(days=30)).isoformat(),
                     }
                 },
             }

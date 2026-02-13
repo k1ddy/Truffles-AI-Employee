@@ -464,13 +464,18 @@ def missing_prerequisites(step: OnboardingStep, inputs: OnboardingInputs) -> lis
                     missing.append("provider_binding.whatsapp.instance_id")
                 elif inputs.instance_id and whatsapp_binding.instance_id != inputs.instance_id:
                     missing.append("provider_binding.whatsapp.instance_id_mismatch")
+                if not whatsapp_binding.owner:
+                    missing.append("provider_binding.whatsapp.owner")
                 if whatsapp_binding.webhook_status != "configured":
                     missing.append("provider_binding.whatsapp.webhook_status")
+                if whatsapp_binding.rebind_required is True or whatsapp_binding.webhook_status == "rebind_required":
+                    missing.append("provider_binding.whatsapp.rebind_required")
 
-                paid_until = _parse_iso_date(whatsapp_binding.paid_until)
-                if not paid_until:
-                    missing.append("provider_binding.whatsapp.paid_until")
-                elif paid_until < datetime.now(timezone.utc).date():
+                renewal_anchor = whatsapp_binding.next_renewal_at or whatsapp_binding.paid_until
+                renewal_until = _parse_iso_date(renewal_anchor)
+                if not renewal_until:
+                    missing.append("provider_binding.whatsapp.next_renewal_at")
+                elif renewal_until < datetime.now(timezone.utc).date():
                     missing.append("provider_binding.whatsapp.paid_until_expired")
 
         if (
