@@ -91,6 +91,13 @@ const MISSING_LABELS: Record<string, string> = {
     reference_pack_required_fields: "Reference pack required fields snapshot",
     reference_pack_required_fields_checksum: "Reference pack required fields checksum",
     branch_active: "Филиал активен",
+    "provider_binding.whatsapp": "Provider binding (WhatsApp)",
+    "provider_binding.whatsapp.provider": "Provider binding: provider",
+    "provider_binding.whatsapp.instance_id": "Provider binding: instance_id",
+    "provider_binding.whatsapp.instance_id_mismatch": "Provider binding: instance_id не совпадает с branch",
+    "provider_binding.whatsapp.webhook_status": "Provider binding: webhook_status=configured",
+    "provider_binding.whatsapp.paid_until": "Provider binding: paid_until",
+    "provider_binding.whatsapp.paid_until_expired": "Provider binding: paid_until истёк",
     "client_pack.business.name": "Профиль бизнеса: название",
     "client_pack.location.city": "Локация: город",
     "client_pack.location.address.full": "Локация: адрес",
@@ -475,6 +482,15 @@ function normalizeOnboardingContractPayload(
     return {
         domain_slug: payload?.domain_slug ?? null,
         purchased: normalizeCapabilities(payload?.purchased ?? null),
+        provider_binding: {
+            whatsapp: {
+                provider: payload?.provider_binding?.whatsapp?.provider ?? null,
+                instance_id: payload?.provider_binding?.whatsapp?.instance_id ?? null,
+                webhook_status: payload?.provider_binding?.whatsapp?.webhook_status ?? null,
+                paid_until: payload?.provider_binding?.whatsapp?.paid_until ?? null,
+                notes: payload?.provider_binding?.whatsapp?.notes ?? null,
+            },
+        },
     };
 }
 
@@ -2194,9 +2210,19 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         } else {
             setPurchasedJsonDraft(JSON.stringify(purchasedPayload, null, 2));
         }
+        const providerBindingWhatsApp = onboardingContractDraft.provider_binding?.whatsapp;
         const payload: OnboardingContractPayload = {
             domain_slug: onboardingContractDraft.domain_slug?.trim() || null,
             purchased: purchasedPayload,
+            provider_binding: {
+                whatsapp: {
+                    provider: providerBindingWhatsApp?.provider?.trim() || null,
+                    instance_id: providerBindingWhatsApp?.instance_id?.trim() || null,
+                    webhook_status: providerBindingWhatsApp?.webhook_status ?? null,
+                    paid_until: providerBindingWhatsApp?.paid_until?.trim() || null,
+                    notes: providerBindingWhatsApp?.notes?.trim() || null,
+                },
+            },
         };
         const requestPayload: components["schemas"]["OnboardingContractPatchRequest"] = {
             scope: "branch",
@@ -3904,6 +3930,145 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             placeholder="beauty"
                                             disabled={!canEdit}
                                         />
+                                    </div>
+                                    <div className="rounded-lg border border-border/60 bg-background p-3 space-y-3">
+                                        <div className="text-xs text-muted-foreground">
+                                            Provider binding (manual proof для ChatFlow/WhatsApp).
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">provider</label>
+                                                <input
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={onboardingContractDraft.provider_binding?.whatsapp?.provider ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setOnboardingContractDraft((prev) => {
+                                                            const normalized = normalizeOnboardingContractPayload(prev);
+                                                            return {
+                                                                ...normalized,
+                                                                provider_binding: {
+                                                                    ...normalized.provider_binding,
+                                                                    whatsapp: {
+                                                                        ...normalized.provider_binding?.whatsapp,
+                                                                        provider: event.target.value || null,
+                                                                    },
+                                                                },
+                                                            };
+                                                        });
+                                                    }}
+                                                    placeholder="chatflow"
+                                                    disabled={!canEdit}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">instance_id (provider side)</label>
+                                                <input
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={onboardingContractDraft.provider_binding?.whatsapp?.instance_id ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setOnboardingContractDraft((prev) => {
+                                                            const normalized = normalizeOnboardingContractPayload(prev);
+                                                            return {
+                                                                ...normalized,
+                                                                provider_binding: {
+                                                                    ...normalized.provider_binding,
+                                                                    whatsapp: {
+                                                                        ...normalized.provider_binding?.whatsapp,
+                                                                        instance_id: event.target.value || null,
+                                                                    },
+                                                                },
+                                                            };
+                                                        });
+                                                    }}
+                                                    placeholder="instance-xxxxxxxx"
+                                                    disabled={!canEdit}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">webhook_status</label>
+                                                <select
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={onboardingContractDraft.provider_binding?.whatsapp?.webhook_status ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setOnboardingContractDraft((prev) => {
+                                                            const normalized = normalizeOnboardingContractPayload(prev);
+                                                            return {
+                                                                ...normalized,
+                                                                provider_binding: {
+                                                                    ...normalized.provider_binding,
+                                                                    whatsapp: {
+                                                                        ...normalized.provider_binding?.whatsapp,
+                                                                        webhook_status: event.target.value
+                                                                            ? event.target.value as "configured" | "pending" | "rebind_required"
+                                                                            : null,
+                                                                    },
+                                                                },
+                                                            };
+                                                        });
+                                                    }}
+                                                    disabled={!canEdit}
+                                                >
+                                                    <option value="">Не указано</option>
+                                                    <option value="configured">configured</option>
+                                                    <option value="pending">pending</option>
+                                                    <option value="rebind_required">rebind_required</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted-foreground">paid_until</label>
+                                                <input
+                                                    type="date"
+                                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                                    value={onboardingContractDraft.provider_binding?.whatsapp?.paid_until ?? ""}
+                                                    onChange={(event) => {
+                                                        setOnboardingContractTouched(true);
+                                                        setOnboardingContractDraft((prev) => {
+                                                            const normalized = normalizeOnboardingContractPayload(prev);
+                                                            return {
+                                                                ...normalized,
+                                                                provider_binding: {
+                                                                    ...normalized.provider_binding,
+                                                                    whatsapp: {
+                                                                        ...normalized.provider_binding?.whatsapp,
+                                                                        paid_until: event.target.value || null,
+                                                                    },
+                                                                },
+                                                            };
+                                                        });
+                                                    }}
+                                                    disabled={!canEdit}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-muted-foreground">notes</label>
+                                            <textarea
+                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs"
+                                                rows={2}
+                                                value={onboardingContractDraft.provider_binding?.whatsapp?.notes ?? ""}
+                                                onChange={(event) => {
+                                                    setOnboardingContractTouched(true);
+                                                    setOnboardingContractDraft((prev) => {
+                                                        const normalized = normalizeOnboardingContractPayload(prev);
+                                                        return {
+                                                            ...normalized,
+                                                            provider_binding: {
+                                                                ...normalized.provider_binding,
+                                                                whatsapp: {
+                                                                    ...normalized.provider_binding?.whatsapp,
+                                                                    notes: event.target.value || null,
+                                                                },
+                                                            },
+                                                        };
+                                                    });
+                                                }}
+                                                placeholder="Manual ops comment"
+                                                disabled={!canEdit}
+                                            />
+                                        </div>
                                     </div>
                                     <div className="rounded-lg border border-border/60 bg-background p-3 space-y-3" data-testid="onboarding-purchased-form">
                                         <div className="text-xs text-muted-foreground">

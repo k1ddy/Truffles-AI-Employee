@@ -2777,6 +2777,19 @@ export interface components {
         OnboardingContractPayload: {
             domain_slug?: string | null;
             purchased?: components["schemas"]["CapabilitiesPayload"];
+            provider_binding?: components["schemas"]["OnboardingProviderBindingPayload"];
+        };
+        OnboardingProviderBindingPayload: {
+            whatsapp?: components["schemas"]["OnboardingProviderBindingWhatsApp"];
+        };
+        OnboardingProviderBindingWhatsApp: {
+            provider?: string | null;
+            instance_id?: string | null;
+            /** @enum {string|null} */
+            webhook_status?: "configured" | "pending" | "rebind_required" | null;
+            /** Format: date */
+            paid_until?: string | null;
+            notes?: string | null;
         };
         OnboardingContractRecord: {
             /** Format: uuid */
