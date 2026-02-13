@@ -1,0 +1,32 @@
+# SESSION 2026-02-13-company-control-plane-v3-a37 — Session 2026-02-13-company-control-plane-v3-a37
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-13-company-control-plane-v3-a37.md
+- branch: feat/2026-02-13-company-control-plane-v3-a37
+- worktree: /home/zhan/worktrees/2026-02-13-company-control-plane-v3-a37
+- base_ref: origin/main
+- scope: Context-scoped Integrations + Company Workspace WhatsApp Control Panel + hard-stop onboarding run-path.
+- done:
+  - Added scope filters (`company_id`, `client_id`, `branch_id`) to `GET /admin/integrations` with strict tenant access checks and mismatch validation.
+  - Updated Console API contract and regenerated frontend API types for integrations scope params.
+  - Added backend tests for integrations scope filtering and mismatch/access-denied guard cases.
+  - Added Integrations page scope controls (company/client/branch), context sync/save actions, and server-scoped query wiring.
+  - Rebuilt `Company Workspace` into an operational control surface with:
+    - scope selectors + context sync,
+    - WhatsApp control panel (branch phone/instance_id save, webhook contract refresh),
+    - provider lifecycle actions (rebind/webhook/renewal/reminder/reconcile) through typed action modal,
+    - linear hard-stop onboarding steps and go-live controls with scorecard gate.
+  - Verified backend/frontend test and build checks.
+- next:
+  - Open PR and handoff for merge
+  - Open PR and handoff for review/merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-13-company-control-plane-v3-a37.md
+  - pytest -q truffles-api/tests/test_console_integrations_registry.py -> 20 passed
+  - pytest -q truffles-api/tests/test_console_*.py -> 259 passed, 4 warnings
+  - python3 truffles-api/scripts/generate_openapi.py --check -> pass
+  - npm --prefix console-web run generate:api -> pass
+  - npm --prefix console-web run lint -- --file src/app/integrations/page.tsx --file src/app/company-workspace/page.tsx --file src/lib/api-client.ts -> pass
+  - npm --prefix console-web run build -> pass
+- last_updated: 2026-02-13

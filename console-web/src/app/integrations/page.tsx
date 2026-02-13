@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
@@ -18,6 +18,28 @@ import {
     type ProviderOpsQueueItem,
 } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
+
+const COMPANY_ID_STORAGE_KEY = "console:company_id";
+const CLIENT_ID_STORAGE_KEY = "console:client_id";
+const BRANCH_ID_STORAGE_KEY = "console:branch_id";
+
+function readLocalStorageValue(key: string): string | null {
+    if (typeof window === "undefined") {
+        return null;
+    }
+    return window.localStorage.getItem(key);
+}
+
+function setLocalStorageValue(key: string, value?: string | null) {
+    if (typeof window === "undefined") {
+        return;
+    }
+    if (!value) {
+        window.localStorage.removeItem(key);
+        return;
+    }
+    window.localStorage.setItem(key, value);
+}
 
 function statusBadgeClass(status: string): string {
     if (status === "error") {
@@ -177,6 +199,10 @@ export default function IntegrationsPage() {
     const { data: session } = useSession();
     const { handleError } = useErrorHandler();
     const [staleAfterMinutes, setStaleAfterMinutes] = useState(60);
+    const [scopeCompanyId, setScopeCompanyId] = useState("");
+    const [scopeClientId, setScopeClientId] = useState("");
+    const [scopeBranchId, setScopeBranchId] = useState("");
+    const [scopeInitialized, setScopeInitialized] = useState(false);
     const [runningAction, setRunningAction] = useState<{
         branchId: string;
         mode: "dry_run" | "execute";
@@ -196,6 +222,86 @@ export default function IntegrationsPage() {
 
     const role = meData?.agent?.role ?? "manager";
     const canReadIntegrations = canAccessConsole(role, "integrations", "read");
+    const companyOptions = meData?.companies ?? [];
+
+    useEffect(() => {
+        if (!meData || scopeInitialized) {
+            return;
+        }
+        const storedCompanyId = readLocalStorageValue(COMPANY_ID_STORAGE_KEY);
+        const storedClientId = readLocalStorageValue(CLIENT_ID_STORAGE_KEY);
+        const storedBranchId = readLocalStorageValue(BRANCH_ID_STORAGE_KEY);
+        setScopeCompanyId(meData.selected_company_id ?? meData.client?.company_id ?? storedCompanyId ?? "");
+        setScopeClientId(meData.client?.id ?? storedClientId ?? "");
+        setScopeBranchId(meData.selected_branch_id ?? storedBranchId ?? "");
+        setScopeInitialized(true);
+    }, [meData, scopeInitialized]);
+
+    const { data: clientsData } = useQuery({
+        queryKey: ["integrations-scope-clients", scopeCompanyId],
+        queryFn: async () => {
+            const response = await adminApi.listClients({
+                limit: 100,
+                lifecycle: "active",
+                company_id: scopeCompanyId || undefined,
+                include_fleet: "true",
+            });
+            return response.data;
+        },
+        enabled: !!session && canReadIntegrations,
+    });
+    const clientOptions = useMemo(() => clientsData?.items ?? [], [clientsData?.items]);
+
+    const { data: branchesData } = useQuery({
+        queryKey: ["integrations-scope-branches", scopeClientId],
+        queryFn: async () => {
+            const response = await adminApi.listBranches({
+                limit: 100,
+                lifecycle: "active",
+                client_id: scopeClientId || undefined,
+            });
+            return response.data;
+        },
+        enabled: !!session && canReadIntegrations && !!scopeClientId,
+    });
+    const branchOptions = useMemo(() => branchesData?.items ?? [], [branchesData?.items]);
+
+    useEffect(() => {
+        if (!scopeClientId) {
+            return;
+        }
+        if (clientOptions.some((client) => client.id === scopeClientId)) {
+            return;
+        }
+        setScopeClientId("");
+        setScopeBranchId("");
+    }, [clientOptions, scopeClientId]);
+
+    useEffect(() => {
+        if (!scopeBranchId) {
+            return;
+        }
+        if (branchOptions.some((branch) => branch.id === scopeBranchId)) {
+            return;
+        }
+        setScopeBranchId("");
+    }, [branchOptions, scopeBranchId]);
+
+    const syncScopeFromContext = () => {
+        const storedCompanyId = readLocalStorageValue(COMPANY_ID_STORAGE_KEY);
+        const storedClientId = readLocalStorageValue(CLIENT_ID_STORAGE_KEY);
+        const storedBranchId = readLocalStorageValue(BRANCH_ID_STORAGE_KEY);
+        setScopeCompanyId(meData?.selected_company_id ?? meData?.client?.company_id ?? storedCompanyId ?? "");
+        setScopeClientId(meData?.client?.id ?? storedClientId ?? "");
+        setScopeBranchId(meData?.selected_branch_id ?? storedBranchId ?? "");
+    };
+
+    const persistScopeAsContext = () => {
+        setLocalStorageValue(COMPANY_ID_STORAGE_KEY, scopeCompanyId || null);
+        setLocalStorageValue(CLIENT_ID_STORAGE_KEY, scopeClientId || null);
+        setLocalStorageValue(BRANCH_ID_STORAGE_KEY, scopeBranchId || null);
+        toast.success("Контекст сохранён");
+    };
 
     const {
         data,
@@ -203,10 +309,13 @@ export default function IntegrationsPage() {
         error,
         refetch,
     } = useQuery({
-        queryKey: ["integrations-registry", staleAfterMinutes],
+        queryKey: ["integrations-registry", staleAfterMinutes, scopeCompanyId, scopeClientId, scopeBranchId],
         queryFn: async () => {
             const response = await adminApi.listIntegrations({
                 stale_after_minutes: staleAfterMinutes,
+                company_id: scopeCompanyId || undefined,
+                client_id: scopeClientId || undefined,
+                branch_id: scopeBranchId || undefined,
             });
             return response.data;
         },
@@ -502,6 +611,101 @@ export default function IntegrationsPage() {
             <div className="mb-3 text-xs text-muted-foreground" data-testid="integrations-threshold-info">
                 stale_after_minutes: {data?.stale_after_minutes ?? staleAfterMinutes}
             </div>
+
+            <section className="mb-4 rounded-lg border border-border/60 bg-card p-4" data-testid="integrations-scope-controls">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Scope</div>
+                <div className="mt-2 grid gap-3 md:grid-cols-4">
+                    <label className="text-xs text-muted-foreground">
+                        company
+                        <select
+                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            value={scopeCompanyId}
+                            onChange={(event) => {
+                                setScopeCompanyId(event.target.value);
+                                setScopeClientId("");
+                                setScopeBranchId("");
+                            }}
+                            data-testid="integrations-scope-company"
+                        >
+                            <option value="">all</option>
+                            {companyOptions.map((company) => (
+                                <option key={company.id} value={company.id ?? ""}>
+                                    {company.name ?? company.id}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+
+                    <label className="text-xs text-muted-foreground">
+                        client
+                        <select
+                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            value={scopeClientId}
+                            onChange={(event) => {
+                                setScopeClientId(event.target.value);
+                                setScopeBranchId("");
+                            }}
+                            data-testid="integrations-scope-client"
+                        >
+                            <option value="">all</option>
+                            {clientOptions.map((client) => (
+                                <option key={client.id} value={client.id ?? ""}>
+                                    {client.name ?? client.slug ?? client.id}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+
+                    <label className="text-xs text-muted-foreground">
+                        branch
+                        <select
+                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            value={scopeBranchId}
+                            onChange={(event) => setScopeBranchId(event.target.value)}
+                            disabled={!scopeClientId}
+                            data-testid="integrations-scope-branch"
+                        >
+                            <option value="">all</option>
+                            {branchOptions.map((branch) => (
+                                <option key={branch.id} value={branch.id ?? ""}>
+                                    {branch.name ?? branch.slug ?? branch.id}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+
+                    <div className="flex flex-wrap items-end gap-2">
+                        <button
+                            className="btn-ghost"
+                            onClick={() => {
+                                setScopeCompanyId("");
+                                setScopeClientId("");
+                                setScopeBranchId("");
+                            }}
+                            data-testid="integrations-scope-reset"
+                        >
+                            Сбросить
+                        </button>
+                        <button
+                            className="btn-ghost"
+                            onClick={syncScopeFromContext}
+                            data-testid="integrations-scope-sync"
+                        >
+                            Из контекста
+                        </button>
+                        <button
+                            className="btn-primary"
+                            onClick={persistScopeAsContext}
+                            data-testid="integrations-scope-save"
+                        >
+                            В контекст
+                        </button>
+                    </div>
+                </div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                    effective: company <span className="font-mono">{scopeCompanyId || "all"}</span> · client <span className="font-mono">{scopeClientId || "all"}</span> · branch <span className="font-mono">{scopeBranchId || "all"}</span>
+                </div>
+            </section>
 
             {providerOpsQueue.length > 0 && (
                 <div className="mb-4 rounded-lg border border-amber-300/60 bg-amber-50/60 p-4" data-testid="provider-ops-queue">

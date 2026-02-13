@@ -7737,15 +7737,52 @@ async def list_integrations(
         ge=_INTEGRATION_MIN_STALE_MINUTES,
         le=_INTEGRATION_MAX_STALE_MINUTES,
     ),
+    company_id: Optional[str] = None,
+    client_id: Optional[str] = None,
+    branch_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> ConsoleIntegrationsListResponse:
     context = get_console_context(request, db, require_selection=False, include_inactive_tenants=False)
     _require_platform_admin(context)
-    _reject_unknown_query_params(request, {"stale_after_minutes"})
+    _reject_unknown_query_params(request, {"stale_after_minutes", "company_id", "client_id", "branch_id"})
+
+    company_uuid = _parse_uuid_param("company_id", company_id)
+    client_uuid = _parse_uuid_param("client_id", client_id)
+    branch_uuid = _parse_uuid_param("branch_id", branch_id)
 
     active_clients = [
         client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
     ]
+    if company_uuid:
+        _require_company_access(context, company_uuid)
+        active_clients = [client for client in active_clients if client.company_id == company_uuid]
+    if client_uuid:
+        _require_client_access(context, client_uuid)
+        selected_client = next((client for client in (context.accessible_clients or []) if client.id == client_uuid), None)
+        if company_uuid and selected_client and selected_client.company_id != company_uuid:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "client_id does not belong to company_id")
+        active_clients = [client for client in active_clients if client.id == client_uuid]
+
+    selected_branch: Optional[Branch] = None
+    if branch_uuid:
+        selected_branch = db.query(Branch).filter(Branch.id == branch_uuid).first()
+        if not selected_branch:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+        _require_client_access(context, selected_branch.client_id, message="Branch belongs to another tenant")
+        if client_uuid and selected_branch.client_id != client_uuid:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to client_id")
+        if company_uuid:
+            selected_branch_company_id = next(
+                (
+                    client.company_id
+                    for client in (context.accessible_clients or [])
+                    if client.id == selected_branch.client_id
+                ),
+                None,
+            )
+            if selected_branch_company_id != company_uuid:
+                raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to company_id")
+
     if not active_clients:
         return ConsoleIntegrationsListResponse(
             stale_after_minutes=stale_after_minutes,
@@ -7756,9 +7793,11 @@ async def list_integrations(
     client_ids = [client.id for client in active_clients]
     client_slug_map = {client.id: client.name for client in active_clients}
 
+    branches_query = db.query(Branch).filter(Branch.client_id.in_(client_ids))
+    if branch_uuid:
+        branches_query = branches_query.filter(Branch.id == branch_uuid)
     branches = (
-        db.query(Branch)
-        .filter(Branch.client_id.in_(client_ids))
+        branches_query
         .order_by(Branch.client_id.asc(), Branch.name.asc(), Branch.created_at.asc())
         .all()
     )
