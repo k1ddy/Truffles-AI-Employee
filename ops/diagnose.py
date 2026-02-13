@@ -3768,6 +3768,28 @@ def _llm_quality_fetch_outbox_payload(db_user, client_id, inbound_message_id):
     status = parts[1] if len(parts) > 1 else None
     return payload, status, None
 
+def _normalize_scenario_generation_error(stderr):
+    text = (stderr or "").strip()
+    if not text:
+        return "scenario generation failed"
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in reversed(lines):
+        marker = "RuntimeError:"
+        idx = line.find(marker)
+        if idx >= 0:
+            return line[idx + len(marker) :].strip()
+    lower = text.lower()
+    if "http error 429" in lower or "insufficient_quota" in lower:
+        return "openai_rate_or_quota_limited: provider returned HTTP 429"
+    if "http error 401" in lower:
+        return "openai_auth_failed: provider returned HTTP 401"
+    if "http error 403" in lower:
+        return "openai_forbidden: provider returned HTTP 403"
+    if "openai_api_key is required" in lower:
+        return "missing_openai_api_key"
+    tail = lines[-1] if lines else text
+    return tail[:500]
+
 def _llm_quality_generate_batch(args, *, count, seed):
     scenario_timeout = float(os.getenv("DIAGNOSE_SCENARIO_GEN_TIMEOUT_SEC", "180"))
     script_path = _llm_quality_dialog_script()
@@ -3804,8 +3826,7 @@ def _llm_quality_generate_batch(args, *, count, seed):
             cmd += ["--llm-api-key", args.llm_api_key]
     result = run_command(cmd, timeout=scenario_timeout)
     if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        return None, None, stderr or "scenario generation failed"
+        return None, None, _normalize_scenario_generation_error(result.stderr or "")
     try:
         payload = json.loads(result.stdout or "")
     except Exception as exc:

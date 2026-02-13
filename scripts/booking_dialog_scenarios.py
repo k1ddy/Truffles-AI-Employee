@@ -9,6 +9,7 @@ import os
 import random
 import re
 import time
+import urllib.error
 import urllib.request
 from typing import Any
 
@@ -920,8 +921,38 @@ def _call_openai(
         method="POST",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
     )
-    with urllib.request.urlopen(req, timeout=40) as resp:
-        body = json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=40) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raw = ""
+        try:
+            raw = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            raw = ""
+        message = f"openai_http_error_{exc.code}"
+        if exc.code == 429:
+            message = "openai_rate_or_quota_limited"
+        elif exc.code == 401:
+            message = "openai_auth_failed"
+        elif exc.code == 403:
+            message = "openai_forbidden"
+        if raw:
+            try:
+                payload = json.loads(raw)
+                error_payload = payload.get("error") if isinstance(payload, dict) else None
+                if isinstance(error_payload, dict):
+                    code = error_payload.get("code")
+                    detail = error_payload.get("message")
+                    if isinstance(code, str) and code.strip():
+                        message = f"{message} ({code})"
+                    if isinstance(detail, str) and detail.strip():
+                        message = f"{message}: {detail.strip()}"
+            except Exception:
+                compact = " ".join(raw.split())
+                if compact:
+                    message = f"{message}: {compact[:400]}"
+        raise RuntimeError(message) from exc
     return body["choices"][0]["message"]["content"]
 
 

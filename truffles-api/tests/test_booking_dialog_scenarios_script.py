@@ -1,5 +1,7 @@
 import json
 import random
+import io
+import urllib.error
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
@@ -207,3 +209,39 @@ def test_ensure_required_tags_adds_check_booking_and_confirm_for_booking_coverag
 
     assert "check_booking" in tags
     assert "confirm" in tags
+
+
+def test_call_openai_classifies_quota_error(monkeypatch):
+    error_payload = json.dumps(
+        {
+            "error": {
+                "code": "insufficient_quota",
+                "message": "quota exceeded for this project",
+            }
+        }
+    ).encode("utf-8")
+    http_error = urllib.error.HTTPError(
+        url="https://api.openai.com/v1/chat/completions",
+        code=429,
+        msg="Too Many Requests",
+        hdrs=None,
+        fp=io.BytesIO(error_payload),
+    )
+
+    def _raise_http_error(*_args, **_kwargs):
+        raise http_error
+
+    monkeypatch.setattr(_module.urllib.request, "urlopen", _raise_http_error)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        _module._call_openai(
+            "test prompt",
+            api_key="test-key",
+            model="gpt-5-mini",
+            base_url="https://api.openai.com",
+            max_tokens=256,
+        )
+
+    message = str(exc_info.value)
+    assert "openai_rate_or_quota_limited" in message
+    assert "insufficient_quota" in message
