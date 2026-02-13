@@ -49,7 +49,12 @@ QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION")
 if not QDRANT_COLLECTION:
     QDRANT_COLLECTION = "truffles_knowledge_ci" if TEST_MODE else "truffles_knowledge"
 BGE_M3_URL = os.environ.get("BGE_M3_URL", "http://bge-m3:80/embed")
+BGE_M3_TIMEOUT_SECONDS = float(os.environ.get("BGE_M3_TIMEOUT_SECONDS", "5.0"))
+BGE_M3_CONNECT_TIMEOUT_SECONDS = float(os.environ.get("BGE_M3_CONNECT_TIMEOUT_SECONDS", "1.5"))
+BGE_M3_ERROR_BACKOFF_SECONDS = float(os.environ.get("BGE_M3_ERROR_BACKOFF_SECONDS", "60.0"))
 _CONSULT_TOPIC_CACHE: dict[tuple[str, str], list[list[float]]] = {}
+_BGE_M3_BACKOFF_UNTIL = 0.0
+_BGE_M3_BACKOFF_REASON: str | None = None
 
 
 def _consult_topic_digest(topics: list[ConsultTopic]) -> str:
@@ -258,21 +263,53 @@ def resolve_consult_topic_candidates(
 
 def get_embedding(text: str, *, client_slug: str | None = None) -> List[float]:
     """Get embedding from BGE-M3 service."""
-    start = time.monotonic()
-    with httpx.Client(timeout=30.0) as client:
-        response = client.post(BGE_M3_URL, json={"inputs": text})
-        if response.status_code != 200:
-            record_bge_time(client_slug, (time.monotonic() - start) * 1000)
-            raise Exception(f"BGE-M3 error: {response.status_code} - {response.text}")
+    global _BGE_M3_BACKOFF_UNTIL, _BGE_M3_BACKOFF_REASON
 
-        data = response.json()
-        # Handle different response formats
-        if isinstance(data, list) and len(data) > 0:
-            embedding = data[0] if isinstance(data[0], list) else data
-        else:
-            embedding = data.get("embedding") or data.get("embeddings") or data
+    start = time.monotonic()
+    if _BGE_M3_BACKOFF_UNTIL > start:
         record_bge_time(client_slug, (time.monotonic() - start) * 1000)
-        return embedding
+        raise RuntimeError(
+            f"BGE-M3 temporarily disabled (backoff active): {_BGE_M3_BACKOFF_REASON or 'unavailable'}"
+        )
+    timeout = httpx.Timeout(
+        timeout=max(BGE_M3_TIMEOUT_SECONDS, 0.1),
+        connect=max(min(BGE_M3_CONNECT_TIMEOUT_SECONDS, BGE_M3_TIMEOUT_SECONDS), 0.1),
+    )
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            response = client.post(BGE_M3_URL, json={"inputs": text})
+            if response.status_code != 200:
+                record_bge_time(client_slug, (time.monotonic() - start) * 1000)
+                raise Exception(f"BGE-M3 error: {response.status_code} - {response.text}")
+
+            data = response.json()
+            # Handle different response formats
+            if isinstance(data, list) and len(data) > 0:
+                embedding = data[0] if isinstance(data[0], list) else data
+            else:
+                embedding = data.get("embedding") or data.get("embeddings") or data
+            _BGE_M3_BACKOFF_UNTIL = 0.0
+            _BGE_M3_BACKOFF_REASON = None
+            record_bge_time(client_slug, (time.monotonic() - start) * 1000)
+            return embedding
+    except Exception as exc:
+        reason = str(exc)
+        lowered = reason.casefold()
+        if any(
+            marker in lowered
+            for marker in (
+                "temporary failure in name resolution",
+                "name or service not known",
+                "failed to resolve",
+                "nodename nor servname provided",
+                "connection refused",
+                "connect timeout",
+            )
+        ):
+            _BGE_M3_BACKOFF_UNTIL = start + max(BGE_M3_ERROR_BACKOFF_SECONDS, 1.0)
+            _BGE_M3_BACKOFF_REASON = reason
+        record_bge_time(client_slug, (time.monotonic() - start) * 1000)
+        raise
 
 
 def _build_qdrant_filter(

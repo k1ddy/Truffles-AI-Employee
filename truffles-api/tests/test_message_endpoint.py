@@ -1233,6 +1233,60 @@ def test_truth_gate_appends_booking_cta_for_info_reply():
     assert (response.bot_response or "").endswith(webhook_router.MSG_BOOKING_CTA)
 
 
+def test_truth_gate_off_topic_handles_simplenamespace_message_metadata():
+    saved_message = SimpleNamespace(
+        message_metadata={"decision_meta": {"expected_reply_matched": False}}
+    )
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        state=ConversationState.BOT_ACTIVE.value,
+        context={"expected_reply_type": webhook_router.EXPECTED_REPLY_SERVICE},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    decision = DemoSalonDecision(
+        action="reply",
+        response="Извините, это не по теме.",
+        intent="off_topic",
+    )
+
+    def _truth_gate(_message: str, *, client_slug: str | None = None, intent_decomp: dict | None = None):
+        return decision
+
+    response = webhook_router._handle_truth_gate_fallback(
+        db=Mock(),
+        conversation=conversation,
+        user=user,
+        message_text="ок",
+        saved_message=saved_message,
+        client_slug="demo_salon",
+        routing={"allow_booking_flow": True, "allow_handover_create": False},
+        booking_wants_flow=False,
+        policy_handler={"policy_type": "demo_salon", "truth_gate": _truth_gate},
+        policy_type="demo_salon",
+        current_goal=None,
+        intent_decomp_used=False,
+        intent_decomp_intents=[],
+        intent_decomp_payload=None,
+        llm_primary_reason="low_confidence",
+        message_count=1,
+        now=datetime.now(timezone.utc),
+        consult_return_pending=False,
+        consult_return_prompt=None,
+        consult_context=None,
+        consult_return_reason=None,
+        maybe_apply_fact_guard=lambda **_kwargs: None,
+        send_and_save=lambda text: (text, True),
+        log_timing=lambda *args, **_kwargs: None,
+        record_escalation_metric=lambda *_args, **_kwargs: None,
+    )
+
+    assert response is not None
+    assert webhook_router.MSG_EXPECTED_SERVICE_OFF_TOPIC in (response.bot_response or "")
+    decision_meta = saved_message.message_metadata.get("decision_meta", {})
+    assert decision_meta.get("expected_reply_guard") == "truth_gate_off_topic_override"
+
+
 def test_strict_ood_sets_out_of_domain_without_in_signals():
     conversation = SimpleNamespace(
         id="conv-ood-1",
