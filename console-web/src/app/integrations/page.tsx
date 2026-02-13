@@ -45,6 +45,45 @@ function statusLabel(status: string): string {
     return labels[status] ?? status;
 }
 
+function paymentStatusLabel(status?: string | null): string {
+    if (status === "confirmed") {
+        return "Confirmed";
+    }
+    if (status === "rejected") {
+        return "Rejected";
+    }
+    if (status === "pending") {
+        return "Pending";
+    }
+    return "Unknown";
+}
+
+function providerBindingExpiryLabel(status?: string | null): string {
+    if (status === "ok") {
+        return "OK";
+    }
+    if (status === "expiring_soon") {
+        return "Expiring soon";
+    }
+    if (status === "expired") {
+        return "Expired";
+    }
+    return "Unknown";
+}
+
+function providerBindingExpiryBadgeClass(status?: string | null): string {
+    if (status === "expired") {
+        return "bg-red-100 text-red-800";
+    }
+    if (status === "expiring_soon") {
+        return "bg-amber-100 text-amber-800";
+    }
+    if (status === "ok") {
+        return "bg-green-100 text-green-800";
+    }
+    return "bg-muted text-muted-foreground";
+}
+
 function formatTimestamp(value?: string | null): string {
     if (!value) {
         return "—";
@@ -223,7 +262,7 @@ export default function IntegrationsPage() {
                 <div>
                     <h1 className="text-2xl font-bold" data-testid="integrations-title">Интеграции</h1>
                     <p className="text-sm text-muted-foreground mt-1">
-                        WhatsApp/Telegram статус по филиалам и drift-сигналы.
+                        WhatsApp/Telegram статус, provider binding lifecycle и drift-сигналы по филиалам.
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -260,6 +299,8 @@ export default function IntegrationsPage() {
                             <th className="p-4 text-sm font-medium text-muted-foreground">Филиал</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">WhatsApp</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">Telegram</th>
+                            <th className="p-4 text-sm font-medium text-muted-foreground">Provider binding</th>
+                            <th className="p-4 text-sm font-medium text-muted-foreground">Оплата/срок</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">Последний inbound</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">Drift issues</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">Итог</th>
@@ -294,6 +335,31 @@ export default function IntegrationsPage() {
                                     <div>{statusLabel(item.telegram_status)}</div>
                                     <div className="text-xs text-muted-foreground">
                                         chat: {item.telegram_chat_id ?? "—"}
+                                    </div>
+                                </td>
+                                <td className="p-4 text-sm">
+                                    <div>{item.provider_binding_provider ?? "—"}</div>
+                                    <div className="text-xs text-muted-foreground">
+                                        binding instance: {item.provider_binding_instance_id ?? "—"}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                        webhook: {item.provider_binding_webhook_status ?? "—"}
+                                    </div>
+                                </td>
+                                <td className="p-4 text-sm">
+                                    <div>{paymentStatusLabel(item.provider_binding_payment_status)}</div>
+                                    <div className="text-xs text-muted-foreground">
+                                        paid_until: {item.provider_binding_paid_until ?? "—"}
+                                    </div>
+                                    <div className="mt-1">
+                                        <span
+                                            className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerBindingExpiryBadgeClass(item.provider_binding_expiry_status)}`}
+                                        >
+                                            {providerBindingExpiryLabel(item.provider_binding_expiry_status)}
+                                        </span>
+                                    </div>
+                                    <div className="text-xs text-muted-foreground mt-1">
+                                        days left: {item.provider_binding_days_until_expiry ?? "—"}
                                     </div>
                                 </td>
                                 <td className="p-4 text-sm">
@@ -337,7 +403,7 @@ export default function IntegrationsPage() {
                         ))}
                         {items.length === 0 && (
                             <tr>
-                                <td colSpan={8} className="p-8 text-center text-muted-foreground" data-testid="integrations-empty">
+                                <td colSpan={10} className="p-8 text-center text-muted-foreground" data-testid="integrations-empty">
                                     Филиалы в доступном fleet не найдены.
                                 </td>
                             </tr>

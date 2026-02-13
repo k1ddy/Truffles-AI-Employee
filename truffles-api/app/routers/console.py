@@ -1246,6 +1246,7 @@ _GO_LIVE_WAIVER_MAX_HOURS = 24 * 30
 _INTEGRATION_DEFAULT_STALE_MINUTES = 60
 _INTEGRATION_MIN_STALE_MINUTES = 5
 _INTEGRATION_MAX_STALE_MINUTES = 24 * 60
+_PROVIDER_BINDING_EXPIRING_SOON_DAYS = 7
 _INTEGRATION_ALERT_ISSUES = {
     "instance_id_mismatch",
     "invalid_webhook_url",
@@ -2538,6 +2539,133 @@ def _load_latest_branch_inbound_observations(
     )
 
 
+@dataclass(frozen=True)
+class _ProviderBindingLifecycle:
+    provider: Optional[str] = None
+    instance_id: Optional[str] = None
+    webhook_status: Optional[str] = None
+    paid_until: Optional[str] = None
+    notes: Optional[str] = None
+    payment_status: str = "unknown"
+    payment_confirmed_at: Optional[str] = None
+    expiry_status: str = "unknown"
+    days_until_expiry: Optional[int] = None
+
+
+def _resolve_provider_binding_expiry(
+    paid_until: Optional[str],
+    *,
+    now_date: dt_date,
+) -> tuple[str, Optional[int]]:
+    value = _normalize_optional_text(paid_until)
+    if not value:
+        return "unknown", None
+    try:
+        paid_until_date = dt_date.fromisoformat(value)
+    except ValueError:
+        return "unknown", None
+    days_until_expiry = (paid_until_date - now_date).days
+    if days_until_expiry < 0:
+        return "expired", days_until_expiry
+    if days_until_expiry <= _PROVIDER_BINDING_EXPIRING_SOON_DAYS:
+        return "expiring_soon", days_until_expiry
+    return "ok", days_until_expiry
+
+
+def _build_provider_binding_lifecycle_map(
+    db: Session,
+    *,
+    client_ids: list[UUID],
+    branches: list[Branch],
+    now: datetime,
+) -> dict[UUID, _ProviderBindingLifecycle]:
+    if not client_ids or not branches:
+        return {}
+
+    branch_ids = [branch.id for branch in branches]
+    contracts = (
+        db.query(ClientOnboardingContract)
+        .filter(
+            ClientOnboardingContract.client_id.in_(client_ids),
+            ClientOnboardingContract.status == "active",
+            or_(
+                and_(
+                    ClientOnboardingContract.scope == "client",
+                    ClientOnboardingContract.branch_id.is_(None),
+                ),
+                and_(
+                    ClientOnboardingContract.scope == "branch",
+                    ClientOnboardingContract.branch_id.in_(branch_ids),
+                ),
+            ),
+        )
+        .order_by(
+            ClientOnboardingContract.updated_at.desc(),
+            ClientOnboardingContract.created_at.desc(),
+        )
+        .all()
+    )
+
+    client_contracts: dict[UUID, ClientOnboardingContract] = {}
+    branch_contracts: dict[UUID, ClientOnboardingContract] = {}
+    for contract in contracts:
+        if contract.scope == "client" and contract.branch_id is None and contract.client_id not in client_contracts:
+            client_contracts[contract.client_id] = contract
+            continue
+        if contract.scope == "branch" and contract.branch_id and contract.branch_id not in branch_contracts:
+            branch_contracts[contract.branch_id] = contract
+
+    lifecycle_by_branch: dict[UUID, _ProviderBindingLifecycle] = {}
+    now_date = now.date()
+    for branch in branches:
+        branch_contract = branch_contracts.get(branch.id)
+        client_contract = client_contracts.get(branch.client_id)
+        payment_source = _resolve_onboarding_payment_source(
+            client_record=client_contract,
+            branch_record=branch_contract,
+        )
+        payment_status = payment_source.payment_status if payment_source else "unknown"
+        payment_confirmed_at = (
+            payment_source.payment_confirmed_at.isoformat()
+            if payment_source and payment_source.payment_confirmed_at
+            else None
+        )
+
+        client_payload = client_contract.payload_json if client_contract else None
+        branch_payload = branch_contract.payload_json if branch_contract else None
+        try:
+            effective_payload = OnboardingContractPayload.model_validate(
+                merge_onboarding_contract(client_payload, branch_payload)
+            )
+        except ValidationError:
+            lifecycle_by_branch[branch.id] = _ProviderBindingLifecycle(
+                payment_status=payment_status,
+                payment_confirmed_at=payment_confirmed_at,
+            )
+            continue
+
+        whatsapp_binding = effective_payload.provider_binding.whatsapp
+        provider = _normalize_optional_text(whatsapp_binding.provider) if whatsapp_binding else None
+        binding_instance_id = _normalize_optional_text(whatsapp_binding.instance_id) if whatsapp_binding else None
+        webhook_status = whatsapp_binding.webhook_status if whatsapp_binding else None
+        paid_until = _normalize_optional_text(whatsapp_binding.paid_until) if whatsapp_binding else None
+        notes = _normalize_optional_text(whatsapp_binding.notes) if whatsapp_binding else None
+        expiry_status, days_until_expiry = _resolve_provider_binding_expiry(paid_until, now_date=now_date)
+        lifecycle_by_branch[branch.id] = _ProviderBindingLifecycle(
+            provider=provider,
+            instance_id=binding_instance_id,
+            webhook_status=webhook_status,
+            paid_until=paid_until,
+            notes=notes,
+            payment_status=payment_status,
+            payment_confirmed_at=payment_confirmed_at,
+            expiry_status=expiry_status,
+            days_until_expiry=days_until_expiry,
+        )
+
+    return lifecycle_by_branch
+
+
 def _build_branch_integration_status(
     *,
     client_id: UUID,
@@ -2548,6 +2676,7 @@ def _build_branch_integration_status(
     last_inbound_at: Optional[datetime],
     last_inbound_instance_id: Optional[str],
     now: datetime,
+    provider_binding: Optional[_ProviderBindingLifecycle] = None,
 ) -> ConsoleBranchIntegrationStatus:
     branch_instance_id = _normalize_optional_text(branch.instance_id)
     branch_telegram_chat_id = _normalize_optional_text(branch.telegram_chat_id)
@@ -2558,6 +2687,7 @@ def _build_branch_integration_status(
     integration_checked_at = getattr(branch, "integration_checked_at", None)
     integration_degraded_at = getattr(branch, "integration_degraded_at", None)
     integration_recovered_at = getattr(branch, "integration_recovered_at", None)
+    binding = provider_binding or _ProviderBindingLifecycle()
     webhook_url: Optional[str] = None
     webhook_url_valid = False
     drift_issues: list[str] = []
@@ -2627,6 +2757,15 @@ def _build_branch_integration_status(
         integration_checked_at=integration_checked_at.isoformat() if integration_checked_at else None,
         integration_degraded_at=integration_degraded_at.isoformat() if integration_degraded_at else None,
         integration_recovered_at=integration_recovered_at.isoformat() if integration_recovered_at else None,
+        provider_binding_provider=binding.provider,
+        provider_binding_instance_id=binding.instance_id,
+        provider_binding_webhook_status=binding.webhook_status,
+        provider_binding_paid_until=binding.paid_until,
+        provider_binding_notes=binding.notes,
+        provider_binding_payment_status=binding.payment_status,
+        provider_binding_payment_confirmed_at=binding.payment_confirmed_at,
+        provider_binding_expiry_status=binding.expiry_status,
+        provider_binding_days_until_expiry=binding.days_until_expiry,
         drift_issues=drift_issues,
         status=status,
     )
@@ -7348,6 +7487,12 @@ async def list_integrations(
         client_ids=client_ids,
     )
     now = datetime.now(timezone.utc)
+    provider_binding_by_branch = _build_provider_binding_lifecycle_map(
+        db,
+        client_ids=client_ids,
+        branches=branches,
+        now=now,
+    )
     items = []
     for branch in branches:
         client_slug = client_slug_map.get(branch.client_id)
@@ -7367,6 +7512,7 @@ async def list_integrations(
             last_inbound_at=last_inbound_at,
             last_inbound_instance_id=last_inbound_instance_id,
             now=now,
+            provider_binding=provider_binding_by_branch.get(branch.id),
         )
         items.append(item)
 
@@ -9030,6 +9176,26 @@ async def waive_branch_go_live(
 
     reason = _normalize_access_reason(body.reason, required=True)
     ttl_hours = _normalize_go_live_waiver_ttl_hours(body.ttl_hours)
+    scorecard = build_onboarding_scorecard(db, branch)
+    if not scorecard.ready:
+        failed_checks = [
+            check.id.value
+            for check in scorecard.checks
+            if check.required and not check.passed
+        ]
+        raise ConsoleAPIError(
+            409,
+            "GO_LIVE_GATE_REQUIRED",
+            "Go-live prerequisites missing",
+            {
+                "operation": "branch_go_live_waive",
+                "go_live_state": _normalize_branch_go_live_state(branch.go_live_state),
+                "required_step": OnboardingStep.GO_NO_GO.value,
+                "missing": scorecard.missing,
+                "scorecard_status": "fail",
+                "failed_checks": failed_checks,
+            },
+        )
 
     now = datetime.now(timezone.utc)
     waiver_until = now + timedelta(hours=ttl_hours)
@@ -10645,17 +10811,34 @@ async def run_onboarding_autopilot(
         db.add(capability_record)
     actions.append("capabilities_upserted")
 
-    contract_payload = OnboardingContractPayload.model_validate(
-        {
-            "domain_slug": domain_slug or purchased_capabilities.domain_slug,
-            "purchased": payload_to_dict(purchased_capabilities),
-        }
-    )
     contract_record = _get_latest_onboarding_contract(
         db,
         client_id=client.id,
         scope="branch",
         branch_id=branch.id,
+    )
+    provider_binding_override = None
+    if body.provider_binding is not None:
+        provider_binding_override = body.provider_binding.model_dump(exclude_none=True, mode="json")
+        whatsapp_override = provider_binding_override.get("whatsapp")
+        if isinstance(whatsapp_override, dict):
+            if not _normalize_optional_text(whatsapp_override.get("instance_id")):
+                whatsapp_override["instance_id"] = instance_id
+    contract_payload_override: dict[str, object] = {
+        "domain_slug": domain_slug or purchased_capabilities.domain_slug,
+        "purchased": payload_to_dict(purchased_capabilities),
+    }
+    if provider_binding_override is not None:
+        contract_payload_override["provider_binding"] = provider_binding_override
+    base_contract_payload = (
+        contract_record.payload_json
+        if contract_record
+        and contract_record.status == "active"
+        and isinstance(contract_record.payload_json, dict)
+        else None
+    )
+    contract_payload = OnboardingContractPayload.model_validate(
+        merge_onboarding_contract(base_contract_payload, contract_payload_override)
     )
     if contract_record:
         contract_record.payload_json = onboarding_contract_payload_to_dict(contract_payload)
