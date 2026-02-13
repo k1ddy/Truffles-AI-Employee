@@ -1,5 +1,5 @@
-from app.schemas.intent import validate_llm_policy_core_output
 from app.routers.webhook import decision as decision_router
+from app.schemas.intent import validate_llm_policy_core_output
 
 
 def test_validate_llm_policy_core_output_valid():

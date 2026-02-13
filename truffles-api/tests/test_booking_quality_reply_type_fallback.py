@@ -9,6 +9,8 @@ def _load_reply_type_fallback():
 
     wanted_assigns = {"CHAOS_BOOKING_REPLY_TYPES", "CHAOS_PENDING_ACTIONS"}
     wanted_functions = {
+        "_llm_quality_normalize_tool_token",
+        "_llm_quality_effective_intent",
         "_chaos_trace_has_stage",
         "_chaos_trace_has_stage_with_reason",
         "_chaos_trace_has_pending",
