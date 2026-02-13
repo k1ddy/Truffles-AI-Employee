@@ -1646,11 +1646,17 @@ def _handle_truth_gate_fallback(
         if decision.intent == "off_topic":
             context = legacy._get_conversation_context(conversation)
             expected_reply_type = legacy._get_expected_reply_type(context)
-            saved_meta = (
-                saved_message.metadata
-                if saved_message and isinstance(saved_message.metadata, dict)
-                else None
-            )
+            saved_meta = None
+            if saved_message is not None:
+                # Tests may pass lightweight message doubles that only expose
+                # `message_metadata` (without SQLAlchemy `.metadata`).
+                raw_meta = getattr(saved_message, "message_metadata", None)
+                if isinstance(raw_meta, dict):
+                    saved_meta = raw_meta
+                else:
+                    legacy_meta = getattr(saved_message, "metadata", None)
+                    if isinstance(legacy_meta, dict):
+                        saved_meta = legacy_meta
             saved_decision_meta = (
                 saved_meta.get("decision_meta")
                 if isinstance(saved_meta, dict)
