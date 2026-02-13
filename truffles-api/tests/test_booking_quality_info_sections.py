@@ -1,4 +1,5 @@
 import ast
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -43,6 +44,29 @@ def _load_expected_section_matcher():
 
 
 _expected_section_answered = _load_expected_section_matcher()
+
+
+def _load_info_tag_infer():
+    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
+    source = script_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(script_path))
+    wanted_assignments = {"LLM_QUALITY_TAG_HINTS", "LLM_QUALITY_TAG_HINTS_RE"}
+    wanted_functions = {"_llm_quality_infer_info_tags"}
+    selected_nodes = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            names = {target.id for target in node.targets if isinstance(target, ast.Name)}
+            if names & wanted_assignments:
+                selected_nodes.append(node)
+        elif isinstance(node, ast.FunctionDef) and node.name in wanted_functions:
+            selected_nodes.append(node)
+    module = ast.Module(body=selected_nodes, type_ignores=[])
+    namespace = {"re": re}
+    exec(compile(module, str(script_path), "exec"), namespace, namespace)
+    return namespace["_llm_quality_infer_info_tags"]
+
+
+_infer_info_tags = _load_info_tag_infer()
 
 
 def test_expected_sections_match_promotions_synonyms():
@@ -123,6 +147,11 @@ def test_parking_signal_ignores_machine_haircut_phrase():
 def test_parking_signal_accepts_machine_phrase_with_parking_context():
     normalized = demo_salon_knowledge._normalize_text("Машинку можно оставить во дворе?")
     assert demo_salon_knowledge._has_parking_signal(normalized, client_slug="demo_salon") is True
+
+
+def test_info_tag_infer_detects_duration_from_how_long_question():
+    tags = _infer_info_tags("Какая длительность процедуры?")
+    assert "duration" in tags
 
 
 def test_parking_signal_accepts_colloquial_parking_wording():

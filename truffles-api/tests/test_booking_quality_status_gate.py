@@ -14,6 +14,8 @@ def _load_quality_helpers():
         "LLM_QUALITY_REGRESSION_KEYS",
     }
     wanted_functions = {
+        "_llm_quality_normalize_tool_token",
+        "_llm_quality_is_timeout_degrade_reason",
         "_clean_webhook_secret",
         "_llm_quality_secret_fingerprint",
         "_llm_quality_resolve_expected_webhook_secret",
@@ -152,3 +154,12 @@ def test_regression_checks_degraded_fallback_rate_as_max_direction():
 
     assert results["degraded_fallback_rate"]["direction"] == "max"
     assert "degraded_fallback_rate" in breaches
+
+
+def test_timeout_degrade_reason_classifier_detects_deadline_and_timeout_markers():
+    ns = _load_quality_helpers()
+    is_timeout = ns["_llm_quality_is_timeout_degrade_reason"]
+
+    assert is_timeout("policy_error:deadline_exceeded") is True
+    assert is_timeout("provider_timeout") is True
+    assert is_timeout("policy_validation:low_confidence") is False

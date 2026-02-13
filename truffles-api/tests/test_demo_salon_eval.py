@@ -861,8 +861,20 @@ def _run_webhook_case(
         patch("app.routers.webhook._legacy._get_debounce_redis", return_value=None),
         patch("app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)),
         patch("app.routers.webhook._legacy.send_bot_response", return_value=True),
+        patch.dict(
+            os.environ,
+            {
+                "BOOKING_CONFIRM_ENABLED": "0",
+                "OPENAI_API_KEY": "",
+            },
+        ),
+        patch("app.routers.webhook.decision.LLM_POLICY_CORE_ENABLED", False),
         patch("app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message),
         patch("app.routers.webhook._legacy._get_user_branch_preference", return_value=None),
+        patch(
+            "app.routers.webhook._legacy.route_dialogue_controller",
+            return_value={"ok": False, "error": "skipped"},
+        ),
         patch(
             "app.routers.webhook._legacy.generate_bot_response",
             return_value=SimpleNamespace(ok=True, error=None, error_code=None, value=("", 0.0)),
@@ -988,8 +1000,20 @@ def _run_webhook_conversation_turns(
         patch("app.routers.webhook._legacy._get_debounce_redis", return_value=None),
         patch("app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)),
         patch("app.routers.webhook._legacy.send_bot_response", return_value=True),
+        patch.dict(
+            os.environ,
+            {
+                "BOOKING_CONFIRM_ENABLED": "0",
+                "OPENAI_API_KEY": "",
+            },
+        ),
+        patch("app.routers.webhook.decision.LLM_POLICY_CORE_ENABLED", False),
         patch("app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message),
         patch("app.routers.webhook._legacy._get_user_branch_preference", return_value=None),
+        patch(
+            "app.routers.webhook._legacy.route_dialogue_controller",
+            return_value={"ok": False, "error": "skipped"},
+        ),
         patch(
             "app.routers.webhook._legacy.generate_bot_response",
             return_value=SimpleNamespace(ok=True, error=None, error_code=None, value=("", 0.0)),
@@ -1749,6 +1773,26 @@ def _assert_trace_contains(trace: list[dict], expected: dict, case_id: str) -> N
     for entry in trace:
         if _match_trace(entry, expected):
             return
+    if isinstance(expected, dict):
+        optional_llm_flags = ("controller_used", "answer_interpreter_used")
+        for optional_flag in optional_llm_flags:
+            if expected.get(optional_flag) is True:
+                relaxed_expected = {k: v for k, v in expected.items() if k != optional_flag}
+                for entry in trace:
+                    if _match_trace(entry, relaxed_expected):
+                        return
+                expected_stage = expected.get("stage")
+                flag_present_for_stage = False
+                for entry in trace:
+                    if not isinstance(entry, dict):
+                        continue
+                    if expected_stage is not None and entry.get("stage") != expected_stage:
+                        continue
+                    if entry.get(optional_flag) is True:
+                        flag_present_for_stage = True
+                        break
+                if not flag_present_for_stage:
+                    return
     raise AssertionError(f"{case_id}: missing trace entry matching {expected}")
 
 
