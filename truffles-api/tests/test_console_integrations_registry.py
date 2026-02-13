@@ -939,3 +939,91 @@ async def test_run_provider_ops_reminder_execute_marks_confirmation(monkeypatch)
     assert require_calls and require_calls[0]["action"] == "provider_ops_execute"
     assert marked == ["used"]
     db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_provider_start_rebind_execute_handles_legacy_contract_extras(monkeypatch):
+    request = SimpleNamespace(query_params={})
+    client_id = uuid4()
+    branch_id = uuid4()
+    actor_id = uuid4()
+    branch = SimpleNamespace(id=branch_id, client_id=client_id, is_active=True, instance_id="instance-1")
+    db = Mock()
+    db.query.return_value = _QueryMock([branch])
+
+    context = SimpleNamespace(
+        role="platform_admin",
+        client=SimpleNamespace(id=client_id),
+        accessible_clients=[SimpleNamespace(id=client_id, status="active")],
+        agent=SimpleNamespace(id=actor_id),
+        effective_branch_id=None,
+    )
+    confirmation = SimpleNamespace(id=uuid4())
+    marked: list[str] = []
+    require_calls: list[dict] = []
+    contract_record = SimpleNamespace(
+        id=uuid4(),
+        client_id=client_id,
+        branch_id=branch_id,
+        scope="branch",
+        status="active",
+        schema_version="v1",
+        payment_status="pending",
+        payment_confirmed_at=None,
+        payment_confirmed_by=None,
+        payload_json={
+            "domain_slug": "beauty",
+            "purchased": {},
+            "provider_binding": {"whatsapp": {"provider": "chatflow", "instance_id": "instance-1"}},
+            "legacy_extra": {"source": "old-migration"},
+        },
+    )
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(
+        console_router,
+        "_build_provider_binding_lifecycle_map",
+        lambda *_args, **_kwargs: {branch_id: console_router._ProviderBindingLifecycle()},
+    )
+
+    def _fake_require_confirmation(*_args, **kwargs):
+        require_calls.append(kwargs)
+        return confirmation
+
+    monkeypatch.setattr(console_router, "require_confirmation", _fake_require_confirmation)
+    monkeypatch.setattr(
+        console_router,
+        "_get_latest_onboarding_contract",
+        lambda *_args, **kwargs: contract_record
+        if kwargs.get("scope") == "branch" and kwargs.get("branch_id") == branch_id
+        else None,
+    )
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "mark_confirmation_used",
+        lambda *_args, **_kwargs: marked.append("used"),
+    )
+
+    response = await console_router.run_integration_reconcile_for_branch(
+        branch_id=branch_id,
+        body=ConsoleIntegrationBranchActionRequest(
+            action="provider_start_rebind",
+            mode="execute",
+            confirmation_id=uuid4(),
+            notes="manual start rebind",
+        ),
+        request=request,
+        db=db,
+    )
+
+    assert response.branch_id == branch_id
+    assert response.action == "provider_start_rebind"
+    assert response.mode == "execute"
+    assert response.result["binding_after"]["webhook_status"] == "rebind_required"
+    assert response.result["binding_after"]["rebind_required"] is True
+    assert response.result["payment_status_after"] == "pending"
+    assert require_calls and require_calls[0]["action"] == "provider_ops_execute"
+    assert marked == ["used"]
+    assert "legacy_extra" not in contract_record.payload_json
+    db.commit.assert_called_once()
