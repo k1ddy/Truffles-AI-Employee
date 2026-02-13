@@ -124,6 +124,43 @@ def test_build_branch_integration_status_ok():
     assert result.drift_issues == []
 
 
+def test_build_branch_integration_status_exposes_provider_binding_lifecycle():
+    branch = _make_branch(instance_id="instance-1")
+    client_id = uuid4()
+    now = datetime.now(timezone.utc)
+    result = console_router._build_branch_integration_status(
+        client_id=client_id,
+        client_slug="demo",
+        branch=branch,
+        has_telegram_bot_token=True,
+        stale_after_minutes=30,
+        last_inbound_at=now - timedelta(minutes=1),
+        last_inbound_instance_id="instance-1",
+        now=now,
+        provider_binding=console_router._ProviderBindingLifecycle(
+            provider="chatflow",
+            instance_id="instance-1",
+            webhook_status="configured",
+            paid_until="2030-01-01",
+            notes="manual renewal",
+            payment_status="confirmed",
+            payment_confirmed_at=now.isoformat(),
+            expiry_status="ok",
+            days_until_expiry=120,
+        ),
+    )
+
+    assert result.provider_binding_provider == "chatflow"
+    assert result.provider_binding_instance_id == "instance-1"
+    assert result.provider_binding_webhook_status == "configured"
+    assert result.provider_binding_paid_until == "2030-01-01"
+    assert result.provider_binding_notes == "manual renewal"
+    assert result.provider_binding_payment_status == "confirmed"
+    assert result.provider_binding_payment_confirmed_at == now.isoformat()
+    assert result.provider_binding_expiry_status == "ok"
+    assert result.provider_binding_days_until_expiry == 120
+
+
 def test_emit_integration_drift_signals_detect_and_clear(monkeypatch):
     with console_router._INTEGRATION_DRIFT_LOCK:
         console_router._INTEGRATION_DRIFT_STATE.clear()
@@ -244,6 +281,11 @@ async def test_list_integrations_is_read_only_without_drift_side_effects(monkeyp
     monkeypatch.setattr(
         console_router,
         "_load_latest_branch_inbound_observations_for_clients",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_provider_binding_lifecycle_map",
         lambda *_args, **_kwargs: {},
     )
     monkeypatch.setattr(
