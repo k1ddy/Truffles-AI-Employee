@@ -4289,6 +4289,77 @@ def _llm_quality_parse_coverage_tokens(value):
     return {token for token in raw_tokens if token and token not in {"none", "off"}}
 
 
+def _llm_quality_build_scenario_contract_status(*, dialogs, scenario_coverage):
+    coverage_tokens = _llm_quality_parse_coverage_tokens(scenario_coverage)
+    required_tags_by_coverage = {
+        "booking": ("booking", "check_booking", "confirm"),
+    }
+    tag_counts = {}
+    dialogs_with_check_confirm_sequence = 0
+
+    for dialog in dialogs or []:
+        if not isinstance(dialog, dict):
+            continue
+        turns = dialog.get("turns")
+        if not isinstance(turns, list):
+            continue
+        first_check_booking = None
+        first_confirm_after_check = None
+        for idx, turn in enumerate(turns):
+            if not isinstance(turn, dict):
+                continue
+            raw_tags = turn.get("tags")
+            if not isinstance(raw_tags, list):
+                continue
+            tags = []
+            for item in raw_tags:
+                if not isinstance(item, str):
+                    continue
+                token = item.strip().casefold()
+                if not token:
+                    continue
+                tags.append(token)
+                tag_counts[token] = tag_counts.get(token, 0) + 1
+            if "check_booking" in tags and first_check_booking is None:
+                first_check_booking = idx
+            if (
+                "confirm" in tags
+                and first_check_booking is not None
+                and idx > first_check_booking
+                and first_confirm_after_check is None
+            ):
+                first_confirm_after_check = idx
+        if first_check_booking is not None and first_confirm_after_check is not None:
+            dialogs_with_check_confirm_sequence += 1
+
+    reasons = []
+    required = {}
+    for coverage_token, required_tags in required_tags_by_coverage.items():
+        if coverage_token not in coverage_tokens:
+            continue
+        for tag in required_tags:
+            present = tag_counts.get(tag, 0) > 0
+            required[tag] = present
+            if not present:
+                reasons.append(f"missing_tag:{tag}")
+
+    if (
+        "booking" in coverage_tokens
+        and required.get("check_booking")
+        and required.get("confirm")
+        and dialogs_with_check_confirm_sequence <= 0
+    ):
+        reasons.append("check_confirm_sequence_missing")
+
+    return {
+        "valid": not reasons,
+        "reasons": reasons,
+        "coverage_tokens": sorted(coverage_tokens),
+        "tag_counts": tag_counts,
+        "dialogs_with_check_confirm_sequence": dialogs_with_check_confirm_sequence,
+    }
+
+
 def _llm_quality_build_tool_evidence_status(
     *,
     scenario_coverage,
@@ -4299,6 +4370,7 @@ def _llm_quality_build_tool_evidence_status(
     policy = _llm_quality_normalize_tool_token(tool_evidence_policy) or "auto"
     if policy not in {"off", "auto", "strict"}:
         policy = "auto"
+    hooks_mode = _llm_quality_normalize_tool_token(tool_hooks_mode)
 
     intents = (coverage_stats or {}).get("intents")
     if not isinstance(intents, dict):
@@ -4362,9 +4434,11 @@ def _llm_quality_build_tool_evidence_status(
     confirm_candidates = check_booking_intents + booking_confirm_actions
     require_calendar = policy in {"auto", "strict"} and booking_required
     require_confirm = policy == "strict" and booking_required
-    require_hooks = policy == "strict" and _llm_quality_normalize_tool_token(tool_hooks_mode) == "auto"
+    require_hooks = policy == "strict"
 
     reasons = []
+    if policy == "strict" and hooks_mode != "auto":
+        reasons.append("tool_hooks_mode_not_auto")
     if require_calendar and calendar_intent_turns == 0:
         reasons.append("calendar_intent_missing")
     if require_calendar and calendar_evidence_total <= 0:
@@ -4373,9 +4447,9 @@ def _llm_quality_build_tool_evidence_status(
         reasons.append("confirm_candidate_missing")
     if require_confirm and confirm_evidence_total <= 0:
         reasons.append("confirm_evidence_missing")
-    if require_hooks and require_calendar and calendar_hook_events <= 0:
+    if require_hooks and hooks_mode == "auto" and require_calendar and calendar_hook_events <= 0:
         reasons.append("calendar_hook_missing")
-    if require_hooks and require_confirm and confirm_hook_events <= 0:
+    if require_hooks and hooks_mode == "auto" and require_confirm and confirm_hook_events <= 0:
         reasons.append("confirm_hook_missing")
 
     return {
@@ -4387,6 +4461,7 @@ def _llm_quality_build_tool_evidence_status(
             "calendar": require_calendar,
             "confirm": require_confirm,
             "hooks": require_hooks,
+            "hooks_mode": hooks_mode,
         },
         "counts": {
             "calendar_intent_turns": calendar_intent_turns,
@@ -5313,7 +5388,25 @@ def _load_env_file(path):
                 if "=" not in line:
                     continue
                 key, value = line.split("=", 1)
-                env[key.strip()] = value.strip().strip('"').strip("'")
+                cleaned_key = key.strip()
+                cleaned_value = value.strip().strip('"').strip("'")
+                if cleaned_value.startswith("${") and cleaned_value.endswith("}") and len(cleaned_value) > 3:
+                    ref_key = cleaned_value[2:-1].strip()
+                    if ref_key:
+                        cleaned_value = (
+                            env.get(ref_key)
+                            or os.environ.get(ref_key)
+                            or cleaned_value
+                        )
+                elif cleaned_value.startswith("$") and len(cleaned_value) > 1:
+                    ref_key = cleaned_value[1:].strip()
+                    if ref_key and all(ch.isalnum() or ch == "_" for ch in ref_key):
+                        cleaned_value = (
+                            env.get(ref_key)
+                            or os.environ.get(ref_key)
+                            or cleaned_value
+                        )
+                env[cleaned_key] = cleaned_value
     except Exception:
         return {}
     return env
@@ -5406,24 +5499,42 @@ def _openai_key_candidate_env_files():
 
 
 def _resolve_openai_api_key(explicit=None, *, container_name=None):
+    key_aliases = (
+        "OPENAI_API_KEY",
+        "OPENAI_KEY",
+        "OPENAI_API_TOKEN",
+        "OPENAI_TOKEN",
+        "LLM_API_KEY",
+        "OPENAI_JUDGE_API_KEY",
+        "JUDGE_API_KEY",
+    )
+
+    def _alias_source(prefix: str, alias: str) -> str:
+        if alias == "OPENAI_API_KEY":
+            return prefix
+        return f"{prefix}:{alias}"
+
     key = _clean_api_key(explicit)
     if key:
         return key, "explicit"
 
-    env_key = _clean_api_key(os.environ.get("OPENAI_API_KEY"))
-    if env_key:
-        return env_key, "env:OPENAI_API_KEY"
+    for alias in key_aliases:
+        env_key = _clean_api_key(os.environ.get(alias))
+        if env_key:
+            return env_key, _alias_source("env:OPENAI_API_KEY", alias)
 
     for env_path in _openai_key_candidate_env_files():
         env_map = _load_env_file(env_path)
-        file_key = _clean_api_key(env_map.get("OPENAI_API_KEY"))
-        if file_key:
-            return file_key, f"env_file:{env_path}"
+        for alias in key_aliases:
+            file_key = _clean_api_key(env_map.get(alias))
+            if file_key:
+                return file_key, _alias_source(f"env_file:{env_path}", alias)
 
     if container_name:
-        container_key = _clean_api_key(_resolve_env_from_container(container_name, "OPENAI_API_KEY"))
-        if container_key:
-            return container_key, f"container:{container_name}"
+        for alias in key_aliases:
+            container_key = _clean_api_key(_resolve_env_from_container(container_name, alias))
+            if container_key:
+                return container_key, _alias_source(f"container:{container_name}", alias)
 
     return None, None
 
@@ -7624,7 +7735,7 @@ def _run_llm_quality(args):
     elif args.mode == "llm" and not args.scenarios_file:
         raise SystemExit(
             "llm-quality: missing OPENAI_API_KEY for scenario generation "
-            "(checked --llm-api-key, OPENAI_API_KEY env, *.env candidates, container env)"
+            "(checked --llm-api-key, OPENAI_API_KEY aliases in env, *.env candidates, container env)"
         )
 
     judge_mode = args.judge_mode
@@ -7709,6 +7820,28 @@ def _run_llm_quality(args):
 
     if not dialogs:
         raise SystemExit("llm-quality: no dialogs to execute")
+
+    scenario_contract = _llm_quality_build_scenario_contract_status(
+        dialogs=dialogs,
+        scenario_coverage=args.scenario_coverage,
+    )
+    scenario_preflight_payload = {
+        "stage": "llm_quality_scenario_contract_preflight",
+        "valid": scenario_contract.get("valid"),
+        "reasons": scenario_contract.get("reasons"),
+        "coverage_tokens": scenario_contract.get("coverage_tokens"),
+        "tag_counts": scenario_contract.get("tag_counts"),
+        "dialogs_with_check_confirm_sequence": scenario_contract.get(
+            "dialogs_with_check_confirm_sequence"
+        ),
+    }
+    print(json.dumps(scenario_preflight_payload, ensure_ascii=False))
+    if not scenario_contract.get("valid"):
+        reason_tokens = scenario_contract.get("reasons") or ["unknown"]
+        raise SystemExit(
+            "llm-quality: INVALID RUN - scenario contract failed "
+            f"({','.join(reason_tokens)})"
+        )
 
     scenarios_payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -9293,6 +9426,7 @@ def _run_llm_quality(args):
         "top_failures": top_failures,
         "failures": failures,
         "coverage": coverage_stats,
+        "scenario_contract": scenario_contract,
         "tool_evidence": tool_evidence_status,
         "judge": judge_stats,
         "webhook_secret_preflight": secret_preflight,
@@ -9305,6 +9439,8 @@ def _run_llm_quality(args):
             "semantic_reasons": semantic_status["reasons"],
             "tool_evidence_valid": tool_evidence_status.get("valid"),
             "tool_evidence_reasons": tool_evidence_status.get("reasons"),
+            "scenario_contract_valid": scenario_contract.get("valid"),
+            "scenario_contract_reasons": scenario_contract.get("reasons"),
             "comparison_blocked": comparison_blocked,
             "comparison_block_reasons": comparison_block_reasons,
         },

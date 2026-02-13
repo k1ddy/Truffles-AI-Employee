@@ -1457,10 +1457,15 @@ def _handle_consult_flow(
             if service_meta:
                 consult_meta.setdefault("service_query", service_meta.get("service_query"))
                 consult_meta.setdefault("service_query_source", service_meta.get("service_query_source"))
+                # Keep fact metadata consistent with the appended service reply branch.
+                # Without this, consult pack metadata can leave stale `fact_source` values
+                # (e.g. "truth") while trace records "service_matcher".
+                if service_fact_source in {"truth", "service_matcher", "multi_truth"}:
+                    consult_meta["fact_source"] = service_fact_source
+                if service_meta.get("fact_intents") is not None:
+                    consult_meta["fact_intents"] = service_meta.get("fact_intents")
                 # Preserve fact metadata from service_matcher replies for downstream contracts/tests.
                 for key in (
-                    "fact_source",
-                    "fact_intents",
                     "info_sections",
                     "info_combined",
                     "question_type",

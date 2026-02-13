@@ -54,6 +54,36 @@ def test_openai_key_resolver_uses_container_fallback(monkeypatch, tmp_path):
     assert source == "container:truffles-api"
 
 
+def test_openai_key_resolver_accepts_env_alias(monkeypatch, tmp_path):
+    resolver, _ = _load_openai_key_helpers()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_KEY", "alias-env-key")
+    monkeypatch.chdir(tmp_path)
+
+    key, source = resolver(None, container_name=None)
+
+    assert key == "alias-env-key"
+    assert source == "env:OPENAI_API_KEY:OPENAI_KEY"
+
+
+def test_openai_key_resolver_expands_env_reference_in_env_file(monkeypatch, tmp_path):
+    resolver, _ = _load_openai_key_helpers()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_KEY", raising=False)
+    env_dir = tmp_path / "truffles-api"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    (env_dir / ".env").write_text(
+        "OPENAI_API_KEY_FALLBACK=expanded-key\nOPENAI_API_KEY=${OPENAI_API_KEY_FALLBACK}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    key, source = resolver(None, container_name=None)
+
+    assert key == "expanded-key"
+    assert source is not None and source.startswith("env_file:")
+
+
 def test_openai_key_export_sets_env(monkeypatch):
     _, exporter = _load_openai_key_helpers()
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

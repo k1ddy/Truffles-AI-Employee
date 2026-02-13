@@ -164,3 +164,24 @@ def test_tool_evidence_strict_policy_counts_check_booking_alias_intents():
 
     assert tool_evidence["valid"] is True
     assert tool_evidence["counts"]["check_booking_intents"] == 2
+
+
+def test_tool_evidence_strict_policy_requires_auto_tool_hooks_mode():
+    ns = _load_tool_evidence_helpers()
+    build_tool_evidence_status = ns["_llm_quality_build_tool_evidence_status"]
+
+    tool_evidence = build_tool_evidence_status(
+        scenario_coverage="booking,info,interrupt",
+        tool_hooks_mode="check",
+        tool_evidence_policy="strict",
+        coverage_stats={
+            "intents": {"calendar.get_booking": 2},
+            "actions": {"booking_confirm": 1},
+            "trace_stages": {"booking_commit": 1, "booking_confirm": 1},
+            "tools": {"events": {"calendar": 2, "confirm": 1}},
+            "tool_hooks": {"by_action": {"calendar": 1, "confirm": 1}},
+        },
+    )
+
+    assert tool_evidence["valid"] is False
+    assert "tool_hooks_mode_not_auto" in tool_evidence["reasons"]
