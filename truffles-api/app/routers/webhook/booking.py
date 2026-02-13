@@ -515,6 +515,22 @@ def _validate_name_slot(
         return None
     if any(len(token) < 2 for token in tokens):
         return None
+    booking_action_tokens = {
+        "проверь",
+        "проверить",
+        "подтверди",
+        "подтвердить",
+        "перенеси",
+        "перенести",
+        "отмени",
+        "отменить",
+    }
+    booking_object_tokens = {"запись", "бронь", "броньку", "броню"}
+    if (
+        set(tokens).intersection(booking_action_tokens)
+        and set(tokens).intersection(booking_object_tokens)
+    ):
+        return None
     if all(token in legacy.NAME_NOISE_TOKENS for token in tokens):
         return None
     return cleaned

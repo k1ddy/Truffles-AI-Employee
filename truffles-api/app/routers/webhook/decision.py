@@ -861,19 +861,27 @@ def _apply_expected_reply_contract(
             slot_confidence = 1.0
         else:
             if answer_used and use_llm_slot:
-                validated_value = _validate_expected_reply_value(
-                    expected_reply_type=expected_reply_type,
-                    value=answer_value,
-                    client_slug=client_slug,
-                )
-                if validated_value:
-                    matched = True
-                    value = validated_value
-                    slot_source = "llm"
-                    slot_confidence = answer_confidence
-                else:
+                # Guard against fabricated time slots: for datetime replies we only
+                # accept LLM slot values when the user text had a deterministic
+                # datetime signal in this turn.
+                if expected_reply_type == legacy.EXPECTED_REPLY_TIME and not deterministic_available:
                     answer_value_validated = False
-                    slot_validation_error = "validation_failed"
+                    slot_validation_error = "time_not_grounded"
+                    answer_error = "time_not_grounded"
+                else:
+                    validated_value = _validate_expected_reply_value(
+                        expected_reply_type=expected_reply_type,
+                        value=answer_value,
+                        client_slug=client_slug,
+                    )
+                    if validated_value:
+                        matched = True
+                        value = validated_value
+                        slot_source = "llm"
+                        slot_confidence = answer_confidence
+                    else:
+                        answer_value_validated = False
+                        slot_validation_error = "validation_failed"
             elif answer_used and not use_llm_slot:
                 answer_used = False
                 answer_value_validated = False
@@ -8257,6 +8265,7 @@ async def _handle_webhook_payload(
                 service_query=policy_service_query,
                 info_sections_hint=info_sections_hint,
                 message_text=message_text,
+                expected_reply_type=expected_reply_type,
                 now=now,
                 user_name=getattr(user, "name", None) if user else None,
                 user_phone=getattr(user, "phone", None) if user else None,

@@ -37,6 +37,8 @@ def test_validate_name_slot_accepts_name(message_text, expected):
         "привет",
         "да",
         "меня зовут 123",
+        "проверь запись",
+        "подтверди запись",
     ],
 )
 def test_validate_name_slot_rejects_noise(message_text):

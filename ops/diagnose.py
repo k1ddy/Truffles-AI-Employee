@@ -6651,7 +6651,59 @@ def _build_livecheck_message(rng, case, marker_prefix, timestamp, idx, noise):
         message = text
     return text, marker, message
 
-def _fetch_message_meta(db_user, message_id, *, timeout=None):
+def _parse_message_meta_row(row):
+    row_text = (row or "").strip()
+    if not row_text:
+        return None, None
+    parts = row_text.split("\t", 1)
+    conversation_id = parts[0] if parts else None
+    meta_raw = parts[1] if len(parts) > 1 else None
+    if meta_raw:
+        try:
+            meta = json.loads(meta_raw)
+        except Exception:
+            meta = None
+    else:
+        meta = None
+    return conversation_id, meta
+
+
+def _fetch_message_meta_by_conversation(db_user, conversation_id, *, timeout=None):
+    if not conversation_id:
+        return None, None, "missing conversation_id_hint"
+    safe_conv_id = str(conversation_id).replace("'", "''")
+    query = (
+        "SELECT conversation_id, metadata->'decision_meta' AS decision_meta "
+        "FROM messages WHERE role='user' "
+        f"AND conversation_id = '{safe_conv_id}' "
+        "ORDER BY created_at DESC LIMIT 1;"
+    )
+    result = run_command(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "truffles_postgres_1",
+            "psql",
+            "-U",
+            db_user,
+            "-d",
+            "chatbot",
+            "-t",
+            "-A",
+            "-F",
+            "\t",
+            "-c",
+            query,
+        ],
+        timeout=_resolve_psql_timeout(timeout),
+    )
+    if result.returncode != 0:
+        return None, None, result.stderr.strip()
+    return (*_parse_message_meta_row(result.stdout), None)
+
+
+def _fetch_message_meta(db_user, message_id, *, timeout=None, conversation_id_hint=None):
     query = (
         "SELECT conversation_id, metadata->'decision_meta' AS decision_meta "
         "FROM messages WHERE role='user' "
@@ -6678,22 +6730,27 @@ def _fetch_message_meta(db_user, message_id, *, timeout=None):
         ],
         timeout=_resolve_psql_timeout(timeout),
     )
-    if result.returncode != 0:
-        return None, None, result.stderr.strip()
-    row = result.stdout.strip()
-    if not row:
+    primary_error = result.stderr.strip() if result.returncode != 0 else None
+    if result.returncode == 0:
+        conversation_id, meta = _parse_message_meta_row(result.stdout)
+        if conversation_id or meta is not None:
+            return conversation_id, meta, None
         return None, None, None
-    parts = row.split("\t", 1)
-    conversation_id = parts[0] if parts else None
-    meta_raw = parts[1] if len(parts) > 1 else None
-    if meta_raw:
-        try:
-            meta = json.loads(meta_raw)
-        except Exception:
-            meta = None
-    else:
-        meta = None
-    return conversation_id, meta, None
+    # Fallback by conversation_id for transient slow JSON-path scans on messageId lookup.
+    # This keeps LLM-quality runs from false hard fails when webhook already returned
+    # a concrete conversation_id but the messageId query timed out under load.
+    timeout_error = "timeout" in primary_error.casefold() if isinstance(primary_error, str) else False
+    if conversation_id_hint and timeout_error:
+        hint_conv_id, hint_meta, hint_error = _fetch_message_meta_by_conversation(
+            db_user,
+            conversation_id_hint,
+            timeout=max(12.0, _resolve_psql_timeout(timeout)),
+        )
+        if hint_conv_id or hint_meta is not None:
+            return hint_conv_id, hint_meta, None
+        if hint_error:
+            return None, None, hint_error
+    return None, None, primary_error
 
 def _poll_decision_meta(
     db_user,
@@ -6702,6 +6759,7 @@ def _poll_decision_meta(
     interval,
     require_action=True,
     fail_fast_after=None,
+    conversation_id_hint=None,
 ):
     deadline = time.time() + max(timeout, 0)
     last_meta = None
@@ -6713,6 +6771,7 @@ def _poll_decision_meta(
             db_user,
             message_id,
             timeout=min(8.0, max(interval * 4, 1.0)),
+            conversation_id_hint=conversation_id_hint,
         )
         if error:
             last_error = error
@@ -6744,6 +6803,7 @@ def _poll_decision_meta(
         db_user,
         message_id,
         timeout=max(8.0, max(timeout, 0.0)),
+        conversation_id_hint=conversation_id_hint,
     )
     if final_conv_id:
         last_conv_id = final_conv_id
@@ -8118,6 +8178,7 @@ def _run_llm_quality(args):
                 attempts = 0
                 response_payload = None
                 inline_response_text = None
+                conversation_id_hint = None
                 if not args.dry_run:
                     response_status, response_body, response_error, attempts = _send_webhook_payload_with_retry(
                         webhook_url,
@@ -8136,6 +8197,9 @@ def _run_llm_quality(args):
                         inline_response_text = response_payload.get("bot_response")
                         if not isinstance(inline_response_text, str):
                             inline_response_text = None
+                        hint_value = response_payload.get("conversation_id")
+                        if isinstance(hint_value, str) and hint_value.strip():
+                            conversation_id_hint = hint_value.strip()
                     if response_error:
                         stats["webhook_errors"] += 1
                         if _is_infra_error(response_error):
@@ -8161,6 +8225,7 @@ def _run_llm_quality(args):
                         message_id,
                         args.poll_timeout,
                         args.poll_interval,
+                        conversation_id_hint=conversation_id_hint,
                     )
                     if meta_error:
                         stats["decision_meta_errors"] += 1
