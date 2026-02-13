@@ -7130,16 +7130,10 @@ async def _handle_webhook_payload(
                     allowed_consult_map = {ref.casefold(): ref for ref in consult_refs}
                     if policy_tool_action == "info":
                         if not policy_pack_refs:
-                            # Accept info plans without explicit pack refs when a concrete query exists.
-                            # This avoids degrading to out_of_domain on in-domain consult questions like lateness.
-                            if not policy_service_query:
-                                policy_validation_error = "pack_refs_missing"
+                            policy_validation_error = "pack_refs_missing"
                         else:
-                            fallback_info_refs = {item.casefold() for item in INFO_INTENTS}
                             for ref in policy_pack_refs:
                                 resolved = allowed_info_map.get(ref)
-                                if not resolved and not allowed_info_map and ref in fallback_info_refs:
-                                    resolved = ref
                                 if not resolved:
                                     policy_validation_error = "pack_ref_invalid"
                                     break
@@ -8533,6 +8527,8 @@ async def _handle_webhook_payload(
                     and isinstance(policy_service_query, str)
                     and policy_service_query.strip()
                     and not info_class_intents
+                    and (tool_result.decision_meta or {}).get("tool_decision")
+                    in {"service_not_found", "not_found_fallback"}
                     and (
                         booking_wants_flow
                         or expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME}
@@ -8946,32 +8942,7 @@ async def _handle_webhook_payload(
                 )
             policy_info_set = set(policy_info_intents)
             requires_service = bool({"pricing", "duration"} & policy_info_set)
-            direct_info_without_service = False
-            if requires_service and not policy_service_query and message_text:
-                direct_pack_decision = get_pack_decision(
-                    message_text,
-                    client_slug=payload.client_slug,
-                    intent_decomp=intent_decomp_payload if isinstance(intent_decomp_payload, dict) else None,
-                )
-                direct_intent = (
-                    str(getattr(direct_pack_decision, "intent", "")).strip().casefold()
-                    if direct_pack_decision is not None
-                    else ""
-                )
-                direct_response = (
-                    str(getattr(direct_pack_decision, "response", "")).strip()
-                    if direct_pack_decision is not None
-                    else ""
-                )
-                if (
-                    direct_pack_decision is not None
-                    and getattr(direct_pack_decision, "action", None) == "reply"
-                    and direct_response
-                    and direct_intent
-                    not in {"service_clarify", "duration_or_price_clarify", "service_not_found"}
-                ):
-                    direct_info_without_service = True
-            if requires_service and not policy_service_query and not direct_info_without_service:
+            if requires_service and not policy_service_query:
                 clarify_sections = _derive_service_clarify_info_sections(policy_info_intents)
                 context = _get_conversation_context(conversation)
                 context = _set_expected_reply_context(

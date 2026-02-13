@@ -1260,6 +1260,23 @@ def _should_skip_consult(
         return True
     if _looks_like_hours_question(normalized, client_slug=client_slug):
         return True
+    if _signal_contains_any(normalized, client_slug, "aftercare_gel_lac_terms") and _signal_contains_any(
+        normalized,
+        client_slug,
+        "aftercare_gel_lac_care_terms",
+    ):
+        return True
+    if _signal_contains_any(normalized, client_slug, "prep_brows_lashes_prepare_terms") and (
+        _signal_contains_any(normalized, client_slug, "prep_brows_lashes_focus_terms")
+        or _signal_contains_any(normalized, client_slug, "prep_brows_lashes_extra_terms")
+    ):
+        return True
+    if _signal_contains_any(normalized, client_slug, "procedure_combo_require_any") and _signal_contains_any(
+        normalized,
+        client_slug,
+        "procedure_combo_require_all",
+    ):
+        return True
     if _signal_contains_any(normalized, client_slug, "consult_skip_address_phrases"):
         return True
     return False
@@ -2444,6 +2461,31 @@ def _looks_like_service_question(
     if not normalized:
         return False
     slug = _normalize_client_slug(client_slug)
+    # Preparation questions for brows/lashes must bypass service matcher and go to truth prep reply.
+    prep_brows_lashes_signal = (
+        _signal_contains_any(normalized, slug, "prep_brows_lashes_prepare_terms")
+        and (
+            _signal_contains_any(normalized, slug, "prep_brows_lashes_focus_terms")
+            or _signal_contains_any(normalized, slug, "prep_brows_lashes_extra_terms")
+        )
+    ) or (
+        _contains_any(normalized, ["подготов", "перед процедур", "что-то нужно делать"])
+        and _contains_any(normalized, ["ресниц", "бров", "ламинир"])
+    )
+    if prep_brows_lashes_signal:
+        return False
+    if _signal_contains_any(normalized, slug, "aftercare_gel_lac_terms") and _signal_contains_any(
+        normalized,
+        slug,
+        "aftercare_gel_lac_care_terms",
+    ):
+        return False
+    if _signal_contains_any(normalized, slug, "procedure_combo_require_any") and _signal_contains_any(
+        normalized,
+        slug,
+        "procedure_combo_require_all",
+    ):
+        return False
     if not _message_has_service_token(normalized, slug):
         if _signal_contains_any(normalized, slug, "booking_keywords"):
             return False
@@ -3531,10 +3573,17 @@ def get_demo_salon_decision(
         if reply:
             return _build_truth_decision(response=reply, intent="services_overview")
 
+    prep_brows_lashes_heuristic = _contains_any(
+        normalized,
+        ["подготов", "перед процедур", "что-то нужно делать"],
+    ) and _contains_any(
+        normalized,
+        ["ресниц", "бров", "ламинир"],
+    )
     if "prep_brows_lashes" in phrase_intents or (
         _signal_contains_any(normalized, slug, "prep_brows_lashes_prepare_terms")
         and _signal_contains_any(normalized, slug, "prep_brows_lashes_focus_terms")
-    ) or _signal_contains_any(normalized, slug, "prep_brows_lashes_extra_terms"):
+    ) or _signal_contains_any(normalized, slug, "prep_brows_lashes_extra_terms") or prep_brows_lashes_heuristic:
         reply = format_reply_from_truth("prep_brows_lashes", client_slug=slug, truth=truth)
         if reply:
             return _build_truth_decision(response=reply, intent="prep_brows_lashes")
