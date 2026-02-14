@@ -7471,7 +7471,6 @@ async def _handle_webhook_payload(
     if (
         policy_core_runtime_active
         and policy_core_mode == "degraded_fallback"
-        and policy_core_attempted
         and not pending_info_signal
         and message_text
         and _policy_core_reason_supports_info_rescue(policy_core_degrade_reason)
