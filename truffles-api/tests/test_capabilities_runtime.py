@@ -110,3 +110,17 @@ def test_build_runtime_capabilities_merges_tool_policy():
 
     assert runtime.payload.tools.allow == ["calendar.*", "catalog.service_query"]
     assert runtime.payload.tools.deny == ["calendar.book_slot"]
+
+
+def test_capabilities_payload_normalizes_tool_policy_tokens():
+    payload = CapabilitiesPayload.model_validate(
+        {
+            "tools": {
+                "allow": [" CALENDAR.* ", "calendar.book_slot", "calendar.book_slot"],
+                "deny": ["Catalog.Location"],
+            }
+        }
+    )
+
+    assert payload.tools.allow == ["calendar.*", "calendar.book_slot"]
+    assert payload.tools.deny == ["catalog.location"]
