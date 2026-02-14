@@ -10,8 +10,17 @@
 - done:
   - Session created.
   - Task Package aligned for UX-unification.
+  - Redesigned `console-web/src/app/integrations/page.tsx` into a fleet control center with scoped filters, KPI cards, risk surfaces, and workspace-first actions.
+  - Added enriched branch matrix context (company/client/branch identity, onboarding/go-live status, team coverage, provider lifecycle, last inbound/drift).
+  - Improved mobile UX with card rows (`integrations-mobile-row`) instead of table-only rendering.
+  - Captured visual evidence: `/tmp/ux-fleet-control-desktop.png`, `/tmp/ux-fleet-control-mobile.png`.
+  - Opened PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/658
 - next:
-  - Execute plan and collect evidence.
+  - Wait for CI and merge.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-14-ux-unify-workspace-a1.md
-- last_updated: 2026-02-14
+  - `cd console-web && npm run lint`
+  - `cd console-web && npm run build`
+  - `pytest -q truffles-api/tests/test_console_integrations_registry.py -q`
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/658
+- last_updated: 2026-02-14T04:34:00Z
