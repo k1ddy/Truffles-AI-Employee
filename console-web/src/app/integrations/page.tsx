@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import toast from "react-hot-toast";
 
@@ -11,9 +12,7 @@ import {
     adminApi,
     authApi,
     canAccessConsole,
-    confirmationsApi,
     type BranchIntegrationStatus,
-    type IntegrationBranchActionRequest,
     type ProviderOpsAction,
     type ProviderOpsQueueItem,
 } from "@/lib/api-client";
@@ -22,6 +21,12 @@ import { useErrorHandler } from "@/lib/api-hooks";
 const COMPANY_ID_STORAGE_KEY = "console:company_id";
 const CLIENT_ID_STORAGE_KEY = "console:client_id";
 const BRANCH_ID_STORAGE_KEY = "console:branch_id";
+
+type ScopeTarget = {
+    companyId?: string | null;
+    clientId?: string | null;
+    branchId?: string | null;
+};
 
 function readLocalStorageValue(key: string): string | null {
     if (typeof window === "undefined") {
@@ -142,7 +147,7 @@ function providerBindingAlertBadgeClass(status?: string | null): string {
 
 function formatTimestamp(value?: string | null): string {
     if (!value) {
-        return "—";
+        return "-";
     }
     return new Date(value).toLocaleString("ru-RU");
 }
@@ -168,7 +173,7 @@ function providerOpsActionLabel(action: ProviderOpsAction): string {
 
 function DriftIssues({ item }: { item: BranchIntegrationStatus }) {
     if (!item.drift_issues || item.drift_issues.length === 0) {
-        return <span className="text-muted-foreground">—</span>;
+        return <span className="text-muted-foreground">-</span>;
     }
     return (
         <div className="flex flex-wrap gap-1">
@@ -184,32 +189,15 @@ function DriftIssues({ item }: { item: BranchIntegrationStatus }) {
     );
 }
 
-type ProviderActionDialogState = {
-    item: BranchIntegrationStatus;
-    action: ProviderOpsAction;
-    mode: "dry_run" | "execute";
-    reason: string;
-    notes: string;
-    paidUntil: string;
-    nextRenewalAt: string;
-    instanceId: string;
-};
-
 export default function IntegrationsPage() {
     const { data: session } = useSession();
+    const router = useRouter();
     const { handleError } = useErrorHandler();
     const [staleAfterMinutes, setStaleAfterMinutes] = useState(60);
     const [scopeCompanyId, setScopeCompanyId] = useState("");
     const [scopeClientId, setScopeClientId] = useState("");
     const [scopeBranchId, setScopeBranchId] = useState("");
     const [scopeInitialized, setScopeInitialized] = useState(false);
-    const [runningAction, setRunningAction] = useState<{
-        branchId: string;
-        mode: "dry_run" | "execute";
-        action: ProviderOpsAction;
-    } | null>(null);
-    const [actionSummaryByBranch, setActionSummaryByBranch] = useState<Record<string, string>>({});
-    const [providerActionDialog, setProviderActionDialog] = useState<ProviderActionDialogState | null>(null);
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -300,7 +288,7 @@ export default function IntegrationsPage() {
         setLocalStorageValue(COMPANY_ID_STORAGE_KEY, scopeCompanyId || null);
         setLocalStorageValue(CLIENT_ID_STORAGE_KEY, scopeClientId || null);
         setLocalStorageValue(BRANCH_ID_STORAGE_KEY, scopeBranchId || null);
-        toast.success("Контекст сохранён");
+        toast.success("Контекст сохранен");
     };
 
     const {
@@ -328,6 +316,54 @@ export default function IntegrationsPage() {
             handleError(error);
         }
     }, [error, handleError]);
+
+    const clientCompanyMap = useMemo(() => {
+        const result = new Map<string, string>();
+        for (const client of meData?.clients ?? []) {
+            if (client?.id && client?.company_id) {
+                result.set(String(client.id), String(client.company_id));
+            }
+        }
+        return result;
+    }, [meData?.clients]);
+
+    const persistScopeAndOpenWorkspace = (target: ScopeTarget, note?: string) => {
+        const normalizedClient = target.clientId ? String(target.clientId) : "";
+        const normalizedBranch = target.branchId ? String(target.branchId) : "";
+        const fallbackCompany = readLocalStorageValue(COMPANY_ID_STORAGE_KEY) ?? "";
+        const normalizedCompany = target.companyId
+            ? String(target.companyId)
+            : (normalizedClient ? clientCompanyMap.get(normalizedClient) : undefined) ?? scopeCompanyId ?? fallbackCompany;
+
+        setLocalStorageValue(COMPANY_ID_STORAGE_KEY, normalizedCompany || null);
+        setLocalStorageValue(CLIENT_ID_STORAGE_KEY, normalizedClient || null);
+        setLocalStorageValue(BRANCH_ID_STORAGE_KEY, normalizedBranch || null);
+
+        if (note) {
+            toast.success(note);
+        }
+        router.push("/company-workspace");
+    };
+
+    const openWorkspaceForRow = (item: BranchIntegrationStatus) => {
+        persistScopeAndOpenWorkspace(
+            {
+                clientId: item.client_id,
+                branchId: item.branch_id,
+            },
+            "Переход в Workspace",
+        );
+    };
+
+    const openWorkspaceForQueueItem = (queueItem: ProviderOpsQueueItem) => {
+        persistScopeAndOpenWorkspace(
+            {
+                clientId: queueItem.client_id,
+                branchId: queueItem.branch_id,
+            },
+            `Queue -> ${providerOpsActionLabel(queueItem.recommended_action)}`,
+        );
+    };
 
     if (!session) {
         return (
@@ -382,200 +418,6 @@ export default function IntegrationsPage() {
 
     const items = data?.items ?? [];
     const providerOpsQueue = data?.provider_ops_queue ?? [];
-    const itemByBranch = new Map(items.map((item) => [String(item.branch_id), item]));
-
-    const createBranchConfirmation = async (
-        branchId: string,
-        reason: string,
-        action: "integration_reconcile" | "provider_ops_execute",
-    ): Promise<string> => {
-        const confirmation = await confirmationsApi.create({
-            action,
-            target_type: "branch",
-            target_id: branchId,
-            reason,
-        });
-        return confirmation.data.confirmation_id;
-    };
-
-    const defaultExecuteReason = (action: ProviderOpsAction): string => {
-        if (action === "provider_send_reminder") {
-            return "provider lifecycle reminder from integrations queue";
-        }
-        if (action === "provider_renewal_confirmed") {
-            return "provider renewal confirmed by platform admin";
-        }
-        if (action === "provider_webhook_updated") {
-            return "provider webhook updated by platform admin";
-        }
-        if (action === "provider_complete_rebind") {
-            return "provider rebind completed by platform admin";
-        }
-        if (action === "provider_start_rebind") {
-            return "provider rebind started by platform admin";
-        }
-        return "manual integration reconcile from platform admin cockpit";
-    };
-
-    const buildActionSummary = (
-        action: ProviderOpsAction,
-        result: Record<string, unknown>,
-    ): string => {
-        if (action === "integration_reconcile") {
-            return `checked ${result.checked ?? 0} · degraded ${result.degraded ?? 0} · recovered ${result.recovered ?? 0} · remediated ${result.remediated ?? 0}`;
-        }
-        if (action === "provider_send_reminder") {
-            return "reminder recorded";
-        }
-        const bindingAfter = result.binding_after as Record<string, unknown> | undefined;
-        if (bindingAfter) {
-            return [
-                `status ${String(bindingAfter.webhook_status ?? "—")}`,
-                `renewal ${String(bindingAfter.next_renewal_at ?? bindingAfter.paid_until ?? "—")}`,
-                `rebind ${String(bindingAfter.rebind_required ?? "—")}`,
-            ].join(" · ");
-        }
-        return providerOpsActionLabel(action);
-    };
-
-    const openProviderActionDialog = (
-        item: BranchIntegrationStatus,
-        action: ProviderOpsAction,
-        mode: "dry_run" | "execute" = "execute",
-    ) => {
-        setProviderActionDialog({
-            item,
-            action,
-            mode,
-            reason: defaultExecuteReason(action),
-            notes: action === "provider_send_reminder"
-                ? `reminder for ${item.branch_slug}`
-                : `${providerOpsActionLabel(action)} for ${item.branch_slug}`,
-            paidUntil: item.provider_binding_next_renewal_at ?? item.provider_binding_paid_until ?? "",
-            nextRenewalAt: item.provider_binding_next_renewal_at ?? "",
-            instanceId: item.instance_id ?? item.provider_binding_instance_id ?? "",
-        });
-    };
-
-    const closeProviderActionDialog = () => {
-        if (runningAction) {
-            return;
-        }
-        setProviderActionDialog(null);
-    };
-
-    const buildDialogPayload = (dialog: ProviderActionDialogState): Partial<IntegrationBranchActionRequest> | null => {
-        if (dialog.mode === "execute" && !dialog.reason.trim()) {
-            toast.error("Укажите причину execute");
-            return null;
-        }
-        if (dialog.action === "provider_renewal_confirmed") {
-            const paidUntil = dialog.paidUntil.trim();
-            const nextRenewalAt = dialog.nextRenewalAt.trim();
-            if (!paidUntil && !nextRenewalAt) {
-                toast.error("Укажите paid_until или next_renewal_at");
-                return null;
-            }
-            return {
-                paid_until: paidUntil || undefined,
-                next_renewal_at: nextRenewalAt || undefined,
-                notes: dialog.notes.trim() || undefined,
-            };
-        }
-        if (dialog.action === "provider_webhook_updated" || dialog.action === "provider_complete_rebind") {
-            return {
-                instance_id: dialog.instanceId.trim() || undefined,
-                notes: dialog.notes.trim() || undefined,
-            };
-        }
-        if (dialog.action === "provider_start_rebind" || dialog.action === "provider_send_reminder") {
-            return {
-                notes: dialog.notes.trim() || undefined,
-            };
-        }
-        if (dialog.action === "integration_reconcile") {
-            return {};
-        }
-        return null;
-    };
-
-    const runBranchAction = async (
-        branchId: string,
-        action: ProviderOpsAction,
-        mode: "dry_run" | "execute",
-        payload: Partial<IntegrationBranchActionRequest> = {},
-        confirmationReason?: string,
-    ) => {
-        setRunningAction({ branchId, mode, action });
-        try {
-            const confirmationAction = action === "integration_reconcile" ? "integration_reconcile" : "provider_ops_execute";
-            const runAction = async (confirmationId?: string) =>
-                adminApi.reconcileIntegrationBranch(branchId, {
-                    action,
-                    mode,
-                    confirmation_id: confirmationId,
-                    ...payload,
-                });
-
-            let response;
-            try {
-                response = await runAction();
-            } catch (error: unknown) {
-                const apiCode = (error as { response?: { data?: { error?: { code?: string } } } })
-                    ?.response?.data?.error?.code;
-                if (mode !== "execute" || apiCode !== "CONFIRMATION_REQUIRED") {
-                    throw error;
-                }
-                const normalizedReason = confirmationReason?.trim();
-                if (!normalizedReason) {
-                    toast.error("Укажите причину для execute");
-                    return;
-                }
-                const confirmationId = await createBranchConfirmation(branchId, normalizedReason, confirmationAction);
-                response = await runAction(confirmationId);
-            }
-
-            const result = (response.data.result ?? {}) as Record<string, unknown>;
-            const summary = buildActionSummary(action, result);
-            setActionSummaryByBranch((prev) => ({ ...prev, [branchId]: summary }));
-            toast.success(mode === "dry_run" ? "Dry-run выполнен" : "Execute выполнен");
-            await refetch();
-        } catch (error) {
-            handleError(error);
-        } finally {
-            setRunningAction(null);
-        }
-    };
-
-    const runBranchReconcileDryRun = async (branchId: string) =>
-        runBranchAction(branchId, "integration_reconcile", "dry_run");
-
-    const runRecommendedQueueAction = async (queueItem: ProviderOpsQueueItem) => {
-        const branch = itemByBranch.get(String(queueItem.branch_id));
-        if (!branch) {
-            toast.error("Branch not found in current integrations list");
-            return;
-        }
-        openProviderActionDialog(branch, queueItem.recommended_action, "execute");
-    };
-
-    const submitProviderActionDialog = async () => {
-        if (!providerActionDialog) {
-            return;
-        }
-        const payload = buildDialogPayload(providerActionDialog);
-        if (payload === null) {
-            return;
-        }
-        await runBranchAction(
-            String(providerActionDialog.item.branch_id),
-            providerActionDialog.action,
-            providerActionDialog.mode,
-            payload,
-            providerActionDialog.reason,
-        );
-        setProviderActionDialog(null);
-    };
 
     return (
         <div className="max-w-6xl mx-auto p-6" data-testid="integrations-page">
@@ -583,7 +425,7 @@ export default function IntegrationsPage() {
                 <div>
                     <h1 className="text-2xl font-bold" data-testid="integrations-title">Интеграции</h1>
                     <p className="text-sm text-muted-foreground mt-1">
-                        WhatsApp/Telegram статус, provider binding lifecycle и drift-сигналы по филиалам.
+                        Реестр статусов WhatsApp/Telegram и provider lifecycle. Все execute-операции выполняются в Workspace.
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -607,6 +449,31 @@ export default function IntegrationsPage() {
                     </Link>
                 </div>
             </div>
+
+            <section className="mb-4 rounded-lg border border-blue-300/50 bg-blue-50/60 p-4" data-testid="integrations-workspace-cta">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <div className="text-sm font-semibold text-blue-900">Workspace-first operations</div>
+                        <div className="text-xs text-blue-800/80 mt-1">
+                            Rebind, renewal, webhook update и reconcile execute перенесены в единый cockpit `Company Workspace`.
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={() => {
+                            persistScopeAndOpenWorkspace({
+                                companyId: scopeCompanyId || null,
+                                clientId: scopeClientId || null,
+                                branchId: scopeBranchId || null,
+                            });
+                        }}
+                        data-testid="integrations-open-workspace"
+                    >
+                        Open Workspace
+                    </button>
+                </div>
+            </section>
 
             <div className="mb-3 text-xs text-muted-foreground" data-testid="integrations-threshold-info">
                 stale_after_minutes: {data?.stale_after_minutes ?? staleAfterMinutes}
@@ -723,16 +590,19 @@ export default function IntegrationsPage() {
                                         {queueItem.client_slug} / {queueItem.branch_name}
                                     </div>
                                     <div className="text-muted-foreground">
-                                        priority {queueItem.priority.toUpperCase()} · reasons: {queueItem.reasons.map((reason) => statusLabel(reason)).join(", ")}
+                                        priority {queueItem.priority.toUpperCase()} · action {providerOpsActionLabel(queueItem.recommended_action)}
+                                    </div>
+                                    <div className="text-muted-foreground">
+                                        reasons: {queueItem.reasons.map((reason) => statusLabel(reason)).join(", ")}
                                     </div>
                                 </div>
                                 <button
                                     type="button"
-                                    className="rounded-full border border-border/60 px-3 py-1 font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                    onClick={() => runRecommendedQueueAction(queueItem)}
-                                    disabled={!!runningAction}
+                                    className="rounded-full border border-border/60 px-3 py-1 font-medium hover:bg-muted"
+                                    onClick={() => openWorkspaceForQueueItem(queueItem)}
+                                    data-testid="integrations-queue-open-workspace"
                                 >
-                                    {providerOpsActionLabel(queueItem.recommended_action)}
+                                    Manage in Workspace
                                 </button>
                             </div>
                         ))}
@@ -753,7 +623,7 @@ export default function IntegrationsPage() {
                             <th className="p-4 text-sm font-medium text-muted-foreground">Последний inbound</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">Drift issues</th>
                             <th className="p-4 text-sm font-medium text-muted-foreground">Итог</th>
-                            <th className="p-4 text-sm font-medium text-muted-foreground">Действия</th>
+                            <th className="p-4 text-sm font-medium text-muted-foreground">Workspace</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -777,37 +647,37 @@ export default function IntegrationsPage() {
                                 <td className="p-4 text-sm">
                                     <div>{statusLabel(item.whatsapp_status)}</div>
                                     <div className="text-xs text-muted-foreground">
-                                        instance: {item.instance_id ?? "—"}
+                                        instance: {item.instance_id ?? "-"}
                                     </div>
                                 </td>
                                 <td className="p-4 text-sm">
                                     <div>{statusLabel(item.telegram_status)}</div>
                                     <div className="text-xs text-muted-foreground">
-                                        chat: {item.telegram_chat_id ?? "—"}
+                                        chat: {item.telegram_chat_id ?? "-"}
                                     </div>
                                 </td>
                                 <td className="p-4 text-sm">
-                                    <div>{item.provider_binding_provider ?? "—"}</div>
+                                    <div>{item.provider_binding_provider ?? "-"}</div>
                                     <div className="text-xs text-muted-foreground">
-                                        binding instance: {item.provider_binding_instance_id ?? "—"}
+                                        binding instance: {item.provider_binding_instance_id ?? "-"}
                                     </div>
                                     <div className="text-xs text-muted-foreground">
-                                        webhook: {item.provider_binding_webhook_status ?? "—"}
+                                        webhook: {item.provider_binding_webhook_status ?? "-"}
                                     </div>
                                     <div className="text-xs text-muted-foreground">
-                                        owner: {item.provider_binding_owner ?? "—"}
+                                        owner: {item.provider_binding_owner ?? "-"}
                                     </div>
                                 </td>
                                 <td className="p-4 text-sm">
                                     <div>{paymentStatusLabel(item.provider_binding_payment_status)}</div>
                                     <div className="text-xs text-muted-foreground">
-                                        paid_until: {item.provider_binding_paid_until ?? "—"}
+                                        paid_until: {item.provider_binding_paid_until ?? "-"}
                                     </div>
                                     <div className="text-xs text-muted-foreground">
-                                        next_renewal: {item.provider_binding_next_renewal_at ?? "—"}
+                                        next_renewal: {item.provider_binding_next_renewal_at ?? "-"}
                                     </div>
                                     <div className="text-xs text-muted-foreground">
-                                        last_rebind: {item.provider_binding_last_rebind_at ?? "—"}
+                                        last_rebind: {item.provider_binding_last_rebind_at ?? "-"}
                                     </div>
                                     <div className="text-xs text-muted-foreground">
                                         rebind_required: {item.provider_binding_rebind_required ? "yes" : "no"}
@@ -827,13 +697,13 @@ export default function IntegrationsPage() {
                                         </span>
                                     </div>
                                     <div className="text-xs text-muted-foreground mt-1">
-                                        days left: {item.provider_binding_days_until_expiry ?? "—"}
+                                        days left: {item.provider_binding_days_until_expiry ?? "-"}
                                     </div>
                                 </td>
                                 <td className="p-4 text-sm">
                                     <div>{formatTimestamp(item.last_inbound_at)}</div>
                                     <div className="text-xs text-muted-foreground">
-                                        instance: {item.last_inbound_instance_id ?? "—"}
+                                        instance: {item.last_inbound_instance_id ?? "-"}
                                     </div>
                                 </td>
                                 <td className="p-4 text-sm">
@@ -845,91 +715,16 @@ export default function IntegrationsPage() {
                                     </span>
                                 </td>
                                 <td className="p-4 text-sm">
-                                    <div className="flex flex-wrap gap-2">
-                                        <button
-                                            type="button"
-                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() => runBranchReconcileDryRun(String(item.branch_id))}
-                                            disabled={!item.is_active || !!runningAction}
-                                        >
-                                            {runningAction?.branchId === String(item.branch_id)
-                                                && runningAction?.mode === "dry_run"
-                                                && runningAction?.action === "integration_reconcile"
-                                                ? "Dry-run..."
-                                                : "Dry-run"}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() => openProviderActionDialog(item, "integration_reconcile", "execute")}
-                                            disabled={!item.is_active || !!runningAction}
-                                        >
-                                            {runningAction?.branchId === String(item.branch_id)
-                                                && runningAction?.mode === "execute"
-                                                && runningAction?.action === "integration_reconcile"
-                                                ? "Execute..."
-                                                : "Execute"}
-                                        </button>
-                                    </div>
-                                    <div className="mt-2 flex flex-wrap gap-2">
-                                        <button
-                                            type="button"
-                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() => openProviderActionDialog(item, "provider_start_rebind", "execute")}
-                                            disabled={!item.is_active || !!runningAction}
-                                        >
-                                            {runningAction?.branchId === String(item.branch_id)
-                                                && runningAction?.action === "provider_start_rebind"
-                                                ? "Start..."
-                                                : "Start rebind"}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() => openProviderActionDialog(item, "provider_complete_rebind", "execute")}
-                                            disabled={!item.is_active || !!runningAction}
-                                        >
-                                            {runningAction?.branchId === String(item.branch_id)
-                                                && runningAction?.action === "provider_complete_rebind"
-                                                ? "Complete..."
-                                                : "Complete rebind"}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() => openProviderActionDialog(item, "provider_renewal_confirmed", "execute")}
-                                            disabled={!item.is_active || !!runningAction}
-                                        >
-                                            {runningAction?.branchId === String(item.branch_id)
-                                                && runningAction?.action === "provider_renewal_confirmed"
-                                                ? "Renewal..."
-                                                : "Renewal"}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() => openProviderActionDialog(item, "provider_webhook_updated", "execute")}
-                                            disabled={!item.is_active || !!runningAction}
-                                        >
-                                            {runningAction?.branchId === String(item.branch_id)
-                                                && runningAction?.action === "provider_webhook_updated"
-                                                ? "Webhook..."
-                                                : "Webhook"}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() => openProviderActionDialog(item, "provider_send_reminder", "execute")}
-                                            disabled={!item.is_active || !!runningAction}
-                                        >
-                                            {runningAction?.branchId === String(item.branch_id)
-                                                && runningAction?.action === "provider_send_reminder"
-                                                ? "Reminder..."
-                                                : "Reminder"}
-                                        </button>
-                                    </div>
+                                    <button
+                                        type="button"
+                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted"
+                                        onClick={() => openWorkspaceForRow(item)}
+                                        data-testid="integrations-row-open-workspace"
+                                    >
+                                        Manage in Workspace
+                                    </button>
                                     <div className="mt-1 text-xs text-muted-foreground">
-                                        {actionSummaryByBranch[String(item.branch_id)] ?? "—"}
+                                        Execute actions only in Workspace
                                     </div>
                                 </td>
                             </tr>
@@ -944,138 +739,6 @@ export default function IntegrationsPage() {
                     </tbody>
                 </table>
             </div>
-
-            {providerActionDialog && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" data-testid="integrations-action-modal-overlay">
-                    <div className="w-full max-w-xl rounded-xl border border-border/60 bg-card p-5 shadow-xl" role="dialog" aria-modal="true" data-testid="integrations-action-modal">
-                        <div className="flex items-start justify-between gap-3">
-                            <div>
-                                <h2 className="text-lg font-semibold">
-                                    {providerOpsActionLabel(providerActionDialog.action)}
-                                </h2>
-                                <p className="text-xs text-muted-foreground mt-1">
-                                    {providerActionDialog.item.client_slug} / {providerActionDialog.item.branch_name} · mode: {providerActionDialog.mode}
-                                </p>
-                            </div>
-                            <button
-                                type="button"
-                                className="btn-ghost"
-                                onClick={closeProviderActionDialog}
-                                disabled={!!runningAction}
-                            >
-                                Закрыть
-                            </button>
-                        </div>
-
-                        <div className="mt-4 space-y-3">
-                            {providerActionDialog.mode === "execute" && (
-                                <label className="text-xs text-muted-foreground">
-                                    Причина execute (обязательно)
-                                    <textarea
-                                        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                        rows={2}
-                                        value={providerActionDialog.reason}
-                                        onChange={(event) =>
-                                            setProviderActionDialog((prev) =>
-                                                prev ? { ...prev, reason: event.target.value } : prev
-                                            )
-                                        }
-                                        placeholder="Укажите причину execute"
-                                    />
-                                </label>
-                            )}
-
-                            {(providerActionDialog.action === "provider_start_rebind"
-                                || providerActionDialog.action === "provider_complete_rebind"
-                                || providerActionDialog.action === "provider_webhook_updated"
-                                || providerActionDialog.action === "provider_send_reminder"
-                                || providerActionDialog.action === "provider_renewal_confirmed") && (
-                                <label className="text-xs text-muted-foreground">
-                                    Комментарий (опционально)
-                                    <textarea
-                                        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                        rows={2}
-                                        value={providerActionDialog.notes}
-                                        onChange={(event) =>
-                                            setProviderActionDialog((prev) =>
-                                                prev ? { ...prev, notes: event.target.value } : prev
-                                            )
-                                        }
-                                        placeholder="Комментарий операции"
-                                    />
-                                </label>
-                            )}
-
-                            {(providerActionDialog.action === "provider_complete_rebind"
-                                || providerActionDialog.action === "provider_webhook_updated") && (
-                                <label className="text-xs text-muted-foreground">
-                                    instance_id (опционально)
-                                    <input
-                                        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                        value={providerActionDialog.instanceId}
-                                        onChange={(event) =>
-                                            setProviderActionDialog((prev) =>
-                                                prev ? { ...prev, instanceId: event.target.value } : prev
-                                            )
-                                        }
-                                        placeholder="instance-xxxxxxxx"
-                                    />
-                                </label>
-                            )}
-
-                            {providerActionDialog.action === "provider_renewal_confirmed" && (
-                                <div className="grid gap-3 sm:grid-cols-2">
-                                    <label className="text-xs text-muted-foreground">
-                                        paid_until (YYYY-MM-DD)
-                                        <input
-                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={providerActionDialog.paidUntil}
-                                            onChange={(event) =>
-                                                setProviderActionDialog((prev) =>
-                                                    prev ? { ...prev, paidUntil: event.target.value } : prev
-                                                )
-                                            }
-                                            placeholder="2026-12-31"
-                                        />
-                                    </label>
-                                    <label className="text-xs text-muted-foreground">
-                                        next_renewal_at (опционально)
-                                        <input
-                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                            value={providerActionDialog.nextRenewalAt}
-                                            onChange={(event) =>
-                                                setProviderActionDialog((prev) =>
-                                                    prev ? { ...prev, nextRenewalAt: event.target.value } : prev
-                                                )
-                                            }
-                                            placeholder="2026-12-31"
-                                        />
-                                    </label>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="mt-4 flex items-center justify-end gap-2">
-                            <button
-                                type="button"
-                                className="btn-ghost"
-                                onClick={closeProviderActionDialog}
-                                disabled={!!runningAction}
-                            >
-                                Отмена
-                            </button>
-                            <button
-                                type="button"
-                                className="btn-primary"
-                                onClick={() => void submitProviderActionDialog()}
-                                disabled={!!runningAction}
-                            >
-                                {runningAction ? "Выполнение..." : providerActionDialog.mode === "execute" ? "Выполнить" : "Dry-run"}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }
