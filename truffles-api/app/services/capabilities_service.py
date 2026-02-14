@@ -37,12 +37,13 @@ def payload_to_dict(payload: CapabilitiesPayload) -> dict[str, Any]:
     data.setdefault("channels", {})
     data.setdefault("providers", {})
     data.setdefault("features", {})
+    data.setdefault("tools", {})
     return data
 
 
 def merge_capabilities(base: dict[str, Any] | None, override: dict[str, Any] | None) -> dict[str, Any]:
     merged = deepcopy(base or {})
-    for section in ("channels", "providers", "features"):
+    for section in ("channels", "providers", "features", "tools"):
         if section not in merged or not isinstance(merged.get(section), dict):
             merged[section] = {}
 

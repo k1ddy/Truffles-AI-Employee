@@ -86,6 +86,58 @@ def _with_provider_health_meta(
     return decision_meta, trace
 
 
+def _normalize_tool_policy_tokens(raw_tokens: Any) -> list[str]:
+    if not isinstance(raw_tokens, list):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for token in raw_tokens:
+        text = str(token or "").strip().casefold()
+        if not text:
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def _tool_policy_token_matches(*, token: str, tool_action: str) -> bool:
+    if token == "*":
+        return True
+    if token.endswith(".*"):
+        return tool_action.startswith(token[:-1])
+    return token == tool_action
+
+
+def _resolve_runtime_tool_policy() -> tuple[list[str], list[str], str]:
+    runtime = get_runtime_capabilities()
+    if runtime is None:
+        return [], [], "default"
+    tools_config = getattr(runtime.payload, "tools", None)
+    allow_tokens = _normalize_tool_policy_tokens(getattr(tools_config, "allow", None))
+    deny_tokens = _normalize_tool_policy_tokens(getattr(tools_config, "deny", None))
+    source = str(getattr(runtime, "source", "") or "runtime")
+    return allow_tokens, deny_tokens, source
+
+
+def _tool_action_block_reason(
+    *,
+    tool_action: str,
+    allow_tokens: list[str],
+    deny_tokens: list[str],
+) -> str | None:
+    for token in deny_tokens:
+        if _tool_policy_token_matches(token=token, tool_action=tool_action):
+            return f"deny:{token}"
+    if allow_tokens:
+        for token in allow_tokens:
+            if _tool_policy_token_matches(token=token, tool_action=tool_action):
+                return None
+        return "allowlist_miss"
+    return None
+
+
 def _parse_datetime(value: str | None, *, fallback_tz: str | None = None) -> datetime | None:
     if not value or not isinstance(value, str):
         return None
@@ -748,6 +800,39 @@ def execute_tool_action(
             error_code="tool_action_invalid",
             decision_meta={},
             trace={},
+        )
+
+    allow_tokens, deny_tokens, capability_source = _resolve_runtime_tool_policy()
+    capability_block_reason = _tool_action_block_reason(
+        tool_action=tool_action,
+        allow_tokens=allow_tokens,
+        deny_tokens=deny_tokens,
+    )
+    if capability_block_reason:
+        response_text = (
+            "В этом филиале онлайн-календарь для такого запроса отключен. "
+            "Передам менеджеру, чтобы помочь вручную."
+            if tool_action.startswith("calendar.")
+            else "Для этого запроса в данном филиале используется ручная обработка менеджером."
+        )
+        return ToolExecutionResult(
+            handled=True,
+            ok=False,
+            response_text=response_text,
+            error_code="tool_action_disabled",
+            decision_meta={
+                "tool_action": tool_action,
+                "tool_decision": "capability_blocked",
+                "capability_reason": capability_block_reason,
+                "capability_source": capability_source,
+            },
+            trace={
+                "stage": "tool_registry",
+                "decision": "capability_blocked",
+                "tool_action": tool_action,
+                "capability_reason": capability_block_reason,
+                "capability_source": capability_source,
+            },
         )
 
     now = now or datetime.now(timezone.utc)
