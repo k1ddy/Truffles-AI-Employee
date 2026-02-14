@@ -153,6 +153,8 @@ from app.schemas.console import (
     ConsoleOutboxRetryRequest,
     ConsoleOutboxRetryResponse,
     ConsoleProviderOpsQueueItem,
+    ConsoleProviderLifecycleItem,
+    ConsoleProviderLifecycleListResponse,
     ConsoleReferencePack,
     ConsoleReferencePackListResponse,
     ConsoleReferencePackUpsertRequest,
@@ -1254,6 +1256,12 @@ _INTEGRATION_DEFAULT_STALE_MINUTES = 60
 _INTEGRATION_MIN_STALE_MINUTES = 5
 _INTEGRATION_MAX_STALE_MINUTES = 24 * 60
 _PROVIDER_BINDING_EXPIRING_SOON_DAYS = 7
+_PROVIDER_OPS_SLA_HOURS_BY_PRIORITY = {
+    "p0": 4,
+    "p1": 24,
+    "p2": 72,
+}
+_PROVIDER_OPS_DUE_SOON_HOURS = 6
 _PROVIDER_OPS_EXECUTE_CONFIRMATION_ACTION = "provider_ops_execute"
 _PROVIDER_OPS_RECONCILE_ACTION = "integration_reconcile"
 _PROVIDER_OPS_ACTIONS = {
@@ -2898,6 +2906,88 @@ def _build_branch_integration_status(
     )
 
 
+def _resolve_provider_ops_decision(
+    item: ConsoleBranchIntegrationStatus,
+) -> Optional[tuple[str, str, list[str]]]:
+    priority_rank = {"p0": 0, "p1": 1, "p2": 2}
+    if not item.is_active:
+        return None
+
+    reasons: list[str] = []
+    priority = "p2"
+    recommended_action = "provider_send_reminder"
+
+    def _promote(level: str) -> None:
+        nonlocal priority
+        if priority_rank[level] < priority_rank[priority]:
+            priority = level
+
+    if item.provider_binding_rebind_required:
+        reasons.append("provider_binding_rebind_required")
+        recommended_action = "provider_complete_rebind"
+        _promote("p0")
+
+    if item.provider_binding_expiry_status == "expired":
+        reasons.append("provider_binding_expired")
+        if recommended_action == "provider_send_reminder":
+            recommended_action = "provider_renewal_confirmed"
+        _promote("p0")
+    elif item.provider_binding_expiry_status == "expiring_soon":
+        reasons.append("provider_binding_expiring_soon")
+        if recommended_action == "provider_send_reminder":
+            recommended_action = "provider_renewal_confirmed"
+        _promote("p1")
+
+    if item.whatsapp_status in {"missing_instance_id", "instance_id_mismatch", "invalid_webhook_url"}:
+        reasons.append(item.whatsapp_status)
+        if recommended_action == "provider_send_reminder":
+            recommended_action = "provider_webhook_updated"
+        _promote("p0")
+    elif item.whatsapp_status == "no_recent_inbound":
+        reasons.append("no_recent_inbound")
+        if recommended_action == "provider_send_reminder":
+            recommended_action = "integration_reconcile"
+        _promote("p1")
+
+    if item.integration_state == "degraded":
+        reasons.append("integration_degraded")
+        if recommended_action == "provider_send_reminder":
+            recommended_action = "integration_reconcile"
+        _promote("p0")
+
+    if item.provider_binding_alert_state == "critical":
+        reasons.append("provider_binding_alert_critical")
+        if recommended_action == "provider_send_reminder":
+            recommended_action = "provider_start_rebind"
+        _promote("p0")
+    elif item.provider_binding_alert_state == "warn":
+        reasons.append("provider_binding_alert_warn")
+        _promote("p1")
+
+    if not reasons:
+        return None
+    return priority, recommended_action, list(dict.fromkeys(reasons))
+
+
+def _resolve_provider_ops_sla(
+    *,
+    priority: Optional[str],
+    generated_at: datetime,
+    now: datetime,
+) -> tuple[Optional[str], str]:
+    if not priority:
+        return None, "none"
+    deadline = generated_at + timedelta(hours=_PROVIDER_OPS_SLA_HOURS_BY_PRIORITY.get(priority, 72))
+    remaining = deadline - now
+    if remaining.total_seconds() <= 0:
+        state = "overdue"
+    elif remaining <= timedelta(hours=_PROVIDER_OPS_DUE_SOON_HOURS):
+        state = "due_soon"
+    else:
+        state = "on_track"
+    return deadline.isoformat(), state
+
+
 def _build_provider_ops_queue(
     items: list[ConsoleBranchIntegrationStatus],
     *,
@@ -2906,53 +2996,10 @@ def _build_provider_ops_queue(
     priority_rank = {"p0": 0, "p1": 1, "p2": 2}
     queue_items: list[ConsoleProviderOpsQueueItem] = []
     for item in items:
-        if not item.is_active:
+        decision = _resolve_provider_ops_decision(item)
+        if not decision:
             continue
-
-        reasons: list[str] = []
-        priority = "p2"
-        recommended_action = "provider_send_reminder"
-
-        def _promote(level: str) -> None:
-            nonlocal priority
-            if priority_rank[level] < priority_rank[priority]:
-                priority = level
-
-        if item.provider_binding_rebind_required:
-            reasons.append("provider_binding_rebind_required")
-            recommended_action = "provider_complete_rebind"
-            _promote("p0")
-
-        if item.provider_binding_expiry_status == "expired":
-            reasons.append("provider_binding_expired")
-            if recommended_action == "provider_send_reminder":
-                recommended_action = "provider_renewal_confirmed"
-            _promote("p0")
-        elif item.provider_binding_expiry_status == "expiring_soon":
-            reasons.append("provider_binding_expiring_soon")
-            if recommended_action == "provider_send_reminder":
-                recommended_action = "provider_renewal_confirmed"
-            _promote("p1")
-
-        if item.whatsapp_status in {"missing_instance_id", "instance_id_mismatch", "invalid_webhook_url"}:
-            reasons.append(item.whatsapp_status)
-            if recommended_action == "provider_send_reminder":
-                recommended_action = "provider_webhook_updated"
-            _promote("p0")
-
-        if item.provider_binding_alert_state == "critical":
-            reasons.append("provider_binding_alert_critical")
-            if recommended_action == "provider_send_reminder":
-                recommended_action = "provider_start_rebind"
-            _promote("p0")
-        elif item.provider_binding_alert_state == "warn":
-            reasons.append("provider_binding_alert_warn")
-            _promote("p1")
-
-        if not reasons:
-            continue
-
-        dedup_reasons = list(dict.fromkeys(reasons))
+        priority, recommended_action, dedup_reasons = decision
         queue_items.append(
             ConsoleProviderOpsQueueItem(
                 client_id=item.client_id,
@@ -2983,6 +3030,60 @@ def _build_provider_ops_queue(
         )
     )
     return queue_items
+
+
+def _build_provider_lifecycle_item(
+    *,
+    status: ConsoleBranchIntegrationStatus,
+    branch: Branch,
+    company_id: Optional[UUID],
+    company_name: Optional[str],
+    generated_at: datetime,
+    now: datetime,
+) -> ConsoleProviderLifecycleItem:
+    decision = _resolve_provider_ops_decision(status)
+    priority: Optional[str] = None
+    next_action: Optional[str] = None
+    blockers: list[str] = []
+    if decision:
+        priority, next_action, blockers = decision
+    sla_deadline_at, sla_state = _resolve_provider_ops_sla(
+        priority=priority,
+        generated_at=generated_at,
+        now=now,
+    )
+    return ConsoleProviderLifecycleItem(
+        client_id=status.client_id,
+        client_slug=status.client_slug,
+        branch_id=status.branch_id,
+        branch_slug=status.branch_slug,
+        branch_name=status.branch_name,
+        company_id=company_id,
+        company_name=company_name,
+        branch_phone=_normalize_optional_text(branch.phone),
+        status=status.status,
+        whatsapp_status=status.whatsapp_status,
+        integration_state=status.integration_state,
+        last_inbound_at=status.last_inbound_at,
+        instance_id=status.instance_id,
+        provider_binding_provider=status.provider_binding_provider,
+        provider_binding_instance_id=status.provider_binding_instance_id,
+        provider_binding_webhook_status=status.provider_binding_webhook_status,
+        provider_binding_paid_until=status.provider_binding_paid_until,
+        provider_binding_owner=status.provider_binding_owner,
+        provider_binding_next_renewal_at=status.provider_binding_next_renewal_at,
+        provider_binding_last_rebind_at=status.provider_binding_last_rebind_at,
+        provider_binding_rebind_required=status.provider_binding_rebind_required,
+        provider_binding_alert_state=status.provider_binding_alert_state,
+        provider_binding_expiry_status=status.provider_binding_expiry_status,
+        provider_binding_days_until_expiry=status.provider_binding_days_until_expiry,
+        next_action=next_action,
+        priority=priority,
+        blockers=blockers,
+        sla_deadline_at=sla_deadline_at,
+        sla_state=sla_state,
+        generated_at=generated_at.isoformat(),
+    )
 
 
 def _build_provider_ops_effective_payload(
@@ -7723,6 +7824,197 @@ async def list_branches(
         items=[_serialize_branch(branch) for branch in items],
         cursor=next_cursor,
         has_more=has_more,
+    )
+
+
+@router.get(
+    "/admin/provider-lifecycle",
+    response_model=ConsoleProviderLifecycleListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_provider_lifecycle(
+    request: Request,
+    stale_after_minutes: int = Query(
+        _INTEGRATION_DEFAULT_STALE_MINUTES,
+        ge=_INTEGRATION_MIN_STALE_MINUTES,
+        le=_INTEGRATION_MAX_STALE_MINUTES,
+    ),
+    cursor: Optional[str] = None,
+    limit: int = 50,
+    only_problematic: Optional[str] = None,
+    company_id: Optional[str] = None,
+    client_id: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleProviderLifecycleListResponse:
+    context = get_console_context(request, db, require_selection=False, include_inactive_tenants=False)
+    _require_platform_admin(context)
+    _reject_unknown_query_params(
+        request,
+        {"stale_after_minutes", "cursor", "limit", "only_problematic", "company_id", "client_id", "branch_id"},
+    )
+    _validate_limit(limit)
+
+    only_problematic_mode = _parse_bool_param("only_problematic", only_problematic, default=False)
+    cursor_date = _parse_cursor_param(cursor)
+    company_uuid = _parse_uuid_param("company_id", company_id)
+    client_uuid = _parse_uuid_param("client_id", client_id)
+    branch_uuid = _parse_uuid_param("branch_id", branch_id)
+
+    active_clients = [
+        client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
+    ]
+    if company_uuid:
+        _require_company_access(context, company_uuid)
+        active_clients = [client for client in active_clients if client.company_id == company_uuid]
+    if client_uuid:
+        _require_client_access(context, client_uuid)
+        selected_client = next((client for client in (context.accessible_clients or []) if client.id == client_uuid), None)
+        if company_uuid and selected_client and selected_client.company_id != company_uuid:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "client_id does not belong to company_id")
+        active_clients = [client for client in active_clients if client.id == client_uuid]
+
+    if branch_uuid:
+        selected_branch = db.query(Branch).filter(Branch.id == branch_uuid).first()
+        if not selected_branch:
+            raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+        _require_client_access(context, selected_branch.client_id, message="Branch belongs to another tenant")
+        if client_uuid and selected_branch.client_id != client_uuid:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to client_id")
+        if company_uuid:
+            selected_branch_company_id = next(
+                (
+                    client.company_id
+                    for client in (context.accessible_clients or [])
+                    if client.id == selected_branch.client_id
+                ),
+                None,
+            )
+            if selected_branch_company_id != company_uuid:
+                raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to company_id")
+
+    if not active_clients:
+        return ConsoleProviderLifecycleListResponse(
+            stale_after_minutes=stale_after_minutes,
+            cursor=None,
+            has_more=False,
+            total_in_scope=0,
+            items=[],
+        )
+
+    client_ids = [client.id for client in active_clients]
+    client_slug_map = {client.id: client.name for client in active_clients}
+    client_company_map = {
+        client.id: client.company_id
+        for client in active_clients
+        if getattr(client, "company_id", None)
+    }
+
+    company_ids = sorted({company_id for company_id in client_company_map.values() if company_id})
+    companies_by_id: dict[UUID, Company] = {}
+    if company_ids:
+        companies_by_id = {
+            company.id: company
+            for company in db.query(Company).filter(Company.id.in_(company_ids)).all()
+        }
+
+    branches_query = db.query(Branch).filter(Branch.client_id.in_(client_ids))
+    if branch_uuid:
+        branches_query = branches_query.filter(Branch.id == branch_uuid)
+    branches = (
+        branches_query
+        .order_by(Branch.created_at.desc(), Branch.id.desc())
+        .all()
+    )
+
+    if not branches:
+        return ConsoleProviderLifecycleListResponse(
+            stale_after_minutes=stale_after_minutes,
+            cursor=None,
+            has_more=False,
+            total_in_scope=0,
+            items=[],
+        )
+
+    branch_client_ids = sorted({branch.client_id for branch in branches})
+    token_rows = (
+        db.query(
+            ClientSettings.client_id,
+            ClientSettings.telegram_bot_token,
+        )
+        .filter(ClientSettings.client_id.in_(branch_client_ids))
+        .all()
+    )
+    telegram_token_map: dict[UUID, bool] = {}
+    for row_client_id, token in token_rows:
+        telegram_token_map[row_client_id] = bool(_normalize_optional_text(token))
+
+    inbound_observations = _load_latest_branch_inbound_observations_for_clients(
+        db,
+        client_ids=branch_client_ids,
+    )
+    generated_at = datetime.now(timezone.utc)
+    provider_binding_by_branch = _build_provider_binding_lifecycle_map(
+        db,
+        client_ids=branch_client_ids,
+        branches=branches,
+        now=generated_at,
+    )
+
+    lifecycle_rows: list[tuple[datetime, ConsoleProviderLifecycleItem]] = []
+    for branch in branches:
+        client_slug = client_slug_map.get(branch.client_id)
+        if not client_slug:
+            continue
+        observed = inbound_observations.get(branch.id)
+        last_inbound_at: Optional[datetime] = observed[0] if observed else None
+        last_inbound_instance_id: Optional[str] = observed[1] if observed else None
+        status = _build_branch_integration_status(
+            client_id=branch.client_id,
+            client_slug=client_slug,
+            branch=branch,
+            has_telegram_bot_token=telegram_token_map.get(branch.client_id, False),
+            stale_after_minutes=stale_after_minutes,
+            last_inbound_at=last_inbound_at,
+            last_inbound_instance_id=last_inbound_instance_id,
+            now=generated_at,
+            provider_binding=provider_binding_by_branch.get(branch.id),
+        )
+        decision = _resolve_provider_ops_decision(status)
+        if only_problematic_mode and status.status == "ok" and not decision:
+            continue
+
+        company_uuid_for_client = client_company_map.get(branch.client_id)
+        company_name = (
+            companies_by_id.get(company_uuid_for_client).name
+            if company_uuid_for_client and company_uuid_for_client in companies_by_id
+            else None
+        )
+        lifecycle_item = _build_provider_lifecycle_item(
+            status=status,
+            branch=branch,
+            company_id=company_uuid_for_client,
+            company_name=company_name,
+            generated_at=generated_at,
+            now=generated_at,
+        )
+        lifecycle_rows.append((branch.created_at, lifecycle_item))
+
+    total_in_scope = len(lifecycle_rows)
+    paged_rows = lifecycle_rows
+    if cursor_date is not None:
+        paged_rows = [row for row in paged_rows if row[0] and row[0] < cursor_date]
+
+    has_more = len(paged_rows) > limit
+    page_rows = paged_rows[:limit]
+    next_cursor = page_rows[-1][0].isoformat() if has_more and page_rows and page_rows[-1][0] else None
+
+    return ConsoleProviderLifecycleListResponse(
+        stale_after_minutes=stale_after_minutes,
+        cursor=next_cursor,
+        has_more=has_more,
+        total_in_scope=total_in_scope,
+        items=[item for _created_at, item in page_rows],
     )
 
 

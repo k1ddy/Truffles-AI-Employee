@@ -1026,6 +1026,7 @@ ConsoleProviderOpsAction = Literal[
     "provider_send_reminder",
 ]
 ConsoleProviderOpsQueuePriority = Literal["p0", "p1", "p2"]
+ConsoleProviderLifecycleSlaState = Literal["none", "on_track", "due_soon", "overdue"]
 
 
 class ConsoleProviderOpsQueueItem(BaseModel):
@@ -1046,6 +1047,54 @@ class ConsoleProviderOpsQueueItem(BaseModel):
     provider_binding_days_until_expiry: Optional[int] = None
     provider_binding_rebind_required: Optional[bool] = None
     generated_at: Optional[str] = None
+
+
+class ConsoleProviderLifecycleItem(BaseModel):
+    client_id: UUID
+    client_slug: str
+    branch_id: UUID
+    branch_slug: str
+    branch_name: str
+    company_id: Optional[UUID] = None
+    company_name: Optional[str] = None
+    branch_phone: Optional[str] = None
+    status: Literal["ok", "warn", "error"]
+    whatsapp_status: Literal[
+        "ok",
+        "inactive",
+        "missing_instance_id",
+        "instance_id_mismatch",
+        "invalid_webhook_url",
+        "no_recent_inbound",
+    ]
+    integration_state: Literal["ok", "degraded"] = "ok"
+    last_inbound_at: Optional[str] = None
+    instance_id: Optional[str] = None
+    provider_binding_provider: Optional[str] = None
+    provider_binding_instance_id: Optional[str] = None
+    provider_binding_webhook_status: Optional[Literal["configured", "pending", "rebind_required"]] = None
+    provider_binding_paid_until: Optional[str] = None
+    provider_binding_owner: Optional[str] = None
+    provider_binding_next_renewal_at: Optional[str] = None
+    provider_binding_last_rebind_at: Optional[str] = None
+    provider_binding_rebind_required: Optional[bool] = None
+    provider_binding_alert_state: Literal["ok", "warn", "critical", "unknown"] = "unknown"
+    provider_binding_expiry_status: Literal["ok", "expiring_soon", "expired", "unknown"] = "unknown"
+    provider_binding_days_until_expiry: Optional[int] = None
+    next_action: Optional[ConsoleProviderOpsAction] = None
+    priority: Optional[ConsoleProviderOpsQueuePriority] = None
+    blockers: list[str] = []
+    sla_deadline_at: Optional[str] = None
+    sla_state: ConsoleProviderLifecycleSlaState = "none"
+    generated_at: Optional[str] = None
+
+
+class ConsoleProviderLifecycleListResponse(BaseModel):
+    stale_after_minutes: int
+    cursor: Optional[str] = None
+    has_more: bool = False
+    total_in_scope: int = 0
+    items: list[ConsoleProviderLifecycleItem]
 
 
 class ConsoleIntegrationsListResponse(BaseModel):
