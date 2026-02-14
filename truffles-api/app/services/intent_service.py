@@ -65,6 +65,17 @@ def _classify_llm_error(exc: Exception) -> str:
     combined = " ".join(part for part in (raw.casefold(), token) if part).strip()
     if not combined:
         return "error"
+    if any(
+        marker in combined
+        for marker in (
+            "deadline_exceeded",
+            "timed out",
+            "timeout",
+            "readtimeout",
+            "connecttimeout",
+        )
+    ):
+        return "timeout"
     if "insufficient_quota" in combined or "insufficient quota" in combined:
         return "insufficient_quota"
     if "rate_limit" in combined or "rate limit" in combined:
@@ -77,6 +88,42 @@ def _classify_llm_error(exc: Exception) -> str:
         or " 401 " in f" {combined} "
     ):
         return "unauthorized"
+    if (
+        "model_not_found" in combined
+        or "does not exist" in combined
+        or "unknown model" in combined
+    ):
+        return "model_not_found"
+    if (
+        "context_length_exceeded" in combined
+        or "maximum context length" in combined
+        or "too many tokens" in combined
+    ):
+        return "context_length"
+    if (
+        "invalid_request_error" in combined
+        or "invalid request" in combined
+        or "unsupported value" in combined
+        or "bad request" in combined
+        or " 400 " in f" {combined} "
+    ):
+        return "invalid_request"
+    if (
+        "connection refused" in combined
+        or "connection reset" in combined
+        or "connection aborted" in combined
+        or "temporarily unavailable" in combined
+        or "name or service not known" in combined
+        or "nodename nor servname" in combined
+    ):
+        return "connection_error"
+    if (
+        "service unavailable" in combined
+        or "server overloaded" in combined
+        or "overloaded" in combined
+        or " 503 " in f" {combined} "
+    ):
+        return "service_unavailable"
     return "error"
 
 QDRANT_HOST = os.environ.get("QDRANT_HOST", "http://qdrant:6333")

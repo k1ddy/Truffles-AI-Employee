@@ -3784,6 +3784,11 @@ CONTROLLER_FALLBACK_REASON_MAP = {
 }
 CONTROLLER_FALLBACK_ERROR_VALUES = {"controller_failed", "error"}
 CONTROLLER_FALLBACK_REASONS = set(CONTROLLER_FALLBACK_REASON_MAP.values()) | {"error"}
+POLICY_CORE_INFO_RESCUE_REASON_PREFIXES = (
+    "policy_error:",
+    "policy_validation:",
+    "llm_degraded:",
+)
 
 
 def _normalize_controller_fallback_reason(*, error: str | None) -> str | None:
@@ -3798,6 +3803,15 @@ def _normalize_controller_fallback_reason(*, error: str | None) -> str | None:
     if normalized in CONTROLLER_FALLBACK_ERROR_VALUES:
         return "error"
     return "error"
+
+
+def _policy_core_reason_supports_info_rescue(reason: str | None) -> bool:
+    if not isinstance(reason, str):
+        return False
+    normalized = reason.strip().casefold()
+    if not normalized:
+        return False
+    return normalized.startswith(POLICY_CORE_INFO_RESCUE_REASON_PREFIXES)
 
 
 def _resolve_controller_signal_class(*, intent_decomp_set: set[str], booking_signal: bool) -> str | None:
@@ -7453,6 +7467,43 @@ async def _handle_webhook_payload(
         and not expected_reply_blocked_by_info
     )
     pending_info_signal = bool(info_class_intents)
+    degraded_guard_info_hints: list[str] = []
+    if (
+        policy_core_runtime_active
+        and policy_core_mode == "degraded_fallback"
+        and policy_core_attempted
+        and not pending_info_signal
+        and message_text
+        and _policy_core_reason_supports_info_rescue(policy_core_degrade_reason)
+    ):
+        rescue_info_intents, _ = _detect_info_class_intents(
+            message_text,
+            intent_decomp_set=intent_decomp_set,
+            client_slug=payload.client_slug,
+        )
+        degraded_guard_info_hints = [
+            intent
+            for intent in rescue_info_intents
+            if isinstance(intent, str) and intent in INFO_INTENTS
+        ]
+        if degraded_guard_info_hints:
+            pending_info_signal = True
+            info_class_intents = set(info_class_intents) | set(degraded_guard_info_hints)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_core_guard",
+                    "decision": "info_hint",
+                    "state": conversation.state,
+                    "reason": policy_core_degrade_reason,
+                    "info_intents": degraded_guard_info_hints,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {"policy_core_guard_info_hints": degraded_guard_info_hints},
+                )
     booking_verification_request = bool(message_text and _looks_like_booking_verification_request(message_text))
     degraded_policy_core_critical = bool(
         policy_core_runtime_active
