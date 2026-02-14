@@ -102,6 +102,12 @@ async function openTenants(page: import('@playwright/test').Page) {
     await expect(page.getByTestId('tenants-title')).toBeVisible();
 }
 
+async function openIntegrations(page: import('@playwright/test').Page) {
+    await page.getByTestId('nav-integrations').click();
+    await expect(page).toHaveURL(urlPathPattern('/integrations'));
+    await expect(page.getByTestId('integrations-title')).toBeVisible();
+}
+
 function tenantsSection(page: import('@playwright/test').Page, title: string) {
     return page.locator('section').filter({ has: page.getByRole('heading', { name: title }) }).first();
 }
@@ -918,6 +924,36 @@ test.describe('Navigation', () => {
             return `${year}-${month}-${day}`;
         });
         await expect(dateInput).toHaveValue(localDate);
+    });
+
+    test('should navigate from Integrations row to Company Workspace @smoke', async ({ page }) => {
+        const integrationsNav = page.getByTestId('nav-integrations');
+        if (!(await integrationsNav.isVisible().catch(() => false))) {
+            return;
+        }
+
+        await openIntegrations(page);
+        await expect(page.getByTestId('integrations-workspace-cta')).toBeVisible();
+
+        const emptyState = page.getByTestId('integrations-empty');
+        if (await emptyState.isVisible().catch(() => false)) {
+            await expect(emptyState).toBeVisible();
+            return;
+        }
+
+        const openWorkspaceButton = page.getByTestId('integrations-row-open-workspace').first();
+        await expect(openWorkspaceButton).toBeVisible();
+        await openWorkspaceButton.click();
+
+        await expect(page).toHaveURL(urlPathPattern('/company-workspace'));
+        await expect(page.getByTestId('company-workspace-page')).toBeVisible();
+
+        const storedContext = await page.evaluate(() => ({
+            clientId: window.localStorage.getItem('console:client_id'),
+            branchId: window.localStorage.getItem('console:branch_id'),
+        }));
+        expect(storedContext.clientId).toBeTruthy();
+        expect(storedContext.branchId).toBeTruthy();
     });
 
     test('should render lifecycle modal flow on Tenants @smoke', async ({ page }) => {
