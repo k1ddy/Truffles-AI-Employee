@@ -30,7 +30,8 @@ def _make_branch(
 
 class _QueryMock:
     def __init__(self, rows):
-        self._rows = rows
+        self._rows = list(rows)
+        self._limit = None
 
     def filter(self, *_args, **_kwargs):
         return self
@@ -38,8 +39,17 @@ class _QueryMock:
     def order_by(self, *_args, **_kwargs):
         return self
 
+    def limit(self, value):
+        self._limit = value
+        return self
+
+    def count(self):
+        return len(self._rows)
+
     def all(self):
-        return self._rows
+        if self._limit is None:
+            return self._rows
+        return self._rows[: self._limit]
 
     def first(self):
         return self._rows[0] if self._rows else None
@@ -59,6 +69,8 @@ class _BranchQueryMock(_QueryMock):
                 filtered = [row for row in filtered if row.client_id in allowed]
             if "branches.id =" in expr_text and value is not None:
                 filtered = [row for row in filtered if row.id == value]
+            if "branches.created_at <" in expr_text and value is not None:
+                filtered = [row for row in filtered if row.created_at < value]
         self._rows = filtered
         return self
 
@@ -303,6 +315,27 @@ async def test_list_integrations_requires_platform_admin(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_integrations_rejects_invalid_limit(monkeypatch):
+    request = SimpleNamespace(query_params={"limit": "101"})
+    db = Mock()
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            role="platform_admin",
+            accessible_clients=[],
+        ),
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_integrations(request=request, limit=101, db=db)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert exc_info.value.message == "limit must be between 1 and 100"
+
+
+@pytest.mark.asyncio
 async def test_list_integrations_is_read_only_without_drift_side_effects(monkeypatch):
     request = SimpleNamespace(query_params={})
     client_id = uuid4()
@@ -389,6 +422,127 @@ async def test_list_integrations_is_read_only_without_drift_side_effects(monkeyp
     assert len(response.items) == 1
     assert response.items[0].client_id == client_id
     assert response.items[0].client_slug == "demo"
+    assert response.total_in_scope == 1
+    assert response.has_more is False
+
+
+@pytest.mark.asyncio
+async def test_list_integrations_supports_cursor_pagination(monkeypatch):
+    now = datetime.now(timezone.utc)
+    request = SimpleNamespace(query_params={"limit": "2"})
+    client_id = uuid4()
+    branch_a = uuid4()
+    branch_b = uuid4()
+    branch_c = uuid4()
+    db = Mock()
+
+    context = SimpleNamespace(
+        role="platform_admin",
+        accessible_clients=[SimpleNamespace(id=client_id, name="demo", status="active")],
+    )
+
+    branch_rows = [
+        SimpleNamespace(
+            id=branch_a,
+            client_id=client_id,
+            slug="branch-a",
+            name="Branch A",
+            is_active=True,
+            instance_id="instance-a",
+            telegram_chat_id="111",
+            webhook_secret="secret-a",
+            created_at=now - timedelta(minutes=1),
+        ),
+        SimpleNamespace(
+            id=branch_b,
+            client_id=client_id,
+            slug="branch-b",
+            name="Branch B",
+            is_active=True,
+            instance_id="instance-b",
+            telegram_chat_id="222",
+            webhook_secret="secret-b",
+            created_at=now - timedelta(minutes=2),
+        ),
+        SimpleNamespace(
+            id=branch_c,
+            client_id=client_id,
+            slug="branch-c",
+            name="Branch C",
+            is_active=True,
+            instance_id="instance-c",
+            telegram_chat_id="333",
+            webhook_secret="secret-c",
+            created_at=now - timedelta(minutes=3),
+        ),
+    ]
+
+    def _query_side_effect(*entities):
+        if len(entities) == 1 and entities[0] is console_router.Branch:
+            return _BranchQueryMock(branch_rows)
+        if len(entities) == 2:
+            return _QueryMock([(client_id, "token-a")])
+        raise AssertionError(f"unexpected query entities: {entities}")
+
+    db.query.side_effect = _query_side_effect
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(
+        console_router,
+        "_load_latest_branch_inbound_observations_for_clients",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_provider_binding_lifecycle_map",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_branch_integration_status",
+        lambda **kwargs: ConsoleBranchIntegrationStatus(
+            client_id=kwargs["client_id"],
+            client_slug=kwargs["client_slug"],
+            branch_id=kwargs["branch"].id,
+            branch_slug=kwargs["branch"].slug,
+            branch_name=kwargs["branch"].name,
+            is_active=True,
+            instance_id=kwargs["branch"].instance_id,
+            telegram_chat_id=kwargs["branch"].telegram_chat_id,
+            webhook_url="https://api.truffles.kz/webhook/demo?webhook_secret=abc",
+            webhook_url_valid=True,
+            whatsapp_status="ok",
+            telegram_status="ok",
+            drift_issues=[],
+            status="ok",
+        ),
+    )
+
+    response_page_1 = await console_router.list_integrations(
+        request=request,
+        stale_after_minutes=60,
+        limit=2,
+        db=db,
+    )
+
+    assert response_page_1.total_in_scope == 3
+    assert response_page_1.has_more is True
+    assert response_page_1.cursor is not None
+    assert len(response_page_1.items) == 2
+    assert [item.branch_id for item in response_page_1.items] == [branch_a, branch_b]
+
+    request_page_2 = SimpleNamespace(query_params={"limit": "2", "cursor": response_page_1.cursor})
+    response_page_2 = await console_router.list_integrations(
+        request=request_page_2,
+        stale_after_minutes=60,
+        cursor=response_page_1.cursor,
+        limit=2,
+        db=db,
+    )
+
+    assert response_page_2.total_in_scope == 3
+    assert response_page_2.has_more is False
+    assert len(response_page_2.items) == 1
+    assert response_page_2.items[0].branch_id == branch_c
 
 
 @pytest.mark.asyncio

@@ -2437,6 +2437,20 @@ paths:
             maximum: 1440
             default: 60
           description: Mark branch as stale when no inbound for this many minutes.
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: ISO timestamp cursor for pagination.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          description: Maximum number of branches in response page.
         - name: company_id
           in: query
           schema:
@@ -4287,10 +4301,18 @@ components:
 
     IntegrationsListResponse:
       type: object
-      required: [stale_after_minutes, items, provider_ops_queue]
+      required: [stale_after_minutes, has_more, total_in_scope, items, provider_ops_queue]
       properties:
         stale_after_minutes:
           type: integer
+        cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
+        total_in_scope:
+          type: integer
+          minimum: 0
         items:
           type: array
           items:
