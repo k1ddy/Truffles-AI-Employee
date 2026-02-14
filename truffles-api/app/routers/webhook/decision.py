@@ -7234,6 +7234,23 @@ async def _handle_webhook_payload(
                 ):
                     policy_validation_error = "action_tool_mismatch"
                 if policy_validation_error is None and policy_tool_action == "info" and not policy_pack_refs:
+                    info_refs_from_tool_args = _normalize_plan_refs(policy_tool_args.get("info_refs"))
+                    if info_refs_from_tool_args:
+                        policy_pack_refs = info_refs_from_tool_args
+                    elif info_class_intents:
+                        policy_pack_refs = [
+                            ref
+                            for ref in _normalize_plan_refs(list(info_class_intents))
+                            if ref in INFO_INTENTS
+                        ]
+                if policy_validation_error is None and policy_tool_action == "consult" and not policy_pack_refs:
+                    consult_ref = policy_tool_args.get("consult_ref")
+                    consult_refs = policy_tool_args.get("consult_refs")
+                    if isinstance(consult_ref, str) and consult_ref.strip():
+                        policy_pack_refs = _normalize_plan_refs([consult_ref])
+                    elif isinstance(consult_refs, list):
+                        policy_pack_refs = _normalize_plan_refs(consult_refs)
+                if policy_validation_error is None and policy_tool_action == "info" and not policy_pack_refs:
                     policy_pack_refs = _derive_policy_info_refs(
                         policy_intent=policy_intent,
                         message_text=message_text,
@@ -7288,6 +7305,10 @@ async def _handle_webhook_payload(
                     policy_validation_error = "handoff_not_allowed"
 
             if policy_validation_error is None and policy_action == "collect":
+                merged_policy_slots = _merge_booking_plan_slots(
+                    booking_state=booking if isinstance(booking, dict) else None,
+                    plan_slots=policy_slot_state_validated,
+                )
                 if policy_next_question:
                     policy_collect_slot = policy_next_question
                 else:
@@ -7300,10 +7321,24 @@ async def _handle_webhook_payload(
                             goal=policy_goal,
                         )
                 if not policy_collect_slot:
-                    merged_policy_slots = _merge_booking_plan_slots(
-                        booking_state=booking if isinstance(booking, dict) else None,
-                        plan_slots=policy_slot_state_validated,
-                    )
+                    if (
+                        conversation.state == ConversationState.BOT_ACTIVE.value
+                        and policy_tool_action
+                        in {
+                            "collect",
+                            "booking",
+                            "calendar.list_slots",
+                            "calendar.book_slot",
+                            "calendar.reschedule",
+                            "calendar.cancel",
+                        }
+                    ):
+                        for slot_key in BOOKING_SLOT_ORDER:
+                            slot_value = merged_policy_slots.get(slot_key)
+                            if not (isinstance(slot_value, str) and slot_value.strip()):
+                                policy_collect_slot = slot_key
+                                break
+                if not policy_collect_slot:
                     if (
                         policy_tool_action in {"collect", "booking", "calendar.book_slot"}
                         and _plan_has_complete_booking_slots(merged_policy_slots)

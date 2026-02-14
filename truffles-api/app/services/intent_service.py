@@ -21,6 +21,8 @@ from app.services.ai_service import (
     INTENT_TIMEOUT_SECONDS,
     _append_llm_budget_event,
     _current_openai_api_key,
+    _record_pipeline_budget_skip,
+    _remaining_pipeline_budget_ms,
     _should_attempt_llm,
     consume_llm_budget,
     get_llm_provider,
@@ -153,6 +155,14 @@ POLICY_CORE_PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "llm
 POLICY_CORE_TIMEOUT_SECONDS = float(
     os.environ.get("LLM_POLICY_CORE_TIMEOUT_SECONDS", "5.0")
 )
+POLICY_CORE_MIN_TIMEOUT_SECONDS = max(
+    float(os.environ.get("LLM_POLICY_CORE_MIN_TIMEOUT_SECONDS", "1.2")),
+    0.1,
+)
+POLICY_CORE_BUDGET_GUARD_MS = max(
+    float(os.environ.get("LLM_POLICY_CORE_BUDGET_GUARD_MS", "200")),
+    0.0,
+)
 POLICY_CORE_RETRY_TIMEOUT_SECONDS = max(
     float(os.environ.get("LLM_POLICY_CORE_TIMEOUT_RETRY_SECONDS", "8.0")),
     POLICY_CORE_TIMEOUT_SECONDS,
@@ -168,6 +178,28 @@ ANSWER_INTERPRETER_TIMEOUT_SECONDS = float(
 )
 ANSWER_INTERPRETER_MAX_TOKENS = int(os.environ.get("ANSWER_INTERPRETER_MAX_TOKENS", "120"))
 ANSWER_INTERPRETER_MODEL = os.environ.get("ANSWER_INTERPRETER_MODEL", CONTROLLER_MODEL).strip()
+
+
+def _resolve_policy_core_timeout_seconds(timing_context: dict | None) -> float:
+    remaining_ms = _remaining_pipeline_budget_ms(timing_context)
+    if remaining_ms is None:
+        return max(POLICY_CORE_TIMEOUT_SECONDS, 0.0)
+    available_ms = max(0.0, remaining_ms - POLICY_CORE_BUDGET_GUARD_MS)
+    if available_ms <= 0:
+        return 0.0
+    return min(max(POLICY_CORE_TIMEOUT_SECONDS, 0.0), available_ms / 1000.0)
+
+
+def _resolve_policy_core_max_tokens(timeout_seconds: float) -> int:
+    if timeout_seconds <= 0:
+        return min(POLICY_CORE_MAX_TOKENS, 120)
+    if timeout_seconds < 1.4:
+        return min(POLICY_CORE_MAX_TOKENS, 120)
+    if timeout_seconds < 2.2:
+        return min(POLICY_CORE_MAX_TOKENS, 160)
+    if timeout_seconds < 3.0:
+        return min(POLICY_CORE_MAX_TOKENS, 200)
+    return POLICY_CORE_MAX_TOKENS
 ANSWER_INTERPRETER_SLOTS = {"service", "datetime", "name"}
 ANSWER_INTERPRETER_SLOT_ALIASES = {
     "service": "service",
@@ -1076,9 +1108,21 @@ def route_llm_policy_core(
     if not _current_openai_api_key():
         result["error"] = "no_api_key"
         return result
+    policy_timeout_seconds = _resolve_policy_core_timeout_seconds(timing_context)
+    if policy_timeout_seconds < POLICY_CORE_MIN_TIMEOUT_SECONDS:
+        remaining_ms = _remaining_pipeline_budget_ms(timing_context)
+        if remaining_ms is not None:
+            _record_pipeline_budget_skip(
+                timing_context=timing_context,
+                stage="policy_core_llm",
+                required_ms=(POLICY_CORE_MIN_TIMEOUT_SECONDS * 1000) + POLICY_CORE_BUDGET_GUARD_MS,
+                remaining_ms=remaining_ms,
+            )
+        result["error"] = "deadline_exceeded"
+        return result
     if not _should_attempt_llm(
         timing_context,
-        timeout_seconds=POLICY_CORE_TIMEOUT_SECONDS,
+        timeout_seconds=policy_timeout_seconds,
         stage="policy_core_llm",
     ):
         result["error"] = "deadline_exceeded"
@@ -1141,18 +1185,20 @@ def route_llm_policy_core(
         {"role": "user", "content": json.dumps(policy_input, ensure_ascii=False)},
     ]
     retry_on_timeout = _is_env_enabled(POLICY_CORE_RETRY_ON_TIMEOUT, default=True)
-    timeout_attempts = [POLICY_CORE_TIMEOUT_SECONDS]
+    timeout_attempts = [policy_timeout_seconds]
     if retry_on_timeout:
-        timeout_attempts.append(POLICY_CORE_RETRY_TIMEOUT_SECONDS)
+        timeout_attempts.append(min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds))
 
     llm_start = time.monotonic()
     response = None
     error = None
     attempt_count = 0
-    timeout_seconds_used = POLICY_CORE_TIMEOUT_SECONDS
+    timeout_seconds_used = policy_timeout_seconds
+    max_tokens_used = _resolve_policy_core_max_tokens(policy_timeout_seconds)
     for attempt_idx, timeout_seconds in enumerate(timeout_attempts):
         attempt_count = attempt_idx + 1
         timeout_seconds_used = timeout_seconds
+        max_tokens_used = _resolve_policy_core_max_tokens(timeout_seconds)
         if attempt_idx > 0 and not _should_attempt_llm(
             timing_context,
             timeout_seconds=timeout_seconds,
@@ -1163,7 +1209,7 @@ def route_llm_policy_core(
         try:
             response = llm.generate(
                 messages=messages,
-                max_tokens=POLICY_CORE_MAX_TOKENS,
+                max_tokens=max_tokens_used,
                 model=POLICY_CORE_MODEL,
                 timeout_seconds=timeout_seconds,
                 temperature=temperature,
@@ -1202,7 +1248,8 @@ def route_llm_policy_core(
             "timeout_seconds": timeout_seconds_used,
             "attempt_count": attempt_count,
             "retry_on_timeout": retry_on_timeout,
-            "max_tokens": POLICY_CORE_MAX_TOKENS,
+            "max_tokens": max_tokens_used,
+            "timeout_budgeted": policy_timeout_seconds,
             "temperature": temperature,
         },
     )

@@ -249,6 +249,61 @@ class TestPolicyCoreTimeoutRetry:
         assert result["error"] is None
         assert mock_llm.return_value.generate.call_count == 2
 
+    def test_uses_adaptive_timeout_when_pipeline_budget_is_tight(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_RETRY_ON_TIMEOUT",
+            "0",
+        )
+        payload = {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "calendar.list_slots",
+            "tool_args": {},
+            "pack_refs": [],
+            "language": "ru",
+            "confidence": 0.8,
+            "reason": "ask_time",
+            "goal": "booking",
+            "slots": {},
+            "open_questions": ["datetime"],
+            "expected_reply_type": "time",
+        }
+        timing_context = {
+            "pipeline_deadline": time.monotonic() + 2.2,
+            "pipeline_budget_ms": 2200,
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Нужно время",
+                expected_reply_type="time",
+                timing_context=timing_context,
+            )
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        kwargs = mock_llm.return_value.generate.call_args.kwargs
+        assert kwargs["timeout_seconds"] < 5.0
+        assert kwargs["timeout_seconds"] >= 1.0
+
+    def test_returns_deadline_when_budget_below_min_policy_timeout(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        timing_context = {
+            "pipeline_deadline": time.monotonic() + 0.2,
+            "pipeline_budget_ms": 200,
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            result = route_llm_policy_core(
+                "Нужно время",
+                expected_reply_type="time",
+                timing_context=timing_context,
+            )
+
+        assert result["ok"] is False
+        assert result["error"] == "deadline_exceeded"
+        mock_llm.assert_not_called()
+
 
 class TestPolicyCoreErrorClassification:
     def test_maps_insufficient_quota_error(self, monkeypatch):
