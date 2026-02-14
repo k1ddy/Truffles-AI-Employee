@@ -1,0 +1,29 @@
+# SESSION 2026-02-14-integrations-limit-ux-fit-a1 — Session 2026-02-14-integrations-limit-ux-fit-a1
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-14-integrations-limit-ux-fit-a1.md
+- branch: fix/2026-02-14-integrations-limit-ux-fit-a1
+- worktree: /home/zhan/worktrees/2026-02-14-integrations-limit-ux-fit-a1
+- base_ref: origin/main
+- scope: Integrations limit bugfix + UX fit (desktop/mobile) for fleet control readability
+- done:
+  - Session created.
+  - Fixed invalid query limits in Integrations scope loaders (`300/500` -> `100`) to match backend contract (`1..100`).
+  - Added truncation warning in UI when API list pagination indicates more records than loaded in current scope.
+  - Reworked branch matrix UX from dense wide table to responsive card grid with `More details`, preserving `Manage in Workspace`.
+  - Simplified filters surface (primary controls visible, advanced filters toggle) to reduce screen clutter.
+  - Visual validation completed via mocked screenshots:
+    - `/tmp/integrations-fit-desktop.png`
+    - `/tmp/integrations-fit-mobile.png`
+- next:
+  - Open PR and wait CI.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-14-integrations-limit-ux-fit-a1.md
+  - `cd console-web && npm run lint`
+  - `cd console-web && npm run build`
+  - `pytest -q truffles-api/tests/test_console_integrations_registry.py -q`
+  - `cd console-web && npm run test:e2e -- --grep \"navigate from Integrations row to Company Workspace\"`
+  - `/tmp/integrations-fit-desktop.png`
+  - `/tmp/integrations-fit-mobile.png`
+- last_updated: 2026-02-14T11:30:00Z

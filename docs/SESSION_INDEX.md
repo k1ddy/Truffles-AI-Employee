@@ -424,3 +424,4 @@
 | 2026-02-13-company-control-plane-v3-a37 | done | feat/2026-02-13-company-control-plane-v3-a37 | /home/zhan/worktrees/2026-02-13-company-control-plane-v3-a37 | docs/TASK_PACKAGES/TP-2026-02-13-company-control-plane-v3-a37.md | 2026-02-13 |
 | 2026-02-13-start-rebind-500-a1 | active | fix/2026-02-13-start-rebind-500-a1 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-13-start-rebind-500-a1.md | 2026-02-13 |
 | 2026-02-14-ux-unify-workspace-a1 | active | fix/2026-02-14-ux-unify-workspace-a1 | /home/zhan/worktrees/2026-02-14-ux-unify-workspace-a1 | docs/TASK_PACKAGES/TP-2026-02-14-ux-unify-workspace-a1.md | 2026-02-14T04:34:00Z |
+| 2026-02-14-integrations-limit-ux-fit-a1 | active | fix/2026-02-14-integrations-limit-ux-fit-a1 | /home/zhan/worktrees/2026-02-14-integrations-limit-ux-fit-a1 | docs/TASK_PACKAGES/TP-2026-02-14-integrations-limit-ux-fit-a1.md | 2026-02-14T11:30:00Z |
