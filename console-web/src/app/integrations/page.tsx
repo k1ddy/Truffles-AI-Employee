@@ -25,6 +25,7 @@ const CLIENT_ID_STORAGE_KEY = "console:client_id";
 const BRANCH_ID_STORAGE_KEY = "console:branch_id";
 
 const STALE_AFTER_OPTIONS = [15, 30, 60, 180] as const;
+const API_LIST_LIMIT = 100;
 
 type ScopeTarget = {
     companyId?: string | null;
@@ -365,6 +366,7 @@ export default function IntegrationsPage() {
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
     const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>("all");
     const [teamFilter, setTeamFilter] = useState<TeamFilter>("all");
+    const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -397,7 +399,7 @@ export default function IntegrationsPage() {
     } = useQuery({
         queryKey: ["integrations-companies"],
         queryFn: async () => {
-            const response = await adminApi.listCompanies({ limit: 300 });
+            const response = await adminApi.listCompanies({ limit: API_LIST_LIMIT });
             return response.data;
         },
         enabled: !!session && canReadIntegrations,
@@ -410,7 +412,7 @@ export default function IntegrationsPage() {
         queryKey: ["integrations-clients", scopeCompanyId],
         queryFn: async () => {
             const response = await adminApi.listClients({
-                limit: 500,
+                limit: API_LIST_LIMIT,
                 lifecycle: "active",
                 company_id: scopeCompanyId || undefined,
                 include_fleet: "true",
@@ -430,7 +432,7 @@ export default function IntegrationsPage() {
         queryKey: ["integrations-branches", scopeClientId],
         queryFn: async () => {
             const response = await adminApi.listBranches({
-                limit: 500,
+                limit: API_LIST_LIMIT,
                 lifecycle: "active",
                 client_id: scopeClientId || undefined,
             });
@@ -788,6 +790,7 @@ export default function IntegrationsPage() {
 
     const fleetAttentionSummary = fleetAttentionData?.summary;
     const providerOpsQueue = integrationsData?.provider_ops_queue ?? [];
+    const scopeDataTruncated = Boolean(companiesData?.has_more || clientsData?.has_more || branchesData?.has_more);
 
     const syncScopeFromContext = () => {
         const storedCompanyId = readLocalStorageValue(COMPANY_ID_STORAGE_KEY);
@@ -858,7 +861,7 @@ export default function IntegrationsPage() {
 
     if (integrationsLoading && integrationsItems.length === 0) {
         return (
-            <div className="mx-auto max-w-[1400px] p-6" data-testid="integrations-page">
+            <div className="mx-auto max-w-[1640px] px-4 py-5 sm:px-6" data-testid="integrations-page">
                 <h1 className="mb-6 text-2xl font-bold" data-testid="integrations-title">Fleet Control Center</h1>
                 <div className="space-y-3 animate-pulse">
                     {[...Array(8)].map((_, index) => (
@@ -871,7 +874,7 @@ export default function IntegrationsPage() {
 
     if (integrationsError && integrationsItems.length === 0) {
         return (
-            <div className="mx-auto max-w-[1400px] p-6" data-testid="integrations-page">
+            <div className="mx-auto max-w-[1640px] px-4 py-5 sm:px-6" data-testid="integrations-page">
                 <h1 className="mb-6 text-2xl font-bold" data-testid="integrations-title">Fleet Control Center</h1>
                 <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-6 text-center" data-testid="integrations-error">
                     <p className="mb-4 text-destructive">Не удалось загрузить интеграции</p>
@@ -888,7 +891,7 @@ export default function IntegrationsPage() {
     }
 
     return (
-        <div className="mx-auto max-w-[1400px] p-6" data-testid="integrations-page">
+        <div className="mx-auto max-w-[1640px] px-4 py-5 sm:px-6" data-testid="integrations-page">
             <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold" data-testid="integrations-title">Fleet Control Center</h1>
@@ -928,7 +931,7 @@ export default function IntegrationsPage() {
 
             <section className="rounded-xl border border-border/60 bg-card p-4" data-testid="integrations-scope-controls">
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Scope + filters</div>
-                <div className="mt-3 grid gap-3 lg:grid-cols-6">
+                <div className="mt-3 grid gap-3 lg:grid-cols-5">
                     <label className="text-xs text-muted-foreground">
                         company
                         <select
@@ -989,6 +992,16 @@ export default function IntegrationsPage() {
                     </label>
 
                     <label className="text-xs text-muted-foreground">
+                        search
+                        <input
+                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            placeholder="company / client / branch / instance"
+                            value={searchText}
+                            onChange={(event) => setSearchText(event.target.value)}
+                        />
+                    </label>
+
+                    <label className="text-xs text-muted-foreground">
                         stale threshold
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -1015,49 +1028,9 @@ export default function IntegrationsPage() {
                             <option value="ok">ok</option>
                         </select>
                     </label>
-
-                    <label className="text-xs text-muted-foreground">
-                        search
-                        <input
-                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                            placeholder="company / client / branch / instance"
-                            value={searchText}
-                            onChange={(event) => setSearchText(event.target.value)}
-                        />
-                    </label>
                 </div>
 
-                <div className="mt-3 grid gap-3 lg:grid-cols-4">
-                    <label className="text-xs text-muted-foreground">
-                        expiry
-                        <select
-                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                            value={expiryFilter}
-                            onChange={(event) => setExpiryFilter(event.target.value as ExpiryFilter)}
-                        >
-                            <option value="all">all</option>
-                            <option value="expired">expired</option>
-                            <option value="expiring">expiring soon</option>
-                            <option value="ok">ok</option>
-                            <option value="unknown">unknown</option>
-                        </select>
-                    </label>
-
-                    <label className="text-xs text-muted-foreground">
-                        team
-                        <select
-                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                            value={teamFilter}
-                            onChange={(event) => setTeamFilter(event.target.value as TeamFilter)}
-                        >
-                            <option value="all">all</option>
-                            <option value="gap">any gap</option>
-                            <option value="no_manager">no manager</option>
-                            <option value="no_specialist">no specialist</option>
-                            <option value="understaffed">understaffed</option>
-                        </select>
-                    </label>
-
+                <div className="mt-3 grid gap-3 lg:grid-cols-3">
                     <div className="flex flex-wrap items-end gap-2">
                         <button
                             className="btn-ghost"
@@ -1088,6 +1061,12 @@ export default function IntegrationsPage() {
                         >
                             Set context
                         </button>
+                        <button
+                            className="btn-ghost"
+                            onClick={() => setShowAdvancedFilters((value) => !value)}
+                        >
+                            {showAdvancedFilters ? "Hide advanced" : "Show advanced"}
+                        </button>
                     </div>
 
                     <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
@@ -1096,7 +1075,51 @@ export default function IntegrationsPage() {
                             company <span className="font-mono">{scopeCompanyId || "all"}</span> · client <span className="font-mono">{scopeClientId || "all"}</span> · branch <span className="font-mono">{scopeBranchId || "all"}</span>
                         </div>
                     </div>
+
+                    {scopeDataTruncated ? (
+                        <div className="rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="integrations-scope-truncated">
+                            API list limit = {API_LIST_LIMIT}. Для fleets &gt; {API_LIST_LIMIT} используй scope (company/client) или поиск для точного выбора.
+                        </div>
+                    ) : (
+                        <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                            Scope catalogue loaded without truncation.
+                        </div>
+                    )}
                 </div>
+
+                {showAdvancedFilters ? (
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <label className="text-xs text-muted-foreground">
+                            expiry
+                            <select
+                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                value={expiryFilter}
+                                onChange={(event) => setExpiryFilter(event.target.value as ExpiryFilter)}
+                            >
+                                <option value="all">all</option>
+                                <option value="expired">expired</option>
+                                <option value="expiring">expiring soon</option>
+                                <option value="ok">ok</option>
+                                <option value="unknown">unknown</option>
+                            </select>
+                        </label>
+
+                        <label className="text-xs text-muted-foreground">
+                            team
+                            <select
+                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                value={teamFilter}
+                                onChange={(event) => setTeamFilter(event.target.value as TeamFilter)}
+                            >
+                                <option value="all">all</option>
+                                <option value="gap">any gap</option>
+                                <option value="no_manager">no manager</option>
+                                <option value="no_specialist">no specialist</option>
+                                <option value="understaffed">understaffed</option>
+                            </select>
+                        </label>
+                    </div>
+                ) : null}
             </section>
 
             <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5" data-testid="integrations-kpi-grid">
@@ -1212,162 +1235,110 @@ export default function IntegrationsPage() {
                 </section>
             )}
 
-            <section className="mt-4 overflow-hidden rounded-xl border border-border/60 bg-card" data-testid="integrations-branch-matrix">
-                <div className="space-y-3 p-3 md:hidden">
+            <section className="mt-4 rounded-xl border border-border/60 bg-card p-3 sm:p-4" data-testid="integrations-branch-matrix">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-sm font-semibold">Branch matrix</div>
+                    <div className="text-xs text-muted-foreground">
+                        Карточный режим: лучше читаемость и меньше скролла по горизонтали.
+                    </div>
+                </div>
+
+                <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3">
                     {filteredRows.map((row) => (
-                        <article key={`mobile-${row.branch_id}`} className="rounded-lg border border-border/60 p-3 text-xs" data-testid="integrations-mobile-row">
-                            <div className="font-medium">{row.company_name}</div>
-                            <div className="text-muted-foreground">{row.client_name} ({row.client_slug})</div>
-                            <div className="mt-1 font-semibold">{row.branch_name}</div>
-                            <div className="text-muted-foreground">{row.branch_slug}</div>
-
-                            <div className="mt-2 flex flex-wrap items-center gap-1">
-                                <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${statusBadgeClass(row.status)}`}>{statusLabel(row.status)}</span>
-                                <span className="rounded bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">WA: {statusLabel(row.whatsapp_status)}</span>
-                                <span className="rounded bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">TG: {statusLabel(row.telegram_status)}</span>
-                            </div>
-
-                            <div className="mt-2 text-muted-foreground">owner: {row.provider_binding_owner ?? "-"} · paid_until: {row.provider_binding_paid_until ?? "-"}</div>
-                            <div className="mt-1 flex flex-wrap items-center gap-1">
-                                <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerBindingExpiryBadgeClass(row.provider_binding_expiry_status)}`}>
-                                    {providerBindingExpiryLabel(row.provider_binding_expiry_status)}
-                                </span>
-                                <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerBindingAlertBadgeClass(row.provider_binding_alert_state)}`}>
-                                    {providerBindingAlertLabel(row.provider_binding_alert_state)}
+                        <article key={row.branch_id} className="rounded-xl border border-border/70 bg-background p-3 text-xs sm:p-4" data-testid="integrations-row">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                    <div className="truncate font-semibold">{row.company_name}</div>
+                                    <div className="truncate text-muted-foreground">{row.client_name} ({row.client_slug})</div>
+                                    <div className="mt-1 truncate font-medium">{row.branch_name}</div>
+                                    <div className="truncate text-muted-foreground">{row.branch_slug}</div>
+                                </div>
+                                <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${statusBadgeClass(row.status)}`}>
+                                    {statusLabel(row.status)}
                                 </span>
                             </div>
 
-                            <div className="mt-2">
-                                <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${teamBadgeClass(row.team_issue)}`}>{row.team_issue ?? "Team OK"}</span>
-                                <span className="ml-2 text-muted-foreground">mgr {row.team_stats.managers} · spec {row.team_stats.specialists} · total {row.team_stats.total}</span>
+                            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Channels</div>
+                                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                                        <span className="rounded bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">WA: {statusLabel(row.whatsapp_status)}</span>
+                                        <span className="rounded bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">TG: {statusLabel(row.telegram_status)}</span>
+                                    </div>
+                                </div>
+
+                                <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Provider</div>
+                                    <div className="mt-1 text-muted-foreground">owner: {row.provider_binding_owner ?? "-"}</div>
+                                    <div className="text-muted-foreground">paid_until: {row.provider_binding_paid_until ?? "-"}</div>
+                                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                                        <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerBindingExpiryBadgeClass(row.provider_binding_expiry_status)}`}>
+                                            {providerBindingExpiryLabel(row.provider_binding_expiry_status)}
+                                        </span>
+                                        <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerBindingAlertBadgeClass(row.provider_binding_alert_state)}`}>
+                                            {providerBindingAlertLabel(row.provider_binding_alert_state)}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Team</div>
+                                    <div className="mt-1 text-muted-foreground">
+                                        total {row.team_stats.total} · mgr {row.team_stats.managers} · spec {row.team_stats.specialists}
+                                    </div>
+                                    <div className="mt-1">
+                                        <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${teamBadgeClass(row.team_issue)}`}>
+                                            {row.team_issue ?? "Team OK"}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Onboarding</div>
+                                    <div className="mt-1 text-muted-foreground">state: {onboardingStateLabel(row.onboarding_state)}</div>
+                                    <div className="mt-1">
+                                        <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${goLiveBadgeClass(row.go_live_allowed, row.go_live_state)}`}>
+                                            go-live: {goLiveStateLabel(row.go_live_state)}{row.go_live_allowed ? " (allowed)" : ""}
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
 
                             <div className="mt-2 text-muted-foreground">
-                                onboarding: {onboardingStateLabel(row.onboarding_state)} · go-live: {goLiveStateLabel(row.go_live_state)}{row.go_live_allowed ? " (allowed)" : ""}
+                                last inbound: {formatTimestamp(row.last_inbound_at)}
                             </div>
 
-                            <div className="mt-2 text-muted-foreground">last inbound: {formatTimestamp(row.last_inbound_at)}</div>
-                            <div className="mt-1"><DriftIssues item={row} /></div>
+                            <details className="mt-2 rounded-lg border border-border/60 bg-muted/10 p-2">
+                                <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">More details</summary>
+                                <div className="mt-2 space-y-1 text-muted-foreground">
+                                    <div>instance: {row.instance_id ?? "-"}</div>
+                                    <div>binding instance: {row.provider_binding_instance_id ?? "-"}</div>
+                                    <div>next_renewal: {row.provider_binding_next_renewal_at ?? "-"}</div>
+                                    <div>days left: {row.provider_binding_days_until_expiry ?? "-"} · rebind_required: {row.provider_binding_rebind_required ? "yes" : "no"}</div>
+                                    <div>last inbound instance: {row.last_inbound_instance_id ?? "-"}</div>
+                                    <div className="pt-1"><DriftIssues item={row} /></div>
+                                </div>
+                            </details>
 
-                            <button
-                                type="button"
-                                className="mt-3 rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted"
-                                onClick={() => openWorkspaceForRow(row)}
-                            >
-                                Manage in Workspace
-                            </button>
+                            <div className="mt-3 flex items-center justify-end">
+                                <button
+                                    type="button"
+                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted"
+                                    onClick={() => openWorkspaceForRow(row)}
+                                    data-testid="integrations-row-open-workspace"
+                                >
+                                    Manage in Workspace
+                                </button>
+                            </div>
                         </article>
                     ))}
-                    {filteredRows.length === 0 && (
-                        <div className="p-4 text-center text-muted-foreground" data-testid="integrations-empty">
-                            Нет филиалов по текущему scope/filter.
-                        </div>
-                    )}
                 </div>
 
-                <div className="hidden overflow-x-auto md:block">
-                    <table className="w-full text-left">
-                        <thead className="bg-muted/70">
-                            <tr>
-                                <th className="p-4 text-sm font-medium text-muted-foreground">Company / Client / Branch</th>
-                                <th className="p-4 text-sm font-medium text-muted-foreground">Channels</th>
-                                <th className="p-4 text-sm font-medium text-muted-foreground">Provider Subscription</th>
-                                <th className="p-4 text-sm font-medium text-muted-foreground">Team</th>
-                                <th className="p-4 text-sm font-medium text-muted-foreground">Onboarding / Go-live</th>
-                                <th className="p-4 text-sm font-medium text-muted-foreground">Last inbound / Drift</th>
-                                <th className="p-4 text-sm font-medium text-muted-foreground">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filteredRows.map((row) => (
-                                <tr
-                                    key={row.branch_id}
-                                    className="border-t border-border/60 align-top hover:bg-muted/30"
-                                    data-testid="integrations-row"
-                                >
-                                    <td className="p-4">
-                                        <div className="font-medium">{row.company_name}</div>
-                                        <div className="text-xs text-muted-foreground">{row.client_name} ({row.client_slug})</div>
-                                        <div className="mt-1 font-medium">{row.branch_name}</div>
-                                        <div className="text-xs text-muted-foreground">{row.branch_slug}</div>
-                                    </td>
-                                    <td className="p-4 text-sm">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusBadgeClass(row.status)}`}>
-                                                {statusLabel(row.status)}
-                                            </span>
-                                            <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                                                WA: {statusLabel(row.whatsapp_status)}
-                                            </span>
-                                            <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                                                TG: {statusLabel(row.telegram_status)}
-                                            </span>
-                                        </div>
-                                        <div className="mt-2 text-xs text-muted-foreground">instance: {row.instance_id ?? "-"}</div>
-                                        <div className="text-xs text-muted-foreground">binding instance: {row.provider_binding_instance_id ?? "-"}</div>
-                                    </td>
-                                    <td className="p-4 text-sm">
-                                        <div className="text-xs text-muted-foreground">owner: {row.provider_binding_owner ?? "-"}</div>
-                                        <div className="text-xs text-muted-foreground">paid_until: {row.provider_binding_paid_until ?? "-"}</div>
-                                        <div className="text-xs text-muted-foreground">next_renewal: {row.provider_binding_next_renewal_at ?? "-"}</div>
-                                        <div className="mt-1 flex flex-wrap items-center gap-1">
-                                            <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerBindingExpiryBadgeClass(row.provider_binding_expiry_status)}`}>
-                                                {providerBindingExpiryLabel(row.provider_binding_expiry_status)}
-                                            </span>
-                                            <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerBindingAlertBadgeClass(row.provider_binding_alert_state)}`}>
-                                                {providerBindingAlertLabel(row.provider_binding_alert_state)}
-                                            </span>
-                                        </div>
-                                        <div className="mt-1 text-xs text-muted-foreground">
-                                            days left: {row.provider_binding_days_until_expiry ?? "-"} · rebind_required: {row.provider_binding_rebind_required ? "yes" : "no"}
-                                        </div>
-                                    </td>
-                                    <td className="p-4 text-sm">
-                                        <div className="text-xs text-muted-foreground">
-                                            total: {row.team_stats.total} · mgr: {row.team_stats.managers} · spec: {row.team_stats.specialists} · support: {row.team_stats.support}
-                                        </div>
-                                        <div className="mt-1">
-                                            <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${teamBadgeClass(row.team_issue)}`}>
-                                                {row.team_issue ?? "Team OK"}
-                                            </span>
-                                        </div>
-                                    </td>
-                                    <td className="p-4 text-sm">
-                                        <div className="text-xs text-muted-foreground">onboarding: {onboardingStateLabel(row.onboarding_state)}</div>
-                                        <div className="mt-1">
-                                            <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${goLiveBadgeClass(row.go_live_allowed, row.go_live_state)}`}>
-                                                go-live: {goLiveStateLabel(row.go_live_state)}{row.go_live_allowed ? " (allowed)" : ""}
-                                            </span>
-                                        </div>
-                                    </td>
-                                    <td className="p-4 text-sm">
-                                        <div>{formatTimestamp(row.last_inbound_at)}</div>
-                                        <div className="mt-1 text-xs text-muted-foreground">last inbound instance: {row.last_inbound_instance_id ?? "-"}</div>
-                                        <div className="mt-2"><DriftIssues item={row} /></div>
-                                    </td>
-                                    <td className="p-4 text-sm">
-                                        <button
-                                            type="button"
-                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted"
-                                            onClick={() => openWorkspaceForRow(row)}
-                                            data-testid="integrations-row-open-workspace"
-                                        >
-                                            Manage in Workspace
-                                        </button>
-                                        <div className="mt-1 text-xs text-muted-foreground">Open scoped workspace for this branch</div>
-                                    </td>
-                                </tr>
-                            ))}
-                            {filteredRows.length === 0 && (
-                                <tr>
-                                    <td colSpan={7} className="p-8 text-center text-muted-foreground" data-testid="integrations-empty">
-                                        Нет филиалов по текущему scope/filter.
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
+                {filteredRows.length === 0 ? (
+                    <div className="mt-2 p-6 text-center text-muted-foreground" data-testid="integrations-empty">
+                        Нет филиалов по текущему scope/filter.
+                    </div>
+                ) : null}
             </section>
         </div>
     );
