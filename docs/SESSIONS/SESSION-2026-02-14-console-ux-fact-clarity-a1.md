@@ -1,0 +1,25 @@
+# SESSION 2026-02-14-console-ux-fact-clarity-a1 — Session 2026-02-14-console-ux-fact-clarity-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-14-console-ux-fact-clarity-a1.md
+- branch: fix/2026-02-14-console-ux-fact-clarity-a1
+- worktree: /home/zhan/worktrees/2026-02-14-console-ux-fact-clarity-a1
+- base_ref: origin/main
+- scope: UX/IA и факт-представление вкладок `Integrations` и `Company Workspace`; читаемость длинных `InstanceID/webhook`; мобильная навигация.
+- done:
+  - Выполнен фактический UX-аудит по скриншотам и коду (`integrations`, `company-workspace`, `ConsoleShell`).
+  - Обновлен `Integrations`: русификация ключевых блоков, clearer-копирайт, упрощенный контекст/фильтры, action-oriented CTA.
+  - Обновлен `Company Workspace`: пошаговый операционный поток, card-факты по webhook/instance, кнопки копирования, hard-stop с явным текущим блокером.
+  - Добавлена обработка ошибки `INVALID_PARAM: limit must be between 1 and 100` в действиях workspace.
+  - Улучшена мобильная навигация в `ConsoleShell` (flex-wrap вместо узкого горизонтального скролла).
+  - Сделаны after-скриншоты с mock-данными и зафиксированы пути артефактов.
+- next:
+  - PR/merge и пост-merge live-check на реальных данных platform_admin.
+- evidence:
+  - `npm run lint` (console-web) — pass
+  - `npm run build` (console-web) — pass
+  - `pytest -q truffles-api/tests/test_console_integrations_registry.py truffles-api/tests/test_console_fleet_attention.py` — 26 passed
+  - before screenshots: `/tmp/ux-integrations-before-desktop.png`, `/tmp/ux-integrations-before-mobile.png`, `/tmp/ux-workspace-before-desktop.png`, `/tmp/ux-workspace-before-mobile.png`
+  - after screenshots: `/tmp/ux-integrations-after-desktop.png`, `/tmp/ux-integrations-after-mobile.png`, `/tmp/ux-workspace-after-desktop.png`, `/tmp/ux-workspace-after-mobile.png`
+- last_updated: 2026-02-14

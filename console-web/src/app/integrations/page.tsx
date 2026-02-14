@@ -129,23 +129,23 @@ function statusBadgeClass(status: string): string {
 function statusLabel(status: string): string {
     const labels: Record<string, string> = {
         ok: "OK",
-        warn: "Warning",
-        error: "Error",
-        inactive: "Inactive",
-        missing_instance_id: "Missing instance_id",
-        instance_id_mismatch: "Instance mismatch",
-        invalid_webhook_url: "Invalid webhook URL",
-        invalid_webhook_secret: "Invalid webhook secret",
+        warn: "Предупреждение",
+        error: "Ошибка",
+        inactive: "Неактивно",
+        missing_instance_id: "Нет instance_id",
+        instance_id_mismatch: "Несовпадение instance_id",
+        invalid_webhook_url: "Невалидный webhook URL",
+        invalid_webhook_secret: "Невалидный webhook secret",
         webhook_secret_drift: "Webhook secret drift",
-        no_recent_inbound: "No recent inbound",
-        inbound_without_outbound: "Inbound without outbound",
-        missing_bot_token: "Missing bot token",
-        missing_chat_id: "Missing chat id",
-        provider_binding_rebind_required: "Provider rebind required",
-        provider_binding_expired: "Provider binding expired",
-        provider_binding_expiring_soon: "Provider binding expiring soon",
-        provider_binding_alert_critical: "Provider alert critical",
-        provider_binding_alert_warn: "Provider alert warn",
+        no_recent_inbound: "Нет недавнего inbound",
+        inbound_without_outbound: "Inbound без outbound",
+        missing_bot_token: "Нет bot token",
+        missing_chat_id: "Нет chat id",
+        provider_binding_rebind_required: "Нужна перепривязка",
+        provider_binding_expired: "Подписка истекла",
+        provider_binding_expiring_soon: "Скоро истекает подписка",
+        provider_binding_alert_critical: "Критичный alert provider",
+        provider_binding_alert_warn: "Alert provider (warn)",
     };
     return labels[status] ?? status;
 }
@@ -155,12 +155,12 @@ function providerBindingExpiryLabel(status?: string | null): string {
         return "OK";
     }
     if (status === "expiring_soon") {
-        return "Expiring soon";
+        return "Скоро истекает";
     }
     if (status === "expired") {
-        return "Expired";
+        return "Истекло";
     }
-    return "Unknown";
+    return "Неизвестно";
 }
 
 function providerBindingExpiryBadgeClass(status?: string | null): string {
@@ -181,12 +181,12 @@ function providerBindingAlertLabel(status?: string | null): string {
         return "Alert OK";
     }
     if (status === "warn") {
-        return "Alert Warn";
+        return "Alert WARN";
     }
     if (status === "critical") {
-        return "Alert Critical";
+        return "Alert CRITICAL";
     }
-    return "Alert Unknown";
+    return "Alert UNKNOWN";
 }
 
 function providerBindingAlertBadgeClass(status?: string | null): string {
@@ -211,26 +211,32 @@ function formatTimestamp(value?: string | null): string {
 
 function providerOpsActionLabel(action: ProviderOpsQueueItem["recommended_action"]): string {
     if (action === "provider_start_rebind") {
-        return "Start rebind";
+        return "Старт перепривязки";
     }
     if (action === "provider_complete_rebind") {
-        return "Complete rebind";
+        return "Завершить перепривязку";
     }
     if (action === "provider_renewal_confirmed") {
-        return "Confirm renewal";
+        return "Подтвердить продление";
     }
     if (action === "provider_webhook_updated") {
-        return "Update webhook";
+        return "Webhook обновлен";
     }
     if (action === "provider_send_reminder") {
-        return "Send reminder";
+        return "Отправить напоминание";
     }
-    return "Reconcile";
+    return "Сверка";
 }
 
 function goLiveStateLabel(value?: string | null): string {
     if (!value) {
         return "pending";
+    }
+    if (value === "approved") {
+        return "approved";
+    }
+    if (value === "rejected") {
+        return "rejected";
     }
     return value;
 }
@@ -247,13 +253,13 @@ function goLiveBadgeClass(allowed: boolean, state?: string | null): string {
 
 function teamIssueFromStats(stats: MembershipStats): string | null {
     if (stats.managers === 0) {
-        return "No manager";
+        return "Нет менеджера";
     }
     if (stats.specialists === 0) {
-        return "No specialist";
+        return "Нет специалиста";
     }
     if (stats.total < 2) {
-        return "Understaffed";
+        return "Недоукомплектовано";
     }
     return null;
 }
@@ -262,7 +268,7 @@ function teamBadgeClass(issue: string | null): string {
     if (!issue) {
         return "bg-green-100 text-green-800";
     }
-    if (issue === "No manager") {
+    if (issue === "Нет менеджера") {
         return "bg-red-100 text-red-800";
     }
     return "bg-amber-100 text-amber-800";
@@ -292,13 +298,13 @@ function rowSeverityWeight(row: EnrichedRow): number {
     if (row.provider_binding_rebind_required) {
         score += 60;
     }
-    if (row.team_issue === "No manager") {
+    if (row.team_issue === "Нет менеджера") {
         score += 50;
     }
-    if (row.team_issue === "No specialist") {
+    if (row.team_issue === "Нет специалиста") {
         score += 25;
     }
-    if (row.team_issue === "Understaffed") {
+    if (row.team_issue === "Недоукомплектовано") {
         score += 20;
     }
     return score;
@@ -862,7 +868,7 @@ export default function IntegrationsPage() {
     if (integrationsLoading && integrationsItems.length === 0) {
         return (
             <div className="mx-auto max-w-[1640px] px-4 py-5 sm:px-6" data-testid="integrations-page">
-                <h1 className="mb-6 text-2xl font-bold" data-testid="integrations-title">Fleet Control Center</h1>
+                <h1 className="mb-6 text-2xl font-bold" data-testid="integrations-title">Центр управления компаниями</h1>
                 <div className="space-y-3 animate-pulse">
                     {[...Array(8)].map((_, index) => (
                         <div key={index} className="h-12 rounded bg-muted/70" />
@@ -875,7 +881,7 @@ export default function IntegrationsPage() {
     if (integrationsError && integrationsItems.length === 0) {
         return (
             <div className="mx-auto max-w-[1640px] px-4 py-5 sm:px-6" data-testid="integrations-page">
-                <h1 className="mb-6 text-2xl font-bold" data-testid="integrations-title">Fleet Control Center</h1>
+                <h1 className="mb-6 text-2xl font-bold" data-testid="integrations-title">Центр управления компаниями</h1>
                 <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-6 text-center" data-testid="integrations-error">
                     <p className="mb-4 text-destructive">Не удалось загрузить интеграции</p>
                     <button
@@ -894,9 +900,9 @@ export default function IntegrationsPage() {
         <div className="mx-auto max-w-[1640px] px-4 py-5 sm:px-6" data-testid="integrations-page">
             <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold" data-testid="integrations-title">Fleet Control Center</h1>
+                    <h1 className="text-2xl font-bold" data-testid="integrations-title">Центр управления компаниями</h1>
                     <p className="mt-1 text-sm text-muted-foreground">
-                        Единый обзор по всем компаниям: филиалы, подписки provider, team coverage, onboarding/go-live, ops-риски.
+                        Единый факт-слой по компаниям: каналы, provider-подписки, команда, онбординг и go-live.
                     </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -908,32 +914,32 @@ export default function IntegrationsPage() {
                         Обновить
                     </button>
                     <Link href="/company-workspace" className="btn-primary" data-testid="integrations-open-workspace">
-                        Open Workspace
+                        Открыть Workspace
                     </Link>
-                    <Link href="/tenants" className="btn-ghost">Tenants</Link>
-                    <Link href="/ops" className="btn-ghost">Ops</Link>
+                    <Link href="/tenants" className="btn-ghost">Тенанты</Link>
+                    <Link href="/ops" className="btn-ghost">Операции</Link>
                 </div>
             </div>
 
             <section className="mb-4 rounded-xl border border-blue-300/50 bg-blue-50/60 p-4" data-testid="integrations-workspace-cta">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                        <div className="text-sm font-semibold text-blue-900">Workspace-first execution</div>
+                        <div className="text-sm font-semibold text-blue-900">Операции выполняются через Workspace</div>
                         <div className="mt-1 text-xs text-blue-800/80">
-                            Execute-операции (rebind, renewal, webhook update, reconcile) выполняются только в `Company Workspace`.
+                            Действия по филиалу (rebind, renewal, webhook update, reconcile) выполняются только в `Company Workspace`.
                         </div>
                     </div>
                     <div className="text-xs text-blue-900/80">
-                        stale_after_minutes: <span className="font-mono">{integrationsData?.stale_after_minutes ?? staleAfterMinutes}</span>
+                        stale_after_minutes: <span className="font-mono">{integrationsData?.stale_after_minutes ?? staleAfterMinutes}</span> мин
                     </div>
                 </div>
             </section>
 
             <section className="rounded-xl border border-border/60 bg-card p-4" data-testid="integrations-scope-controls">
-                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Scope + filters</div>
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Контекст + фильтры</div>
                 <div className="mt-3 grid gap-3 lg:grid-cols-5">
                     <label className="text-xs text-muted-foreground">
-                        company
+                        компания
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                             value={scopeCompanyId}
@@ -944,7 +950,7 @@ export default function IntegrationsPage() {
                             }}
                             data-testid="integrations-scope-company"
                         >
-                            <option value="">all</option>
+                            <option value="">все</option>
                             {companyOptions.map((company) => (
                                 <option key={company.id} value={company.id ?? ""}>
                                     {company.name ?? company.id}
@@ -954,7 +960,7 @@ export default function IntegrationsPage() {
                     </label>
 
                     <label className="text-xs text-muted-foreground">
-                        client
+                        клиент
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                             value={scopeClientId}
@@ -964,7 +970,7 @@ export default function IntegrationsPage() {
                             }}
                             data-testid="integrations-scope-client"
                         >
-                            <option value="">all</option>
+                            <option value="">все</option>
                             {clientOptions.map((client) => (
                                 <option key={client.id} value={client.id ?? ""}>
                                     {client.name ?? client.slug ?? client.id}
@@ -974,7 +980,7 @@ export default function IntegrationsPage() {
                     </label>
 
                     <label className="text-xs text-muted-foreground">
-                        branch
+                        филиал
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                             value={scopeBranchId}
@@ -982,7 +988,7 @@ export default function IntegrationsPage() {
                             disabled={!scopeClientId}
                             data-testid="integrations-scope-branch"
                         >
-                            <option value="">all</option>
+                            <option value="">все</option>
                             {branchOptions.map((branch) => (
                                 <option key={branch.id} value={branch.id ?? ""}>
                                     {branch.name ?? branch.slug ?? branch.id}
@@ -992,17 +998,17 @@ export default function IntegrationsPage() {
                     </label>
 
                     <label className="text-xs text-muted-foreground">
-                        search
+                        поиск
                         <input
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                            placeholder="company / client / branch / instance"
+                            placeholder="компания / клиент / филиал / instance"
                             value={searchText}
                             onChange={(event) => setSearchText(event.target.value)}
                         />
                     </label>
 
                     <label className="text-xs text-muted-foreground">
-                        stale threshold
+                        порог stale
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                             value={staleAfterMinutes}
@@ -1010,21 +1016,21 @@ export default function IntegrationsPage() {
                             data-testid="integrations-stale-select"
                         >
                             {STALE_AFTER_OPTIONS.map((minutes) => (
-                                <option key={minutes} value={minutes}>{minutes} min</option>
+                                <option key={minutes} value={minutes}>{minutes} мин</option>
                             ))}
                         </select>
                     </label>
 
                     <label className="text-xs text-muted-foreground">
-                        status
+                        статус
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                             value={statusFilter}
                             onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
                         >
-                            <option value="all">all</option>
-                            <option value="error">error</option>
-                            <option value="warn">warn</option>
+                            <option value="all">все</option>
+                            <option value="error">ошибка</option>
+                            <option value="warn">предупреждение</option>
                             <option value="ok">ok</option>
                         </select>
                     </label>
@@ -1045,44 +1051,44 @@ export default function IntegrationsPage() {
                             }}
                             data-testid="integrations-scope-reset"
                         >
-                            Reset
+                            Сбросить
                         </button>
                         <button
                             className="btn-ghost"
                             onClick={syncScopeFromContext}
                             data-testid="integrations-scope-sync"
                         >
-                            From context
+                            Из контекста
                         </button>
                         <button
                             className="btn-primary"
                             onClick={persistScopeAsContext}
                             data-testid="integrations-scope-save"
                         >
-                            Set context
+                            Применить контекст
                         </button>
                         <button
                             className="btn-ghost"
                             onClick={() => setShowAdvancedFilters((value) => !value)}
                         >
-                            {showAdvancedFilters ? "Hide advanced" : "Show advanced"}
+                            {showAdvancedFilters ? "Скрыть расширенные" : "Показать расширенные"}
                         </button>
                     </div>
 
                     <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                        showing <span className="font-semibold text-foreground">{kpi.filteredBranches}</span> of {kpi.totalBranches} branches
+                        показано <span className="font-semibold text-foreground">{kpi.filteredBranches}</span> из {kpi.totalBranches} филиалов
                         <div className="mt-1">
-                            company <span className="font-mono">{scopeCompanyId || "all"}</span> · client <span className="font-mono">{scopeClientId || "all"}</span> · branch <span className="font-mono">{scopeBranchId || "all"}</span>
+                            компания <span className="font-mono">{scopeCompanyId || "все"}</span> · клиент <span className="font-mono">{scopeClientId || "все"}</span> · филиал <span className="font-mono">{scopeBranchId || "все"}</span>
                         </div>
                     </div>
 
                     {scopeDataTruncated ? (
                         <div className="rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="integrations-scope-truncated">
-                            API list limit = {API_LIST_LIMIT}. Для fleets &gt; {API_LIST_LIMIT} используй scope (company/client) или поиск для точного выбора.
+                            API limit = {API_LIST_LIMIT}. Если объектов больше, задайте `компания`/`клиент` в scope или используйте поиск.
                         </div>
                     ) : (
                         <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                            Scope catalogue loaded without truncation.
+                            Каталог контекста загружен без усечения.
                         </div>
                     )}
                 </div>
@@ -1090,32 +1096,32 @@ export default function IntegrationsPage() {
                 {showAdvancedFilters ? (
                     <div className="mt-3 grid gap-3 md:grid-cols-2">
                         <label className="text-xs text-muted-foreground">
-                            expiry
+                            подписка provider
                             <select
                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                 value={expiryFilter}
                                 onChange={(event) => setExpiryFilter(event.target.value as ExpiryFilter)}
                             >
-                                <option value="all">all</option>
-                                <option value="expired">expired</option>
-                                <option value="expiring">expiring soon</option>
+                                <option value="all">все</option>
+                                <option value="expired">истекла</option>
+                                <option value="expiring">скоро истекает</option>
                                 <option value="ok">ok</option>
-                                <option value="unknown">unknown</option>
+                                <option value="unknown">неизвестно</option>
                             </select>
                         </label>
 
                         <label className="text-xs text-muted-foreground">
-                            team
+                            команда
                             <select
                                 className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                 value={teamFilter}
                                 onChange={(event) => setTeamFilter(event.target.value as TeamFilter)}
                             >
-                                <option value="all">all</option>
-                                <option value="gap">any gap</option>
-                                <option value="no_manager">no manager</option>
-                                <option value="no_specialist">no specialist</option>
-                                <option value="understaffed">understaffed</option>
+                                <option value="all">все</option>
+                                <option value="gap">любой gap</option>
+                                <option value="no_manager">нет менеджера</option>
+                                <option value="no_specialist">нет специалиста</option>
+                                <option value="understaffed">недоукомплектовано</option>
                             </select>
                         </label>
                     </div>
@@ -1124,33 +1130,33 @@ export default function IntegrationsPage() {
 
             <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5" data-testid="integrations-kpi-grid">
                 <KpiCard
-                    title="Coverage"
+                    title="Покрытие"
                     value={`${kpi.totalCompanies} / ${kpi.totalClients} / ${kpi.totalBranches}`}
-                    description="companies / clients / branches in scope"
+                    description="компании / клиенты / филиалы в scope"
                     tone="neutral"
                 />
                 <KpiCard
-                    title="Health"
+                    title="Здоровье"
                     value={`${kpi.errorBranches} err · ${kpi.warnBranches} warn`}
-                    description="integration status by branch"
+                    description="статус интеграции по филиалам"
                     tone={kpi.errorBranches > 0 ? "critical" : kpi.warnBranches > 0 ? "warn" : "good"}
                 />
                 <KpiCard
-                    title="Provider Expiry"
-                    value={`${kpi.expiredBindings} expired · ${kpi.expiringSoon} soon`}
-                    description="paid_until / renewal risks"
+                    title="Подписка Provider"
+                    value={`${kpi.expiredBindings} истекло · ${kpi.expiringSoon} скоро`}
+                    description="риски paid_until / renewal"
                     tone={kpi.expiredBindings > 0 ? "critical" : kpi.expiringSoon > 0 ? "warn" : "good"}
                 />
                 <KpiCard
-                    title="Rebind"
+                    title="Перепривязка"
                     value={`${kpi.rebindRequired}`}
-                    description="branches with rebind_required=true"
+                    description="филиалы с rebind_required=true"
                     tone={kpi.rebindRequired > 0 ? "warn" : "good"}
                 />
                 <KpiCard
-                    title="Team"
+                    title="Команда"
                     value={`${kpi.teamGaps} gaps · ${kpi.goLiveAllowed} go-live`}
-                    description="team coverage gaps and go-live allowed"
+                    description="пробелы команды + сколько филиалов готовы к go-live"
                     tone={kpi.teamGaps > 0 ? "warn" : "good"}
                 />
             </section>
@@ -1158,17 +1164,17 @@ export default function IntegrationsPage() {
             {fleetAttentionSummary && (
                 <section className="mt-4 grid gap-3 md:grid-cols-3">
                     <div className="rounded-xl border border-red-300/70 bg-red-50 p-4">
-                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-red-800">Fleet Attention</div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-red-800">Внимание флота</div>
                         <div className="mt-2 text-2xl font-semibold text-red-900">{fleetAttentionSummary.high_risk_clients}</div>
-                        <div className="text-xs text-red-900/80">high risk clients</div>
+                        <div className="text-xs text-red-900/80">клиенты высокого риска</div>
                     </div>
                     <div className="rounded-xl border border-amber-300/70 bg-amber-50 p-4">
-                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-800">Stale / Errors</div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-800">Stale / Ошибки</div>
                         <div className="mt-2 text-2xl font-semibold text-amber-900">{fleetAttentionSummary.stale_branches_total + fleetAttentionSummary.integration_error_branches_total}</div>
-                        <div className="text-xs text-amber-900/80">stale + integration error branches</div>
+                        <div className="text-xs text-amber-900/80">stale + проблемные филиалы</div>
                     </div>
                     <div className="rounded-xl border border-blue-300/70 bg-blue-50 p-4">
-                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-800">Queues</div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-800">Очереди</div>
                         <div className="mt-2 text-2xl font-semibold text-blue-900">{fleetAttentionSummary.outbox_failed_24h_total + fleetAttentionSummary.pending_handovers_total}</div>
                         <div className="text-xs text-blue-900/80">outbox failed + pending handovers</div>
                     </div>
@@ -1177,7 +1183,7 @@ export default function IntegrationsPage() {
 
             {fleetAttentionData?.items?.length ? (
                 <section className="mt-4 rounded-xl border border-border/60 bg-card p-4" data-testid="integrations-fleet-attention-list">
-                    <div className="text-sm font-semibold">Top risk clients</div>
+                    <div className="text-sm font-semibold">Клиенты с наибольшим риском</div>
                     <div className="mt-2 grid gap-2 md:grid-cols-2">
                         {fleetAttentionData.items.slice(0, 8).map((item) => (
                             <div key={item.client_id} className="rounded-lg border border-border/60 p-3 text-xs">
@@ -1188,10 +1194,10 @@ export default function IntegrationsPage() {
                                     </span>
                                 </div>
                                 <div className="mt-1 text-muted-foreground">
-                                    action: {item.next_action} · reasons: {item.reasons.join(", ") || "-"}
+                                    действие: {item.next_action} · причины: {item.reasons.join(", ") || "-"}
                                 </div>
                                 <div className="mt-1 text-muted-foreground">
-                                    branches {item.active_branches}/{item.total_branches} · stale {item.stale_branches} · degraded {item.degraded_branches}
+                                    филиалы {item.active_branches}/{item.total_branches} · stale {item.stale_branches} · degraded {item.degraded_branches}
                                 </div>
                             </div>
                         ))}
@@ -1202,7 +1208,7 @@ export default function IntegrationsPage() {
             {providerOpsQueue.length > 0 && (
                 <section className="mt-4 rounded-xl border border-amber-300/60 bg-amber-50/60 p-4" data-testid="provider-ops-queue">
                     <div className="mb-2 text-sm font-semibold text-amber-900">
-                        Provider Ops Queue ({providerOpsQueue.length})
+                        Очередь provider-операций ({providerOpsQueue.length})
                     </div>
                     <div className="space-y-2">
                         {providerOpsQueue.map((queueItem) => (
@@ -1215,10 +1221,10 @@ export default function IntegrationsPage() {
                                         {queueItem.client_slug} / {queueItem.branch_name}
                                     </div>
                                     <div className="text-muted-foreground">
-                                        priority {queueItem.priority.toUpperCase()} · action {providerOpsActionLabel(queueItem.recommended_action)}
+                                        приоритет {queueItem.priority.toUpperCase()} · действие {providerOpsActionLabel(queueItem.recommended_action)}
                                     </div>
                                     <div className="text-muted-foreground">
-                                        reasons: {queueItem.reasons.map((reason) => statusLabel(reason)).join(", ")}
+                                        причины: {queueItem.reasons.map((reason) => statusLabel(reason)).join(", ")}
                                     </div>
                                 </div>
                                 <button
@@ -1227,7 +1233,7 @@ export default function IntegrationsPage() {
                                     onClick={() => openWorkspaceForQueueItem(queueItem)}
                                     data-testid="integrations-queue-open-workspace"
                                 >
-                                    Manage in Workspace
+                                    Открыть в Workspace
                                 </button>
                             </div>
                         ))}
@@ -1237,9 +1243,9 @@ export default function IntegrationsPage() {
 
             <section className="mt-4 rounded-xl border border-border/60 bg-card p-3 sm:p-4" data-testid="integrations-branch-matrix">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-sm font-semibold">Branch matrix</div>
+                    <div className="text-sm font-semibold">Матрица филиалов</div>
                     <div className="text-xs text-muted-foreground">
-                        Карточный режим: лучше читаемость и меньше скролла по горизонтали.
+                        Карточный режим: факты по филиалу без горизонтального скролла.
                     </div>
                 </div>
 
@@ -1260,7 +1266,7 @@ export default function IntegrationsPage() {
 
                             <div className="mt-3 grid gap-2 sm:grid-cols-2">
                                 <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Channels</div>
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Каналы</div>
                                     <div className="mt-1 flex flex-wrap items-center gap-1">
                                         <span className="rounded bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">WA: {statusLabel(row.whatsapp_status)}</span>
                                         <span className="rounded bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">TG: {statusLabel(row.telegram_status)}</span>
@@ -1268,7 +1274,7 @@ export default function IntegrationsPage() {
                                 </div>
 
                                 <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Provider</div>
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Провайдер</div>
                                     <div className="mt-1 text-muted-foreground">owner: {row.provider_binding_owner ?? "-"}</div>
                                     <div className="text-muted-foreground">paid_until: {row.provider_binding_paid_until ?? "-"}</div>
                                     <div className="mt-1 flex flex-wrap items-center gap-1">
@@ -1282,40 +1288,40 @@ export default function IntegrationsPage() {
                                 </div>
 
                                 <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Team</div>
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Команда</div>
                                     <div className="mt-1 text-muted-foreground">
-                                        total {row.team_stats.total} · mgr {row.team_stats.managers} · spec {row.team_stats.specialists}
+                                        всего {row.team_stats.total} · manager {row.team_stats.managers} · specialist {row.team_stats.specialists}
                                     </div>
                                     <div className="mt-1">
                                         <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${teamBadgeClass(row.team_issue)}`}>
-                                            {row.team_issue ?? "Team OK"}
+                                            {row.team_issue ?? "Команда OK"}
                                         </span>
                                     </div>
                                 </div>
 
                                 <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Onboarding</div>
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Онбординг</div>
                                     <div className="mt-1 text-muted-foreground">state: {onboardingStateLabel(row.onboarding_state)}</div>
                                     <div className="mt-1">
                                         <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${goLiveBadgeClass(row.go_live_allowed, row.go_live_state)}`}>
-                                            go-live: {goLiveStateLabel(row.go_live_state)}{row.go_live_allowed ? " (allowed)" : ""}
+                                            go-live: {goLiveStateLabel(row.go_live_state)}{row.go_live_allowed ? " (разрешен)" : ""}
                                         </span>
                                     </div>
                                 </div>
                             </div>
 
                             <div className="mt-2 text-muted-foreground">
-                                last inbound: {formatTimestamp(row.last_inbound_at)}
+                                последний inbound: {formatTimestamp(row.last_inbound_at)}
                             </div>
 
                             <details className="mt-2 rounded-lg border border-border/60 bg-muted/10 p-2">
-                                <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">More details</summary>
+                                <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">Больше фактов</summary>
                                 <div className="mt-2 space-y-1 text-muted-foreground">
-                                    <div>instance: {row.instance_id ?? "-"}</div>
-                                    <div>binding instance: {row.provider_binding_instance_id ?? "-"}</div>
-                                    <div>next_renewal: {row.provider_binding_next_renewal_at ?? "-"}</div>
+                                    <div>instance: <span className="font-mono break-all">{row.instance_id ?? "-"}</span></div>
+                                    <div>binding instance: <span className="font-mono break-all">{row.provider_binding_instance_id ?? "-"}</span></div>
+                                    <div>next_renewal: <span className="font-mono break-all">{row.provider_binding_next_renewal_at ?? "-"}</span></div>
                                     <div>days left: {row.provider_binding_days_until_expiry ?? "-"} · rebind_required: {row.provider_binding_rebind_required ? "yes" : "no"}</div>
-                                    <div>last inbound instance: {row.last_inbound_instance_id ?? "-"}</div>
+                                    <div>last inbound instance: <span className="font-mono break-all">{row.last_inbound_instance_id ?? "-"}</span></div>
                                     <div className="pt-1"><DriftIssues item={row} /></div>
                                 </div>
                             </details>
@@ -1327,7 +1333,7 @@ export default function IntegrationsPage() {
                                     onClick={() => openWorkspaceForRow(row)}
                                     data-testid="integrations-row-open-workspace"
                                 >
-                                    Manage in Workspace
+                                    Открыть в Workspace
                                 </button>
                             </div>
                         </article>
@@ -1336,7 +1342,7 @@ export default function IntegrationsPage() {
 
                 {filteredRows.length === 0 ? (
                     <div className="mt-2 p-6 text-center text-muted-foreground" data-testid="integrations-empty">
-                        Нет филиалов по текущему scope/filter.
+                        Нет филиалов по текущему контексту и фильтрам.
                     </div>
                 ) : null}
             </section>

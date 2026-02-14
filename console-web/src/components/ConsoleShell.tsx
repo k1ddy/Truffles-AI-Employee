@@ -69,7 +69,7 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
     { label: "Тенанты", href: "/tenants", section: "tenants", action: "read", testId: "nav-tenants" },
-    { label: "Workspace", href: "/company-workspace", section: "tenants", action: "read", testId: "nav-company-workspace" },
+    { label: "Компании", href: "/company-workspace", section: "tenants", action: "read", testId: "nav-company-workspace" },
     { label: "Интеграции", href: "/integrations", section: "integrations", action: "read", testId: "nav-integrations" },
     { label: "Заявки", href: "/", section: "inbox", action: "read", testId: "nav-cases" },
     { label: "Записи", href: "/calendar", section: "calendar", action: "read", testId: "nav-calendar" },
@@ -82,13 +82,13 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const ROLE_LABELS: Record<ConsoleRole, string> = {
-    platform_admin: "Platform Admin",
+    platform_admin: "Платформа: админ",
     owner: "Owner",
-    admin: "Admin",
-    manager: "Manager",
-    support: "Support",
+    admin: "Админ",
+    manager: "Менеджер",
+    support: "Поддержка",
     specialist: "Специалист",
-    viewer: "Viewer",
+    viewer: "Наблюдатель",
 };
 
 function NavIcon({ children, className }: { children: ReactNode; className?: string }) {
@@ -843,7 +843,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                 <LoginButton />
                             </div>
                         </div>
-                        <nav className="flex gap-2 overflow-x-auto px-6 pb-3 text-sm font-medium md:hidden">
+                        <nav className="flex flex-wrap gap-2 px-4 pb-3 text-xs font-medium md:hidden">
                             {navItems.map((item) => {
                                 const isActive = item.href === "/"
                                     ? pathname === "/"

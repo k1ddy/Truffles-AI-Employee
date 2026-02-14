@@ -13,6 +13,7 @@ import {
     canAccessConsole,
     confirmationsApi,
     onboardingApi,
+    parseApiError,
     type IntegrationBranchActionRequest,
     type ProviderOpsAction,
 } from "@/lib/api-client";
@@ -81,21 +82,21 @@ function statusPill(status: "ok" | "warn" | "error"): string {
 
 function providerOpsActionLabel(action: ProviderOpsAction): string {
     if (action === "provider_start_rebind") {
-        return "Start rebind";
+        return "Старт перепривязки";
     }
     if (action === "provider_complete_rebind") {
-        return "Complete rebind";
+        return "Завершить перепривязку";
     }
     if (action === "provider_renewal_confirmed") {
-        return "Confirm renewal";
+        return "Подтвердить продление";
     }
     if (action === "provider_webhook_updated") {
-        return "Webhook updated";
+        return "Webhook обновлен";
     }
     if (action === "provider_send_reminder") {
-        return "Send reminder";
+        return "Отправить напоминание";
     }
-    return "Reconcile";
+    return "Сверка интеграции";
 }
 
 function defaultExecuteReason(action: ProviderOpsAction): string {
@@ -117,6 +118,10 @@ function defaultExecuteReason(action: ProviderOpsAction): string {
     return "workspace integration reconcile";
 }
 
+function wizardStatusLabel(passed: boolean): string {
+    return passed ? "ok" : "блокер";
+}
+
 export default function CompanyWorkspacePage() {
     const { data: session } = useSession();
     const { handleError } = useErrorHandler();
@@ -130,7 +135,7 @@ export default function CompanyWorkspacePage() {
 
     const [branchPhone, setBranchPhone] = useState("");
     const [branchInstanceId, setBranchInstanceId] = useState("");
-    const [goLiveReason, setGoLiveReason] = useState("go-live approved from company workspace");
+    const [goLiveReason, setGoLiveReason] = useState("go-live подтвержден из workspace компании");
 
     const [webhookSecret, setWebhookSecret] = useState("");
     const [webhookUrl, setWebhookUrl] = useState("");
@@ -185,7 +190,25 @@ export default function CompanyWorkspacePage() {
         setLocalStorageValue(COMPANY_ID_STORAGE_KEY, scopeCompanyId || null);
         setLocalStorageValue(CLIENT_ID_STORAGE_KEY, scopeClientId || null);
         setLocalStorageValue(BRANCH_ID_STORAGE_KEY, scopeBranchId || null);
-        toast.success("Console context updated");
+        toast.success("Контекст сохранен");
+    };
+
+    const copyToClipboard = async (label: string, value?: string | null) => {
+        const normalizedValue = (value ?? "").trim();
+        if (!normalizedValue) {
+            toast.error(`${label}: нечего копировать`);
+            return;
+        }
+        if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+            toast.error("Копирование недоступно в этом браузере");
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(normalizedValue);
+            toast.success(`${label} скопирован`);
+        } catch {
+            toast.error(`Не удалось скопировать ${label.toLowerCase()}`);
+        }
     };
 
     const { data: clientsData } = useQuery({
@@ -349,7 +372,7 @@ export default function CompanyWorkspacePage() {
                 }
                 const normalizedReason = confirmationReason?.trim();
                 if (!normalizedReason) {
-                    toast.error("Reason is required");
+                    toast.error("Укажите причину выполнения");
                     return;
                 }
                 const confirmationId = await createBranchConfirmation(branchId, normalizedReason, confirmationAction);
@@ -358,10 +381,18 @@ export default function CompanyWorkspacePage() {
 
             const result = response.data.result ?? {};
             setActionSummary(`${providerOpsActionLabel(action)}: ${JSON.stringify(result)}`);
-            toast.success(mode === "dry_run" ? "Dry-run completed" : "Execute completed");
+            toast.success(mode === "dry_run" ? "Dry-run завершен" : "Операция выполнена");
             await refetchIntegrations();
             await refetchScorecard();
         } catch (error) {
+            const parsed = parseApiError(error);
+            if (
+                parsed.code === "INVALID_PARAM"
+                && /limit must be between 1 and 100/i.test(parsed.message)
+            ) {
+                toast.error("API вернул limit вне диапазона 1..100. Обновите страницу и повторите.");
+                return;
+            }
             handleError(error);
         } finally {
             setRunningAction(null);
@@ -370,14 +401,14 @@ export default function CompanyWorkspacePage() {
 
     const openProviderActionDialog = (action: ProviderOpsAction, mode: "dry_run" | "execute" = "execute") => {
         if (!selectedIntegration) {
-            toast.error("Select branch integration first");
+            toast.error("Сначала выберите филиал");
             return;
         }
         setProviderActionDialog({
             action,
             mode,
             reason: defaultExecuteReason(action),
-            notes: `${providerOpsActionLabel(action)} for ${selectedIntegration.branch_slug}`,
+            notes: `${providerOpsActionLabel(action)} для ${selectedIntegration.branch_slug}`,
             paidUntil: selectedIntegration.provider_binding_paid_until ?? "",
             nextRenewalAt: selectedIntegration.provider_binding_next_renewal_at ?? "",
             instanceId: branchInstanceId || selectedIntegration.instance_id || "",
@@ -393,14 +424,14 @@ export default function CompanyWorkspacePage() {
 
     const buildDialogPayload = (dialog: ProviderActionDialogState): Partial<IntegrationBranchActionRequest> | null => {
         if (dialog.mode === "execute" && !dialog.reason.trim()) {
-            toast.error("Reason is required");
+            toast.error("Причина обязательна");
             return null;
         }
         if (dialog.action === "provider_renewal_confirmed") {
             const paidUntil = dialog.paidUntil.trim();
             const nextRenewalAt = dialog.nextRenewalAt.trim();
             if (!paidUntil && !nextRenewalAt) {
-                toast.error("Specify paid_until or next_renewal_at");
+                toast.error("Укажите paid_until или next_renewal_at");
                 return null;
             }
             return {
@@ -446,13 +477,13 @@ export default function CompanyWorkspacePage() {
 
     const saveBranchWhatsappIdentity = async () => {
         if (!scopeBranchId) {
-            toast.error("Select branch");
+            toast.error("Выберите филиал");
             return;
         }
         const normalizedPhone = branchPhone.trim();
         const normalizedInstanceId = branchInstanceId.trim();
         if (!normalizedPhone || !normalizedInstanceId) {
-            toast.error("phone and instance_id are required");
+            toast.error("Телефон и instance_id обязательны");
             return;
         }
         setBranchSaving(true);
@@ -462,7 +493,7 @@ export default function CompanyWorkspacePage() {
                 instance_id: normalizedInstanceId,
                 is_active: true,
             });
-            toast.success("Branch WhatsApp identity saved");
+            toast.success("WhatsApp-идентичность филиала сохранена");
             await refetchIntegrations();
         } catch (error) {
             handleError(error);
@@ -473,7 +504,7 @@ export default function CompanyWorkspacePage() {
 
     const refreshWebhookSecret = async () => {
         if (!scopeBranchId) {
-            toast.error("Select branch");
+            toast.error("Выберите филиал");
             return;
         }
         try {
@@ -483,7 +514,7 @@ export default function CompanyWorkspacePage() {
             });
             setWebhookSecret(response.data.webhook_secret ?? "");
             setWebhookUrl(response.data.webhook_url ?? "");
-            toast.success("Webhook contract refreshed");
+            toast.success("Webhook-контракт обновлен");
         } catch (error) {
             handleError(error);
         }
@@ -491,18 +522,18 @@ export default function CompanyWorkspacePage() {
 
     const approveGoLive = async () => {
         if (!scopeBranchId) {
-            toast.error("Select branch");
+            toast.error("Выберите филиал");
             return;
         }
         const reason = goLiveReason.trim();
         if (!reason) {
-            toast.error("Go-live reason is required");
+            toast.error("Причина для go-live обязательна");
             return;
         }
         setGoLiveSaving("approve");
         try {
             await adminApi.approveBranchGoLive(scopeBranchId, { reason });
-            toast.success("Go-live approved");
+            toast.success("Go-live подтвержден");
             await refetchIntegrations();
             await refetchScorecard();
         } catch (error) {
@@ -514,18 +545,18 @@ export default function CompanyWorkspacePage() {
 
     const rejectGoLive = async () => {
         if (!scopeBranchId) {
-            toast.error("Select branch");
+            toast.error("Выберите филиал");
             return;
         }
         const reason = goLiveReason.trim();
         if (!reason) {
-            toast.error("Go-live reason is required");
+            toast.error("Причина отклонения обязательна");
             return;
         }
         setGoLiveSaving("reject");
         try {
             await adminApi.rejectBranchGoLive(scopeBranchId, { reason });
-            toast.success("Go-live rejected");
+            toast.success("Go-live отклонен");
             await refetchIntegrations();
             await refetchScorecard();
         } catch (error) {
@@ -537,18 +568,18 @@ export default function CompanyWorkspacePage() {
 
     const waiveGoLive = async () => {
         if (!scopeBranchId) {
-            toast.error("Select branch");
+            toast.error("Выберите филиал");
             return;
         }
         const reason = goLiveReason.trim();
         if (!reason) {
-            toast.error("Waiver reason is required");
+            toast.error("Причина waiver обязательна");
             return;
         }
         setGoLiveSaving("waive");
         try {
             await adminApi.waiveBranchGoLive(scopeBranchId, { reason, ttl_hours: 24 });
-            toast.success("Go-live waiver applied for 24h");
+            toast.success("Waiver go-live применен на 24 часа");
             await refetchIntegrations();
             await refetchScorecard();
         } catch (error) {
@@ -578,80 +609,82 @@ export default function CompanyWorkspacePage() {
         return [
             {
                 id: "context",
-                title: "Step 1: Select company/client/branch",
+                title: "Шаг 1: Выберите компанию/клиента/филиал",
                 passed: hasContext,
-                detail: hasContext ? "Context selected" : "Company, client and branch are required",
-                fix: "Use Scope selectors and persist context",
+                detail: hasContext ? "Контекст выбран" : "Компания, клиент и филиал обязательны",
+                fix: "Заполните Scope и нажмите «Применить контекст»",
             },
             {
                 id: "identity",
-                title: "Step 2: Set WhatsApp identity",
+                title: "Шаг 2: Запишите WhatsApp-идентичность",
                 passed: hasIdentity,
-                detail: hasIdentity ? "phone + instance_id ready" : "Branch phone and instance_id are mandatory",
-                fix: "Save branch WhatsApp identity",
+                detail: hasIdentity ? "Телефон и instance_id заполнены" : "Телефон филиала и instance_id обязательны",
+                fix: "Сохраните WA-идентичность филиала",
             },
             {
                 id: "webhook",
-                title: "Step 3: Verify webhook and binding",
+                title: "Шаг 3: Проверьте webhook и связку provider",
                 passed: webhookConfigured,
-                detail: webhookConfigured ? "Webhook configured" : "Webhook must be valid and provider webhook_status=configured",
-                fix: "Refresh webhook + run Webhook updated/Complete rebind",
+                detail: webhookConfigured ? "Webhook настроен" : "Webhook должен быть валидным и webhook_status=configured",
+                fix: "Обновите webhook и выполните «Webhook обновлен»/«Завершить перепривязку»",
             },
             {
                 id: "renewal",
-                title: "Step 4: Track renewal ownership",
+                title: "Шаг 4: Зафиксируйте продление и owner",
                 passed: renewalTracked,
-                detail: renewalTracked ? "Renewal fields are tracked" : "owner + paid_until/next_renewal_at are required",
-                fix: "Run Confirm renewal action",
+                detail: renewalTracked ? "Данные продления заполнены" : "Нужны owner и paid_until/next_renewal_at",
+                fix: "Выполните действие «Подтвердить продление»",
             },
             {
                 id: "go-live",
-                title: "Step 5: Scorecard and go-live gate",
+                title: "Шаг 5: Scorecard и go-live gate",
                 passed: scorecardReady,
-                detail: scorecardReady ? "Onboarding scorecard is ready" : "Onboarding scorecard is failing",
-                fix: "Close missing scorecard checks before approve",
+                detail: scorecardReady ? "Onboarding scorecard прошел" : "Onboarding scorecard не пройден",
+                fix: "Закройте незаполненные проверки scorecard до подтверждения go-live",
             },
         ];
     }, [scopeCompanyId, scopeClientId, scopeBranchId, selectedBranch?.phone, selectedBranch?.instance_id, selectedIntegration, onboardingScorecard?.ready]);
 
     const firstFailedStepIndex = wizardSteps.findIndex((step) => !step.passed);
     const hardStopActive = firstFailedStepIndex !== -1;
+    const currentBlocker = hardStopActive ? wizardSteps[firstFailedStepIndex] : null;
 
     if (!session) {
-        return <div className="p-8 text-center text-muted-foreground">Sign in to use Company Workspace.</div>;
+        return <div className="p-8 text-center text-muted-foreground">Войдите в систему, чтобы открыть Workspace компании.</div>;
     }
 
     if (meLoading) {
-        return <div className="p-8 text-center text-muted-foreground">Loading role...</div>;
+        return <div className="p-8 text-center text-muted-foreground">Загрузка роли и контекста...</div>;
     }
 
     if (!canReadTenants && !canReadIntegrations) {
-        return <AccessDenied message="No access to Company Workspace." />;
+        return <AccessDenied message="Нет доступа к Workspace компании." />;
     }
 
     return (
-        <div className="max-w-6xl mx-auto p-6" data-testid="company-workspace-page">
+        <div className="mx-auto max-w-[1200px] p-4 sm:p-6" data-testid="company-workspace-page">
             <div className="rounded-lg border border-border/60 bg-card p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                        <h1 className="text-2xl font-bold">Company Workspace</h1>
+                        <h1 className="text-2xl font-bold">Workspace компании</h1>
                         <p className="mt-1 text-sm text-muted-foreground">
-                            Single control plane for onboarding and WhatsApp lifecycle.
+                            Один экран для онбординга, управления InstanceID/Webhook и go-live.
                         </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                        <Link href="/tenants" className="btn-ghost">Tenants</Link>
-                        <Link href="/integrations" className="btn-ghost">Integrations</Link>
-                        <Link href="/ops" className="btn-ghost">Ops</Link>
+                        <Link href="/tenants" className="btn-ghost">Тенанты</Link>
+                        <Link href="/integrations" className="btn-ghost">Интеграции</Link>
+                        <Link href="/ops" className="btn-ghost">Операции</Link>
                     </div>
                 </div>
             </div>
 
             <section className="mt-4 rounded-lg border border-border/60 bg-card p-4" data-testid="company-workspace-scope">
-                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Scope</div>
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Контекст</div>
+                <div className="mt-1 text-xs text-muted-foreground">Шаг 1. Выберите компанию, клиента и филиал, затем сохраните контекст.</div>
                 <div className="mt-3 grid gap-3 md:grid-cols-4">
                     <label className="text-xs text-muted-foreground">
-                        company
+                        компания
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                             value={scopeCompanyId}
@@ -662,7 +695,7 @@ export default function CompanyWorkspacePage() {
                             }}
                             data-testid="workspace-scope-company"
                         >
-                            <option value="">select</option>
+                            <option value="">выберите</option>
                             {(meData?.companies ?? []).map((company) => (
                                 <option key={company.id} value={company.id ?? ""}>
                                     {company.name ?? company.id}
@@ -671,7 +704,7 @@ export default function CompanyWorkspacePage() {
                         </select>
                     </label>
                     <label className="text-xs text-muted-foreground">
-                        client
+                        клиент
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                             value={scopeClientId}
@@ -681,7 +714,7 @@ export default function CompanyWorkspacePage() {
                             }}
                             data-testid="workspace-scope-client"
                         >
-                            <option value="">select</option>
+                            <option value="">выберите</option>
                             {clientOptions.map((client) => (
                                 <option key={client.id} value={client.id ?? ""}>
                                     {client.name ?? client.slug ?? client.id}
@@ -690,7 +723,7 @@ export default function CompanyWorkspacePage() {
                         </select>
                     </label>
                     <label className="text-xs text-muted-foreground">
-                        branch
+                        филиал
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                             value={scopeBranchId}
@@ -698,7 +731,7 @@ export default function CompanyWorkspacePage() {
                             disabled={!scopeClientId}
                             data-testid="workspace-scope-branch"
                         >
-                            <option value="">select</option>
+                            <option value="">выберите</option>
                             {branchOptions.map((branch) => (
                                 <option key={branch.id} value={branch.id ?? ""}>
                                     {branch.name ?? branch.slug ?? branch.id}
@@ -707,21 +740,24 @@ export default function CompanyWorkspacePage() {
                         </select>
                     </label>
                     <div className="flex flex-wrap items-end gap-2">
-                        <button className="btn-ghost" onClick={syncScopeFromContext}>From context</button>
-                        <button className="btn-primary" onClick={persistScopeAsContext}>Set context</button>
+                        <button className="btn-ghost" onClick={syncScopeFromContext}>Из контекста</button>
+                        <button className="btn-primary" onClick={persistScopeAsContext}>Применить контекст</button>
                     </div>
                 </div>
-                <div className="mt-2 text-xs text-muted-foreground">
-                    active: company <span className="font-mono">{scopeCompanyId || "-"}</span> · client <span className="font-mono">{scopeClientId || "-"}</span> · branch <span className="font-mono">{scopeBranchId || "-"}</span>
+                <div className="mt-2 rounded-md border border-border/60 bg-muted/20 p-2 text-xs text-muted-foreground">
+                    активный контекст:
+                    {" "}компания <span className="font-mono break-all">{scopeCompanyId || "-"}</span>
+                    {" "}· клиент <span className="font-mono break-all">{scopeClientId || "-"}</span>
+                    {" "}· филиал <span className="font-mono break-all">{scopeBranchId || "-"}</span>
                 </div>
             </section>
 
             <section className="mt-4 rounded-lg border border-border/60 bg-card p-4" data-testid="company-workspace-whatsapp-panel">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                        <h2 className="text-lg font-semibold">WhatsApp Control Panel</h2>
-                        <p className="text-xs text-muted-foreground mt-1">
-                            Instance, webhook, renewal and rebind in one operational flow.
+                        <h2 className="text-lg font-semibold">Панель WhatsApp / ChatFlow</h2>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                            Шаг 2-4. Сохранение identity, webhook-контракт, операции rebind/renewal и контроль фактов.
                         </p>
                     </div>
                     <button
@@ -729,15 +765,15 @@ export default function CompanyWorkspacePage() {
                         onClick={() => refetchIntegrations()}
                         disabled={integrationsLoading}
                     >
-                        {integrationsLoading ? "Refreshing..." : "Refresh"}
+                        {integrationsLoading ? "Обновляю..." : "Обновить"}
                     </button>
                 </div>
 
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                     <label className="text-xs text-muted-foreground">
-                        branch phone
+                        телефон филиала
                         <input
-                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono"
                             value={branchPhone}
                             onChange={(event) => setBranchPhone(event.target.value)}
                             placeholder="+77000000000"
@@ -746,7 +782,7 @@ export default function CompanyWorkspacePage() {
                     <label className="text-xs text-muted-foreground">
                         instance_id
                         <input
-                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono"
                             value={branchInstanceId}
                             onChange={(event) => setBranchInstanceId(event.target.value)}
                             placeholder="instance-xxxxxxxx"
@@ -760,43 +796,89 @@ export default function CompanyWorkspacePage() {
                         onClick={() => void saveBranchWhatsappIdentity()}
                         disabled={!scopeBranchId || branchSaving}
                     >
-                        {branchSaving ? "Saving..." : "Save WA identity"}
+                        {branchSaving ? "Сохраняю..." : "Сохранить WA identity"}
                     </button>
                     <button className="btn-ghost" onClick={() => void refreshWebhookSecret()} disabled={!scopeBranchId}>
-                        Get webhook contract
+                        Получить webhook-контракт
                     </button>
                     <button className="btn-ghost" onClick={() => openProviderActionDialog("integration_reconcile", "dry_run")} disabled={!scopeBranchId || !!runningAction}>
-                        Dry-run reconcile
+                        Dry-run сверки
                     </button>
                     <button className="btn-ghost" onClick={() => openProviderActionDialog("integration_reconcile", "execute")} disabled={!scopeBranchId || !!runningAction}>
-                        Execute reconcile
+                        Выполнить сверку
                     </button>
                 </div>
 
-                <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
-                    <div>webhook_url: <span className="font-mono">{webhookUrl || selectedIntegration?.webhook_url || "-"}</span></div>
-                    <div>webhook_secret: <span className="font-mono">{webhookSecret || "-"}</span></div>
-                    <div>provider owner: <span className="font-mono">{selectedIntegration?.provider_binding_owner || "-"}</span></div>
-                    <div>paid_until: <span className="font-mono">{selectedIntegration?.provider_binding_paid_until || "-"}</span> · next_renewal_at: <span className="font-mono">{selectedIntegration?.provider_binding_next_renewal_at || "-"}</span></div>
-                    <div>binding webhook: <span className="font-mono">{selectedIntegration?.provider_binding_webhook_status || "-"}</span> · status: <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusPill(selectedIntegration?.status ?? "ok")}`}>{selectedIntegration?.status ?? "-"}</span></div>
-                    <div>last inbound: <span className="font-mono">{formatDateLabel(selectedIntegration?.last_inbound_at)}</span></div>
-                    <div>action summary: <span className="font-mono">{actionSummary || "-"}</span></div>
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold">instance_id филиала</span>
+                            <button className="btn-ghost px-2 py-1 text-[11px]" onClick={() => void copyToClipboard("InstanceID", branchInstanceId || selectedIntegration?.instance_id)}>Копировать</button>
+                        </div>
+                        <div className="mt-1 font-mono text-[11px] break-all">{branchInstanceId || selectedIntegration?.instance_id || "-"}</div>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold">Webhook URL</span>
+                            <button className="btn-ghost px-2 py-1 text-[11px]" onClick={() => void copyToClipboard("Webhook URL", webhookUrl || selectedIntegration?.webhook_url)}>Копировать</button>
+                        </div>
+                        <div className="mt-1 font-mono text-[11px] break-all">{webhookUrl || selectedIntegration?.webhook_url || "-"}</div>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold">Webhook secret</span>
+                            <button className="btn-ghost px-2 py-1 text-[11px]" onClick={() => void copyToClipboard("Webhook secret", webhookSecret)}>Копировать</button>
+                        </div>
+                        <div className="mt-1 font-mono text-[11px] break-all">{webhookSecret || "-"}</div>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold">Provider owner</span>
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusPill(selectedIntegration?.status ?? "ok")}`}>
+                                {selectedIntegration?.status ?? "-"}
+                            </span>
+                        </div>
+                        <div className="mt-1 font-mono text-[11px] break-all">{selectedIntegration?.provider_binding_owner || "-"}</div>
+                        <div className="mt-1 text-[11px] text-muted-foreground">
+                            paid_until: <span className="font-mono break-all">{selectedIntegration?.provider_binding_paid_until || "-"}</span>
+                            {" "}· next_renewal_at: <span className="font-mono break-all">{selectedIntegration?.provider_binding_next_renewal_at || "-"}</span>
+                        </div>
+                        <div className="mt-1 text-[11px] text-muted-foreground">
+                            webhook_status: <span className="font-mono">{selectedIntegration?.provider_binding_webhook_status || "-"}</span>
+                            {" "}· last inbound: <span className="font-mono">{formatDateLabel(selectedIntegration?.last_inbound_at)}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-2 rounded-lg border border-border/60 bg-muted/10 p-2 text-xs text-muted-foreground">
+                    последнее действие: <span className="font-mono break-all">{actionSummary || "-"}</span>
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-2" data-testid="company-workspace-provider-actions">
-                    <button className="btn-ghost" onClick={() => openProviderActionDialog("provider_start_rebind")} disabled={!scopeBranchId || !!runningAction}>Start rebind</button>
-                    <button className="btn-ghost" onClick={() => openProviderActionDialog("provider_complete_rebind")} disabled={!scopeBranchId || !!runningAction}>Complete rebind</button>
-                    <button className="btn-ghost" onClick={() => openProviderActionDialog("provider_webhook_updated")} disabled={!scopeBranchId || !!runningAction}>Webhook updated</button>
-                    <button className="btn-ghost" onClick={() => openProviderActionDialog("provider_renewal_confirmed")} disabled={!scopeBranchId || !!runningAction}>Confirm renewal</button>
-                    <button className="btn-ghost" onClick={() => openProviderActionDialog("provider_send_reminder")} disabled={!scopeBranchId || !!runningAction}>Send reminder</button>
+                    <button className="btn-ghost" onClick={() => openProviderActionDialog("provider_start_rebind")} disabled={!scopeBranchId || !!runningAction}>Старт перепривязки</button>
+                    <button className="btn-ghost" onClick={() => openProviderActionDialog("provider_complete_rebind")} disabled={!scopeBranchId || !!runningAction}>Завершить перепривязку</button>
+                    <button className="btn-ghost" onClick={() => openProviderActionDialog("provider_webhook_updated")} disabled={!scopeBranchId || !!runningAction}>Webhook обновлен</button>
+                    <button className="btn-ghost" onClick={() => openProviderActionDialog("provider_renewal_confirmed")} disabled={!scopeBranchId || !!runningAction}>Подтвердить продление</button>
+                    <button className="btn-ghost" onClick={() => openProviderActionDialog("provider_send_reminder")} disabled={!scopeBranchId || !!runningAction}>Отправить напоминание</button>
                 </div>
             </section>
 
             <section className="mt-4 rounded-lg border border-border/60 bg-card p-4" data-testid="company-workspace-hardstop-wizard">
-                <h2 className="text-lg font-semibold">Linear Onboarding Hard-Stop</h2>
+                <h2 className="text-lg font-semibold">Линейный hard-stop онбординга</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                    Flow: Create -&gt; WA identity -&gt; Webhook verify -&gt; Renewal tracking -&gt; Go-live.
+                    Поток: контекст -&gt; WA identity -&gt; webhook -&gt; продление -&gt; go-live.
                 </p>
+
+                {currentBlocker ? (
+                    <div className="mt-3 rounded-lg border border-red-300/70 bg-red-50 p-3 text-xs text-red-800">
+                        <div className="font-semibold">Текущий блокер: {currentBlocker.title}</div>
+                        <div className="mt-1">Что исправить: {currentBlocker.fix}</div>
+                    </div>
+                ) : (
+                    <div className="mt-3 rounded-lg border border-emerald-300/70 bg-emerald-50 p-3 text-xs text-emerald-800">
+                        Все обязательные шаги пройдены, можно принимать go-live.
+                    </div>
+                )}
 
                 <div className="mt-3 space-y-2">
                     {wizardSteps.map((step, index) => {
@@ -806,13 +888,13 @@ export default function CompanyWorkspacePage() {
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                     <div className="text-sm font-medium">{step.title}</div>
                                     <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${step.passed ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                                        {step.passed ? "pass" : "fail"}
+                                        {wizardStatusLabel(step.passed)}
                                     </span>
                                 </div>
                                 <div className="mt-1 text-xs text-muted-foreground">{step.detail}</div>
                                 {!step.passed ? (
                                     <div className={`mt-1 text-xs ${isCurrentBlocker ? "text-red-700" : "text-muted-foreground"}`}>
-                                        fix: {step.fix}{isCurrentBlocker ? " (current blocker)" : ""}
+                                        fix: {step.fix}{isCurrentBlocker ? " (текущий блокер)" : ""}
                                     </div>
                                 ) : null}
                             </div>
@@ -821,15 +903,15 @@ export default function CompanyWorkspacePage() {
                 </div>
 
                 <div className="mt-4 rounded-lg border border-border/60 bg-background p-3">
-                    <div className="text-sm font-medium">Go-live decision</div>
+                    <div className="text-sm font-medium">Решение по go-live</div>
                     <label className="mt-2 block text-xs text-muted-foreground">
-                        reason
+                        причина
                         <textarea
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                             rows={2}
                             value={goLiveReason}
                             onChange={(event) => setGoLiveReason(event.target.value)}
-                            placeholder="go-live decision reason"
+                            placeholder="укажите причину решения"
                         />
                     </label>
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -838,25 +920,25 @@ export default function CompanyWorkspacePage() {
                             onClick={() => void approveGoLive()}
                             disabled={!scopeBranchId || !canWriteTenants || hardStopActive || goLiveSaving !== null}
                         >
-                            {goLiveSaving === "approve" ? "Approving..." : "Approve go-live"}
+                            {goLiveSaving === "approve" ? "Подтверждаю..." : "Подтвердить go-live"}
                         </button>
                         <button
                             className="btn-ghost"
                             onClick={() => void rejectGoLive()}
                             disabled={!scopeBranchId || !canWriteTenants || goLiveSaving !== null}
                         >
-                            {goLiveSaving === "reject" ? "Rejecting..." : "Reject"}
+                            {goLiveSaving === "reject" ? "Отклоняю..." : "Отклонить"}
                         </button>
                         <button
                             className="btn-ghost"
                             onClick={() => void waiveGoLive()}
                             disabled={!scopeBranchId || !canWriteTenants || hardStopActive || goLiveSaving !== null}
                         >
-                            {goLiveSaving === "waive" ? "Waiving..." : "Waive 24h"}
+                            {goLiveSaving === "waive" ? "Применяю..." : "Waive 24ч"}
                         </button>
                     </div>
                     <div className="mt-2 text-xs text-muted-foreground">
-                        hard-stop: {hardStopActive ? "active" : "clear"} · scorecard: {onboardingScorecard?.status ?? "-"}
+                        hard-stop: {hardStopActive ? "активен" : "снят"} · scorecard: {onboardingScorecard?.status ?? "-"}
                     </div>
                 </div>
             </section>
@@ -868,34 +950,34 @@ export default function CompanyWorkspacePage() {
                             <div>
                                 <h2 className="text-lg font-semibold">{providerOpsActionLabel(providerActionDialog.action)}</h2>
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    {selectedIntegration.client_slug} / {selectedIntegration.branch_name} · mode: {providerActionDialog.mode}
+                                    {selectedIntegration.client_slug} / {selectedIntegration.branch_name} · режим: {providerActionDialog.mode === "execute" ? "execute" : "dry_run"}
                                 </p>
                             </div>
-                            <button type="button" className="btn-ghost" onClick={closeProviderActionDialog} disabled={!!runningAction}>Close</button>
+                            <button type="button" className="btn-ghost" onClick={closeProviderActionDialog} disabled={!!runningAction}>Закрыть</button>
                         </div>
 
                         <div className="mt-4 space-y-3">
                             {providerActionDialog.mode === "execute" ? (
                                 <label className="text-xs text-muted-foreground">
-                                    reason (required)
+                                    причина (обязательно)
                                     <textarea
                                         className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                         rows={2}
                                         value={providerActionDialog.reason}
                                         onChange={(event) => setProviderActionDialog((prev) => (prev ? { ...prev, reason: event.target.value } : prev))}
-                                        placeholder="execute reason"
+                                        placeholder="почему выполняем операцию"
                                     />
                                 </label>
                             ) : null}
 
                             <label className="text-xs text-muted-foreground">
-                                notes
+                                заметки
                                 <textarea
                                     className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                     rows={2}
                                     value={providerActionDialog.notes}
                                     onChange={(event) => setProviderActionDialog((prev) => (prev ? { ...prev, notes: event.target.value } : prev))}
-                                    placeholder="operation notes"
+                                    placeholder="комментарий для операции"
                                 />
                             </label>
 
@@ -936,9 +1018,9 @@ export default function CompanyWorkspacePage() {
                         </div>
 
                         <div className="mt-4 flex items-center justify-end gap-2">
-                            <button type="button" className="btn-ghost" onClick={closeProviderActionDialog} disabled={!!runningAction}>Cancel</button>
+                            <button type="button" className="btn-ghost" onClick={closeProviderActionDialog} disabled={!!runningAction}>Отмена</button>
                             <button type="button" className="btn-primary" onClick={() => void submitProviderActionDialog()} disabled={!!runningAction}>
-                                {runningAction ? "Running..." : providerActionDialog.mode === "execute" ? "Execute" : "Dry-run"}
+                                {runningAction ? "Выполняю..." : providerActionDialog.mode === "execute" ? "Выполнить" : "Запустить dry-run"}
                             </button>
                         </div>
                     </div>
