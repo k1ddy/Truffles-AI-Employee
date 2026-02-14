@@ -22,6 +22,7 @@ import { useErrorHandler } from "@/lib/api-hooks";
 const COMPANY_ID_STORAGE_KEY = "console:company_id";
 const CLIENT_ID_STORAGE_KEY = "console:client_id";
 const BRANCH_ID_STORAGE_KEY = "console:branch_id";
+const WORKSPACE_RECOMMENDED_ACTION_KEY = "console:workspace_recommended_action";
 
 type ProviderActionDialogState = {
     action: ProviderOpsAction;
@@ -31,6 +32,14 @@ type ProviderActionDialogState = {
     paidUntil: string;
     nextRenewalAt: string;
     instanceId: string;
+};
+
+type WorkspaceRecommendedActionContext = {
+    branch_id: string;
+    action: ProviderOpsAction;
+    reasons: string[];
+    source: "queue" | "matrix";
+    captured_at: string;
 };
 
 type WizardStep = {
@@ -57,6 +66,22 @@ function setLocalStorageValue(key: string, value?: string | null) {
         return;
     }
     window.localStorage.setItem(key, value);
+}
+
+function readWorkspaceRecommendedActionContext(): WorkspaceRecommendedActionContext | null {
+    const raw = readLocalStorageValue(WORKSPACE_RECOMMENDED_ACTION_KEY);
+    if (!raw) {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(raw) as WorkspaceRecommendedActionContext;
+        if (!parsed?.branch_id || !parsed?.action) {
+            return null;
+        }
+        return parsed;
+    } catch {
+        return null;
+    }
 }
 
 function formatDateLabel(value?: string | null): string {
@@ -97,6 +122,21 @@ function providerOpsActionLabel(action: ProviderOpsAction): string {
         return "Отправить напоминание";
     }
     return "Сверка интеграции";
+}
+
+function providerOpsReasonLabel(reason: string): string {
+    const labels: Record<string, string> = {
+        provider_binding_rebind_required: "нужна перепривязка provider",
+        provider_binding_expired: "подписка provider истекла",
+        provider_binding_expiring_soon: "подписка provider скоро истекает",
+        no_recent_inbound: "давно нет входящих сообщений",
+        instance_id_mismatch: "instance_id не совпадает",
+        invalid_webhook_url: "webhook URL невалиден",
+        integration_degraded: "интеграция деградировала",
+        provider_binding_alert_critical: "критичный alert у provider",
+        provider_binding_alert_warn: "предупреждение у provider",
+    };
+    return labels[reason] ?? reason;
 }
 
 function defaultExecuteReason(action: ProviderOpsAction): string {
@@ -166,6 +206,7 @@ export default function CompanyWorkspacePage() {
     const [providerActionDialog, setProviderActionDialog] = useState<ProviderActionDialogState | null>(null);
     const [branchSaving, setBranchSaving] = useState(false);
     const [goLiveSaving, setGoLiveSaving] = useState<"approve" | "reject" | "waive" | null>(null);
+    const [recommendedActionContext, setRecommendedActionContext] = useState<WorkspaceRecommendedActionContext | null>(null);
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -347,6 +388,23 @@ export default function CompanyWorkspacePage() {
         setActionSummary("");
     }, [selectedIntegration?.branch_id, selectedIntegration?.webhook_url]);
 
+    useEffect(() => {
+        const recommendation = readWorkspaceRecommendedActionContext();
+        if (!recommendation) {
+            setRecommendedActionContext(null);
+            return;
+        }
+        if (!scopeBranchId) {
+            setRecommendedActionContext(recommendation);
+            return;
+        }
+        if (recommendation.branch_id !== scopeBranchId) {
+            setRecommendedActionContext(null);
+            return;
+        }
+        setRecommendedActionContext(recommendation);
+    }, [scopeBranchId, selectedIntegration?.branch_id]);
+
     const createBranchConfirmation = async (
         branchId: string,
         reason: string,
@@ -399,6 +457,10 @@ export default function CompanyWorkspacePage() {
             const result = response.data.result ?? {};
             setActionSummary(`${providerOpsActionLabel(action)}: ${JSON.stringify(result)}`);
             toast.success(mode === "dry_run" ? "Проверка завершена (без записи)" : "Операция выполнена");
+            if (mode === "execute") {
+                setLocalStorageValue(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
+                setRecommendedActionContext(null);
+            }
             await refetchIntegrations();
             await refetchScorecard();
         } catch (error) {
@@ -687,6 +749,34 @@ export default function CompanyWorkspacePage() {
     const hardStopActive = firstFailedStepIndex !== -1;
     const currentBlocker = hardStopActive ? wizardSteps[firstFailedStepIndex] : null;
 
+    const recommendedPlaybook = useMemo(() => {
+        const reasons = recommendedActionContext?.reasons ?? [];
+        const steps: string[] = [];
+        for (const reason of reasons) {
+            if (reason === "provider_binding_rebind_required" || reason === "instance_id_mismatch") {
+                steps.push("Проверьте instance_id и нажмите «Старт перепривязки», затем «Завершить перепривязку».");
+                continue;
+            }
+            if (reason === "provider_binding_expired" || reason === "provider_binding_expiring_soon") {
+                steps.push("Уточните оплату у provider и выполните «Подтвердить продление» с актуальной датой.");
+                continue;
+            }
+            if (reason === "invalid_webhook_url") {
+                steps.push("Получите новый webhook-контракт и подтвердите действие «Webhook обновлен».");
+                continue;
+            }
+            if (reason === "no_recent_inbound" || reason === "integration_degraded") {
+                steps.push("Запустите «Проверить без записи», затем «Применить сверку» при подтверждении проблемы.");
+                continue;
+            }
+            if (reason === "provider_binding_alert_critical" || reason === "provider_binding_alert_warn") {
+                steps.push("Проверьте карточку provider и отправьте напоминание/перепривяжите по регламенту.");
+                continue;
+            }
+        }
+        return [...new Set(steps)];
+    }, [recommendedActionContext?.reasons]);
+
     if (!session) {
         return <div className="p-8 text-center text-muted-foreground">Войдите в систему, чтобы открыть центр компании.</div>;
     }
@@ -738,6 +828,89 @@ export default function CompanyWorkspacePage() {
                     <div className="font-semibold uppercase tracking-[0.15em]">Go-live</div>
                     <div className="mt-1 text-sm">{scorecardReady ? "Допуск возможен" : "Есть блокеры"}</div>
                 </div>
+            </section>
+
+            <section className="mt-4 rounded-lg border border-border/60 bg-card p-4" data-testid="company-workspace-recommended-action">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <h2 className="text-lg font-semibold">Следующее рекомендуемое действие</h2>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                            Авто-подсказка из Integrations Queue/Matrix. Ничего не выполняется автоматически.
+                        </p>
+                    </div>
+                    <span className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
+                        source: {recommendedActionContext?.source ?? "-"}
+                    </span>
+                </div>
+
+                {recommendedActionContext && (!scopeBranchId || recommendedActionContext.branch_id === scopeBranchId) ? (
+                    <div className="mt-3 space-y-3">
+                        <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900">
+                            <span className="font-semibold">Рекомендуется:</span>{" "}
+                            {providerOpsActionLabel(recommendedActionContext.action)}
+                        </div>
+
+                        <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
+                            <div className="font-semibold uppercase tracking-[0.12em] text-muted-foreground">Причины</div>
+                            <div className="mt-2 flex flex-wrap gap-1">
+                                {(recommendedActionContext.reasons ?? []).length ? (
+                                    recommendedActionContext.reasons.map((reason) => (
+                                        <span key={reason} className="rounded bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-800">
+                                            {providerOpsReasonLabel(reason)}
+                                        </span>
+                                    ))
+                                ) : (
+                                    <span className="text-muted-foreground">нет</span>
+                                )}
+                            </div>
+                        </div>
+
+                        {recommendedPlaybook.length ? (
+                            <div className="rounded-lg border border-border/60 bg-background p-3 text-xs">
+                                <div className="font-semibold uppercase tracking-[0.12em] text-muted-foreground">Playbook</div>
+                                <ol className="mt-2 list-decimal space-y-1 pl-4 text-muted-foreground">
+                                    {recommendedPlaybook.map((step) => (
+                                        <li key={step}>{step}</li>
+                                    ))}
+                                </ol>
+                            </div>
+                        ) : null}
+
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                className="btn-primary"
+                                onClick={() => openProviderActionDialog(recommendedActionContext.action, "execute")}
+                                disabled={!scopeBranchId || !selectedIntegration || !!runningAction}
+                                data-testid="workspace-recommended-open-execute"
+                            >
+                                Открыть форму действия
+                            </button>
+                            <button
+                                className="btn-ghost"
+                                onClick={() => openProviderActionDialog("integration_reconcile", "dry_run")}
+                                disabled={!scopeBranchId || !selectedIntegration || !!runningAction}
+                                data-testid="workspace-recommended-open-dryrun"
+                            >
+                                Сначала проверить без записи
+                            </button>
+                            <button
+                                className="btn-ghost"
+                                onClick={() => {
+                                    setLocalStorageValue(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
+                                    setRecommendedActionContext(null);
+                                }}
+                                disabled={!!runningAction}
+                                data-testid="workspace-recommended-clear"
+                            >
+                                Скрыть подсказку
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="mt-3 rounded-lg border border-emerald-300/60 bg-emerald-50 p-3 text-xs text-emerald-800">
+                        Для текущего контекста нет активной подсказки. Используйте Integrations Queue/Matrix для выбора филиала с проблемой.
+                    </div>
+                )}
             </section>
 
             <section className="mt-4 rounded-lg border border-border/60 bg-card p-4" data-testid="company-workspace-scope">

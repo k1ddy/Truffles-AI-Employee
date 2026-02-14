@@ -23,6 +23,7 @@ import type { components } from "@/types/api.generated";
 const COMPANY_ID_STORAGE_KEY = "console:company_id";
 const CLIENT_ID_STORAGE_KEY = "console:client_id";
 const BRANCH_ID_STORAGE_KEY = "console:branch_id";
+const WORKSPACE_RECOMMENDED_ACTION_KEY = "console:workspace_recommended_action";
 
 const STALE_AFTER_OPTIONS = [15, 30, 60, 180] as const;
 const API_LIST_LIMIT = 100;
@@ -32,6 +33,14 @@ type ScopeTarget = {
     companyId?: string | null;
     clientId?: string | null;
     branchId?: string | null;
+};
+
+type WorkspaceRecommendedActionContext = {
+    branch_id: string;
+    action: ProviderOpsQueueItem["recommended_action"];
+    reasons: string[];
+    source: "queue" | "matrix";
+    captured_at: string;
 };
 
 type StatusFilter = "all" | "error" | "warn" | "ok";
@@ -111,6 +120,14 @@ function setLocalStorageValue(key: string, value?: string | null) {
         return;
     }
     window.localStorage.setItem(key, value);
+}
+
+function setWorkspaceRecommendedActionContext(value: WorkspaceRecommendedActionContext | null) {
+    if (value === null) {
+        setLocalStorageValue(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
+        return;
+    }
+    setLocalStorageValue(WORKSPACE_RECOMMENDED_ACTION_KEY, JSON.stringify(value));
 }
 
 function normalizeText(value?: string | null): string {
@@ -812,6 +829,16 @@ export default function IntegrationsPage() {
         };
     }, [filteredRows.length, integrationsTotalInScope, rows]);
 
+    const providerOpsByBranchId = useMemo(() => {
+        const map = new Map<string, ProviderOpsQueueItem>();
+        for (const item of providerOpsQueue) {
+            if (!map.has(item.branch_id)) {
+                map.set(item.branch_id, item);
+            }
+        }
+        return map;
+    }, [providerOpsQueue]);
+
     const fleetAttentionSummary = fleetAttentionData?.summary;
     const scopeDataTruncated = Boolean(companiesData?.has_more || clientsData?.has_more || branchesData?.has_more);
 
@@ -850,6 +877,18 @@ export default function IntegrationsPage() {
     };
 
     const openWorkspaceForRow = (row: EnrichedRow) => {
+        const recommendation = providerOpsByBranchId.get(row.branch_id);
+        if (recommendation) {
+            setWorkspaceRecommendedActionContext({
+                branch_id: recommendation.branch_id,
+                action: recommendation.recommended_action,
+                reasons: recommendation.reasons ?? [],
+                source: "matrix",
+                captured_at: new Date().toISOString(),
+            });
+        } else {
+            setWorkspaceRecommendedActionContext(null);
+        }
         persistScopeAndOpenWorkspace(
             {
                 companyId: row.company_id,
@@ -861,6 +900,13 @@ export default function IntegrationsPage() {
     };
 
     const openWorkspaceForQueueItem = (queueItem: ProviderOpsQueueItem) => {
+        setWorkspaceRecommendedActionContext({
+            branch_id: queueItem.branch_id,
+            action: queueItem.recommended_action,
+            reasons: queueItem.reasons ?? [],
+            source: "queue",
+            captured_at: new Date().toISOString(),
+        });
         persistScopeAndOpenWorkspace(
             {
                 clientId: queueItem.client_id,
@@ -1324,9 +1370,16 @@ export default function IntegrationsPage() {
                                     <div className="mt-1 truncate font-medium">{row.branch_name}</div>
                                     <div className="truncate text-muted-foreground">{row.branch_slug}</div>
                                 </div>
-                                <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${statusBadgeClass(row.status)}`}>
-                                    {statusLabel(row.status)}
-                                </span>
+                                <div className="flex flex-col items-end gap-1">
+                                    <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${statusBadgeClass(row.status)}`}>
+                                        {statusLabel(row.status)}
+                                    </span>
+                                    {providerOpsByBranchId.get(row.branch_id) ? (
+                                        <span className="rounded bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                                            next: {providerOpsActionLabel(providerOpsByBranchId.get(row.branch_id)?.recommended_action ?? "integration_reconcile")}
+                                        </span>
+                                    ) : null}
+                                </div>
                             </div>
 
                             <div className="mt-3 grid gap-2 sm:grid-cols-2">
