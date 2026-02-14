@@ -3539,7 +3539,7 @@ def _llm_quality_should_send_calendar_hook(tool_signals, turn_tags):
     if "calendar" in (turn_tags or []):
         return False
     outcome = _llm_quality_normalize_tool_token(signal.get("outcome"))
-    if outcome != "success":
+    if outcome not in {"success", "pending"}:
         return False
     # Slot lookup is an intermediate step and should not trigger
     # synthetic "check booking" messages that derail booking progression.

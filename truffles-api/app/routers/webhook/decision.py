@@ -878,6 +878,16 @@ def _apply_expected_reply_contract(
                 or not answer_interpreter_attempted
                 or not answer_result_ok
             )
+            if (
+                expected_reply_type == legacy.EXPECTED_REPLY_TIME
+                and isinstance(deterministic_value, str)
+            ):
+                deterministic_has_time = bool(
+                    legacy.TIME_PATTERN.search(deterministic_value)
+                    or legacy.TIME_HOUR_PATTERN.search(deterministic_value)
+                )
+                if not deterministic_has_time:
+                    should_use_deterministic = True
             if should_use_deterministic:
                 deterministic_matched = True
                 if expected_slot_key:
@@ -3078,7 +3088,31 @@ def _has_explicit_service_signal(
 
 
 def _is_booking_request(text: str, *, client_slug: str | None) -> bool:
-    return _matches_booking_request_lexicon(text, client_slug=client_slug)
+    if _matches_booking_request_lexicon(text, client_slug=client_slug):
+        return True
+    normalized = normalize_for_matching(text)
+    if not normalized:
+        return False
+    if "запис" in normalized:
+        return True
+    need_or_desire_signal = any(marker in normalized for marker in ("хочу", "нужн", "надо"))
+    if not need_or_desire_signal or not client_slug:
+        return False
+    cleaned_text = re.sub(r"\[[^\]]+\]", " ", text)
+    normalized_service = _normalize_service_text(cleaned_text)
+    if not normalized_service:
+        return False
+    if not (
+        _match_service(normalized_service, client_slug)
+        or _matches_service_request_lexicon(normalized_service, client_slug)
+    ):
+        return False
+    info_intents, _ = _detect_info_class_intents(
+        cleaned_text,
+        intent_decomp_set=set(),
+        client_slug=client_slug,
+    )
+    return not bool({"location", "hours", "parking"} & info_intents)
 
 
 def _is_booking_cancel(text: str, *, policy_pack: dict | None) -> bool:
