@@ -122,6 +122,23 @@ function wizardStatusLabel(passed: boolean): string {
     return passed ? "ok" : "блокер";
 }
 
+function shortId(value?: string | null): string {
+    const normalized = (value ?? "").trim();
+    if (!normalized) {
+        return "-";
+    }
+    if (normalized.length <= 16) {
+        return normalized;
+    }
+    return `${normalized.slice(0, 8)}...${normalized.slice(-6)}`;
+}
+
+function statusCardClass(ok: boolean): string {
+    return ok
+        ? "border-emerald-300/70 bg-emerald-50 text-emerald-900"
+        : "border-red-300/70 bg-red-50 text-red-900";
+}
+
 export default function CompanyWorkspacePage() {
     const { data: session } = useSession();
     const { handleError } = useErrorHandler();
@@ -135,7 +152,7 @@ export default function CompanyWorkspacePage() {
 
     const [branchPhone, setBranchPhone] = useState("");
     const [branchInstanceId, setBranchInstanceId] = useState("");
-    const [goLiveReason, setGoLiveReason] = useState("go-live подтвержден из workspace компании");
+    const [goLiveReason, setGoLiveReason] = useState("go-live подтвержден из центра компании");
 
     const [webhookSecret, setWebhookSecret] = useState("");
     const [webhookUrl, setWebhookUrl] = useState("");
@@ -381,7 +398,7 @@ export default function CompanyWorkspacePage() {
 
             const result = response.data.result ?? {};
             setActionSummary(`${providerOpsActionLabel(action)}: ${JSON.stringify(result)}`);
-            toast.success(mode === "dry_run" ? "Dry-run завершен" : "Операция выполнена");
+            toast.success(mode === "dry_run" ? "Проверка завершена (без записи)" : "Операция выполнена");
             await refetchIntegrations();
             await refetchScorecard();
         } catch (error) {
@@ -579,7 +596,7 @@ export default function CompanyWorkspacePage() {
         setGoLiveSaving("waive");
         try {
             await adminApi.waiveBranchGoLive(scopeBranchId, { reason, ttl_hours: 24 });
-            toast.success("Waiver go-live применен на 24 часа");
+            toast.success("Отсрочка go-live применена на 24 часа");
             await refetchIntegrations();
             await refetchScorecard();
         } catch (error) {
@@ -589,23 +606,44 @@ export default function CompanyWorkspacePage() {
         }
     };
 
-    const wizardSteps = useMemo<WizardStep[]>(() => {
-        const hasContext = Boolean(scopeCompanyId && scopeClientId && scopeBranchId);
-        const hasIdentity = Boolean((selectedBranch?.phone ?? "").trim() && (selectedBranch?.instance_id ?? "").trim());
-        const webhookConfigured = Boolean(
-            selectedIntegration?.webhook_url_valid
-            && selectedIntegration?.provider_binding_webhook_status === "configured",
+    const selectedCompanyName = useMemo(() => {
+        return (
+            (meData?.companies ?? []).find((company) => company.id === scopeCompanyId)?.name
+            ?? shortId(scopeCompanyId)
         );
-        const renewalTracked = Boolean(
-            selectedIntegration
-            && (
-                (selectedIntegration.provider_binding_paid_until ?? "").trim()
-                || (selectedIntegration.provider_binding_next_renewal_at ?? "").trim()
-            )
-            && (selectedIntegration.provider_binding_owner ?? "").trim(),
-        );
-        const scorecardReady = Boolean(onboardingScorecard?.ready);
+    }, [meData?.companies, scopeCompanyId]);
 
+    const selectedClientName = useMemo(() => {
+        return (
+            clientOptions.find((client) => client.id === scopeClientId)?.name
+            ?? shortId(scopeClientId)
+        );
+    }, [clientOptions, scopeClientId]);
+
+    const selectedBranchName = useMemo(() => {
+        return (
+            branchOptions.find((branch) => branch.id === scopeBranchId)?.name
+            ?? shortId(scopeBranchId)
+        );
+    }, [branchOptions, scopeBranchId]);
+
+    const hasContext = Boolean(scopeCompanyId && scopeClientId && scopeBranchId);
+    const hasIdentity = Boolean((selectedBranch?.phone ?? "").trim() && (selectedBranch?.instance_id ?? "").trim());
+    const webhookConfigured = Boolean(
+        selectedIntegration?.webhook_url_valid
+        && selectedIntegration?.provider_binding_webhook_status === "configured",
+    );
+    const renewalTracked = Boolean(
+        selectedIntegration
+        && (
+            (selectedIntegration.provider_binding_paid_until ?? "").trim()
+            || (selectedIntegration.provider_binding_next_renewal_at ?? "").trim()
+        )
+        && (selectedIntegration.provider_binding_owner ?? "").trim(),
+    );
+    const scorecardReady = Boolean(onboardingScorecard?.ready);
+
+    const wizardSteps = useMemo<WizardStep[]>(() => {
         return [
             {
                 id: "context",
@@ -619,38 +657,38 @@ export default function CompanyWorkspacePage() {
                 title: "Шаг 2: Запишите WhatsApp-идентичность",
                 passed: hasIdentity,
                 detail: hasIdentity ? "Телефон и instance_id заполнены" : "Телефон филиала и instance_id обязательны",
-                fix: "Сохраните WA-идентичность филиала",
+                fix: "Сохраните WA-идентичность филиала (телефон + instance_id)",
             },
             {
                 id: "webhook",
-                title: "Шаг 3: Проверьте webhook и связку provider",
+                title: "Шаг 3: Проверьте webhook и связь с provider",
                 passed: webhookConfigured,
                 detail: webhookConfigured ? "Webhook настроен" : "Webhook должен быть валидным и webhook_status=configured",
-                fix: "Обновите webhook и выполните «Webhook обновлен»/«Завершить перепривязку»",
+                fix: "Обновите webhook и отметьте «Webhook обновлен» или «Завершить перепривязку»",
             },
             {
                 id: "renewal",
-                title: "Шаг 4: Зафиксируйте продление и owner",
+                title: "Шаг 4: Зафиксируйте продление и владельца",
                 passed: renewalTracked,
-                detail: renewalTracked ? "Данные продления заполнены" : "Нужны owner и paid_until/next_renewal_at",
+                detail: renewalTracked ? "Данные продления заполнены" : "Нужны владелец и paid_until/next_renewal_at",
                 fix: "Выполните действие «Подтвердить продление»",
             },
             {
                 id: "go-live",
-                title: "Шаг 5: Scorecard и go-live gate",
+                title: "Шаг 5: Готовность и допуск go-live",
                 passed: scorecardReady,
-                detail: scorecardReady ? "Onboarding scorecard прошел" : "Onboarding scorecard не пройден",
-                fix: "Закройте незаполненные проверки scorecard до подтверждения go-live",
+                detail: scorecardReady ? "Проверка готовности пройдена" : "Проверка готовности не пройдена",
+                fix: "Закройте незаполненные проверки до подтверждения go-live",
             },
         ];
-    }, [scopeCompanyId, scopeClientId, scopeBranchId, selectedBranch?.phone, selectedBranch?.instance_id, selectedIntegration, onboardingScorecard?.ready]);
+    }, [hasContext, hasIdentity, renewalTracked, scorecardReady, webhookConfigured]);
 
     const firstFailedStepIndex = wizardSteps.findIndex((step) => !step.passed);
     const hardStopActive = firstFailedStepIndex !== -1;
     const currentBlocker = hardStopActive ? wizardSteps[firstFailedStepIndex] : null;
 
     if (!session) {
-        return <div className="p-8 text-center text-muted-foreground">Войдите в систему, чтобы открыть Workspace компании.</div>;
+        return <div className="p-8 text-center text-muted-foreground">Войдите в систему, чтобы открыть центр компании.</div>;
     }
 
     if (meLoading) {
@@ -658,17 +696,17 @@ export default function CompanyWorkspacePage() {
     }
 
     if (!canReadTenants && !canReadIntegrations) {
-        return <AccessDenied message="Нет доступа к Workspace компании." />;
+        return <AccessDenied message="Нет доступа к центру компании." />;
     }
 
     return (
-        <div className="mx-auto max-w-[1200px] p-4 sm:p-6" data-testid="company-workspace-page">
+        <div className="mx-auto max-w-[1320px] p-4 sm:p-6" data-testid="company-workspace-page">
             <div className="rounded-lg border border-border/60 bg-card p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                        <h1 className="text-2xl font-bold">Workspace компании</h1>
+                        <h1 className="text-2xl font-bold">Центр управления компанией</h1>
                         <p className="mt-1 text-sm text-muted-foreground">
-                            Один экран для онбординга, управления InstanceID/Webhook и go-live.
+                            Один экран для подключения, перепривязки, продления и допуска go-live по филиалу.
                         </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -679,9 +717,32 @@ export default function CompanyWorkspacePage() {
                 </div>
             </div>
 
+            <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5" data-testid="company-workspace-status-cards">
+                <div className={`rounded-lg border p-3 text-xs ${statusCardClass(hasContext)}`}>
+                    <div className="font-semibold uppercase tracking-[0.15em]">Контекст</div>
+                    <div className="mt-1 text-sm">{hasContext ? "Выбран" : "Не выбран"}</div>
+                </div>
+                <div className={`rounded-lg border p-3 text-xs ${statusCardClass(hasIdentity)}`}>
+                    <div className="font-semibold uppercase tracking-[0.15em]">WA-идентичность</div>
+                    <div className="mt-1 text-sm">{hasIdentity ? "Заполнена" : "Нет телефона/instance_id"}</div>
+                </div>
+                <div className={`rounded-lg border p-3 text-xs ${statusCardClass(webhookConfigured)}`}>
+                    <div className="font-semibold uppercase tracking-[0.15em]">Webhook</div>
+                    <div className="mt-1 text-sm">{webhookConfigured ? "Настроен" : "Требует проверки"}</div>
+                </div>
+                <div className={`rounded-lg border p-3 text-xs ${statusCardClass(renewalTracked)}`}>
+                    <div className="font-semibold uppercase tracking-[0.15em]">Продление</div>
+                    <div className="mt-1 text-sm">{renewalTracked ? "Зафиксировано" : "Нужен владелец + даты"}</div>
+                </div>
+                <div className={`rounded-lg border p-3 text-xs ${statusCardClass(scorecardReady)}`}>
+                    <div className="font-semibold uppercase tracking-[0.15em]">Go-live</div>
+                    <div className="mt-1 text-sm">{scorecardReady ? "Допуск возможен" : "Есть блокеры"}</div>
+                </div>
+            </section>
+
             <section className="mt-4 rounded-lg border border-border/60 bg-card p-4" data-testid="company-workspace-scope">
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Контекст</div>
-                <div className="mt-1 text-xs text-muted-foreground">Шаг 1. Выберите компанию, клиента и филиал, затем сохраните контекст.</div>
+                <div className="mt-1 text-xs text-muted-foreground">Шаг 1. Выберите компанию, клиента и филиал, затем нажмите «Применить контекст».</div>
                 <div className="mt-3 grid gap-3 md:grid-cols-4">
                     <label className="text-xs text-muted-foreground">
                         компания
@@ -745,10 +806,13 @@ export default function CompanyWorkspacePage() {
                     </div>
                 </div>
                 <div className="mt-2 rounded-md border border-border/60 bg-muted/20 p-2 text-xs text-muted-foreground">
-                    активный контекст:
-                    {" "}компания <span className="font-mono break-all">{scopeCompanyId || "-"}</span>
-                    {" "}· клиент <span className="font-mono break-all">{scopeClientId || "-"}</span>
-                    {" "}· филиал <span className="font-mono break-all">{scopeBranchId || "-"}</span>
+                    активный контекст:{" "}
+                    компания <span className="font-semibold text-foreground">{selectedCompanyName}</span>
+                    {" "}(<span className="font-mono">{shortId(scopeCompanyId)}</span>)
+                    {" "}· клиент <span className="font-semibold text-foreground">{selectedClientName}</span>
+                    {" "}(<span className="font-mono">{shortId(scopeClientId)}</span>)
+                    {" "}· филиал <span className="font-semibold text-foreground">{selectedBranchName}</span>
+                    {" "}(<span className="font-mono">{shortId(scopeBranchId)}</span>)
                 </div>
             </section>
 
@@ -757,7 +821,7 @@ export default function CompanyWorkspacePage() {
                     <div>
                         <h2 className="text-lg font-semibold">Панель WhatsApp / ChatFlow</h2>
                         <p className="mt-1 text-xs text-muted-foreground">
-                            Шаг 2-4. Сохранение identity, webhook-контракт, операции rebind/renewal и контроль фактов.
+                            Шаги 2-4: идентичность канала, webhook-контракт, перепривязка и продление.
                         </p>
                     </div>
                     <button
@@ -780,7 +844,7 @@ export default function CompanyWorkspacePage() {
                         />
                     </label>
                     <label className="text-xs text-muted-foreground">
-                        instance_id
+                        instance_id ChatFlow
                         <input
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono"
                             value={branchInstanceId}
@@ -796,16 +860,16 @@ export default function CompanyWorkspacePage() {
                         onClick={() => void saveBranchWhatsappIdentity()}
                         disabled={!scopeBranchId || branchSaving}
                     >
-                        {branchSaving ? "Сохраняю..." : "Сохранить WA identity"}
+                        {branchSaving ? "Сохраняю..." : "Сохранить WA-идентичность"}
                     </button>
                     <button className="btn-ghost" onClick={() => void refreshWebhookSecret()} disabled={!scopeBranchId}>
                         Получить webhook-контракт
                     </button>
                     <button className="btn-ghost" onClick={() => openProviderActionDialog("integration_reconcile", "dry_run")} disabled={!scopeBranchId || !!runningAction}>
-                        Dry-run сверки
+                        Проверить без записи
                     </button>
                     <button className="btn-ghost" onClick={() => openProviderActionDialog("integration_reconcile", "execute")} disabled={!scopeBranchId || !!runningAction}>
-                        Выполнить сверку
+                        Применить сверку
                     </button>
                 </div>
 
@@ -813,27 +877,33 @@ export default function CompanyWorkspacePage() {
                     <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
                         <div className="flex items-center justify-between gap-2">
                             <span className="font-semibold">instance_id филиала</span>
-                            <button className="btn-ghost px-2 py-1 text-[11px]" onClick={() => void copyToClipboard("InstanceID", branchInstanceId || selectedIntegration?.instance_id)}>Копировать</button>
+                            <button className="btn-ghost px-2 py-1 text-[11px]" onClick={() => void copyToClipboard("instance_id", branchInstanceId || selectedIntegration?.instance_id)}>Копировать</button>
                         </div>
-                        <div className="mt-1 font-mono text-[11px] break-all">{branchInstanceId || selectedIntegration?.instance_id || "-"}</div>
+                        <div className="mt-1 overflow-x-auto rounded bg-background/60 px-2 py-1">
+                            <span className="font-mono text-[11px] whitespace-nowrap">{branchInstanceId || selectedIntegration?.instance_id || "-"}</span>
+                        </div>
                     </div>
                     <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
                         <div className="flex items-center justify-between gap-2">
                             <span className="font-semibold">Webhook URL</span>
                             <button className="btn-ghost px-2 py-1 text-[11px]" onClick={() => void copyToClipboard("Webhook URL", webhookUrl || selectedIntegration?.webhook_url)}>Копировать</button>
                         </div>
-                        <div className="mt-1 font-mono text-[11px] break-all">{webhookUrl || selectedIntegration?.webhook_url || "-"}</div>
+                        <div className="mt-1 overflow-x-auto rounded bg-background/60 px-2 py-1">
+                            <span className="font-mono text-[11px] whitespace-nowrap">{webhookUrl || selectedIntegration?.webhook_url || "-"}</span>
+                        </div>
                     </div>
                     <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
                         <div className="flex items-center justify-between gap-2">
                             <span className="font-semibold">Webhook secret</span>
                             <button className="btn-ghost px-2 py-1 text-[11px]" onClick={() => void copyToClipboard("Webhook secret", webhookSecret)}>Копировать</button>
                         </div>
-                        <div className="mt-1 font-mono text-[11px] break-all">{webhookSecret || "-"}</div>
+                        <div className="mt-1 overflow-x-auto rounded bg-background/60 px-2 py-1">
+                            <span className="font-mono text-[11px] whitespace-nowrap">{webhookSecret || "-"}</span>
+                        </div>
                     </div>
                     <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
                         <div className="flex items-center justify-between gap-2">
-                            <span className="font-semibold">Provider owner</span>
+                            <span className="font-semibold">Владелец provider</span>
                             <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusPill(selectedIntegration?.status ?? "ok")}`}>
                                 {selectedIntegration?.status ?? "-"}
                             </span>
@@ -866,7 +936,7 @@ export default function CompanyWorkspacePage() {
             <section className="mt-4 rounded-lg border border-border/60 bg-card p-4" data-testid="company-workspace-hardstop-wizard">
                 <h2 className="text-lg font-semibold">Линейный hard-stop онбординга</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                    Поток: контекст -&gt; WA identity -&gt; webhook -&gt; продление -&gt; go-live.
+                    Поток: контекст -&gt; WA-идентичность -&gt; webhook -&gt; продление -&gt; go-live.
                 </p>
 
                 {currentBlocker ? (
@@ -934,11 +1004,11 @@ export default function CompanyWorkspacePage() {
                             onClick={() => void waiveGoLive()}
                             disabled={!scopeBranchId || !canWriteTenants || hardStopActive || goLiveSaving !== null}
                         >
-                            {goLiveSaving === "waive" ? "Применяю..." : "Waive 24ч"}
+                            {goLiveSaving === "waive" ? "Применяю..." : "Отложить 24ч"}
                         </button>
                     </div>
                     <div className="mt-2 text-xs text-muted-foreground">
-                        hard-stop: {hardStopActive ? "активен" : "снят"} · scorecard: {onboardingScorecard?.status ?? "-"}
+                        hard-stop: {hardStopActive ? "активен" : "снят"} · готовность: {onboardingScorecard?.status ?? "-"}
                     </div>
                 </div>
             </section>
@@ -950,7 +1020,7 @@ export default function CompanyWorkspacePage() {
                             <div>
                                 <h2 className="text-lg font-semibold">{providerOpsActionLabel(providerActionDialog.action)}</h2>
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    {selectedIntegration.client_slug} / {selectedIntegration.branch_name} · режим: {providerActionDialog.mode === "execute" ? "execute" : "dry_run"}
+                                    {selectedIntegration.client_slug} / {selectedIntegration.branch_name} · режим: {providerActionDialog.mode === "execute" ? "выполнить" : "проверить"}
                                 </p>
                             </div>
                             <button type="button" className="btn-ghost" onClick={closeProviderActionDialog} disabled={!!runningAction}>Закрыть</button>
@@ -1020,7 +1090,7 @@ export default function CompanyWorkspacePage() {
                         <div className="mt-4 flex items-center justify-end gap-2">
                             <button type="button" className="btn-ghost" onClick={closeProviderActionDialog} disabled={!!runningAction}>Отмена</button>
                             <button type="button" className="btn-primary" onClick={() => void submitProviderActionDialog()} disabled={!!runningAction}>
-                                {runningAction ? "Выполняю..." : providerActionDialog.mode === "execute" ? "Выполнить" : "Запустить dry-run"}
+                                {runningAction ? "Выполняю..." : providerActionDialog.mode === "execute" ? "Выполнить" : "Проверить"}
                             </button>
                         </div>
                     </div>
