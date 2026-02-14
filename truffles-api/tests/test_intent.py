@@ -262,3 +262,25 @@ class TestPolicyCoreErrorClassification:
 
         assert result["ok"] is False
         assert result["error"] == "insufficient_quota"
+
+    def test_maps_connection_error(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = Exception(
+                "Connection refused while calling upstream provider"
+            )
+            result = route_llm_policy_core("нужна запись")
+
+        assert result["ok"] is False
+        assert result["error"] == "connection_error"
+
+    def test_maps_model_not_found_error(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = Exception(
+                "The model gpt-x does not exist"
+            )
+            result = route_llm_policy_core("нужна запись")
+
+        assert result["ok"] is False
+        assert result["error"] == "model_not_found"
