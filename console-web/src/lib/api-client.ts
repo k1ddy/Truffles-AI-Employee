@@ -538,6 +538,7 @@ export type ListClientsParams = operations["listAdminClients"]["parameters"]["qu
 export type ListBranchesParams = operations["listAdminBranches"]["parameters"]["query"];
 export type ListFleetAttentionParams = operations["listFleetAttention"]["parameters"]["query"];
 export type ListIntegrationsParams = operations["listAdminIntegrations"]["parameters"]["query"];
+export type ListProviderLifecycleParams = operations["listAdminProviderLifecycle"]["parameters"]["query"];
 export type ListMembershipsParams = operations["listAdminMemberships"]["parameters"]["query"];
 export type ListReferencePacksParams = operations["listAdminReferencePacks"]["parameters"]["query"];
 export type ListOpsJobsParams = operations["listOpsJobs"]["parameters"]["query"];
@@ -657,6 +658,8 @@ export const adminApi = {
         apiClient.get<components["schemas"]["FleetAttentionResponse"]>("/admin/fleet/attention", { params }),
     listIntegrations: (params?: ListIntegrationsParams) =>
         apiClient.get<components["schemas"]["IntegrationsListResponse"]>("/admin/integrations", { params }),
+    listProviderLifecycle: (params?: ListProviderLifecycleParams) =>
+        apiClient.get<components["schemas"]["ProviderLifecycleListResponse"]>("/admin/provider-lifecycle", { params }),
     reconcileIntegrationBranch: (branchId: string, data: IntegrationBranchActionRequest) =>
         apiClient.post<IntegrationBranchActionResponse>(`/admin/integrations/${branchId}/reconcile`, data),
     listMemberships: (params?: ListMembershipsParams) =>

@@ -546,6 +546,249 @@ async def test_list_integrations_supports_cursor_pagination(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_provider_lifecycle_only_problematic(monkeypatch):
+    now = datetime.now(timezone.utc)
+    request = SimpleNamespace(query_params={"only_problematic": "true"})
+    client_id = uuid4()
+    ok_branch_id = uuid4()
+    bad_branch_id = uuid4()
+    db = Mock()
+
+    context = SimpleNamespace(
+        role="platform_admin",
+        accessible_clients=[SimpleNamespace(id=client_id, name="demo", status="active", company_id=None)],
+    )
+
+    branch_rows = [
+        SimpleNamespace(
+            id=ok_branch_id,
+            client_id=client_id,
+            slug="ok-branch",
+            name="OK Branch",
+            is_active=True,
+            instance_id="instance-ok",
+            telegram_chat_id="111",
+            webhook_secret="secret-ok",
+            phone="+77000000001",
+            created_at=now - timedelta(minutes=1),
+        ),
+        SimpleNamespace(
+            id=bad_branch_id,
+            client_id=client_id,
+            slug="bad-branch",
+            name="Bad Branch",
+            is_active=True,
+            instance_id="instance-bad",
+            telegram_chat_id="222",
+            webhook_secret="secret-bad",
+            phone="+77000000002",
+            created_at=now - timedelta(minutes=2),
+        ),
+    ]
+
+    def _query_side_effect(*entities):
+        if len(entities) == 1 and entities[0] is console_router.Branch:
+            return _BranchQueryMock(branch_rows)
+        if len(entities) == 2:
+            return _QueryMock([(client_id, "token-a")])
+        raise AssertionError(f"unexpected query entities: {entities}")
+
+    db.query.side_effect = _query_side_effect
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(
+        console_router,
+        "_load_latest_branch_inbound_observations_for_clients",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_provider_binding_lifecycle_map",
+        lambda *_args, **_kwargs: {},
+    )
+
+    def _status_for_branch(**kwargs):
+        branch = kwargs["branch"]
+        if branch.id == bad_branch_id:
+            return ConsoleBranchIntegrationStatus(
+                client_id=kwargs["client_id"],
+                client_slug=kwargs["client_slug"],
+                branch_id=branch.id,
+                branch_slug=branch.slug,
+                branch_name=branch.name,
+                is_active=True,
+                instance_id=branch.instance_id,
+                telegram_chat_id=branch.telegram_chat_id,
+                webhook_url="https://api.truffles.kz/webhook/demo?webhook_secret=abc",
+                webhook_url_valid=True,
+                whatsapp_status="instance_id_mismatch",
+                telegram_status="ok",
+                provider_binding_rebind_required=True,
+                provider_binding_expiry_status="ok",
+                provider_binding_alert_state="critical",
+                drift_issues=["instance_id_mismatch", "provider_binding_rebind_required"],
+                status="error",
+            )
+        return ConsoleBranchIntegrationStatus(
+            client_id=kwargs["client_id"],
+            client_slug=kwargs["client_slug"],
+            branch_id=branch.id,
+            branch_slug=branch.slug,
+            branch_name=branch.name,
+            is_active=True,
+            instance_id=branch.instance_id,
+            telegram_chat_id=branch.telegram_chat_id,
+            webhook_url="https://api.truffles.kz/webhook/demo?webhook_secret=abc",
+            webhook_url_valid=True,
+            whatsapp_status="ok",
+            telegram_status="ok",
+            provider_binding_expiry_status="ok",
+            provider_binding_alert_state="ok",
+            drift_issues=[],
+            status="ok",
+        )
+
+    monkeypatch.setattr(console_router, "_build_branch_integration_status", _status_for_branch)
+
+    response = await console_router.list_provider_lifecycle(
+        request=request,
+        stale_after_minutes=60,
+        only_problematic="true",
+        db=db,
+    )
+
+    assert response.total_in_scope == 1
+    assert response.has_more is False
+    assert len(response.items) == 1
+    assert response.items[0].branch_id == bad_branch_id
+    assert response.items[0].next_action == "provider_complete_rebind"
+    assert "provider_binding_rebind_required" in response.items[0].blockers
+
+
+@pytest.mark.asyncio
+async def test_list_provider_lifecycle_pagination(monkeypatch):
+    now = datetime.now(timezone.utc)
+    client_id = uuid4()
+    branch_a = uuid4()
+    branch_b = uuid4()
+    branch_c = uuid4()
+    db = Mock()
+    context = SimpleNamespace(
+        role="platform_admin",
+        accessible_clients=[SimpleNamespace(id=client_id, name="demo", status="active", company_id=None)],
+    )
+
+    branch_rows = [
+        SimpleNamespace(
+            id=branch_a,
+            client_id=client_id,
+            slug="branch-a",
+            name="Branch A",
+            is_active=True,
+            instance_id="instance-a",
+            telegram_chat_id="111",
+            webhook_secret="secret-a",
+            phone="+77000000001",
+            created_at=now - timedelta(minutes=1),
+        ),
+        SimpleNamespace(
+            id=branch_b,
+            client_id=client_id,
+            slug="branch-b",
+            name="Branch B",
+            is_active=True,
+            instance_id="instance-b",
+            telegram_chat_id="222",
+            webhook_secret="secret-b",
+            phone="+77000000002",
+            created_at=now - timedelta(minutes=2),
+        ),
+        SimpleNamespace(
+            id=branch_c,
+            client_id=client_id,
+            slug="branch-c",
+            name="Branch C",
+            is_active=True,
+            instance_id="instance-c",
+            telegram_chat_id="333",
+            webhook_secret="secret-c",
+            phone="+77000000003",
+            created_at=now - timedelta(minutes=3),
+        ),
+    ]
+
+    def _query_side_effect(*entities):
+        if len(entities) == 1 and entities[0] is console_router.Branch:
+            return _BranchQueryMock(branch_rows)
+        if len(entities) == 2:
+            return _QueryMock([(client_id, "token-a")])
+        raise AssertionError(f"unexpected query entities: {entities}")
+
+    db.query.side_effect = _query_side_effect
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(
+        console_router,
+        "_load_latest_branch_inbound_observations_for_clients",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_provider_binding_lifecycle_map",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_build_branch_integration_status",
+        lambda **kwargs: ConsoleBranchIntegrationStatus(
+            client_id=kwargs["client_id"],
+            client_slug=kwargs["client_slug"],
+            branch_id=kwargs["branch"].id,
+            branch_slug=kwargs["branch"].slug,
+            branch_name=kwargs["branch"].name,
+            is_active=True,
+            instance_id=kwargs["branch"].instance_id,
+            telegram_chat_id=kwargs["branch"].telegram_chat_id,
+            webhook_url="https://api.truffles.kz/webhook/demo?webhook_secret=abc",
+            webhook_url_valid=True,
+            whatsapp_status="instance_id_mismatch",
+            telegram_status="ok",
+            provider_binding_rebind_required=True,
+            provider_binding_expiry_status="ok",
+            provider_binding_alert_state="critical",
+            drift_issues=["provider_binding_rebind_required"],
+            status="error",
+        ),
+    )
+
+    response_page_1 = await console_router.list_provider_lifecycle(
+        request=SimpleNamespace(query_params={"limit": "2", "only_problematic": "true"}),
+        stale_after_minutes=60,
+        limit=2,
+        only_problematic="true",
+        db=db,
+    )
+
+    assert response_page_1.total_in_scope == 3
+    assert response_page_1.has_more is True
+    assert response_page_1.cursor is not None
+    assert len(response_page_1.items) == 2
+    assert response_page_1.items[0].sla_state in {"due_soon", "on_track", "overdue"}
+
+    response_page_2 = await console_router.list_provider_lifecycle(
+        request=SimpleNamespace(query_params={"limit": "2", "cursor": response_page_1.cursor, "only_problematic": "true"}),
+        stale_after_minutes=60,
+        limit=2,
+        cursor=response_page_1.cursor,
+        only_problematic="true",
+        db=db,
+    )
+
+    assert response_page_2.total_in_scope == 3
+    assert response_page_2.has_more is False
+    assert len(response_page_2.items) == 1
+    assert response_page_2.items[0].branch_id == branch_c
+
+
+@pytest.mark.asyncio
 async def test_run_integration_reconcile_for_branch_dry_run(monkeypatch):
     request = SimpleNamespace(query_params={})
     client_id = uuid4()

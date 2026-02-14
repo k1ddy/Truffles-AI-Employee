@@ -139,6 +139,72 @@ function providerOpsReasonLabel(reason: string): string {
     return labels[reason] ?? reason;
 }
 
+function providerLifecycleActionLabel(action?: string | null): string {
+    if (!action) {
+        return "Нет действия";
+    }
+    if (action === "integration_reconcile") {
+        return "Сверка интеграции";
+    }
+    if (action === "provider_start_rebind") {
+        return "Старт перепривязки";
+    }
+    if (action === "provider_complete_rebind") {
+        return "Завершить перепривязку";
+    }
+    if (action === "provider_renewal_confirmed") {
+        return "Подтвердить продление";
+    }
+    if (action === "provider_webhook_updated") {
+        return "Webhook обновлен";
+    }
+    if (action === "provider_send_reminder") {
+        return "Отправить напоминание";
+    }
+    return action;
+}
+
+function providerSlaPillClass(value?: string | null): string {
+    if (value === "overdue") {
+        return "bg-red-100 text-red-700";
+    }
+    if (value === "due_soon") {
+        return "bg-amber-100 text-amber-700";
+    }
+    if (value === "on_track") {
+        return "bg-green-100 text-green-700";
+    }
+    return "bg-muted text-muted-foreground";
+}
+
+function providerSlaLabel(value?: string | null): string {
+    if (value === "overdue") {
+        return "просрочено";
+    }
+    if (value === "due_soon") {
+        return "скоро дедлайн";
+    }
+    if (value === "on_track") {
+        return "в срок";
+    }
+    return "нет SLA";
+}
+
+function lifecycleBlockerLabel(value: string): string {
+    const labels: Record<string, string> = {
+        provider_binding_rebind_required: "Требуется перепривязка",
+        provider_binding_expired: "Подписка provider истекла",
+        provider_binding_expiring_soon: "Подписка provider скоро истекает",
+        no_recent_inbound: "Нет недавнего inbound",
+        instance_id_mismatch: "Несовпадение instance_id",
+        invalid_webhook_url: "Webhook URL невалиден",
+        integration_degraded: "Интеграция degraded",
+        provider_binding_alert_critical: "Критичный alert provider",
+        provider_binding_alert_warn: "Alert provider (warn)",
+    };
+    return labels[value] ?? value;
+}
+
 function defaultExecuteReason(action: ProviderOpsAction): string {
     if (action === "provider_send_reminder") {
         return "provider lifecycle reminder from workspace";
@@ -319,6 +385,27 @@ export default function CompanyWorkspacePage() {
     });
 
     const {
+        data: providerLifecycleData,
+        error: providerLifecycleError,
+        refetch: refetchProviderLifecycle,
+    } = useQuery({
+        queryKey: ["company-workspace-provider-lifecycle", staleAfterMinutes, scopeCompanyId, scopeClientId, scopeBranchId],
+        queryFn: async () => {
+            const response = await adminApi.listProviderLifecycle({
+                stale_after_minutes: staleAfterMinutes,
+                limit: 1,
+                only_problematic: true,
+                company_id: scopeCompanyId || undefined,
+                client_id: scopeClientId || undefined,
+                branch_id: scopeBranchId || undefined,
+            });
+            return response.data;
+        },
+        enabled: !!session && canReadIntegrations && !!scopeBranchId,
+        refetchInterval: 60000,
+    });
+
+    const {
         data: onboardingScorecard,
         error: scorecardError,
         refetch: refetchScorecard,
@@ -342,6 +429,12 @@ export default function CompanyWorkspacePage() {
             handleError(scorecardError);
         }
     }, [scorecardError, handleError]);
+
+    useEffect(() => {
+        if (providerLifecycleError) {
+            handleError(providerLifecycleError);
+        }
+    }, [providerLifecycleError, handleError]);
 
     useEffect(() => {
         if (!scopeClientId) {
@@ -376,6 +469,10 @@ export default function CompanyWorkspacePage() {
         }
         return items.find((item) => item.branch_id === scopeBranchId) ?? null;
     }, [integrationsData?.items, scopeBranchId]);
+
+    const lifecycleTodayFact = useMemo(() => {
+        return providerLifecycleData?.items?.[0] ?? null;
+    }, [providerLifecycleData?.items]);
 
     useEffect(() => {
         setBranchPhone(selectedBranch?.phone ?? "");
@@ -461,8 +558,7 @@ export default function CompanyWorkspacePage() {
                 setLocalStorageValue(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
                 setRecommendedActionContext(null);
             }
-            await refetchIntegrations();
-            await refetchScorecard();
+            await Promise.all([refetchIntegrations(), refetchProviderLifecycle(), refetchScorecard()]);
         } catch (error) {
             const parsed = parseApiError(error);
             if (
@@ -573,7 +669,7 @@ export default function CompanyWorkspacePage() {
                 is_active: true,
             });
             toast.success("WhatsApp-идентичность филиала сохранена");
-            await refetchIntegrations();
+            await Promise.all([refetchIntegrations(), refetchProviderLifecycle()]);
         } catch (error) {
             handleError(error);
         } finally {
@@ -613,8 +709,7 @@ export default function CompanyWorkspacePage() {
         try {
             await adminApi.approveBranchGoLive(scopeBranchId, { reason });
             toast.success("Go-live подтвержден");
-            await refetchIntegrations();
-            await refetchScorecard();
+            await Promise.all([refetchIntegrations(), refetchProviderLifecycle(), refetchScorecard()]);
         } catch (error) {
             handleError(error);
         } finally {
@@ -636,8 +731,7 @@ export default function CompanyWorkspacePage() {
         try {
             await adminApi.rejectBranchGoLive(scopeBranchId, { reason });
             toast.success("Go-live отклонен");
-            await refetchIntegrations();
-            await refetchScorecard();
+            await Promise.all([refetchIntegrations(), refetchProviderLifecycle(), refetchScorecard()]);
         } catch (error) {
             handleError(error);
         } finally {
@@ -659,8 +753,7 @@ export default function CompanyWorkspacePage() {
         try {
             await adminApi.waiveBranchGoLive(scopeBranchId, { reason, ttl_hours: 24 });
             toast.success("Отсрочка go-live применена на 24 часа");
-            await refetchIntegrations();
-            await refetchScorecard();
+            await Promise.all([refetchIntegrations(), refetchProviderLifecycle(), refetchScorecard()]);
         } catch (error) {
             handleError(error);
         } finally {
@@ -913,6 +1006,53 @@ export default function CompanyWorkspacePage() {
                 )}
             </section>
 
+            <section className="mt-4 rounded-lg border border-border/60 bg-card p-4" data-testid="company-workspace-today-fact">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <h2 className="text-sm font-semibold">Today по выбранному филиалу</h2>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                            Следующее действие и SLA из provider lifecycle registry.
+                        </p>
+                    </div>
+                    {lifecycleTodayFact ? (
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${providerSlaPillClass(lifecycleTodayFact.sla_state)}`}>
+                            {providerSlaLabel(lifecycleTodayFact.sla_state)}
+                        </span>
+                    ) : (
+                        <span className="inline-flex rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                            нет проблем
+                        </span>
+                    )}
+                </div>
+
+                {lifecycleTodayFact ? (
+                    <div className="mt-3 grid gap-2 md:grid-cols-2">
+                        <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Next action</div>
+                            <div className="mt-1 text-sm font-medium text-foreground">{providerLifecycleActionLabel(lifecycleTodayFact.next_action)}</div>
+                            <div className="mt-1 text-muted-foreground">
+                                дедлайн: <span className="font-mono">{formatDateLabel(lifecycleTodayFact.sla_deadline_at)}</span>
+                            </div>
+                            <div className="mt-1 text-muted-foreground">
+                                блокеры: {lifecycleTodayFact.blockers.length ? lifecycleTodayFact.blockers.map((blocker) => lifecycleBlockerLabel(blocker)).join(", ") : "-"}
+                            </div>
+                        </div>
+                        <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Provider facts</div>
+                            <div className="mt-1 text-muted-foreground">owner: {lifecycleTodayFact.provider_binding_owner ?? "-"}</div>
+                            <div className="text-muted-foreground">paid_until: {lifecycleTodayFact.provider_binding_paid_until ?? "-"}</div>
+                            <div className="text-muted-foreground break-all">
+                                instance: {lifecycleTodayFact.instance_id ?? "-"} · binding: {lifecycleTodayFact.provider_binding_instance_id ?? "-"}
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="mt-3 rounded-lg border border-emerald-300/60 bg-emerald-50 p-3 text-xs text-emerald-800">
+                        Для выбранного филиала сейчас нет проблемных lifecycle-сигналов.
+                    </div>
+                )}
+            </section>
+
             <section className="mt-4 rounded-lg border border-border/60 bg-card p-4" data-testid="company-workspace-scope">
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Контекст</div>
                 <div className="mt-1 text-xs text-muted-foreground">Шаг 1. Выберите компанию, клиента и филиал, затем нажмите «Применить контекст».</div>
@@ -999,7 +1139,9 @@ export default function CompanyWorkspacePage() {
                     </div>
                     <button
                         className="btn-ghost"
-                        onClick={() => refetchIntegrations()}
+                        onClick={() => {
+                            void Promise.all([refetchIntegrations(), refetchProviderLifecycle()]);
+                        }}
                         disabled={integrationsLoading}
                     >
                         {integrationsLoading ? "Обновляю..." : "Обновить"}
