@@ -720,6 +720,34 @@ def test_tool_registry_blocks_action_on_allowlist_miss():
     assert result.decision_meta.get("capability_reason") == "allowlist_miss"
 
 
+def test_tool_registry_skips_capability_block_when_enforcement_disabled(monkeypatch):
+    monkeypatch.setenv("TOOL_POLICY_ENFORCEMENT", "0")
+    db = Mock()
+    runtime = RuntimeCapabilities(
+        payload=CapabilitiesPayload.model_validate({"tools": {"allow": ["catalog.location"]}}),
+        client_id=uuid4(),
+        branch_id=None,
+        source="client_capabilities",
+        has_records=True,
+    )
+    set_runtime_capabilities(runtime)
+    try:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="catalog.portfolio",
+            tool_args={},
+            conversation_id=uuid4(),
+            branch_id=None,
+            client_slug="demo_salon",
+            service_query=None,
+        )
+    finally:
+        set_runtime_capabilities(None)
+
+    assert result.error_code != "tool_action_disabled"
+    assert result.decision_meta.get("tool_decision") != "capability_blocked"
+
+
 def test_tool_registry_catalog_location_includes_parking_section():
     db = Mock()
 

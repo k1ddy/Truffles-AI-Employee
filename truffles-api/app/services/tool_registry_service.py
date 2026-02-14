@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -100,6 +101,16 @@ def _normalize_tool_policy_tokens(raw_tokens: Any) -> list[str]:
         seen.add(text)
         normalized.append(text)
     return normalized
+
+
+def _is_env_enabled(value: str | None, *, default: bool = True) -> bool:
+    if value is None:
+        return default
+    return str(value).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _is_tool_policy_enforcement_enabled() -> bool:
+    return _is_env_enabled(os.environ.get("TOOL_POLICY_ENFORCEMENT"), default=True)
 
 
 def _tool_policy_token_matches(*, token: str, tool_action: str) -> bool:
@@ -803,11 +814,13 @@ def execute_tool_action(
         )
 
     allow_tokens, deny_tokens, capability_source = _resolve_runtime_tool_policy()
-    capability_block_reason = _tool_action_block_reason(
-        tool_action=tool_action,
-        allow_tokens=allow_tokens,
-        deny_tokens=deny_tokens,
-    )
+    capability_block_reason = None
+    if _is_tool_policy_enforcement_enabled():
+        capability_block_reason = _tool_action_block_reason(
+            tool_action=tool_action,
+            allow_tokens=allow_tokens,
+            deny_tokens=deny_tokens,
+        )
     if capability_block_reason:
         response_text = (
             "В этом филиале онлайн-календарь для такого запроса отключен. "

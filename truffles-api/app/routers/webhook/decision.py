@@ -3303,6 +3303,9 @@ LLM_POLICY_CORE_LOW_CONFIDENCE_TOOL_ALLOWLIST = {
 LLM_POLICY_CORE_ENABLED = _is_env_enabled(
     os.environ.get("LLM_POLICY_CORE_ENABLED"), default=True
 )
+POLICY_CORE_RESCUE_MATRIX_ENABLED = _is_env_enabled(
+    os.environ.get("POLICY_CORE_RESCUE_MATRIX"), default=True
+)
 CONSULT_INTERRUPT_INTENTS = {"booking", "pricing", "duration", "location", "hours"}
 INFO_INTENT_PRIORITY_SERVICE = ("pricing", "duration", "location", "hours", "master")
 INFO_INTENT_PRIORITY_GENERIC = ("location", "hours", "pricing", "duration", "master")
@@ -7503,6 +7506,8 @@ async def _handle_webhook_payload(
     pending_info_signal = bool(info_class_intents)
     degraded_guard_info_hints: list[str] = []
     if (
+        POLICY_CORE_RESCUE_MATRIX_ENABLED
+        and
         policy_core_runtime_active
         and policy_core_mode == "degraded_fallback"
         and not pending_info_signal
@@ -7539,6 +7544,8 @@ async def _handle_webhook_payload(
                 )
     booking_verification_request = bool(message_text and _looks_like_booking_verification_request(message_text))
     degraded_policy_core_critical = bool(
+        POLICY_CORE_RESCUE_MATRIX_ENABLED
+        and
         policy_core_runtime_active
         and policy_core_mode == "degraded_fallback"
         and policy_core_attempted
