@@ -4,6 +4,9 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 CAPABILITIES_SCHEMA_VERSION = "v1"
+_TOOL_POLICY_TOKEN_RE = re.compile(
+    r"^(?:\*|[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*|\.\*))$"
+)
 
 
 class CapabilityChannels(BaseModel):
@@ -33,6 +36,34 @@ class CapabilityFeatures(BaseModel):
     auto_learn: Optional[bool] = None
 
 
+class CapabilityTools(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    allow: Optional[list[str]] = None
+    deny: Optional[list[str]] = None
+
+    @field_validator("allow", "deny")
+    @classmethod
+    def validate_tool_tokens(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+        if value is None:
+            return None
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            token = str(item or "").strip().casefold()
+            if not token:
+                continue
+            if not _TOOL_POLICY_TOKEN_RE.match(token):
+                raise ValueError(
+                    "tool policy token must be '*', '<group>.*' or '<group>.<action>'"
+                )
+            if token in seen:
+                continue
+            seen.add(token)
+            normalized.append(token)
+        return normalized or None
+
+
 class CapabilitiesPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -40,6 +71,7 @@ class CapabilitiesPayload(BaseModel):
     channels: CapabilityChannels = Field(default_factory=CapabilityChannels)
     providers: CapabilityProviders = Field(default_factory=CapabilityProviders)
     features: CapabilityFeatures = Field(default_factory=CapabilityFeatures)
+    tools: CapabilityTools = Field(default_factory=CapabilityTools)
 
     @field_validator("domain_slug")
     @classmethod

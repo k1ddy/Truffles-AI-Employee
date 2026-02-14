@@ -77,3 +77,50 @@ def test_resolve_booking_settings_uses_runtime_capabilities():
     assert booking_mode == "confirm_slots"
     assert availability_provider == "google_calendar"
     assert effective_mode == "confirm_slots"
+
+
+def test_build_runtime_capabilities_merges_tool_policy():
+    client_id = uuid4()
+    branch_id = uuid4()
+    client_payload = {
+        "tools": {"allow": ["calendar.*", "catalog.service_query"]},
+    }
+    branch_payload = {
+        "tools": {"deny": ["calendar.book_slot"]},
+    }
+
+    def _fake_get_latest_capability(_db, *, client_id, scope, branch_id):
+        assert client_id is not None
+        if scope == "client" and branch_id is None:
+            return SimpleNamespace(payload_json=client_payload, status="active")
+        if scope == "branch" and branch_id is not None:
+            return SimpleNamespace(payload_json=branch_payload, status="active")
+        return None
+
+    original = capabilities_runtime._get_latest_capability
+    capabilities_runtime._get_latest_capability = _fake_get_latest_capability
+    try:
+        runtime = capabilities_runtime.build_runtime_capabilities(
+            db=Mock(),
+            client_id=client_id,
+            branch_id=branch_id,
+        )
+    finally:
+        capabilities_runtime._get_latest_capability = original
+
+    assert runtime.payload.tools.allow == ["calendar.*", "catalog.service_query"]
+    assert runtime.payload.tools.deny == ["calendar.book_slot"]
+
+
+def test_capabilities_payload_normalizes_tool_policy_tokens():
+    payload = CapabilitiesPayload.model_validate(
+        {
+            "tools": {
+                "allow": [" CALENDAR.* ", "calendar.book_slot", "calendar.book_slot"],
+                "deny": ["Catalog.Location"],
+            }
+        }
+    )
+
+    assert payload.tools.allow == ["calendar.*", "calendar.book_slot"]
+    assert payload.tools.deny == ["catalog.location"]

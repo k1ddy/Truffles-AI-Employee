@@ -22,6 +22,7 @@ from app.database import get_db
 from app.main import app
 from app.models import Branch, Client, ClientSettings, Conversation, User
 from app.routers import webhook as webhook_router
+from app.routers.webhook.decision import _policy_core_reason_supports_info_rescue
 from app.routers.webhook import response as webhook_response
 from app.routers.webhook.session_memory import _is_session_reset_only_message
 from app.schemas.consult import ConsultControllerOutput
@@ -10838,6 +10839,14 @@ def test_llm_policy_core_degraded_booking_guard_uses_safe_collect(monkeypatch):
     assert meta.get("policy_core_mode") == "degraded_fallback"
     assert meta.get("policy_core_degrade_reason") == "policy_error:invalid_schema"
     assert meta.get("action") == "booking_prompt"
+
+
+def test_policy_core_reason_supports_info_rescue_prefixes():
+    assert _policy_core_reason_supports_info_rescue("policy_error:invalid_schema") is True
+    assert _policy_core_reason_supports_info_rescue("policy_validation:low_confidence") is True
+    assert _policy_core_reason_supports_info_rescue("llm_degraded:llm_timeout") is True
+    assert _policy_core_reason_supports_info_rescue("guard_not_eligible") is False
+    assert _policy_core_reason_supports_info_rescue(None) is False
 
 
 def test_unknown_state_fallback_sends_reply():

@@ -1,0 +1,27 @@
+# SESSION 2026-02-14-universal-consultant-p0-impl-a1 — Session 2026-02-14-universal-consultant-p0-impl-a1
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-14-universal-consultant-p0-contract-kernel-a1.md
+- branch: feat/2026-02-14-universal-consultant-p0-impl-a1
+- worktree: /home/zhan/worktrees/2026-02-14-universal-consultant-p0-impl-a1
+- base_ref: origin/feat/2026-02-14-universal-consultant-task-packages-a1
+- scope: P0 contract kernel: LLM error taxonomy, degraded policy-core rescue signal, capability-gated tool execution, deterministic tests.
+- done:
+  - Added `tools.allow` / `tools.deny` capability schema and merge serialization.
+  - Added capability enforcement gate in `execute_tool_action` with `tool_decision=capability_blocked`.
+  - Expanded `_classify_llm_error` taxonomy for timeout/connection/model/context/request/service failures.
+  - Added degraded policy-core info rescue hook (`_policy_core_reason_supports_info_rescue`) before critical fallback collect.
+  - Added tests in `test_intent.py`, `test_capabilities_runtime.py`, `test_booking_appointments.py`, and `test_message_endpoint.py`.
+  - Pushed branch and opened stacked PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/663
+- next:
+  - Run full quality replay on frozen scenarios and build failure-ledger for remaining 99% contract gaps.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-14-universal-consultant-p0-contract-kernel-a1.md
+  - pytest -q truffles-api/tests/test_intent.py
+  - pytest -q truffles-api/tests/test_capabilities_runtime.py
+  - pytest -q truffles-api/tests/test_booking_appointments.py
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "degraded_booking_guard_uses_safe_collect or policy_core_reason_supports_info_rescue_prefixes"
+  - pytest -q truffles-api/tests/test_onboarding_contract_service.py truffles-api/tests/test_console_onboarding_contract_api.py truffles-api/tests/test_console_onboarding_state.py
+  - scripts/session_check.sh
+- last_updated: 2026-02-14
