@@ -26,6 +26,7 @@ const BRANCH_ID_STORAGE_KEY = "console:branch_id";
 
 const STALE_AFTER_OPTIONS = [15, 30, 60, 180] as const;
 const API_LIST_LIMIT = 100;
+const INTEGRATIONS_PAGE_LIMIT = 24;
 
 type ScopeTarget = {
     companyId?: string | null;
@@ -373,6 +374,12 @@ export default function IntegrationsPage() {
     const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>("all");
     const [teamFilter, setTeamFilter] = useState<TeamFilter>("all");
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+    const [integrationsItems, setIntegrationsItems] = useState<BranchIntegrationStatus[]>([]);
+    const [providerOpsQueue, setProviderOpsQueue] = useState<ProviderOpsQueueItem[]>([]);
+    const [integrationsCursor, setIntegrationsCursor] = useState<string | null>(null);
+    const [integrationsHasMore, setIntegrationsHasMore] = useState(false);
+    const [integrationsTotalInScope, setIntegrationsTotalInScope] = useState(0);
+    const [loadingMoreIntegrations, setLoadingMoreIntegrations] = useState(false);
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -459,6 +466,7 @@ export default function IntegrationsPage() {
         queryFn: async () => {
             const response = await adminApi.listIntegrations({
                 stale_after_minutes: staleAfterMinutes,
+                limit: INTEGRATIONS_PAGE_LIMIT,
                 company_id: scopeCompanyId || undefined,
                 client_id: scopeClientId || undefined,
                 branch_id: scopeBranchId || undefined,
@@ -468,6 +476,17 @@ export default function IntegrationsPage() {
         enabled: !!session && canReadIntegrations,
         refetchInterval: 60000,
     });
+
+    useEffect(() => {
+        if (!integrationsData) {
+            return;
+        }
+        setIntegrationsItems(integrationsData.items ?? []);
+        setProviderOpsQueue(integrationsData.provider_ops_queue ?? []);
+        setIntegrationsCursor(integrationsData.cursor ?? null);
+        setIntegrationsHasMore(Boolean(integrationsData.has_more));
+        setIntegrationsTotalInScope(integrationsData.total_in_scope ?? (integrationsData.items?.length ?? 0));
+    }, [integrationsData]);
 
     const {
         data: membershipsData,
@@ -664,8 +683,6 @@ export default function IntegrationsPage() {
         };
     }, [membershipsData?.items]);
 
-    const integrationsItems = useMemo(() => integrationsData?.items ?? [], [integrationsData?.items]);
-
     const rows = useMemo<EnrichedRow[]>(() => {
         return integrationsItems
             .map((item) => {
@@ -781,7 +798,8 @@ export default function IntegrationsPage() {
         return {
             totalCompanies: companySet.size,
             totalClients: clientSet.size,
-            totalBranches: allRows.length,
+            totalBranchesLoaded: allRows.length,
+            totalBranchesInScope: integrationsTotalInScope || allRows.length,
             errorBranches,
             warnBranches,
             expiredBindings,
@@ -792,10 +810,9 @@ export default function IntegrationsPage() {
             staleInbound,
             filteredBranches: filteredRows.length,
         };
-    }, [filteredRows.length, rows]);
+    }, [filteredRows.length, integrationsTotalInScope, rows]);
 
     const fleetAttentionSummary = fleetAttentionData?.summary;
-    const providerOpsQueue = integrationsData?.provider_ops_queue ?? [];
     const scopeDataTruncated = Boolean(companiesData?.has_more || clientsData?.has_more || branchesData?.has_more);
 
     const syncScopeFromContext = () => {
@@ -851,6 +868,51 @@ export default function IntegrationsPage() {
             },
             `Queue -> ${providerOpsActionLabel(queueItem.recommended_action)}`,
         );
+    };
+
+    const loadMoreIntegrations = async () => {
+        if (!integrationsCursor || loadingMoreIntegrations) {
+            return;
+        }
+        setLoadingMoreIntegrations(true);
+        try {
+            const response = await adminApi.listIntegrations({
+                stale_after_minutes: staleAfterMinutes,
+                limit: INTEGRATIONS_PAGE_LIMIT,
+                cursor: integrationsCursor,
+                company_id: scopeCompanyId || undefined,
+                client_id: scopeClientId || undefined,
+                branch_id: scopeBranchId || undefined,
+            });
+            const page = response.data;
+            setIntegrationsItems((previous) => {
+                const byBranchId = new Map<string, BranchIntegrationStatus>();
+                for (const item of previous) {
+                    byBranchId.set(item.branch_id, item);
+                }
+                for (const item of page.items ?? []) {
+                    byBranchId.set(item.branch_id, item);
+                }
+                return [...byBranchId.values()];
+            });
+            setProviderOpsQueue((previous) => {
+                const byQueueKey = new Map<string, ProviderOpsQueueItem>();
+                for (const item of previous) {
+                    byQueueKey.set(`${item.branch_id}:${item.recommended_action}`, item);
+                }
+                for (const item of page.provider_ops_queue ?? []) {
+                    byQueueKey.set(`${item.branch_id}:${item.recommended_action}`, item);
+                }
+                return [...byQueueKey.values()];
+            });
+            setIntegrationsCursor(page.cursor ?? null);
+            setIntegrationsHasMore(Boolean(page.has_more));
+            setIntegrationsTotalInScope((current) => Math.max(current, page.total_in_scope ?? current));
+        } catch (error) {
+            handleError(error);
+        } finally {
+            setLoadingMoreIntegrations(false);
+        }
     };
 
     if (!session) {
@@ -931,6 +993,8 @@ export default function IntegrationsPage() {
                     </div>
                     <div className="text-xs text-blue-900/80">
                         stale_after_minutes: <span className="font-mono">{integrationsData?.stale_after_minutes ?? staleAfterMinutes}</span> мин
+                        {" "}· page_limit: <span className="font-mono">{INTEGRATIONS_PAGE_LIMIT}</span>
+                        {" "}· загружено: <span className="font-mono">{integrationsItems.length}</span>/<span className="font-mono">{integrationsTotalInScope}</span>
                     </div>
                 </div>
             </section>
@@ -1076,7 +1140,8 @@ export default function IntegrationsPage() {
                     </div>
 
                     <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                        показано <span className="font-semibold text-foreground">{kpi.filteredBranches}</span> из {kpi.totalBranches} филиалов
+                        показано <span className="font-semibold text-foreground">{kpi.filteredBranches}</span> из {kpi.totalBranchesInScope} филиалов
+                        {" "}· загружено {kpi.totalBranchesLoaded}
                         <div className="mt-1">
                             компания <span className="font-mono">{scopeCompanyId || "все"}</span> · клиент <span className="font-mono">{scopeClientId || "все"}</span> · филиал <span className="font-mono">{scopeBranchId || "все"}</span>
                         </div>
@@ -1131,7 +1196,7 @@ export default function IntegrationsPage() {
             <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5" data-testid="integrations-kpi-grid">
                 <KpiCard
                     title="Покрытие"
-                    value={`${kpi.totalCompanies} / ${kpi.totalClients} / ${kpi.totalBranches}`}
+                    value={`${kpi.totalCompanies} / ${kpi.totalClients} / ${kpi.totalBranchesLoaded}`}
                     description="компании / клиенты / филиалы в scope"
                     tone="neutral"
                 />
@@ -1339,6 +1404,20 @@ export default function IntegrationsPage() {
                         </article>
                     ))}
                 </div>
+
+                {integrationsHasMore ? (
+                    <div className="mt-4 flex justify-center">
+                        <button
+                            type="button"
+                            className="btn-ghost"
+                            onClick={() => void loadMoreIntegrations()}
+                            disabled={loadingMoreIntegrations}
+                            data-testid="integrations-load-more"
+                        >
+                            {loadingMoreIntegrations ? "Загружаю еще..." : `Показать еще ${INTEGRATIONS_PAGE_LIMIT}`}
+                        </button>
+                    </div>
+                ) : null}
 
                 {filteredRows.length === 0 ? (
                     <div className="mt-2 p-6 text-center text-muted-foreground" data-testid="integrations-empty">
