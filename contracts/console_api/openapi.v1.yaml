@@ -2485,6 +2485,76 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /admin/provider-lifecycle:
+    get:
+      operationId: listAdminProviderLifecycle
+      tags: [integrations]
+      summary: List provider lifecycle facts for branch WhatsApp operations
+      parameters:
+        - name: stale_after_minutes
+          in: query
+          schema:
+            type: integer
+            minimum: 5
+            maximum: 1440
+            default: 60
+          description: Mark branch as stale when no inbound for this many minutes.
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: ISO timestamp cursor for pagination.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          description: Maximum number of branches in response page.
+        - name: only_problematic
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Return only branches that require an operation.
+        - name: company_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Optional company scope filter.
+        - name: client_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Optional client scope filter.
+        - name: branch_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Optional branch scope filter.
+      responses:
+        "200":
+          description: Provider lifecycle registry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderLifecycleListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /admin/integrations/{branch_id}/reconcile:
     post:
       operationId: runAdminIntegrationReconcileForBranch
@@ -4298,6 +4368,140 @@ components:
           type: string
           format: date-time
           nullable: true
+
+    ProviderLifecycleSlaState:
+      type: string
+      enum: [none, on_track, due_soon, overdue]
+
+    ProviderLifecycleItem:
+      type: object
+      required:
+        [client_id, client_slug, branch_id, branch_slug, branch_name, status, whatsapp_status, integration_state, blockers, sla_state]
+      properties:
+        client_id:
+          type: string
+          format: uuid
+        client_slug:
+          type: string
+        branch_id:
+          type: string
+          format: uuid
+        branch_slug:
+          type: string
+        branch_name:
+          type: string
+        company_id:
+          type: string
+          format: uuid
+          nullable: true
+        company_name:
+          type: string
+          nullable: true
+        branch_phone:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [ok, warn, error]
+        whatsapp_status:
+          type: string
+          enum: [ok, inactive, missing_instance_id, instance_id_mismatch, invalid_webhook_url, no_recent_inbound]
+        integration_state:
+          type: string
+          enum: [ok, degraded]
+        last_inbound_at:
+          type: string
+          format: date-time
+          nullable: true
+        instance_id:
+          type: string
+          nullable: true
+        provider_binding_provider:
+          type: string
+          nullable: true
+        provider_binding_instance_id:
+          type: string
+          nullable: true
+        provider_binding_webhook_status:
+          type: string
+          enum: [configured, pending, rebind_required]
+          nullable: true
+        provider_binding_paid_until:
+          type: string
+          format: date
+          nullable: true
+        provider_binding_owner:
+          type: string
+          nullable: true
+        provider_binding_next_renewal_at:
+          type: string
+          format: date
+          nullable: true
+        provider_binding_last_rebind_at:
+          type: string
+          format: date
+          nullable: true
+        provider_binding_rebind_required:
+          type: boolean
+          nullable: true
+        provider_binding_alert_state:
+          type: string
+          enum: [ok, warn, critical, unknown]
+        provider_binding_expiry_status:
+          type: string
+          enum: [ok, expiring_soon, expired, unknown]
+        provider_binding_days_until_expiry:
+          type: integer
+          nullable: true
+        next_action:
+          type: string
+          enum:
+            [
+              integration_reconcile,
+              provider_start_rebind,
+              provider_complete_rebind,
+              provider_renewal_confirmed,
+              provider_webhook_updated,
+              provider_send_reminder,
+            ]
+          nullable: true
+        priority:
+          type: string
+          enum: [p0, p1, p2]
+          nullable: true
+        blockers:
+          type: array
+          items:
+            type: string
+        sla_deadline_at:
+          type: string
+          format: date-time
+          nullable: true
+        sla_state:
+          $ref: "#/components/schemas/ProviderLifecycleSlaState"
+        generated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ProviderLifecycleListResponse:
+      type: object
+      required: [stale_after_minutes, has_more, total_in_scope, items]
+      properties:
+        stale_after_minutes:
+          type: integer
+        cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
+        total_in_scope:
+          type: integer
+          minimum: 0
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProviderLifecycleItem"
 
     IntegrationsListResponse:
       type: object
