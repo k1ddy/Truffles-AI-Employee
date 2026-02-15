@@ -31,9 +31,11 @@ import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
 
 const NAV_COLLAPSED_STORAGE_KEY = "console:nav_collapsed";
 const AUTH_ERROR_CODES = new Set(["AUTH_REQUIRED", "TOKEN_EXPIRED", "TOKEN_INVALID"]);
+const HEALTH_INCIDENT_UI_STORAGE_KEY = "console:health_incident_ui";
 const HEALTH_INCIDENT_CRITICAL_BACKLOG = 1000;
 const HEALTH_INCIDENT_WARN_BACKLOG = 500;
 const HEALTH_INCIDENT_STALE_WARN_MINUTES = 3;
+const HEALTH_INCIDENT_HIDE_MS = 30 * 60 * 1000;
 
 type SessionAuth = {
     accessToken?: string;
@@ -230,11 +232,19 @@ function findBranchName(branches: BranchSummary[] | undefined, branchId: string 
 
 type HealthIncident = {
     severity: "critical" | "warn";
+    status: string;
+    backlog: number;
+    fingerprint: string;
     title: string;
     summary: string;
     reasons: string[];
     runbook: string[];
     updatedAtLabel: string;
+};
+
+type HealthIncidentUiState = {
+    compactByFingerprint: Record<string, boolean>;
+    hiddenUntilByFingerprint: Record<string, number>;
 };
 
 function formatRelativeAgeLabel(timestampMs: number): string {
@@ -255,6 +265,50 @@ function formatRelativeAgeLabel(timestampMs: number): string {
     return `обновлено ${elapsedMinutes} минут назад`;
 }
 
+function readHealthIncidentUiState(): HealthIncidentUiState {
+    const raw = readBrowserStorage(HEALTH_INCIDENT_UI_STORAGE_KEY);
+    if (!raw) {
+        return {
+            compactByFingerprint: {},
+            hiddenUntilByFingerprint: {},
+        };
+    }
+    try {
+        const parsed = JSON.parse(raw) as Partial<HealthIncidentUiState>;
+        const compactByFingerprint = parsed.compactByFingerprint && typeof parsed.compactByFingerprint === "object"
+            ? parsed.compactByFingerprint
+            : {};
+        const hiddenUntilByFingerprint = parsed.hiddenUntilByFingerprint && typeof parsed.hiddenUntilByFingerprint === "object"
+            ? parsed.hiddenUntilByFingerprint
+            : {};
+        return {
+            compactByFingerprint,
+            hiddenUntilByFingerprint,
+        };
+    } catch {
+        return {
+            compactByFingerprint: {},
+            hiddenUntilByFingerprint: {},
+        };
+    }
+}
+
+function formatAbsoluteTimeLabel(timestampMs: number): string {
+    if (!Number.isFinite(timestampMs) || timestampMs <= 0) {
+        return "";
+    }
+    const timestamp = new Date(timestampMs);
+    if (Number.isNaN(timestamp.getTime())) {
+        return "";
+    }
+    return timestamp.toLocaleString("ru-RU", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+}
+
 function deriveHealthIncident(
     health?: HealthResponse | null,
     updatedAtMs?: number,
@@ -265,20 +319,21 @@ function deriveHealthIncident(
     }
 
     const ownerAdminView = options?.ownerAdminView ?? false;
-    const status = health.status ?? "healthy";
+    const statusRaw = health.status ?? "healthy";
+    const status = statusRaw === "healthy" ? "ok" : statusRaw;
     const backlog = health.outbox_backlog ?? 0;
     const reasons: string[] = [];
     let severity: "critical" | "warn" | null = null;
 
-    if (status === "unhealthy" || backlog >= HEALTH_INCIDENT_CRITICAL_BACKLOG) {
+    if (statusRaw === "unhealthy" || backlog >= HEALTH_INCIDENT_CRITICAL_BACKLOG) {
         severity = "critical";
     }
 
-    if (!severity && (status === "degraded" || backlog >= HEALTH_INCIDENT_WARN_BACKLOG)) {
+    if (!severity && (statusRaw === "degraded" || backlog >= HEALTH_INCIDENT_WARN_BACKLOG)) {
         severity = "warn";
     }
 
-    if (status === "unhealthy" || status === "degraded") {
+    if (statusRaw === "unhealthy" || statusRaw === "degraded") {
         reasons.push(ownerAdminView ? `Статус сервиса: ${status}` : `health.status=${status}`);
     }
     if (backlog >= HEALTH_INCIDENT_CRITICAL_BACKLOG) {
@@ -344,6 +399,9 @@ function deriveHealthIncident(
 
     return {
         severity,
+        status,
+        backlog,
+        fingerprint: `${severity}:${status}:${backlog}`,
         title: severity === "critical"
             ? ownerAdminView
                 ? "Критичный риск для клиентских сообщений (P0)"
@@ -713,7 +771,18 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const [navCollapsed, setNavCollapsed] = useState(
         () => readBrowserStorage(NAV_COLLAPSED_STORAGE_KEY) === "1"
     );
+    const [healthIncidentUiState, setHealthIncidentUiState] = useState<HealthIncidentUiState>(
+        () => readHealthIncidentUiState()
+    );
     const navToggleLabel = navCollapsed ? "Развернуть меню" : "Свернуть меню";
+    const healthIncidentFingerprint = healthIncident?.fingerprint ?? null;
+    const healthIncidentCompact = healthIncidentFingerprint
+        ? healthIncidentUiState.compactByFingerprint[healthIncidentFingerprint] ?? true
+        : true;
+    const healthIncidentHiddenUntil = healthIncidentFingerprint
+        ? healthIncidentUiState.hiddenUntilByFingerprint[healthIncidentFingerprint] ?? 0
+        : 0;
+    const healthIncidentHidden = !!healthIncidentFingerprint && healthIncidentHiddenUntil > Date.now();
 
     useEffect(() => {
         if (!contextNotice) {
@@ -726,6 +795,55 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     useEffect(() => {
         writeBrowserStorage(NAV_COLLAPSED_STORAGE_KEY, navCollapsed ? "1" : null);
     }, [navCollapsed]);
+
+    useEffect(() => {
+        const hasCompact = Object.keys(healthIncidentUiState.compactByFingerprint).length > 0;
+        const hasHiddenUntil = Object.keys(healthIncidentUiState.hiddenUntilByFingerprint).length > 0;
+        if (!hasCompact && !hasHiddenUntil) {
+            writeBrowserStorage(HEALTH_INCIDENT_UI_STORAGE_KEY, null);
+            return;
+        }
+        writeBrowserStorage(HEALTH_INCIDENT_UI_STORAGE_KEY, JSON.stringify(healthIncidentUiState));
+    }, [healthIncidentUiState]);
+
+    const setHealthIncidentCompact = (compact: boolean) => {
+        if (!healthIncidentFingerprint) {
+            return;
+        }
+        setHealthIncidentUiState((prev) => ({
+            compactByFingerprint: {
+                ...prev.compactByFingerprint,
+                [healthIncidentFingerprint]: compact,
+            },
+            hiddenUntilByFingerprint: prev.hiddenUntilByFingerprint,
+        }));
+    };
+
+    const snoozeHealthIncident = () => {
+        if (!healthIncidentFingerprint) {
+            return;
+        }
+        setHealthIncidentUiState((prev) => ({
+            compactByFingerprint: prev.compactByFingerprint,
+            hiddenUntilByFingerprint: {
+                ...prev.hiddenUntilByFingerprint,
+                [healthIncidentFingerprint]: Date.now() + HEALTH_INCIDENT_HIDE_MS,
+            },
+        }));
+    };
+
+    const showHealthIncidentNow = () => {
+        if (!healthIncidentFingerprint) {
+            return;
+        }
+        setHealthIncidentUiState((prev) => ({
+            compactByFingerprint: prev.compactByFingerprint,
+            hiddenUntilByFingerprint: {
+                ...prev.hiddenUntilByFingerprint,
+                [healthIncidentFingerprint]: 0,
+            },
+        }));
+    };
 
     const companies = data?.companies ?? [];
     const companySelectionRequired = !!data?.company_selection_required;
@@ -1013,63 +1131,132 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                             </div>
                         </div>
                         {healthIncident && (
-                            <div
-                                className={`mx-6 mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border px-4 py-3 text-xs ${healthIncidentClass}`}
-                                data-testid="global-health-incident-banner"
-                            >
-                                <div className="min-w-[280px] flex-1">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <span
-                                            className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                                healthIncident.severity === "critical"
-                                                    ? "bg-red-200/80 text-red-900"
-                                                    : "bg-amber-200/80 text-amber-900"
-                                            }`}
-                                            data-testid="global-health-incident-severity"
-                                        >
-                                            {healthIncident.severity === "critical" ? "P0" : "P1"}
-                                        </span>
-                                        <p className="text-sm font-semibold">{healthIncident.title}</p>
+                            healthIncidentHidden ? (
+                                <div
+                                    className={`mx-6 mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-2 text-xs ${healthIncidentClass}`}
+                                    data-testid="global-health-incident-hidden"
+                                >
+                                    <div className="min-w-[280px] flex-1">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span
+                                                className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                                    healthIncident.severity === "critical"
+                                                        ? "bg-red-200/80 text-red-900"
+                                                        : "bg-amber-200/80 text-amber-900"
+                                                }`}
+                                                data-testid="global-health-incident-severity"
+                                            >
+                                                {healthIncident.severity === "critical" ? "P0" : "P1"}
+                                            </span>
+                                            <p className="font-mono" data-testid="global-health-incident-summary">
+                                                {healthIncident.summary}
+                                            </p>
+                                        </div>
+                                        <p className="mt-1 text-[11px] text-current/80">
+                                            Скрыто до {formatAbsoluteTimeLabel(healthIncidentHiddenUntil)}. {healthIncident.updatedAtLabel}
+                                        </p>
                                     </div>
-                                    <p className="mt-1 font-mono" data-testid="global-health-incident-summary">
-                                        {healthIncident.summary}
-                                    </p>
-                                    <p className="mt-1 text-[11px] text-current/80" data-testid="global-health-incident-updated">
-                                        {healthIncident.updatedAtLabel}
-                                    </p>
-                                    <ul className="mt-2 list-disc space-y-1 pl-4 text-[11px]" data-testid="global-health-incident-reasons">
-                                        {healthIncident.reasons.map((reason) => (
-                                            <li key={reason}>{reason}</li>
-                                        ))}
-                                    </ul>
-                                    <ol className="mt-2 space-y-1 text-[11px]" data-testid="global-health-incident-runbook">
-                                        {healthIncident.runbook.map((step, index) => (
-                                            <li key={step}>{index + 1}. {step}</li>
-                                        ))}
-                                    </ol>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            className="btn-ghost"
+                                            onClick={showHealthIncidentNow}
+                                            data-testid="global-health-incident-show"
+                                        >
+                                            Показать
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="btn-ghost"
+                                            onClick={() => {
+                                                void refetchHealth();
+                                            }}
+                                            disabled={healthFetching}
+                                            data-testid="global-health-incident-refresh"
+                                        >
+                                            {healthFetching ? "Обновление..." : "Обновить health"}
+                                        </button>
+                                    </div>
                                 </div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <button
-                                        type="button"
-                                        className="btn-ghost"
-                                        onClick={() => {
-                                            void refetchHealth();
-                                        }}
-                                        disabled={healthFetching}
-                                        data-testid="global-health-incident-refresh"
-                                    >
-                                        {healthFetching ? "Обновление..." : "Обновить health"}
-                                    </button>
-                                    <Link href="/ops" className="btn-ghost">
-                                        Открыть OPS
-                                    </Link>
-                                    {canReadTenants && (
-                                        <Link href="/company-workspace" className="btn-ghost">
-                                            Открыть Workspace
+                            ) : (
+                                <div
+                                    className={`mx-6 mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border px-4 py-3 text-xs ${healthIncidentClass}`}
+                                    data-testid="global-health-incident-banner"
+                                >
+                                    <div className="min-w-[280px] flex-1">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span
+                                                className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                                    healthIncident.severity === "critical"
+                                                        ? "bg-red-200/80 text-red-900"
+                                                        : "bg-amber-200/80 text-amber-900"
+                                                }`}
+                                                data-testid="global-health-incident-severity"
+                                            >
+                                                {healthIncident.severity === "critical" ? "P0" : "P1"}
+                                            </span>
+                                            <p className="text-sm font-semibold">{healthIncident.title}</p>
+                                        </div>
+                                        <p className="mt-1 font-mono" data-testid="global-health-incident-summary">
+                                            {healthIncident.summary}
+                                        </p>
+                                        <p className="mt-1 text-[11px] text-current/80" data-testid="global-health-incident-updated">
+                                            {healthIncident.updatedAtLabel}
+                                        </p>
+                                        {!healthIncidentCompact && (
+                                            <>
+                                                <ul className="mt-2 list-disc space-y-1 pl-4 text-[11px]" data-testid="global-health-incident-reasons">
+                                                    {healthIncident.reasons.map((reason) => (
+                                                        <li key={reason}>{reason}</li>
+                                                    ))}
+                                                </ul>
+                                                <ol className="mt-2 space-y-1 text-[11px]" data-testid="global-health-incident-runbook">
+                                                    {healthIncident.runbook.map((step, index) => (
+                                                        <li key={step}>{index + 1}. {step}</li>
+                                                    ))}
+                                                </ol>
+                                            </>
+                                        )}
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            className="btn-ghost"
+                                            onClick={() => setHealthIncidentCompact(!healthIncidentCompact)}
+                                            data-testid="global-health-incident-toggle"
+                                        >
+                                            {healthIncidentCompact ? "Развернуть" : "Свернуть"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="btn-ghost"
+                                            onClick={snoozeHealthIncident}
+                                            data-testid="global-health-incident-snooze"
+                                        >
+                                            Скрыть на 30м
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="btn-ghost"
+                                            onClick={() => {
+                                                void refetchHealth();
+                                            }}
+                                            disabled={healthFetching}
+                                            data-testid="global-health-incident-refresh"
+                                        >
+                                            {healthFetching ? "Обновление..." : "Обновить health"}
+                                        </button>
+                                        <Link href="/ops" className="btn-ghost">
+                                            Открыть OPS
                                         </Link>
-                                    )}
+                                        {canReadTenants && (
+                                            <Link href="/company-workspace" className="btn-ghost">
+                                                Открыть Workspace
+                                            </Link>
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
+                            )
                         )}
                         <nav className="flex gap-2 overflow-x-auto px-4 pb-3 text-xs font-medium md:hidden">
                             {navItems.map((item) => {
