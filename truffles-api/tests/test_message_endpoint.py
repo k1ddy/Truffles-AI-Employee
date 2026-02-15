@@ -22,8 +22,8 @@ from app.database import get_db
 from app.main import app
 from app.models import Branch, Client, ClientSettings, Conversation, User
 from app.routers import webhook as webhook_router
-from app.routers.webhook.decision import _policy_core_reason_supports_info_rescue
 from app.routers.webhook import response as webhook_response
+from app.routers.webhook.decision import _policy_core_reason_supports_info_rescue
 from app.routers.webhook.session_memory import _is_session_reset_only_message
 from app.schemas.consult import ConsultControllerOutput
 from app.schemas.message import MessageRequest, MessageResponse
