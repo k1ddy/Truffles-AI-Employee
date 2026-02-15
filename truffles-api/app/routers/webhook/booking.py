@@ -29,6 +29,19 @@ if TYPE_CHECKING:
 
 BOOKING_SLOT_ORDER = ("service", "datetime", "name")
 PHONE_PATTERN = re.compile(r"\+?\d[\d\s\-\(\)]{8,}\d")
+BOOKING_HOUR_FALLBACK_PATTERN = re.compile(
+    r"\b(?P<prep>в|к|на)\s*(?P<hour>[01]?\d|2[0-3])(?:[:.](?P<minute>[0-5]\d))?\s*(?:час(?:а|ов)?)?\b",
+    re.IGNORECASE,
+)
+DATETIME_DURATION_CONTEXT_MARKERS = (
+    "сколько",
+    "длит",
+    "длител",
+    "занима",
+    "долго",
+    "по времени",
+    "duration",
+)
 _LAYOUT_SWAP_MAP = str.maketrans(
     {
         "q": "й",
@@ -510,7 +523,23 @@ def _validate_datetime_slot(
     extracted = legacy._extract_datetime(message_text)
     if extracted:
         return extracted
-    return None
+    match = BOOKING_HOUR_FALLBACK_PATTERN.search(message_text)
+    if not match:
+        return None
+    normalized = legacy._normalize_text(message_text)
+    has_duration_context = any(marker in normalized for marker in DATETIME_DURATION_CONTEXT_MARKERS)
+    booking_signal = bool(legacy._is_booking_request(message_text, client_slug=client_slug))
+    prep = (match.group("prep") or "").casefold()
+    if has_duration_context and not booking_signal:
+        return None
+    if prep == "на" and not booking_signal:
+        if "?" in message_text:
+            return None
+        if len(normalized.split()) > 4:
+            return None
+    hour = int(match.group("hour"))
+    minute = match.group("minute") or "00"
+    return f"{hour:02d}:{minute}"
 
 
 def _validate_name_slot(

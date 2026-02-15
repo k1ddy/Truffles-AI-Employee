@@ -964,6 +964,24 @@ class TestDatetimeExtraction:
 
         assert value is None
 
+    def test_validate_datetime_slot_parses_booking_hour_phrase(self):
+        value = webhook_router._validate_datetime_slot(
+            "Я хочу записаться на 3 часа.",
+            allow_freeform=True,
+            client_slug="demo_salon",
+        )
+
+        assert value == "03:00"
+
+    def test_validate_datetime_slot_rejects_duration_question_without_booking_signal(self):
+        value = webhook_router._validate_datetime_slot(
+            "Сколько длится маникюр на 3 часа?",
+            allow_freeform=True,
+            client_slug="demo_salon",
+        )
+
+        assert value is None
+
 
 class TestServiceHints:
     def test_service_hint_within_window(self):
