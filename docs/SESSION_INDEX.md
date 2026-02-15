@@ -433,3 +433,4 @@
 | 2026-02-14-humanity-quality-console-a1 | done | feat/2026-02-14-humanity-quality-console-a1 | /home/zhan/worktrees/2026-02-14-humanity-quality-console-a1 | docs/TASK_PACKAGES/TP-2026-02-14-humanity-quality-console-a1.md | 2026-02-14 |
 | 2026-02-14-provider-lifecycle-registry-today-mode-a1 | done | feat/2026-02-14-provider-lifecycle-registry-today-mode-a1 | /home/zhan/worktrees/2026-02-14-provider-lifecycle-registry-today-mode-a1 | docs/TASK_PACKAGES/TP-2026-02-14-provider-lifecycle-registry-today-mode-a1.md | 2026-02-14 |
 | 2026-02-15-console-context-incident-errors-a1 | active | feat/console-context-incident-errors | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-14-company-workspace-ux-a1.md | 2026-02-15 |
+| 2026-02-15-platform-admin-wave14-a1 | active | feat/2026-02-15-platform-admin-wave14-a1 | /home/zhan/worktrees/2026-02-15-platform-admin-wave14-a1 | docs/TASK_PACKAGES/TP-2026-02-15-platform-admin-wave14-a1.md | 2026-02-15 |

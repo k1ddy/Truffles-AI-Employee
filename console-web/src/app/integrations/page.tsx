@@ -18,6 +18,7 @@ import {
     type ProviderOpsQueueItem,
 } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
+import { writeBrowserStorage } from "@/lib/browser-storage";
 import { useConsoleContextScope } from "@/lib/use-console-context-scope";
 import type { components } from "@/types/api.generated";
 
@@ -105,23 +106,12 @@ function mergeMembershipStats(...items: Array<MembershipStats | undefined>): Mem
     return merged;
 }
 
-function setLocalStorageValue(key: string, value?: string | null) {
-    if (typeof window === "undefined") {
-        return;
-    }
-    if (!value) {
-        window.localStorage.removeItem(key);
-        return;
-    }
-    window.localStorage.setItem(key, value);
-}
-
 function setWorkspaceRecommendedActionContext(value: WorkspaceRecommendedActionContext | null) {
     if (value === null) {
-        setLocalStorageValue(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
+        writeBrowserStorage(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
         return;
     }
-    setLocalStorageValue(WORKSPACE_RECOMMENDED_ACTION_KEY, JSON.stringify(value));
+    writeBrowserStorage(WORKSPACE_RECOMMENDED_ACTION_KEY, JSON.stringify(value));
 }
 
 function normalizeText(value?: string | null): string {

@@ -27,11 +27,13 @@ import {
     setConsoleCompanyContext,
     writeConsoleContextScopeToStorage,
 } from "@/lib/console-context-storage";
+import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
 
 const NAV_COLLAPSED_STORAGE_KEY = "console:nav_collapsed";
 const AUTH_ERROR_CODES = new Set(["AUTH_REQUIRED", "TOKEN_EXPIRED", "TOKEN_INVALID"]);
 const HEALTH_INCIDENT_CRITICAL_BACKLOG = 1000;
 const HEALTH_INCIDENT_WARN_BACKLOG = 500;
+const HEALTH_INCIDENT_STALE_WARN_MINUTES = 3;
 
 type SessionAuth = {
     accessToken?: string;
@@ -207,55 +209,99 @@ function findBranchName(branches: BranchSummary[] | undefined, branchId: string 
     return match?.name ?? "—";
 }
 
-function readBrowserStorage(key: string): string | null {
-    if (typeof window === "undefined") {
-        return null;
-    }
-    return window.localStorage.getItem(key);
-}
-
-function writeBrowserStorage(key: string, value?: string | null) {
-    if (typeof window === "undefined") {
-        return;
-    }
-    if (!value) {
-        window.localStorage.removeItem(key);
-        return;
-    }
-    window.localStorage.setItem(key, value);
-}
-
 type HealthIncident = {
     severity: "critical" | "warn";
     title: string;
-    details: string;
+    summary: string;
+    reasons: string[];
+    runbook: string[];
+    updatedAtLabel: string;
 };
 
-function deriveHealthIncident(health?: HealthResponse | null): HealthIncident | null {
+function formatRelativeAgeLabel(timestampMs: number): string {
+    if (!Number.isFinite(timestampMs) || timestampMs <= 0) {
+        return "время обновления неизвестно";
+    }
+    const elapsedMs = Date.now() - timestampMs;
+    if (!Number.isFinite(elapsedMs) || elapsedMs < 0) {
+        return "обновлено только что";
+    }
+    const elapsedMinutes = Math.floor(elapsedMs / 60000);
+    if (elapsedMinutes <= 0) {
+        return "обновлено только что";
+    }
+    if (elapsedMinutes === 1) {
+        return "обновлено 1 минуту назад";
+    }
+    return `обновлено ${elapsedMinutes} минут назад`;
+}
+
+function deriveHealthIncident(health?: HealthResponse | null, updatedAtMs?: number): HealthIncident | null {
     if (!health) {
         return null;
     }
 
     const status = health.status ?? "healthy";
     const backlog = health.outbox_backlog ?? 0;
+    const reasons: string[] = [];
+    let severity: "critical" | "warn" | null = null;
 
     if (status === "unhealthy" || backlog >= HEALTH_INCIDENT_CRITICAL_BACKLOG) {
-        return {
-            severity: "critical",
-            title: "Критичный инцидент платформы",
-            details: `status=${status}, outbox_backlog=${backlog}`,
-        };
+        severity = "critical";
     }
 
-    if (status === "degraded" || backlog >= HEALTH_INCIDENT_WARN_BACKLOG) {
-        return {
-            severity: "warn",
-            title: "Риск деградации платформы",
-            details: `status=${status}, outbox_backlog=${backlog}`,
-        };
+    if (!severity && (status === "degraded" || backlog >= HEALTH_INCIDENT_WARN_BACKLOG)) {
+        severity = "warn";
     }
 
-    return null;
+    if (status === "unhealthy" || status === "degraded") {
+        reasons.push(`health.status=${status}`);
+    }
+    if (backlog >= HEALTH_INCIDENT_CRITICAL_BACKLOG) {
+        reasons.push(`outbox_backlog=${backlog} (>= ${HEALTH_INCIDENT_CRITICAL_BACKLOG})`);
+    } else if (backlog >= HEALTH_INCIDENT_WARN_BACKLOG) {
+        reasons.push(`outbox_backlog=${backlog} (>= ${HEALTH_INCIDENT_WARN_BACKLOG})`);
+    }
+
+    const updatedAgeLabel = formatRelativeAgeLabel(updatedAtMs ?? 0);
+    const staleMinutes = Number.isFinite(updatedAtMs) && (updatedAtMs ?? 0) > 0
+        ? Math.floor((Date.now() - (updatedAtMs ?? 0)) / 60000)
+        : null;
+    if (staleMinutes !== null && staleMinutes >= HEALTH_INCIDENT_STALE_WARN_MINUTES) {
+        reasons.push(`telemetry stale=${staleMinutes}m`);
+        if (!severity) {
+            severity = "warn";
+        }
+    }
+
+    if (!severity) {
+        return null;
+    }
+
+    if (reasons.length === 0) {
+        reasons.push(`status=${status}, outbox_backlog=${backlog}`);
+    }
+
+    const runbook = severity === "critical"
+        ? [
+            "P0 triage: откройте OPS и разберите failed/pending outbox.",
+            "Если backlog растёт, проверьте provider lifecycle и выполните rebind/remediation в Workspace.",
+            "После действий обновите health и зафиксируйте trace/audit evidence.",
+        ]
+        : [
+            "Откройте OPS и проверьте динамику очереди за последние минуты.",
+            "Проверьте branch-лидеров по риску в Company Workspace.",
+            "Если риск растёт, поднимите инцидент до P0.",
+        ];
+
+    return {
+        severity,
+        title: severity === "critical" ? "Критичный инцидент платформы (P0)" : "Риск деградации платформы (P1)",
+        summary: `status=${status}, outbox_backlog=${backlog}`,
+        reasons,
+        runbook,
+        updatedAtLabel: updatedAgeLabel,
+    };
 }
 
 function SelectionGate({
@@ -585,7 +631,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             }),
         [role]
     );
-    const { data: healthData } = useQuery({
+    const { data: healthData, dataUpdatedAt: healthDataUpdatedAt, isFetching: healthFetching, refetch: refetchHealth } = useQuery({
         queryKey: ["console-health-banner"],
         queryFn: async () => {
             const response = await opsApi.getHealth();
@@ -595,7 +641,10 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         refetchInterval: 30000,
         staleTime: 10000,
     });
-    const healthIncident = useMemo(() => deriveHealthIncident(healthData ?? null), [healthData]);
+    const healthIncident = useMemo(
+        () => deriveHealthIncident(healthData ?? null, healthDataUpdatedAt),
+        [healthData, healthDataUpdatedAt],
+    );
     const healthIncidentClass = healthIncident?.severity === "critical"
         ? "border-red-300/80 bg-red-50 text-red-900"
         : "border-amber-300/80 bg-amber-50 text-amber-900";
@@ -910,11 +959,49 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                 className={`mx-6 mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border px-4 py-3 text-xs ${healthIncidentClass}`}
                                 data-testid="global-health-incident-banner"
                             >
-                                <div>
-                                    <p className="text-sm font-semibold">{healthIncident.title}</p>
-                                    <p className="mt-1 font-mono">{healthIncident.details}</p>
+                                <div className="min-w-[280px] flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <span
+                                            className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                                healthIncident.severity === "critical"
+                                                    ? "bg-red-200/80 text-red-900"
+                                                    : "bg-amber-200/80 text-amber-900"
+                                            }`}
+                                            data-testid="global-health-incident-severity"
+                                        >
+                                            {healthIncident.severity === "critical" ? "P0" : "P1"}
+                                        </span>
+                                        <p className="text-sm font-semibold">{healthIncident.title}</p>
+                                    </div>
+                                    <p className="mt-1 font-mono" data-testid="global-health-incident-summary">
+                                        {healthIncident.summary}
+                                    </p>
+                                    <p className="mt-1 text-[11px] text-current/80" data-testid="global-health-incident-updated">
+                                        {healthIncident.updatedAtLabel}
+                                    </p>
+                                    <ul className="mt-2 list-disc space-y-1 pl-4 text-[11px]" data-testid="global-health-incident-reasons">
+                                        {healthIncident.reasons.map((reason) => (
+                                            <li key={reason}>{reason}</li>
+                                        ))}
+                                    </ul>
+                                    <ol className="mt-2 space-y-1 text-[11px]" data-testid="global-health-incident-runbook">
+                                        {healthIncident.runbook.map((step, index) => (
+                                            <li key={step}>{index + 1}. {step}</li>
+                                        ))}
+                                    </ol>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                        type="button"
+                                        className="btn-ghost"
+                                        onClick={() => {
+                                            void refetchHealth();
+                                        }}
+                                        disabled={healthFetching}
+                                        data-testid="global-health-incident-refresh"
+                                    >
+                                        {healthFetching ? "Обновление..." : "Обновить health"}
+                                    </button>
                                     <Link href="/ops" className="btn-ghost">
                                         Открыть OPS
                                     </Link>
