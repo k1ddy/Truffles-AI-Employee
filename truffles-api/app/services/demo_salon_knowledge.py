@@ -705,6 +705,29 @@ def _build_phrase_index(client_slug: str) -> dict[str, list[str]]:
     return index
 
 
+def _has_term_match(normalized: str, term: str) -> bool:
+    term = _normalize_text(term)
+    if not term:
+        return False
+    tokens = [token for token in term.split() if token]
+    if not tokens:
+        return False
+
+    def _token_pattern(token: str, *, in_phrase: bool) -> str:
+        escaped = re.escape(token)
+        if len(token) <= 2:
+            return rf"\b{escaped}\b"
+        if len(token) == 3 and not in_phrase:
+            return rf"\b{escaped}\b"
+        return rf"\b{escaped}\w*"
+
+    if len(tokens) == 1:
+        return bool(re.search(_token_pattern(tokens[0], in_phrase=False), normalized))
+
+    pattern = r"\s+".join(_token_pattern(token, in_phrase=True) for token in tokens)
+    return bool(re.search(pattern, normalized))
+
+
 def phrase_match_intent(text: str, client_slug: str | None = _DEFAULT_CLIENT_SLUG) -> set[str]:
     normalized = _normalize_text(text)
     if not normalized:
@@ -713,14 +736,7 @@ def phrase_match_intent(text: str, client_slug: str | None = _DEFAULT_CLIENT_SLU
     slug = _normalize_client_slug(client_slug)
     for intent, phrases in _build_phrase_index(slug).items():
         for phrase in phrases:
-            if not phrase:
-                continue
-            if len(phrase) <= 3:
-                if re.search(rf"\b{re.escape(phrase)}\b", normalized):
-                    matches.add(intent)
-                    break
-                continue
-            if phrase in normalized:
+            if _has_term_match(normalized, phrase):
                 matches.add(intent)
                 break
     return matches
@@ -3087,13 +3103,7 @@ def _get_policy_section(policy_pack: dict | None, key: str) -> dict[str, Any] | 
 
 def _matches_policy_keywords(normalized: str, keywords: list[str]) -> bool:
     for keyword in keywords:
-        if not keyword:
-            continue
-        if len(keyword) <= 3:
-            if re.search(rf"\b{re.escape(keyword)}\b", normalized):
-                return True
-            continue
-        if keyword in normalized:
+        if _has_term_match(normalized, keyword):
             return True
     return False
 

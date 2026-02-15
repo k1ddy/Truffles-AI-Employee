@@ -26,6 +26,9 @@
   - Updated hard-law fallback resolution to risk-aware inferred sections and safe default without `payment_info` when policy hard-law config is partial.
   - Added regression coverage for keyword matcher, hard-law hint confirmation, and hard-law fallback section inference.
   - Opened follow-up PR with these fixes: https://github.com/k1ddy/Truffles-AI-Employee/pull/678
+  - Fixed truth-gate false-positive path in `demo_salon_knowledge`: boundary-safe token matcher for phrase/policy terms prevents `счет` matching inside `насчет` while preserving stem-based policy intents (`не понрав*`, `тон кож*`).
+  - Added regressions for `А как насчет парковки?` at phrase-intent, policy-keyword, and end-to-end truth-gate decision levels.
+  - Rebuilt patched runtime container on `:18101` and completed frozen replay `offline-replay-20260215-p0-r27` (`infra_valid=true`, `semantic_valid=true`, `strict_pass_rate=1.0`, `failure_counts={}`).
 - next:
   - Monitor PR #674 CI and merge after green gates.
   - After merge: replay frozen booking scenarios with judge off and publish fresh failure-ledger delta.
@@ -44,14 +47,20 @@
   - pytest -q truffles-api/tests/test_message_endpoint.py
   - pytest -q truffles-api/tests/test_booking_chaos_dialogs.py
   - pytest -q truffles-api/tests/test_booking_quality_response_guard.py
+  - pytest -q truffles-api/tests/test_booking_quality_info_sections.py
+  - pytest -q truffles-api/tests/test_demo_salon_eval.py  # expected known non-blocking failure: E409 consult_cta
   - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18001 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-20260213-a1-main-r18-postfix5/scenarios.json --count 10 --tool-hooks auto --tool-evidence-policy strict --reset-before-dialog --jid-mode unique --skip-outbox --judge-mode off --allow-judge-off --timeout-profile realistic --run-id offline-replay-20260215-p0-r21
   - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18001 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-20260213-a1-main-r18-postfix5/scenarios.json --count 10 --tool-hooks auto --tool-evidence-policy strict --reset-before-dialog --jid-mode unique --skip-outbox --judge-mode off --allow-judge-off --timeout-profile realistic --run-id offline-replay-20260215-p0-r22
   - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18001 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-20260213-a1-main-r18-postfix5/scenarios.json --count 10 --tool-hooks auto --tool-evidence-policy strict --reset-before-dialog --jid-mode unique --skip-outbox --judge-mode off --allow-judge-off --timeout-profile realistic --run-id offline-replay-20260215-p0-r23
   - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18001 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-20260213-a1-main-r18-postfix5/scenarios.json --count 10 --tool-hooks auto --tool-evidence-policy strict --reset-before-dialog --jid-mode unique --skip-outbox --judge-mode off --allow-judge-off --timeout-profile realistic --run-id offline-replay-20260215-p0-r24
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18101 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-20260213-a1-main-r18-postfix5/scenarios.json --count 10 --tool-hooks auto --tool-evidence-policy strict --reset-before-dialog --jid-mode unique --skip-outbox --judge-mode off --allow-judge-off --timeout-profile realistic --run-id offline-replay-20260215-p0-r27
+  - /tmp/booking_quality/offline-replay-20260215-p0-r27/summary.json
+  - /tmp/booking_quality/offline-replay-20260215-p0-r27/brief.md
+  - manual trace/meta check for turn `А как насчет парковки?` in `/tmp/booking_quality/offline-replay-20260215-p0-r27/responses.jsonl` (`action=reply`, `intent=parking`, `policy_gate=None`)
   - scripts/session_check.sh
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/668
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/670
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/672
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/674
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/678
-- last_updated: 2026-02-15T08:56:00Z
+- last_updated: 2026-02-15T10:03:04Z

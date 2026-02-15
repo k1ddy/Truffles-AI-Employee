@@ -162,3 +162,25 @@ def test_parking_signal_accepts_colloquial_parking_wording():
 def test_parking_signal_accepts_parkirovat_wording():
     normalized = demo_salon_knowledge._normalize_text("Где можно паркировать машину?")
     assert demo_salon_knowledge._has_parking_signal(normalized, client_slug="demo_salon") is True
+
+
+def test_phrase_match_intent_does_not_map_naschet_parkovki_to_payment():
+    intents = demo_salon_knowledge.phrase_match_intent("А как насчет парковки?", client_slug="demo_salon")
+    assert "payment" not in intents
+
+
+def test_policy_keyword_match_ignores_inner_word_fragment():
+    normalized = demo_salon_knowledge._normalize_text("А как насчет парковки?")
+    assert demo_salon_knowledge._matches_policy_keywords(normalized, ["счет"]) is False
+
+
+def test_truth_gate_routes_naschet_parkovki_to_parking_info():
+    decision = demo_salon_knowledge.get_demo_salon_decision(
+        "А как насчет парковки?",
+        client_slug="demo_salon",
+        intent_decomp={"intents": ["inquire_parking"], "primary_intent": "inquire_parking"},
+    )
+    assert decision is not None
+    assert decision.intent == "parking"
+    assert decision.intent != "payment"
+    assert "парков" in decision.response.casefold()
