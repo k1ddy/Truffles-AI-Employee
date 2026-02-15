@@ -7666,6 +7666,56 @@ async def send_telegram_test(
     )
 
 
+def _validate_console_settings_update(body: ConsoleSettingsUpdateRequest) -> None:
+    if body.reminder_1_minutes is not None and not 5 <= body.reminder_1_minutes <= 60:
+        raise ConsoleAPIError(400, "INVALID_INPUT", "reminder_1_minutes must be between 5 and 60")
+    if body.reminder_2_minutes is not None and not 30 <= body.reminder_2_minutes <= 180:
+        raise ConsoleAPIError(400, "INVALID_INPUT", "reminder_2_minutes must be between 30 and 180")
+    if body.escalation_timeout_minutes is not None and not 30 <= body.escalation_timeout_minutes <= 360:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_INPUT",
+            "escalation_timeout_minutes must be between 30 and 360",
+        )
+    if (
+        body.reminder_1_minutes is not None
+        and body.reminder_2_minutes is not None
+        and body.reminder_1_minutes >= body.reminder_2_minutes
+    ):
+        raise ConsoleAPIError(
+            400,
+            "INVALID_INPUT",
+            "reminder_1_minutes must be less than reminder_2_minutes",
+        )
+    if (
+        body.reminder_2_minutes is not None
+        and body.escalation_timeout_minutes is not None
+        and body.reminder_2_minutes >= body.escalation_timeout_minutes
+    ):
+        raise ConsoleAPIError(
+            400,
+            "INVALID_INPUT",
+            "reminder_2_minutes must be less than escalation_timeout_minutes",
+        )
+
+
+def _apply_console_settings_update(
+    settings: ClientSettings,
+    body: ConsoleSettingsUpdateRequest,
+) -> list[str]:
+    updated_fields: list[str] = []
+    if body.reminder_1_minutes is not None:
+        settings.reminder_timeout_1 = body.reminder_1_minutes
+        updated_fields.append("reminder_timeout_1")
+    if body.reminder_2_minutes is not None:
+        settings.reminder_timeout_2 = body.reminder_2_minutes
+        updated_fields.append("reminder_timeout_2")
+    if body.escalation_timeout_minutes is not None:
+        settings.auto_close_timeout = body.escalation_timeout_minutes
+        updated_fields.append("auto_close_timeout")
+    return updated_fields
+
+
 @router.patch(
     "/settings",
     response_model=ConsoleSettingsUpdateResponse,
@@ -7677,8 +7727,6 @@ async def update_settings(
     db: Session = Depends(get_db),
 ) -> ConsoleSettingsUpdateResponse:
     """Update client settings (owner/admin only)."""
-    from app.schemas.console import ConsoleSettingsUpdateRequest, ConsoleSettingsUpdateResponse
-    
     context = get_console_context(request, db)
     require_console_permission(
         context,
@@ -7686,34 +7734,21 @@ async def update_settings(
         "write",
         message="Only owner/admin can update settings",
     )
-    
-    # Get client settings
-    from app.models import ClientSettings
-    
+
+    _validate_console_settings_update(body)
+
     settings = db.query(ClientSettings).filter(
         ClientSettings.client_id == context.client.id
     ).first()
-    
+
     if not settings:
-        # Create settings if not exists
         settings = ClientSettings(client_id=context.client.id)
         db.add(settings)
-    
-    # Update fields if provided
-    updated_fields = []
-    if body.reminder_1_minutes is not None:
-        settings.reminder_1_minutes = body.reminder_1_minutes
-        updated_fields.append("reminder_1_minutes")
-    if body.reminder_2_minutes is not None:
-        settings.reminder_2_minutes = body.reminder_2_minutes
-        updated_fields.append("reminder_2_minutes")
-    if body.escalation_timeout_minutes is not None:
-        settings.escalation_timeout_minutes = body.escalation_timeout_minutes
-        updated_fields.append("escalation_timeout_minutes")
-    
+
+    updated_fields = _apply_console_settings_update(settings, body)
+
     db.commit()
-    
-    # Audit log
+
     record_audit_event(
         db,
         client_id=context.client.id,
@@ -7724,7 +7759,7 @@ async def update_settings(
         entity_id=str(context.client.id),
         payload={"updated_fields": updated_fields},
     )
-    
+
     return ConsoleSettingsUpdateResponse(
         success=True,
         message=f"Updated: {', '.join(updated_fields)}" if updated_fields else "No changes"

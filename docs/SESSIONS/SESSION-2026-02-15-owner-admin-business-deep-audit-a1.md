@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave2-data-trust-team-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave3-simple-settings-a1.md
 - branch: feat/2026-02-15-owner-admin-business-audit-a1
 - worktree: /home/zhan/worktrees/2026-02-15-owner-admin-business-audit-a1
 - base_ref: origin/main
@@ -29,15 +29,31 @@
     - owner/admin nav entries `Данные` and `Команда KPI`.
   - Updated console audit docs/backlog and published Wave-2 report.
   - Ran checks: pytest (`49 passed`), OpenAPI check, TS type generation, console-web lint/build.
+  - Fixed red PR check (`lint`) by correcting import order in `truffles-api/app/routers/console.py`.
+  - Added dedicated owner/admin smoke suite `console-web/e2e/owner-admin-business.spec.ts`.
+  - Completed live-check evidence for CA10 outbox suite + explain trace:
+    - `conversation_id=d9d1d29d-e082-4c04-8c38-bb68093013f2`
+    - `message_id=LC-DEDUP-20260215-093909-5a48bffa`
+    - `outbox_status=PENDING`, `decision_meta.action=escalate`
+  - Completed Wave-3:
+    - fixed `PATCH /console/v1/settings` mapping to persisted `client_settings` columns;
+    - added validation and deterministic tests for settings update;
+    - shipped owner/admin simple settings + explainability block in `/settings`;
+    - expanded owner/admin e2e coverage for Wave-3 surface.
+  - Published Wave-3 task package/report and updated settings/backlog docs.
 - next:
-  - Collect product feedback from owner/admin users and prioritize Wave-3 (`simple settings` + onboarding explainability).
+  - Collect product feedback from owner/admin users on new Wave-3 presets and explainability wording.
   - Decide whether to split owner/admin control pages into dedicated IA section in canon docs (`SPECS/CONTROL_PLANE.md` update).
 - evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave3-simple-settings-a1.md
   - docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave2-data-trust-team-a1.md
   - docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave1-business-home-a1.md
+  - docs/REPORTS/2026-02-15-owner-admin-wave3-simple-settings-v1.md
   - docs/REPORTS/2026-02-15-owner-admin-business-control-plane-v1.md
   - docs/REPORTS/2026-02-15-owner-admin-wave1-implementation-v1.md
   - docs/REPORTS/2026-02-15-owner-admin-wave2-data-trust-team-v1.md
+  - /tmp/livecheck_owner_wave2_20260215-143909.log
+  - /tmp/livecheck_owner_wave2_explain_LC-DEDUP-20260215-093909-5a48bffa.log
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/679
   - runtime snapshot (`/api/health/full`, `/admin/version`)
 - last_updated: 2026-02-15

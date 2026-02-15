@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 from app.routers import console as console_router
+from app.schemas.console import ConsoleSettingsUpdateRequest
 from app.services.console_errors import ConsoleAPIError
 
 
@@ -150,6 +151,55 @@ def test_derive_team_performance_status_thresholds() -> None:
     assert unhealthy_status == "unhealthy"
     assert degraded_status == "degraded"
     assert healthy_status == "healthy"
+
+
+def test_apply_console_settings_update_maps_public_fields_to_model_columns() -> None:
+    settings = SimpleNamespace(
+        reminder_timeout_1=30,
+        reminder_timeout_2=60,
+        auto_close_timeout=120,
+    )
+    body = ConsoleSettingsUpdateRequest(
+        reminder_1_minutes=10,
+        reminder_2_minutes=45,
+        escalation_timeout_minutes=90,
+    )
+
+    updated_fields = console_router._apply_console_settings_update(settings, body)
+
+    assert settings.reminder_timeout_1 == 10
+    assert settings.reminder_timeout_2 == 45
+    assert settings.auto_close_timeout == 90
+    assert updated_fields == [
+        "reminder_timeout_1",
+        "reminder_timeout_2",
+        "auto_close_timeout",
+    ]
+
+
+def test_validate_console_settings_update_rejects_invalid_order() -> None:
+    body = ConsoleSettingsUpdateRequest(
+        reminder_1_minutes=30,
+        reminder_2_minutes=20,
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._validate_console_settings_update(body)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "INVALID_INPUT"
+
+
+def test_validate_console_settings_update_rejects_invalid_range() -> None:
+    body = ConsoleSettingsUpdateRequest(
+        reminder_1_minutes=2,
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._validate_console_settings_update(body)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.code == "INVALID_INPUT"
 
 
 @pytest.mark.asyncio
