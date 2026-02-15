@@ -7234,6 +7234,37 @@ async def _handle_webhook_payload(
                 ):
                     policy_validation_error = "action_tool_mismatch"
                 if policy_validation_error is None and policy_tool_action == "info" and not policy_pack_refs:
+                    # Rescue common policy-core drift: style-reference asks and booking slot replies
+                    # sometimes arrive as "info" without refs.
+                    style_reference_signal = bool(
+                        message_text and _is_style_reference_request(message_text, has_media=has_media)
+                    )
+                    if style_reference_signal and not has_media:
+                        policy_action = "fact"
+                        policy_tool_action = "catalog.portfolio"
+                    elif message_text and _has_lateness_signal(
+                        message_text,
+                        client_slug=payload.client_slug,
+                    ):
+                        policy_pack_refs = ["hours"]
+                    elif (
+                        conversation.state == ConversationState.BOT_ACTIVE.value
+                        and policy_slot_state_validated
+                        and (
+                            expected_reply_type
+                            in {
+                                EXPECTED_REPLY_SERVICE,
+                                EXPECTED_REPLY_TIME,
+                                EXPECTED_REPLY_NAME,
+                            }
+                            or booking_active
+                            or booking_wants_flow
+                        )
+                        and not info_class_intents
+                    ):
+                        policy_action = "collect"
+                        policy_tool_action = "collect"
+                if policy_validation_error is None and policy_tool_action == "info" and not policy_pack_refs:
                     info_refs_from_tool_args = _normalize_plan_refs(policy_tool_args.get("info_refs"))
                     if info_refs_from_tool_args:
                         policy_pack_refs = info_refs_from_tool_args
@@ -7327,6 +7358,7 @@ async def _handle_webhook_payload(
                         in {
                             "collect",
                             "booking",
+                            "catalog.service_query",
                             "calendar.list_slots",
                             "calendar.book_slot",
                             "calendar.reschedule",
