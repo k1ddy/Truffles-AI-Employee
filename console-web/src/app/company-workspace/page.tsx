@@ -17,6 +17,7 @@ import {
     type IntegrationBranchActionRequest,
     type ProviderOpsAction,
 } from "@/lib/api-client";
+import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
 import { useConsoleContextScope } from "@/lib/use-console-context-scope";
 import { useInlineErrorSummary } from "@/lib/use-inline-error-summary";
 
@@ -48,26 +49,8 @@ type WizardStep = {
     fix: string;
 };
 
-function readLocalStorageValue(key: string): string | null {
-    if (typeof window === "undefined") {
-        return null;
-    }
-    return window.localStorage.getItem(key);
-}
-
-function setLocalStorageValue(key: string, value?: string | null) {
-    if (typeof window === "undefined") {
-        return;
-    }
-    if (!value) {
-        window.localStorage.removeItem(key);
-        return;
-    }
-    window.localStorage.setItem(key, value);
-}
-
 function readWorkspaceRecommendedActionContext(): WorkspaceRecommendedActionContext | null {
-    const raw = readLocalStorageValue(WORKSPACE_RECOMMENDED_ACTION_KEY);
+    const raw = readBrowserStorage(WORKSPACE_RECOMMENDED_ACTION_KEY);
     if (!raw) {
         return null;
     }
@@ -539,7 +522,7 @@ export default function CompanyWorkspacePage() {
             setActionSummary(`${providerOpsActionLabel(action)}: ${JSON.stringify(result)}`);
             toast.success(mode === "dry_run" ? "Проверка завершена (без записи)" : "Операция выполнена");
             if (mode === "execute") {
-                setLocalStorageValue(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
+                writeBrowserStorage(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
                 setRecommendedActionContext(null);
             }
             await Promise.all([refetchIntegrations(), refetchProviderLifecycle(), refetchScorecard()]);
@@ -994,7 +977,7 @@ export default function CompanyWorkspacePage() {
                             <button
                                 className="btn-ghost"
                                 onClick={() => {
-                                    setLocalStorageValue(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
+                                    writeBrowserStorage(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
                                     setRecommendedActionContext(null);
                                 }}
                                 disabled={!!runningAction}

@@ -7,32 +7,20 @@
 
 import axios, { AxiosError, AxiosInstance } from "axios";
 import type { components, operations } from "@/types/api.generated";
-
-const CLIENT_ID_STORAGE_KEY = "console:client_id";
-const BRANCH_ID_STORAGE_KEY = "console:branch_id";
-const COMPANY_ID_STORAGE_KEY = "console:company_id";
+import { readConsoleContextScopeFromStorage } from "@/lib/console-context-storage";
 
 function getSelectedClientId(): string | undefined {
-    if (typeof window === "undefined") {
-        return undefined;
-    }
-    const stored = window.localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+    const stored = readConsoleContextScopeFromStorage().clientId;
     return stored || undefined;
 }
 
 function getSelectedCompanyId(): string | undefined {
-    if (typeof window === "undefined") {
-        return undefined;
-    }
-    const stored = window.localStorage.getItem(COMPANY_ID_STORAGE_KEY);
+    const stored = readConsoleContextScopeFromStorage().companyId;
     return stored || undefined;
 }
 
 function getSelectedBranchId(): string | undefined {
-    if (typeof window === "undefined") {
-        return undefined;
-    }
-    const stored = window.localStorage.getItem(BRANCH_ID_STORAGE_KEY);
+    const stored = readConsoleContextScopeFromStorage().branchId;
     return stored || undefined;
 }
 

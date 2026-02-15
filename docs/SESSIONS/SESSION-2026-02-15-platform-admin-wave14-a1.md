@@ -1,0 +1,23 @@
+# SESSION 2026-02-15-platform-admin-wave14-a1 — Platform Admin UX Wave 1-4
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-15-platform-admin-wave14-a1.md
+- branch: feat/2026-02-15-platform-admin-wave14-a1
+- worktree: /home/zhan/worktrees/2026-02-15-platform-admin-wave14-a1
+- base_ref: origin/main
+- scope: incident runbook banner, provisioning inline errors, context storage finalization, initial tenants decomposition.
+- done:
+  - Added global incident runbook banner in `ConsoleShell` with severity (P0/P1), stale telemetry signal, reason list, and actionable CTA (`OPS`, `Workspace`, `refresh`).
+  - Added persistent inline error summary in `ProvisioningWizard` (`provisioning-error-summary`) and wired validation/API errors into summary via `useInlineErrorSummary`.
+  - Finalized context/storage migration in target pages: moved direct storage access to shared helpers (`browser-storage`, `console-context-storage`), removed direct `localStorage` calls from target pages and `api-client` context headers.
+  - Started tenants decomposition by extracting Action Queue UI into `TenantsActionQueuePanel`.
+  - Completed local validation (`lint`, `build`) on updated console-web.
+- next:
+  - Commit, push branch, and open PR for review/merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-15-platform-admin-wave14-a1.md
+  - npm --prefix console-web run lint
+  - npm --prefix console-web run build
+  - rg -n \"window\\.localStorage|localStorage\\.getItem|localStorage\\.setItem|localStorage\\.removeItem\" console-web/src/components/ConsoleShell.tsx console-web/src/components/ProvisioningWizard.tsx console-web/src/app/tenants/page.tsx console-web/src/app/integrations/page.tsx console-web/src/app/company-workspace/page.tsx console-web/src/lib/api-client.ts
+- last_updated: 2026-02-15

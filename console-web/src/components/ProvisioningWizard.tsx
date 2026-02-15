@@ -15,7 +15,7 @@ import {
     type ConsoleRole,
     type ConsoleSection,
 } from "@/lib/api-client";
-import { useErrorHandler } from "@/lib/api-hooks";
+import { useInlineErrorSummary } from "@/lib/use-inline-error-summary";
 
 type SessionData = ReturnType<typeof useSession>["data"];
 type ProvisioningBranch = components["schemas"]["Branch"];
@@ -622,7 +622,17 @@ type ProvisioningWizardProps = {
 
 function ProvisioningWizard({ session, accessSection = "settings" }: ProvisioningWizardProps) {
     const queryClient = useQueryClient();
-    const { handleError } = useErrorHandler();
+    const {
+        errors: inlineErrors,
+        reportError,
+        reportInlineError,
+        clearErrors,
+    } = useInlineErrorSummary();
+
+    const reportValidationError = (message: string, code = "VALIDATION_ERROR") => {
+        toast.error(message);
+        reportInlineError({ code, message });
+    };
 
     const { data: meData } = useQuery({
         queryKey: ["console-me"],
@@ -863,7 +873,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const applyBillingToJson = () => {
         const built = buildBillingInfoPayload();
         if (built.error) {
-            toast.error(built.error);
+            reportValidationError(built.error);
             return;
         }
         setBillingInfo(built.value ? JSON.stringify(built.value, null, 2) : "");
@@ -872,7 +882,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const loadBillingFromJson = () => {
         const parsed = parseOptionalJson(billingInfo, "billing_info");
         if (parsed.error) {
-            toast.error(parsed.error);
+            reportValidationError(parsed.error);
             return;
         }
         const payload = (parsed.value ?? {}) as Record<string, unknown>;
@@ -908,7 +918,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const applyWorkingHoursToJson = () => {
         const built = buildWorkingHoursPayload();
         if (built.error) {
-            toast.error(built.error);
+            reportValidationError(built.error);
             return;
         }
         const nextValue = built.value ? JSON.stringify(built.value, null, 2) : "";
@@ -918,7 +928,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const loadWorkingHoursFromJson = () => {
         const parsed = parseOptionalJson(branchForm.workingHours, "working_hours");
         if (parsed.error) {
-            toast.error(parsed.error);
+            reportValidationError(parsed.error);
             return;
         }
         const payload = (parsed.value ?? {}) as Record<string, unknown>;
@@ -976,7 +986,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const applyBookingSettingsToJson = () => {
         const built = buildBookingSettingsPayload();
         if (built.error) {
-            toast.error(built.error);
+            reportValidationError(built.error);
             return;
         }
         const nextValue = built.value ? JSON.stringify(built.value, null, 2) : "";
@@ -986,7 +996,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const loadBookingSettingsFromJson = () => {
         const parsed = parseOptionalJson(branchForm.bookingSettings, "booking_settings");
         if (parsed.error) {
-            toast.error(parsed.error);
+            reportValidationError(parsed.error);
             return;
         }
         const payload = (parsed.value ?? {}) as Record<string, unknown>;
@@ -1029,7 +1039,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const applyPurchasedToJson = () => {
         const built = buildPurchasedPayload();
         if (built.error) {
-            toast.error(built.error);
+            reportValidationError(built.error);
             return;
         }
         setPurchasedJsonDraft(built.value ? JSON.stringify(built.value, null, 2) : "{}");
@@ -1039,13 +1049,13 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const loadPurchasedFromJson = () => {
         const parsed = parseOptionalJson(purchasedJsonDraft, "purchased");
         if (parsed.error) {
-            toast.error(parsed.error);
+            reportValidationError(parsed.error);
             return;
         }
         const normalized = normalizeCapabilities((parsed.value as CapabilitiesPayload | undefined) ?? null);
         const validationError = validatePurchasedPayload(normalized);
         if (validationError) {
-            toast.error(validationError);
+            reportValidationError(validationError);
             return;
         }
         setOnboardingContractTouched(true);
@@ -1056,13 +1066,13 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const handleApplyDomainTemplate = () => {
         const selected = DOMAIN_TEMPLATE_PRESETS.find((template) => template.id === selectedDomainTemplate);
         if (!selected) {
-            toast.error("Выберите валидный template");
+            reportValidationError("Выберите валидный template");
             return;
         }
         const normalized = normalizeCapabilities(selected.payload);
         const validationError = validatePurchasedPayload(normalized);
         if (validationError) {
-            toast.error(validationError);
+            reportValidationError(validationError);
             return;
         }
         setOnboardingContractTouched(true);
@@ -1151,6 +1161,24 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     });
 
     useEffect(() => {
+        if (capabilitiesError) {
+            reportError(capabilitiesError);
+        }
+    }, [capabilitiesError, reportError]);
+
+    useEffect(() => {
+        if (onboardingContractError) {
+            reportError(onboardingContractError);
+        }
+    }, [onboardingContractError, reportError]);
+
+    useEffect(() => {
+        if (referencePackError) {
+            reportError(referencePackError);
+        }
+    }, [referencePackError, reportError]);
+
+    useEffect(() => {
         if (capabilitiesTouched || !capabilitiesData) {
             return;
         }
@@ -1234,7 +1262,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.success("Компания создана");
         },
         onError: (error) => {
-            handleError(error);
+            reportError(error);
         },
     });
 
@@ -1250,7 +1278,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.success("Клиент создан");
         },
         onError: (error) => {
-            handleError(error);
+            reportError(error);
         },
     });
 
@@ -1275,7 +1303,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             );
         },
         onError: (error) => {
-            handleError(error);
+            reportError(error);
         },
     });
 
@@ -1295,10 +1323,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         },
         onError: (error) => {
             if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
-                toast.error("Сначала создайте филиал");
+                reportValidationError("Сначала создайте филиал");
                 return;
             }
-            handleError(error);
+            reportError(error);
         },
     });
 
@@ -1318,10 +1346,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         },
         onError: (error) => {
             if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
-                toast.error("Сначала создайте филиал");
+                reportValidationError("Сначала создайте филиал");
                 return;
             }
-            handleError(error);
+            reportError(error);
         },
     });
 
@@ -1341,10 +1369,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         },
         onError: (error) => {
             if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
-                toast.error("Сначала создайте филиал");
+                reportValidationError("Сначала создайте филиал");
                 return;
             }
-            handleError(error);
+            reportError(error);
         },
     });
 
@@ -1364,10 +1392,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         },
         onError: (error) => {
             if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
-                toast.error("Сначала создайте филиал");
+                reportValidationError("Сначала создайте филиал");
                 return;
             }
-            handleError(error);
+            reportError(error);
         },
     });
 
@@ -1384,7 +1412,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.success("Пользователь добавлен");
         },
         onError: (error) => {
-            handleError(error);
+            reportError(error);
         },
     });
 
@@ -1401,7 +1429,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.success("Capabilities сохранены");
         },
         onError: (error) => {
-            handleError(error);
+            reportError(error);
         },
     });
 
@@ -1418,7 +1446,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.success("Onboarding contract сохранён");
         },
         onError: (error) => {
-            handleError(error);
+            reportError(error);
         },
     });
 
@@ -1438,7 +1466,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.success("Reference pack обновлён");
         },
         onError: (error) => {
-            handleError(error);
+            reportError(error);
         },
     });
 
@@ -1496,7 +1524,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.success("Авто-онбординг выполнен");
         },
         onError: (error) => {
-            handleError(error);
+            reportError(error);
         },
     });
 
@@ -1513,7 +1541,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             setIntegrationWebhookUrl(data.webhook_url ?? "");
         },
         onError: (error) => {
-            handleError(error);
+            reportError(error);
         },
     });
 
@@ -1545,10 +1573,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         },
         onError: (error) => {
             if (error instanceof Error && error.message === "BRANCH_REQUIRED") {
-                toast.error("Сначала создайте филиал");
+                reportValidationError("Сначала создайте филиал");
                 return;
             }
-            handleError(error);
+            reportError(error);
         },
     });
 
@@ -1835,16 +1863,16 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const handleApproveGoLive = () => {
         const reason = goLiveDecisionReason.trim();
         if (!branchData?.id) {
-            toast.error("Сначала создайте филиал");
+            reportValidationError("Сначала создайте филиал");
             return;
         }
         if (scorecardFailed) {
             const missing = goNoGoMissing.map((item) => formatMissingRequirement(item));
-            toast.error(`Go-live заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
+            reportValidationError(`Go-live заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
             return;
         }
         if (!reason) {
-            toast.error("Укажите reason для approve");
+            reportValidationError("Укажите reason для approve");
             return;
         }
         approveGoLiveMutation.mutate(
@@ -1860,11 +1888,11 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const handleRejectGoLive = () => {
         const reason = goLiveDecisionReason.trim();
         if (!branchData?.id) {
-            toast.error("Сначала создайте филиал");
+            reportValidationError("Сначала создайте филиал");
             return;
         }
         if (!reason) {
-            toast.error("Укажите reason для reject");
+            reportValidationError("Укажите reason для reject");
             return;
         }
         rejectGoLiveMutation.mutate(
@@ -1881,20 +1909,20 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         const reason = goLiveDecisionReason.trim();
         const ttlHours = Number.parseInt(goLiveWaiverHours, 10);
         if (!branchData?.id) {
-            toast.error("Сначала создайте филиал");
+            reportValidationError("Сначала создайте филиал");
             return;
         }
         if (scorecardFailed) {
             const missing = goNoGoMissing.map((item) => formatMissingRequirement(item));
-            toast.error(`Go-live заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
+            reportValidationError(`Go-live заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
             return;
         }
         if (!reason) {
-            toast.error("Укажите reason для waiver");
+            reportValidationError("Укажите reason для waiver");
             return;
         }
         if (!Number.isFinite(ttlHours) || ttlHours <= 0) {
-            toast.error("ttl_hours должен быть положительным числом");
+            reportValidationError("ttl_hours должен быть положительным числом");
             return;
         }
         waiveGoLiveMutation.mutate(
@@ -1909,12 +1937,12 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
     const handleRunAutopilot = () => {
         if (autopilotMissingInputs.length > 0) {
-            toast.error(`Не хватает данных: ${autopilotMissingInputs.join(", ")}`);
+            reportValidationError(`Не хватает данных: ${autopilotMissingInputs.join(", ")}`);
             return;
         }
         if (autopilotBlockedByScorecard) {
             const missing = goNoGoMissing.map((item) => formatMissingRequirement(item));
-            toast.error(`Автопроцесс заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
+            reportValidationError(`Автопроцесс заблокирован scorecard: ${missing.join(", ") || "есть незавершенные проверки"}`);
             return;
         }
         const payload: OnboardingAutopilotRequest = {
@@ -1958,17 +1986,17 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const handleCreateCompany = () => {
         const name = companyName.trim();
         if (!name) {
-            toast.error("Укажите название компании");
+            reportValidationError("Укажите название компании");
             return;
         }
         const builtBilling = buildBillingInfoPayload();
         if (builtBilling.error) {
-            toast.error(builtBilling.error);
+            reportValidationError(builtBilling.error);
             return;
         }
         const billing = parseOptionalJson(billingInfo, "billing_info");
         if (billing.error) {
-            toast.error(billing.error);
+            reportValidationError(billing.error);
             return;
         }
         let billingPayload = billing.value;
@@ -1987,11 +2015,11 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const handleCreateClient = () => {
         const slug = clientSlug.trim();
         if (!slug) {
-            toast.error("Укажите slug клиента");
+            reportValidationError("Укажите slug клиента");
             return;
         }
         if (!companyId.trim()) {
-            toast.error("Укажите company_id компании");
+            reportValidationError("Укажите company_id компании");
             return;
         }
         createClientMutation.mutate({
@@ -2032,13 +2060,13 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
     const handleCreateBranch = () => {
         if (!clientId) {
-            toast.error("Укажите client_id");
+            reportValidationError("Укажите client_id");
             return;
         }
         const name = branchForm.name.trim();
         const slug = branchForm.slug.trim();
         if (!name || !slug) {
-            toast.error("Заполните название и slug");
+            reportValidationError("Заполните название и slug");
             return;
         }
         const bootstrapAccounts = buildBranchBootstrapAccounts();
@@ -2055,13 +2083,13 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
     const handleUpdateBranchDraft = () => {
         if (!branchData?.id) {
-            toast.error("Сначала создайте филиал");
+            reportValidationError("Сначала создайте филиал");
             return;
         }
         const name = branchForm.name.trim();
         const slug = branchForm.slug.trim();
         if (!name || !slug) {
-            toast.error("Заполните название и slug");
+            reportValidationError("Заполните название и slug");
             return;
         }
         patchBranchMutation.mutate({
@@ -2074,17 +2102,17 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
     const handleSaveInstance = () => {
         if (!branchData?.id) {
-            toast.error("Сначала создайте филиал");
+            reportValidationError("Сначала создайте филиал");
             return;
         }
         const instanceId = branchForm.instanceId.trim();
         if (!instanceId) {
-            toast.error("Укажите instance_id");
+            reportValidationError("Укажите instance_id");
             return;
         }
         const phone = branchForm.phone.trim();
         if (!phone) {
-            toast.error("Укажите phone филиала");
+            reportValidationError("Укажите phone филиала");
             return;
         }
         patchBranchMutation.mutate(
@@ -2106,12 +2134,12 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
     const handleSaveTelegram = () => {
         if (!branchData?.id) {
-            toast.error("Сначала создайте филиал");
+            reportValidationError("Сначала создайте филиал");
             return;
         }
         const chatId = branchForm.telegramChatId.trim();
         if (!chatId) {
-            toast.error("Укажите telegram_chat_id");
+            reportValidationError("Укажите telegram_chat_id");
             return;
         }
         patchBranchMutation.mutate({
@@ -2121,12 +2149,12 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
     const handleSaveKnowledge = () => {
         if (!branchData?.id) {
-            toast.error("Сначала создайте филиал");
+            reportValidationError("Сначала создайте филиал");
             return;
         }
         const tag = branchForm.knowledgeTag.trim();
         if (!tag) {
-            toast.error("Укажите knowledge_tag");
+            reportValidationError("Укажите knowledge_tag");
             return;
         }
         patchBranchMutation.mutate({
@@ -2136,17 +2164,17 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
     const handleSaveBooking = () => {
         if (!branchData?.id) {
-            toast.error("Сначала создайте филиал");
+            reportValidationError("Сначала создайте филиал");
             return;
         }
         const workingHours = parseOptionalJson(branchForm.workingHours, "working_hours");
         if (workingHours.error) {
-            toast.error(workingHours.error);
+            reportValidationError(workingHours.error);
             return;
         }
         const bookingSettings = parseOptionalJson(branchForm.bookingSettings, "booking_settings");
         if (bookingSettings.error) {
-            toast.error(bookingSettings.error);
+            reportValidationError(bookingSettings.error);
             return;
         }
         let workingPayload = workingHours.value;
@@ -2156,7 +2184,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         if (!workingPayload) {
             const built = buildWorkingHoursPayload();
             if (built.error) {
-                toast.error(built.error);
+                reportValidationError(built.error);
                 return;
             }
             workingPayload = built.value;
@@ -2167,7 +2195,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         if (!bookingPayload) {
             const built = buildBookingSettingsPayload();
             if (built.error) {
-                toast.error(built.error);
+                reportValidationError(built.error);
                 return;
             }
             bookingPayload = built.value;
@@ -2176,7 +2204,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             }
         }
         if (!workingPayload && !bookingPayload) {
-            toast.error("Заполните working_hours или booking_settings");
+            reportValidationError("Заполните working_hours или booking_settings");
             return;
         }
         if (nextWorkingJson || nextBookingJson) {
@@ -2194,7 +2222,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
     const handleCreateAgent = () => {
         if (!clientId) {
-            toast.error("Укажите client_id");
+            reportValidationError("Укажите client_id");
             return;
         }
         const roleValue = agentForm.role;
@@ -2207,7 +2235,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         if (roleValue === "manager" || roleValue === "specialist") {
             const branchId = agentForm.branchId || branchData?.id;
             if (!branchId) {
-                toast.error("branch_id обязателен для manager/specialist");
+                reportValidationError("branch_id обязателен для manager/specialist");
                 return;
             }
             payload.branch_id = branchId;
@@ -2217,7 +2245,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
     const handleSaveCapabilities = () => {
         if (!branchData?.id || !clientId) {
-            toast.error("Нужны client_id и branch_id");
+            reportValidationError("Нужны client_id и branch_id");
             return;
         }
         const sanitized = normalizeCapabilities(capabilitiesDraft);
@@ -2231,26 +2259,26 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
     const handleSaveOnboardingContract = () => {
         if (!branchData?.id || !clientId) {
-            toast.error("Нужны client_id и branch_id");
+            reportValidationError("Нужны client_id и branch_id");
             return;
         }
         const builtPurchased = buildPurchasedPayload();
         if (builtPurchased.error || !builtPurchased.value) {
-            toast.error(builtPurchased.error ?? "purchased: добавьте данные");
+            reportValidationError(builtPurchased.error ?? "purchased: добавьте данные");
             return;
         }
         let purchasedPayload = builtPurchased.value;
         if (purchasedJsonDirty) {
             const parsedPurchased = parseOptionalJson(purchasedJsonDraft, "purchased");
             if (parsedPurchased.error) {
-                toast.error(parsedPurchased.error);
+                reportValidationError(parsedPurchased.error);
                 return;
             }
             if (parsedPurchased.value) {
                 const normalizedFromJson = normalizeCapabilities(parsedPurchased.value as CapabilitiesPayload);
                 const validationError = validatePurchasedPayload(normalizedFromJson);
                 if (validationError) {
-                    toast.error(validationError);
+                    reportValidationError(validationError);
                     return;
                 }
                 purchasedPayload = normalizedFromJson;
@@ -2294,12 +2322,12 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
     const handleUpsertReferencePack = () => {
         if (!canManageReferencePacks) {
-            toast.error("Только platform_admin может управлять reference packs");
+            reportValidationError("Только platform_admin может управлять reference packs");
             return;
         }
         const domainSlug = referencePackDomainSlug.trim();
         if (!domainSlug) {
-            toast.error("Укажите domain_slug");
+            reportValidationError("Укажите domain_slug");
             return;
         }
         const title = referencePackTitle.trim() || `Reference pack: ${domainSlug}`;
@@ -2410,6 +2438,29 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 <div className="mt-6 rounded-xl border border-border/60 bg-muted/40 p-4 text-sm text-muted-foreground">
                     Provisioning доступен только для owner/admin/platform admin.
                 </div>
+            )}
+
+            {inlineErrors.length > 0 && (
+                <section className="mt-6 rounded-xl border border-red-300/60 bg-red-50 p-4" data-testid="provisioning-error-summary">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="text-sm font-semibold text-red-900">Ошибки последних операций</h3>
+                        <button type="button" className="btn-ghost" onClick={clearErrors}>
+                            Очистить
+                        </button>
+                    </div>
+                    <div className="mt-2 space-y-2">
+                        {inlineErrors.map((error) => (
+                            <div key={error.id} className="rounded-lg border border-red-200/80 bg-background/90 p-3 text-xs">
+                                <div className="font-mono text-red-900">{error.code}</div>
+                                <div className="mt-1 text-foreground">{error.message}</div>
+                                <div className="mt-1 text-muted-foreground">
+                                    {new Date(error.capturedAt).toLocaleString("ru-RU")}
+                                    {error.traceId ? ` · trace: ${error.traceId}` : ""}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </section>
             )}
 
             <div className="mt-6 rounded-xl border border-border/60 bg-card p-4">
@@ -3263,7 +3314,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                             className="btn-ghost"
                             onClick={() => {
                                 if (!branchData?.id) {
-                                    toast.error("Сначала создайте филиал");
+                                    reportValidationError("Сначала создайте филиал");
                                     return;
                                 }
                                 getWebhookSecretMutation.mutate({ branchId: branchData.id });

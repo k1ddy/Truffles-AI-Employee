@@ -8,7 +8,9 @@ import toast from "react-hot-toast";
 import type { components } from "@/types/api.generated";
 import AccessDenied from "@/components/AccessDenied";
 import ProvisioningWizard from "@/components/ProvisioningWizard";
+import TenantsActionQueuePanel, { type TenantsActionQueueItem } from "@/components/TenantsActionQueuePanel";
 import { adminApi, auditApi, authApi, canAccessConsole, confirmationsApi, opsApi } from "@/lib/api-client";
+import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
 import {
     setConsoleBranchContext,
     setConsoleClientContext,
@@ -127,15 +129,8 @@ type ActionQueueIntent =
     | "workspace_decommission"
     | "none";
 
-type ActionQueueItem = {
-    id: string;
-    priority: FleetAttentionLevel;
-    title: string;
-    detail: string;
+type ActionQueueItem = TenantsActionQueueItem & {
     intent: ActionQueueIntent;
-    actionLabel: string;
-    clientId?: string;
-    companyId?: string | null;
 };
 type OperationalKpiId =
     | "onboardingCoverage"
@@ -303,16 +298,6 @@ function attentionLevelClass(level?: FleetAttentionLevel): string {
         return "bg-amber-100 text-amber-700";
     }
     return "bg-blue-100 text-blue-700";
-}
-
-function priorityLabel(level: FleetAttentionLevel): string {
-    if (level === "high") {
-        return "критично";
-    }
-    if (level === "medium") {
-        return "важно";
-    }
-    return "планово";
 }
 
 const FLEET_LIFECYCLE_LABELS: Record<string, string> = {
@@ -882,28 +867,19 @@ export default function TenantsPage() {
     const branchQueryValue = branchQuery.trim() || undefined;
 
     useEffect(() => {
-        if (typeof window === "undefined") {
-            return;
-        }
-        setClientLifecycleAuditById(safeParseLifecycleAuditMap(window.localStorage.getItem(LIFECYCLE_AUDIT_STORAGE_KEY)));
-        setWeeklySnapshots(safeParseWeeklySnapshots(window.localStorage.getItem(WEEKLY_SNAPSHOT_STORAGE_KEY)));
+        setClientLifecycleAuditById(safeParseLifecycleAuditMap(readBrowserStorage(LIFECYCLE_AUDIT_STORAGE_KEY)));
+        setWeeklySnapshots(safeParseWeeklySnapshots(readBrowserStorage(WEEKLY_SNAPSHOT_STORAGE_KEY)));
     }, []);
 
     useEffect(() => {
-        if (typeof window === "undefined") {
-            return;
-        }
-        window.localStorage.setItem(
+        writeBrowserStorage(
             LIFECYCLE_AUDIT_STORAGE_KEY,
             JSON.stringify(clientLifecycleAuditById),
         );
     }, [clientLifecycleAuditById]);
 
     useEffect(() => {
-        if (typeof window === "undefined") {
-            return;
-        }
-        window.localStorage.setItem(
+        writeBrowserStorage(
             WEEKLY_SNAPSHOT_STORAGE_KEY,
             JSON.stringify(weeklySnapshots.slice(0, MAX_WEEKLY_SNAPSHOTS)),
         );
@@ -2331,62 +2307,17 @@ export default function TenantsPage() {
                         </div>
                     </section>
                 ) : null}
-                <section className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-action-queue">
-                    <div className="flex items-start justify-between gap-3">
-                        <div>
-                            <h2 className="text-sm font-semibold">Action Queue</h2>
-                            <p className="text-xs text-muted-foreground">
-                                Приоритетные действия для текущего среза активных тенантов.
-                            </p>
-                        </div>
-                        <button
-                            className="btn-ghost"
-                            onClick={() => {
-                                fleetAttentionQuery.refetch();
-                                recentBranchChangesKpiQuery.refetch();
-                                clientsQuery.refetch();
-                            }}
-                            disabled={fleetAttentionQuery.isFetching || recentBranchChangesKpiQuery.isFetching || clientsQuery.isFetching}
-                        >
-                            Обновить
-                        </button>
-                    </div>
-                    <div className="mt-3 grid gap-2">
-                        {actionQueue.map((item) => (
-                            <div
-                                key={item.id}
-                                className="rounded-lg border border-border/60 bg-background px-3 py-2"
-                                data-testid="tenants-action-queue-item"
-                            >
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <div className="text-xs font-medium">{item.title}</div>
-                                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${attentionLevelClass(item.priority)}`}>
-                                        {priorityLabel(item.priority)}
-                                    </span>
-                                </div>
-                                <div className="mt-1 text-xs text-muted-foreground">{item.detail}</div>
-                                <div className="mt-2 flex flex-wrap items-center gap-2">
-                                    <button
-                                        className="btn-ghost"
-                                        onClick={() => runActionQueueIntent(item)}
-                                        data-testid="tenants-action-queue-run"
-                                    >
-                                        {item.actionLabel}
-                                    </button>
-                                    {item.clientId ? (
-                                        <button
-                                            className="btn-ghost"
-                                            onClick={() => setClientContext(item.clientId, item.companyId)}
-                                            data-testid="tenants-action-queue-context"
-                                        >
-                                            В контекст клиента
-                                        </button>
-                                    ) : null}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </section>
+                <TenantsActionQueuePanel
+                    items={actionQueue}
+                    refreshing={fleetAttentionQuery.isFetching || recentBranchChangesKpiQuery.isFetching || clientsQuery.isFetching}
+                    onRefresh={() => {
+                        fleetAttentionQuery.refetch();
+                        recentBranchChangesKpiQuery.refetch();
+                        clientsQuery.refetch();
+                    }}
+                    onRunIntent={runActionQueueIntent}
+                    onSetClientContext={setClientContext}
+                />
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                     <span className="text-xs text-muted-foreground">Режим списка:</span>
                     <button

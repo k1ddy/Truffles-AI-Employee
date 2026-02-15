@@ -12,6 +12,12 @@ export type InlineErrorSummaryItem = {
     capturedAt: string;
 };
 
+export type InlineErrorInput = {
+    code?: string;
+    message: string;
+    traceId?: string;
+};
+
 type ParsedErrorShape = {
     code?: string;
     message?: string;
@@ -27,14 +33,13 @@ export function useInlineErrorSummary(limit = 8) {
         handleErrorRef.current = handleError;
     }, [handleError]);
 
-    const reportError = useCallback((error: unknown): ParsedErrorShape => {
-        const parsed = handleErrorRef.current(error) as ParsedErrorShape;
+    const appendError = useCallback((input: InlineErrorInput): InlineErrorSummaryItem => {
         const capturedAt = new Date().toISOString();
         const next: InlineErrorSummaryItem = {
             id: `${capturedAt}:${Math.random().toString(36).slice(2, 8)}`,
-            code: parsed?.code ?? "UNKNOWN_ERROR",
-            message: parsed?.message ?? "Unexpected error",
-            traceId: parsed?.trace_id ?? "",
+            code: input.code ?? "UNKNOWN_ERROR",
+            message: input.message,
+            traceId: input.traceId ?? "",
             capturedAt,
         };
         setErrors((previous) => {
@@ -46,8 +51,26 @@ export function useInlineErrorSummary(limit = 8) {
             );
             return [next, ...deduped].slice(0, limit);
         });
-        return parsed;
+        return next;
     }, [limit]);
+
+    const reportError = useCallback((error: unknown): ParsedErrorShape => {
+        const parsed = handleErrorRef.current(error) as ParsedErrorShape;
+        appendError({
+            code: parsed?.code ?? "UNKNOWN_ERROR",
+            message: parsed?.message ?? "Unexpected error",
+            traceId: parsed?.trace_id ?? "",
+        });
+        return parsed;
+    }, [appendError]);
+
+    const reportInlineError = useCallback((input: InlineErrorInput) => {
+        appendError({
+            code: input.code ?? "VALIDATION_ERROR",
+            message: input.message,
+            traceId: input.traceId ?? "",
+        });
+    }, [appendError]);
 
     const clearErrors = useCallback(() => {
         setErrors([]);
@@ -56,6 +79,7 @@ export function useInlineErrorSummary(limit = 8) {
     return {
         errors,
         reportError,
+        reportInlineError,
         clearErrors,
     };
 }
