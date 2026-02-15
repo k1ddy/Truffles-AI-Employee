@@ -4039,6 +4039,7 @@ def _llm_quality_build_replay_command(args, scenarios_path, count):
 def _llm_quality_write_brief(path, summary):
     metrics = (summary or {}).get("metrics") or {}
     rates = metrics.get("rates") or {}
+    stages = metrics.get("stages") or {}
     counts = metrics.get("counts") or {}
     top_failures = (summary or {}).get("top_failures") or []
     stop_reason = (summary or {}).get("stop_reason")
@@ -4056,6 +4057,11 @@ def _llm_quality_write_brief(path, summary):
         f"- hard_fail_turns: `{counts.get('turns_hard_failed')}`",
         f"- expected_reply_rate: `{rates.get('expected_reply_rate')}`",
         f"- booking_slot_progress_rate: `{rates.get('booking_slot_progress_rate')}`",
+        f"- controller_attempt_rate: `{(stages.get('controller') or {}).get('attempt_rate')}`",
+        f"- tool_selection_ok_rate: `{(stages.get('tool_selection') or {}).get('ok_rate')}`",
+        f"- tool_args_valid_rate: `{(stages.get('tool_args') or {}).get('valid_rate')}`",
+        f"- state_transition_pass_rate: `{(stages.get('state_transition') or {}).get('pass_rate')}`",
+        f"- response_contract_pass_rate: `{(stages.get('response_contract') or {}).get('pass_rate')}`",
         f"- scenario_source: `{scenario_source.get('type')}`",
         f"- scenarios_path: `{summary.get('scenarios_path')}`",
         f"- responses_path: `{summary.get('responses_path')}`",
@@ -8181,6 +8187,26 @@ def _run_llm_quality(args):
         "progressed": 0,
         "filled_slots_total": 0,
     }
+    stage_stats = {
+        "controller": {
+            "opportunities": 0,
+            "attempted": 0,
+            "skipped": 0,
+            "skip_reasons": {},
+        },
+        "tool_selection": {
+            "selected": 0,
+            "ok": 0,
+            "blocked": 0,
+            "invalid": 0,
+        },
+        "tool_args": {
+            "checked": 0,
+            "valid": 0,
+            "invalid": 0,
+            "invalid_reasons": {},
+        },
+    }
     booking_progress = {}
     coverage_stats = {
         "turn_tags": {},
@@ -8944,6 +8970,51 @@ def _run_llm_quality(args):
 
                 _bump_state(state, expected_response, bot_response)
 
+                if isinstance(meta, dict):
+                    controller_stats = stage_stats["controller"]
+                    if expected_response:
+                        controller_stats["opportunities"] += 1
+                        if meta.get("controller_attempted") is True:
+                            controller_stats["attempted"] += 1
+                        else:
+                            controller_stats["skipped"] += 1
+                            skip_reason = (
+                                _llm_quality_normalize_tool_token(meta.get("controller_skipped_reason"))
+                                or _llm_quality_normalize_tool_token(meta.get("router_skipped_reason"))
+                                or "not_attempted"
+                            )
+                            skip_reasons = controller_stats.setdefault("skip_reasons", {})
+                            skip_reasons[skip_reason] = skip_reasons.get(skip_reason, 0) + 1
+
+                    tool_action_token = _llm_quality_normalize_tool_token(meta.get("tool_action"))
+                    if tool_action_token and "." in tool_action_token:
+                        selection_stats = stage_stats["tool_selection"]
+                        args_stats = stage_stats["tool_args"]
+                        selection_stats["selected"] += 1
+                        tool_decision_token = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+                        if tool_decision_token == "capability_blocked":
+                            selection_stats["blocked"] += 1
+                        elif tool_decision_token in {"invalid", "invalid_args"}:
+                            selection_stats["invalid"] += 1
+                        else:
+                            selection_stats["ok"] += 1
+
+                        if bool(meta.get("tool_args_checked")):
+                            args_stats["checked"] += 1
+                            args_contract = _llm_quality_normalize_tool_token(
+                                meta.get("tool_args_contract")
+                            )
+                            if args_contract == "invalid":
+                                args_stats["invalid"] += 1
+                                args_error = (
+                                    _llm_quality_normalize_tool_token(meta.get("tool_args_error"))
+                                    or "unknown"
+                                )
+                                invalid_reasons = args_stats.setdefault("invalid_reasons", {})
+                                invalid_reasons[args_error] = invalid_reasons.get(args_error, 0) + 1
+                            else:
+                                args_stats["valid"] += 1
+
                 turn_tags = _llm_quality_extract_turn_tags(turn)
                 for tag in turn_tags:
                     coverage_stats["turn_tags"][tag] = coverage_stats["turn_tags"].get(tag, 0) + 1
@@ -9564,6 +9635,101 @@ def _run_llm_quality(args):
             stats["policy_core_degraded_turns"] / max(stats["policy_core_turns"], 1),
             4,
         )
+    controller_stage = stage_stats.get("controller") or {}
+    tool_selection_stage = stage_stats.get("tool_selection") or {}
+    tool_args_stage = stage_stats.get("tool_args") or {}
+    state_transition_checks = manager_stats.get("actions_total", 0)
+    state_transition_passed = manager_stats.get("actions_ok", 0)
+    state_transition_failed = max(state_transition_checks - state_transition_passed, 0)
+    response_contract_checks = stats.get("turns_expected_response", 0)
+    response_contract_passed = max(
+        response_contract_checks - stats.get("turns_expected_missing", 0), 0
+    )
+    response_contract_failed = max(response_contract_checks - response_contract_passed, 0)
+    strict_contract_checks = stats.get("turns", 0)
+    strict_contract_passed = stats.get("turns_strict_passed", 0)
+    strict_contract_failed = stats.get("turns_strict_failed", 0)
+    metrics["stages"] = {
+        "controller": {
+            "opportunities": controller_stage.get("opportunities", 0),
+            "attempted": controller_stage.get("attempted", 0),
+            "skipped": controller_stage.get("skipped", 0),
+            "skip_reasons": controller_stage.get("skip_reasons", {}),
+            "attempt_rate": round(
+                controller_stage.get("attempted", 0)
+                / max(controller_stage.get("opportunities", 1), 1),
+                4,
+            )
+            if controller_stage.get("opportunities", 0)
+            else None,
+            "skip_rate": round(
+                controller_stage.get("skipped", 0)
+                / max(controller_stage.get("opportunities", 1), 1),
+                4,
+            )
+            if controller_stage.get("opportunities", 0)
+            else None,
+        },
+        "tool_selection": {
+            "selected": tool_selection_stage.get("selected", 0),
+            "ok": tool_selection_stage.get("ok", 0),
+            "blocked": tool_selection_stage.get("blocked", 0),
+            "invalid": tool_selection_stage.get("invalid", 0),
+            "ok_rate": round(
+                tool_selection_stage.get("ok", 0)
+                / max(tool_selection_stage.get("selected", 1), 1),
+                4,
+            )
+            if tool_selection_stage.get("selected", 0)
+            else None,
+        },
+        "tool_args": {
+            "checked": tool_args_stage.get("checked", 0),
+            "valid": tool_args_stage.get("valid", 0),
+            "invalid": tool_args_stage.get("invalid", 0),
+            "invalid_reasons": tool_args_stage.get("invalid_reasons", {}),
+            "valid_rate": round(
+                tool_args_stage.get("valid", 0)
+                / max(tool_args_stage.get("checked", 1), 1),
+                4,
+            )
+            if tool_args_stage.get("checked", 0)
+            else None,
+        },
+        "state_transition": {
+            "checks": state_transition_checks,
+            "passed": state_transition_passed,
+            "failed": state_transition_failed,
+            "pass_rate": round(
+                state_transition_passed / max(state_transition_checks, 1),
+                4,
+            )
+            if state_transition_checks
+            else None,
+        },
+        "response_contract": {
+            "checks": response_contract_checks,
+            "passed": response_contract_passed,
+            "failed": response_contract_failed,
+            "pass_rate": round(
+                response_contract_passed / max(response_contract_checks, 1),
+                4,
+            )
+            if response_contract_checks
+            else None,
+        },
+        "strict_contract": {
+            "checks": strict_contract_checks,
+            "passed": strict_contract_passed,
+            "failed": strict_contract_failed,
+            "pass_rate": round(
+                strict_contract_passed / max(strict_contract_checks, 1),
+                4,
+            )
+            if strict_contract_checks
+            else None,
+        },
+    }
 
     baseline_path = os.path.join(_llm_quality_repo_root(), "ops", "results", "booking_quality.json")
     baseline_source = baseline_path
