@@ -18,11 +18,9 @@ import {
     type ProviderOpsQueueItem,
 } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
+import { useConsoleContextScope } from "@/lib/use-console-context-scope";
 import type { components } from "@/types/api.generated";
 
-const COMPANY_ID_STORAGE_KEY = "console:company_id";
-const CLIENT_ID_STORAGE_KEY = "console:client_id";
-const BRANCH_ID_STORAGE_KEY = "console:branch_id";
 const WORKSPACE_RECOMMENDED_ACTION_KEY = "console:workspace_recommended_action";
 
 const STALE_AFTER_OPTIONS = [15, 30, 60, 180] as const;
@@ -105,13 +103,6 @@ function mergeMembershipStats(...items: Array<MembershipStats | undefined>): Mem
         merged.support += item.support;
     }
     return merged;
-}
-
-function readLocalStorageValue(key: string): string | null {
-    if (typeof window === "undefined") {
-        return null;
-    }
-    return window.localStorage.getItem(key);
 }
 
 function setLocalStorageValue(key: string, value?: string | null) {
@@ -456,10 +447,6 @@ export default function IntegrationsPage() {
     const { handleError } = useErrorHandler();
 
     const [staleAfterMinutes, setStaleAfterMinutes] = useState(60);
-    const [scopeCompanyId, setScopeCompanyId] = useState("");
-    const [scopeClientId, setScopeClientId] = useState("");
-    const [scopeBranchId, setScopeBranchId] = useState("");
-    const [scopeInitialized, setScopeInitialized] = useState(false);
 
     const [searchText, setSearchText] = useState("");
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -488,22 +475,21 @@ export default function IntegrationsPage() {
         },
         enabled: !!session,
     });
+    const {
+        scope,
+        setCompanyId: setScopeCompanyId,
+        setClientId: setScopeClientId,
+        setBranchId: setScopeBranchId,
+        syncFromRuntime,
+        updateScope,
+        persistScopeToStorage,
+    } = useConsoleContextScope(meData);
+    const scopeCompanyId = scope.companyId;
+    const scopeClientId = scope.clientId;
+    const scopeBranchId = scope.branchId;
 
     const role = meData?.agent?.role ?? "manager";
     const canReadIntegrations = canAccessConsole(role, "integrations", "read");
-
-    useEffect(() => {
-        if (!meData || scopeInitialized) {
-            return;
-        }
-        const storedCompanyId = readLocalStorageValue(COMPANY_ID_STORAGE_KEY);
-        const storedClientId = readLocalStorageValue(CLIENT_ID_STORAGE_KEY);
-        const storedBranchId = readLocalStorageValue(BRANCH_ID_STORAGE_KEY);
-        setScopeCompanyId(meData.selected_company_id ?? meData.client?.company_id ?? storedCompanyId ?? "");
-        setScopeClientId(meData.client?.id ?? storedClientId ?? "");
-        setScopeBranchId(meData.selected_branch_id ?? storedBranchId ?? "");
-        setScopeInitialized(true);
-    }, [meData, scopeInitialized]);
 
     const {
         data: companiesData,
@@ -704,7 +690,7 @@ export default function IntegrationsPage() {
         }
         setScopeClientId("");
         setScopeBranchId("");
-    }, [clientOptions, scopeClientId]);
+    }, [clientOptions, scopeClientId, setScopeBranchId, setScopeClientId]);
 
     useEffect(() => {
         if (!scopeBranchId) {
@@ -714,7 +700,7 @@ export default function IntegrationsPage() {
             return;
         }
         setScopeBranchId("");
-    }, [branchOptions, scopeBranchId]);
+    }, [branchOptions, scopeBranchId, setScopeBranchId]);
 
     const companyOptions = useMemo<Company[]>(() => {
         const fromMe = meData?.companies ?? [];
@@ -997,32 +983,30 @@ export default function IntegrationsPage() {
     const scopeDataTruncated = Boolean(companiesData?.has_more || clientsData?.has_more || branchesData?.has_more);
 
     const syncScopeFromContext = () => {
-        const storedCompanyId = readLocalStorageValue(COMPANY_ID_STORAGE_KEY);
-        const storedClientId = readLocalStorageValue(CLIENT_ID_STORAGE_KEY);
-        const storedBranchId = readLocalStorageValue(BRANCH_ID_STORAGE_KEY);
-        setScopeCompanyId(meData?.selected_company_id ?? meData?.client?.company_id ?? storedCompanyId ?? "");
-        setScopeClientId(meData?.client?.id ?? storedClientId ?? "");
-        setScopeBranchId(meData?.selected_branch_id ?? storedBranchId ?? "");
+        syncFromRuntime();
     };
 
     const persistScopeAsContext = () => {
-        setLocalStorageValue(COMPANY_ID_STORAGE_KEY, scopeCompanyId || null);
-        setLocalStorageValue(CLIENT_ID_STORAGE_KEY, scopeClientId || null);
-        setLocalStorageValue(BRANCH_ID_STORAGE_KEY, scopeBranchId || null);
+        persistScopeToStorage();
         toast.success("Контекст сохранен");
     };
 
     const persistScopeAndOpenWorkspace = (target: ScopeTarget, note?: string) => {
         const normalizedClient = target.clientId ? String(target.clientId) : "";
         const normalizedBranch = target.branchId ? String(target.branchId) : "";
-        const fallbackCompany = readLocalStorageValue(COMPANY_ID_STORAGE_KEY) ?? "";
         const normalizedCompany = target.companyId
             ? String(target.companyId)
-            : (normalizedClient ? clientCompanyMap.get(normalizedClient) : undefined) ?? scopeCompanyId ?? fallbackCompany;
-
-        setLocalStorageValue(COMPANY_ID_STORAGE_KEY, normalizedCompany || null);
-        setLocalStorageValue(CLIENT_ID_STORAGE_KEY, normalizedClient || null);
-        setLocalStorageValue(BRANCH_ID_STORAGE_KEY, normalizedBranch || null);
+            : (normalizedClient ? clientCompanyMap.get(normalizedClient) : undefined) ?? scopeCompanyId;
+        updateScope({
+            companyId: normalizedCompany,
+            clientId: normalizedClient,
+            branchId: normalizedBranch,
+        });
+        persistScopeToStorage({
+            companyId: normalizedCompany,
+            clientId: normalizedClient,
+            branchId: normalizedBranch,
+        });
 
         if (note) {
             toast.success(note);
