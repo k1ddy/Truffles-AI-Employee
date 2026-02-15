@@ -1456,6 +1456,7 @@ def _handle_booking_interrupt(
     saved_message: Message | None,
     client_slug: str | None,
     routing: dict,
+    has_media: bool,
     bypass_domain_flows: bool,
     booking_wants_flow: bool,
     consult_intent: bool | None,
@@ -2365,6 +2366,15 @@ def _handle_booking_interrupt(
                 )
 
                 bot_response = legacy._combine_sidecar(prompt or "", info_decision.response or "")
+                style_reference_signal = bool(
+                    message_text
+                    and legacy._is_style_reference_request(message_text, has_media=has_media)
+                )
+                if style_reference_signal and not has_media:
+                    bot_response = legacy._combine_sidecar(
+                        legacy.MSG_STYLE_REFERENCE_NEED_MEDIA,
+                        bot_response,
+                    )
                 bot_response = bot_response.strip()
                 if consult_return_pending:
                     bot_response = legacy._apply_consult_return(
