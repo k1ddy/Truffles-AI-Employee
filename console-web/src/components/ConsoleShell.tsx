@@ -89,6 +89,10 @@ const NAV_ITEMS: NavItem[] = [
     { label: "Статус", href: "/ops", section: "ops", action: "read", testId: "nav-ops" },
     { label: "Журнал", href: "/audit", section: "audit", action: "read", testId: "nav-audit" },
     { label: "Аналитика", href: "/insights", section: "insights", action: "read", testId: "nav-insights" },
+    { label: "Бизнес", href: "/business", section: "business", action: "read", testId: "nav-business" },
+    { label: "Данные", href: "/business/data-trust", section: "business", action: "read", testId: "nav-data-trust" },
+    { label: "Команда KPI", href: "/business/team-performance", section: "business", action: "read", testId: "nav-team-performance" },
+    { label: "Подписка", href: "/subscription", section: "subscription", action: "read", testId: "nav-subscription" },
     { label: "Настройки", href: "/settings", section: "settings", action: "read", testId: "nav-settings" },
 ];
 
@@ -183,6 +187,21 @@ const NAV_ICONS: Partial<Record<ConsoleSection, ReactNode>> = {
             <path d="M17 16v-3" />
         </NavIcon>
     ),
+    business: (
+        <NavIcon>
+            <path d="M4 20h16" />
+            <rect x="5" y="11" width="4" height="7" rx="1" />
+            <rect x="10" y="8" width="4" height="10" rx="1" />
+            <rect x="15" y="5" width="4" height="13" rx="1" />
+        </NavIcon>
+    ),
+    subscription: (
+        <NavIcon>
+            <circle cx="12" cy="12" r="8" />
+            <path d="M9.5 9.5c.4-1 1.4-1.6 2.6-1.6 1.5 0 2.7.9 2.7 2.1 0 1.1-.9 1.7-2.2 2.1l-1 .3c-1.1.3-1.6.7-1.6 1.5 0 1 1 1.8 2.5 1.8 1.3 0 2.2-.5 2.8-1.4" />
+            <path d="M12 6.5v11" />
+        </NavIcon>
+    ),
     settings: (
         <NavIcon>
             <circle cx="12" cy="12" r="3" />
@@ -236,11 +255,16 @@ function formatRelativeAgeLabel(timestampMs: number): string {
     return `обновлено ${elapsedMinutes} минут назад`;
 }
 
-function deriveHealthIncident(health?: HealthResponse | null, updatedAtMs?: number): HealthIncident | null {
+function deriveHealthIncident(
+    health?: HealthResponse | null,
+    updatedAtMs?: number,
+    options?: { ownerAdminView?: boolean },
+): HealthIncident | null {
     if (!health) {
         return null;
     }
 
+    const ownerAdminView = options?.ownerAdminView ?? false;
     const status = health.status ?? "healthy";
     const backlog = health.outbox_backlog ?? 0;
     const reasons: string[] = [];
@@ -255,12 +279,20 @@ function deriveHealthIncident(health?: HealthResponse | null, updatedAtMs?: numb
     }
 
     if (status === "unhealthy" || status === "degraded") {
-        reasons.push(`health.status=${status}`);
+        reasons.push(ownerAdminView ? `Статус сервиса: ${status}` : `health.status=${status}`);
     }
     if (backlog >= HEALTH_INCIDENT_CRITICAL_BACKLOG) {
-        reasons.push(`outbox_backlog=${backlog} (>= ${HEALTH_INCIDENT_CRITICAL_BACKLOG})`);
+        reasons.push(
+            ownerAdminView
+                ? `Очередь отправки: ${backlog} (критично)`
+                : `outbox_backlog=${backlog} (>= ${HEALTH_INCIDENT_CRITICAL_BACKLOG})`,
+        );
     } else if (backlog >= HEALTH_INCIDENT_WARN_BACKLOG) {
-        reasons.push(`outbox_backlog=${backlog} (>= ${HEALTH_INCIDENT_WARN_BACKLOG})`);
+        reasons.push(
+            ownerAdminView
+                ? `Очередь отправки: ${backlog} (повышенный риск)`
+                : `outbox_backlog=${backlog} (>= ${HEALTH_INCIDENT_WARN_BACKLOG})`,
+        );
     }
 
     const updatedAgeLabel = formatRelativeAgeLabel(updatedAtMs ?? 0);
@@ -268,7 +300,11 @@ function deriveHealthIncident(health?: HealthResponse | null, updatedAtMs?: numb
         ? Math.floor((Date.now() - (updatedAtMs ?? 0)) / 60000)
         : null;
     if (staleMinutes !== null && staleMinutes >= HEALTH_INCIDENT_STALE_WARN_MINUTES) {
-        reasons.push(`telemetry stale=${staleMinutes}m`);
+        reasons.push(
+            ownerAdminView
+                ? `Данные обновлялись давно: ${staleMinutes} мин назад`
+                : `telemetry stale=${staleMinutes}m`,
+        );
         if (!severity) {
             severity = "warn";
         }
@@ -282,22 +318,42 @@ function deriveHealthIncident(health?: HealthResponse | null, updatedAtMs?: numb
         reasons.push(`status=${status}, outbox_backlog=${backlog}`);
     }
 
-    const runbook = severity === "critical"
-        ? [
-            "P0 triage: откройте OPS и разберите failed/pending outbox.",
-            "Если backlog растёт, проверьте provider lifecycle и выполните rebind/remediation в Workspace.",
-            "После действий обновите health и зафиксируйте trace/audit evidence.",
-        ]
-        : [
-            "Откройте OPS и проверьте динамику очереди за последние минуты.",
-            "Проверьте branch-лидеров по риску в Company Workspace.",
-            "Если риск растёт, поднимите инцидент до P0.",
-        ];
+    const runbook = ownerAdminView
+        ? severity === "critical"
+            ? [
+                "Откройте «Статус» и проверьте очередь отправки (failed/pending).",
+                "Проверьте, нет ли задержек ответов менеджеров по срочным заявкам.",
+                "После стабилизации обновите health и убедитесь, что риск снят.",
+            ]
+            : [
+                "Откройте «Статус» и проверьте динамику очереди за последние минуты.",
+                "Оцените, растёт ли число неразобранных заявок в Inbox.",
+                "Если показатели ухудшаются, эскалируйте инцидент до P0.",
+            ]
+        : severity === "critical"
+            ? [
+                "P0 triage: откройте OPS и разберите failed/pending outbox.",
+                "Если backlog растёт, проверьте provider lifecycle и выполните rebind/remediation в Workspace.",
+                "После действий обновите health и зафиксируйте trace/audit evidence.",
+            ]
+            : [
+                "Откройте OPS и проверьте динамику очереди за последние минуты.",
+                "Проверьте branch-лидеров по риску в Company Workspace.",
+                "Если риск растёт, поднимите инцидент до P0.",
+            ];
 
     return {
         severity,
-        title: severity === "critical" ? "Критичный инцидент платформы (P0)" : "Риск деградации платформы (P1)",
-        summary: `status=${status}, outbox_backlog=${backlog}`,
+        title: severity === "critical"
+            ? ownerAdminView
+                ? "Критичный риск для клиентских сообщений (P0)"
+                : "Критичный инцидент платформы (P0)"
+            : ownerAdminView
+                ? "Повышенный риск задержек сообщений (P1)"
+                : "Риск деградации платформы (P1)",
+        summary: ownerAdminView
+            ? `Статус сервиса: ${status} · очередь отправки: ${backlog}`
+            : `status=${status}, outbox_backlog=${backlog}`,
         reasons,
         runbook,
         updatedAtLabel: updatedAgeLabel,
@@ -618,6 +674,8 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
 
     const role = data?.agent?.role ?? "manager";
     const canReadOps = canAccessConsole(role, "ops", "read");
+    const canReadTenants = canAccessConsole(role, "tenants", "read");
+    const ownerAdminView = role === "owner" || role === "admin";
     const navItems = useMemo(
         () =>
             NAV_ITEMS.filter((item) => {
@@ -642,8 +700,8 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         staleTime: 10000,
     });
     const healthIncident = useMemo(
-        () => deriveHealthIncident(healthData ?? null, healthDataUpdatedAt),
-        [healthData, healthDataUpdatedAt],
+        () => deriveHealthIncident(healthData ?? null, healthDataUpdatedAt, { ownerAdminView }),
+        [healthData, healthDataUpdatedAt, ownerAdminView],
     );
     const healthIncidentClass = healthIncident?.severity === "critical"
         ? "border-red-300/80 bg-red-50 text-red-900"
@@ -1005,9 +1063,11 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                     <Link href="/ops" className="btn-ghost">
                                         Открыть OPS
                                     </Link>
-                                    <Link href="/company-workspace" className="btn-ghost">
-                                        Открыть Workspace
-                                    </Link>
+                                    {canReadTenants && (
+                                        <Link href="/company-workspace" className="btn-ghost">
+                                            Открыть Workspace
+                                        </Link>
+                                    )}
                                 </div>
                             </div>
                         )}

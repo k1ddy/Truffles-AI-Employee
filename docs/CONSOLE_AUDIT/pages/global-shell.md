@@ -11,6 +11,8 @@ Primary UI regions
 
 Navigation items (labels and routes)
 - Тенанты (`/tenants`)
+- Компании (`/company-workspace`)
+- Интеграции (`/integrations`)
 - Заявки (`/`)
 - Записи (`/calendar`)
 - Знания (`/knowledge`)
@@ -18,6 +20,8 @@ Navigation items (labels and routes)
 - Статус (`/ops`)
 - Журнал (`/audit`)
 - Аналитика (`/insights`)
+- Бизнес (`/business`)
+- Подписка (`/subscription`)
 - Настройки (`/settings`)
 
 Nav visibility rules
@@ -49,6 +53,14 @@ Session controls
 Content width
 - Inbox pages (`/` and `/cases/*`) use a wider max width (`max-w-[1440px]`).
 - Other pages use `max-w-6xl`.
+
+Global incident banner
+- Shell polls `/console/v1/health` (every 30s for roles with `ops:read`) and shows global incident banner when status/backlog thresholds are breached.
+- Owner/Admin get business-language copy in the banner; platform_admin keeps technical runbook-style copy.
+- Banner actions include:
+  - Refresh health,
+  - Open OPS,
+  - Open Workspace (only for roles with `tenants:read`).
 
 API / data interactions
 - `/console/v1/me` returns role + tenant context; enforced by `get_console_context` (`truffles-api/app/services/console_auth.py`).

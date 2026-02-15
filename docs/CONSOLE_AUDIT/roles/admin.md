@@ -12,6 +12,10 @@ Navigation (sidebar + mobile)
 - Статус (`/ops`)
 - Журнал (`/audit`)
 - Аналитика (`/insights`)
+- Бизнес (`/business`)
+- Данные (`/business/data-trust`)
+- Команда KPI (`/business/team-performance`)
+- Подписка (`/subscription`)
 - Настройки (`/settings`)
 
 Access summary (RBAC)
@@ -23,6 +27,10 @@ Access summary (RBAC)
 - Ops: read/write (outbox retry, telegram verify/test).
 - Audit: read-only.
 - Insights: read-only (daily metrics).
+- Business: read-only (owner/admin business summary + action queue).
+- Data Trust: read-only (quality completeness, knowledge freshness, critical audit pressure).
+- Team Performance: read-only (stale queue pressure, manager responsiveness, manager workload).
+- Subscription: read-only (quota/usage/projection + billable evidence).
 
 Selection gates
 - Context selection gates (company/client/branch) are enforced by `/console/v1/me` and surfaced in `ConsoleShell`.
@@ -40,6 +48,14 @@ Key UI actions
   - Telegram verify/test (client + branch scope).
 - Ops
   - Outbox retry (`POST /console/v1/ops/outbox/retry`).
+- Business
+  - Business summary (`GET /console/v1/business/summary`).
+- Data Trust
+  - Data trust summary (`GET /console/v1/business/data-trust`).
+- Team Performance
+  - Team performance summary (`GET /console/v1/business/team-performance`).
+- Subscription
+  - Subscription summary (`GET /console/v1/subscription/summary`).
 
 Code references
 - RBAC: `console-web/src/lib/api-client.ts`, `truffles-api/app/services/console_auth.py`.
