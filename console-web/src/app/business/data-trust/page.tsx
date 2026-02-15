@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 
 import AccessDenied from "@/components/AccessDenied";
-import { authApi, businessApi, canAccessConsole } from "@/lib/api-client";
+import { authApi, businessApi, canAccessConsole, type MetricFactMeta } from "@/lib/api-client";
 
 function formatNumber(value?: number | null): string {
     if (value === null || value === undefined || Number.isNaN(value)) {
@@ -42,6 +42,14 @@ function actionChipClass(severity: "critical" | "warn" | "info"): string {
         return "bg-amber-100 text-amber-800";
     }
     return "bg-slate-100 text-slate-700";
+}
+
+function formatMetricMeta(meta?: MetricFactMeta): string {
+    if (!meta) {
+        return "missing · source: n/a";
+    }
+    const asOf = meta.as_of ? ` · as_of: ${meta.as_of}` : "";
+    return `${meta.kind} · source: ${meta.source}${asOf}`;
 }
 
 export default function BusinessDataTrustPage() {
@@ -162,14 +170,17 @@ export default function BusinessDataTrustPage() {
                 <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
                     <p className="text-sm text-muted-foreground">Пробелы first response</p>
                     <p className="mt-1 text-2xl font-semibold text-foreground">{formatNumber(data.first_response_missing_total)}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.first_response_missing_total)}</p>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
                     <p className="text-sm text-muted-foreground">Пробелы escalation meta</p>
                     <p className="mt-1 text-2xl font-semibold text-foreground">{formatNumber(data.escalation_meta_missing_total)}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.escalation_meta_missing_total)}</p>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
                     <p className="text-sm text-muted-foreground">Пробелы intent</p>
                     <p className="mt-1 text-2xl font-semibold text-foreground">{formatNumber(data.intent_missing_total)}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.intent_missing_total)}</p>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
                     <p className="text-sm text-muted-foreground">Свежесть знаний</p>
@@ -177,6 +188,7 @@ export default function BusinessDataTrustPage() {
                     <p className="text-xs text-muted-foreground">
                         последняя публикация: {data.knowledge_last_published_at ? new Date(data.knowledge_last_published_at).toLocaleString("ru-RU") : "—"}
                     </p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.knowledge_stale_hours)}</p>
                 </div>
             </section>
 

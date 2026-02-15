@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 
 import AccessDenied from "@/components/AccessDenied";
-import { authApi, businessApi, canAccessConsole } from "@/lib/api-client";
+import { authApi, businessApi, canAccessConsole, type MetricFactMeta } from "@/lib/api-client";
 
 function formatMinutes(value?: number | null): string {
     if (value === null || value === undefined || Number.isNaN(value)) {
@@ -53,6 +53,14 @@ function actionChipClass(severity: "critical" | "warn" | "info"): string {
         return "bg-amber-100 text-amber-800";
     }
     return "bg-slate-100 text-slate-700";
+}
+
+function formatMetricMeta(meta?: MetricFactMeta): string {
+    if (!meta) {
+        return "missing · source: n/a";
+    }
+    const asOf = meta.as_of ? ` · as_of: ${meta.as_of}` : "";
+    return `${meta.kind} · source: ${meta.source}${asOf}`;
 }
 
 export default function BusinessPage() {
@@ -174,16 +182,19 @@ export default function BusinessPage() {
                     <p className="text-sm text-muted-foreground">Очередь отправки</p>
                     <p className="mt-1 text-2xl font-semibold text-foreground">{data.outbox_backlog}</p>
                     <p className="text-xs text-muted-foreground">failed за 24ч: {data.outbox_failed_24h}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.outbox_backlog)}</p>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
                     <p className="text-sm text-muted-foreground">Неразобранные заявки</p>
                     <p className="mt-1 text-2xl font-semibold text-foreground">{data.unresolved_cases}</p>
                     <p className="text-xs text-muted-foreground">pending: {data.pending_cases} · active: {data.active_cases}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.unresolved_cases)}</p>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
                     <p className="text-sm text-muted-foreground">Скорость ответа</p>
                     <p className="mt-1 text-2xl font-semibold text-foreground">{formatSeconds(data.first_response_p90_seconds)}</p>
                     <p className="text-xs text-muted-foreground">старейшая незавершенная: {formatMinutes(data.oldest_unresolved_minutes)}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.first_response_p90_seconds)}</p>
                 </div>
             </section>
 

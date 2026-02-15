@@ -596,8 +596,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/BusinessSummaryResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -617,8 +616,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/DataTrustSummaryResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -638,8 +636,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/TeamPerformanceSummaryResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -659,12 +656,119 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/SubscriptionSummaryResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /business/operations/owner-mode/preview:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    post:
+      operationId: previewOwnerModeOperation
+      tags: [ops]
+      summary: Preview owner operation mode before apply
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OwnerOperationApplyRequest"
+      responses:
+        "200":
+          description: Owner mode preview payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerOperationPreviewResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /business/operations/owner-mode/apply:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    post:
+      operationId: applyOwnerModeOperation
+      tags: [ops]
+      summary: Apply owner operation mode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OwnerOperationApplyRequest"
+      responses:
+        "200":
+          description: Owner mode apply result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerOperationApplyResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /business/operations/owner-mode/rollback:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    post:
+      operationId: rollbackOwnerModeOperation
+      tags: [ops]
+      summary: Rollback owner mode operation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OwnerOperationRollbackRequest"
+      responses:
+        "200":
+          description: Rollback result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerOperationRollbackResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /business/operations/{operation_id}/impact:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+      - name: operation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getOwnerModeOperationImpact
+      tags: [ops]
+      summary: Get impact for a previously applied owner mode operation
+      responses:
+        "200":
+          description: Owner mode impact snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerOperationImpactResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /telegram/health:
     parameters:
@@ -5292,9 +5396,470 @@ components:
           enum: [ok, error, connected]
         redis:
           type: string
-          enum: [ok, error, connected]
+          enum: [ok, error, connected, unknown]
         outbox_backlog:
           type: integer
+
+    MetricFactMeta:
+      type: object
+      required: [kind, source, scope]
+      properties:
+        kind:
+          type: string
+          enum: [fact, estimate, missing]
+        source:
+          type: string
+        as_of:
+          type: string
+          nullable: true
+        scope:
+          type: string
+          enum: [system, client, branch]
+        sample_size:
+          type: integer
+          nullable: true
+        note:
+          type: string
+          nullable: true
+
+    BusinessSummaryAction:
+      type: object
+      required: [id, title, description, href, severity]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        href:
+          type: string
+        severity:
+          type: string
+          enum: [critical, warn, info]
+
+    BusinessSummaryResponse:
+      type: object
+      required:
+        - generated_at
+        - status
+        - status_label
+        - outbox_backlog
+        - outbox_failed_24h
+        - pending_cases
+        - active_cases
+        - unresolved_cases
+        - actions
+        - metric_meta
+      properties:
+        generated_at:
+          type: string
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        status_label:
+          type: string
+        outbox_backlog:
+          type: integer
+        outbox_failed_24h:
+          type: integer
+        pending_cases:
+          type: integer
+        active_cases:
+          type: integer
+        unresolved_cases:
+          type: integer
+        oldest_unresolved_minutes:
+          type: integer
+          nullable: true
+        first_response_p90_seconds:
+          type: number
+          nullable: true
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/BusinessSummaryAction"
+        metric_meta:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/MetricFactMeta"
+
+    SubscriptionEvidenceItem:
+      type: object
+      required: [outbox_id, inbound_message_id, created_at, status]
+      properties:
+        outbox_id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+          nullable: true
+        inbound_message_id:
+          type: string
+        created_at:
+          type: string
+        status:
+          type: string
+        provider_status:
+          type: string
+          nullable: true
+        provider_message_id:
+          type: string
+          nullable: true
+
+    SubscriptionSummaryResponse:
+      type: object
+      required:
+        - generated_at
+        - period_start
+        - period_end
+        - next_billing_date
+        - quota_source
+        - billable_messages
+        - projected_over_quota
+        - quota_alert_level
+        - quota_alert_message
+        - overage_policy_message
+        - over_quota
+        - evidence
+        - metric_meta
+      properties:
+        generated_at:
+          type: string
+        period_start:
+          type: string
+        period_end:
+          type: string
+        next_billing_date:
+          type: string
+        plan_name:
+          type: string
+          nullable: true
+        contract_label:
+          type: string
+          nullable: true
+        currency:
+          type: string
+          nullable: true
+        monthly_quota:
+          type: integer
+          nullable: true
+        quota_source:
+          type: string
+          enum: [company_billing_info, client_config, unknown]
+        billable_messages:
+          type: integer
+        remaining_quota:
+          type: integer
+          nullable: true
+        projected_month_total:
+          type: integer
+          nullable: true
+        usage_percent:
+          type: number
+          nullable: true
+        projected_remaining_quota:
+          type: integer
+          nullable: true
+        projected_over_quota:
+          type: boolean
+        projected_overage_messages:
+          type: integer
+          nullable: true
+        quota_alert_level:
+          type: string
+          enum: [normal, warning_80, limit_100]
+        quota_alert_message:
+          type: string
+        overage_policy_message:
+          type: string
+        over_quota:
+          type: boolean
+        evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/SubscriptionEvidenceItem"
+        metric_meta:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/MetricFactMeta"
+
+    DataTrustSummaryResponse:
+      type: object
+      required:
+        - generated_at
+        - status
+        - status_label
+        - analytics_scope_limited
+        - audit_events_24h
+        - critical_audit_events_24h
+        - actions
+        - metric_meta
+      properties:
+        generated_at:
+          type: string
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        status_label:
+          type: string
+        metric_date:
+          type: string
+          nullable: true
+        analytics_scope_limited:
+          type: boolean
+        first_response_missing_total:
+          type: integer
+          nullable: true
+        escalation_meta_missing_total:
+          type: integer
+          nullable: true
+        intent_missing_total:
+          type: integer
+          nullable: true
+        knowledge_last_published_at:
+          type: string
+          nullable: true
+        knowledge_stale_hours:
+          type: integer
+          nullable: true
+        audit_events_24h:
+          type: integer
+        critical_audit_events_24h:
+          type: integer
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/BusinessSummaryAction"
+        metric_meta:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/MetricFactMeta"
+
+    TeamManagerPerformanceItem:
+      type: object
+      required: [manager_name, unresolved_cases, pending_cases, active_cases]
+      properties:
+        manager_name:
+          type: string
+        unresolved_cases:
+          type: integer
+        pending_cases:
+          type: integer
+        active_cases:
+          type: integer
+        oldest_unresolved_minutes:
+          type: integer
+          nullable: true
+        avg_first_response_seconds_30d:
+          type: number
+          nullable: true
+
+    TeamPerformanceSummaryResponse:
+      type: object
+      required:
+        - generated_at
+        - status
+        - status_label
+        - analytics_scope_limited
+        - unresolved_cases
+        - unresolved_older_than_60m
+        - managers
+        - actions
+        - metric_meta
+      properties:
+        generated_at:
+          type: string
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        status_label:
+          type: string
+        metric_date:
+          type: string
+          nullable: true
+        analytics_scope_limited:
+          type: boolean
+        manager_median_response_seconds:
+          type: number
+          nullable: true
+        first_response_p90_seconds:
+          type: number
+          nullable: true
+        unresolved_cases:
+          type: integer
+        unresolved_older_than_60m:
+          type: integer
+        managers:
+          type: array
+          items:
+            $ref: "#/components/schemas/TeamManagerPerformanceItem"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/BusinessSummaryAction"
+        metric_meta:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/MetricFactMeta"
+
+    OwnerOperationApplyRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [capture_leads, stable_quality, team_protection]
+
+    OwnerOperationSettingsPatch:
+      type: object
+      required: [reminder_1_minutes, reminder_2_minutes, escalation_timeout_minutes]
+      properties:
+        reminder_1_minutes:
+          type: integer
+        reminder_2_minutes:
+          type: integer
+        escalation_timeout_minutes:
+          type: integer
+
+    OwnerOperationMetricSnapshot:
+      type: object
+      required: [outbox_backlog, unresolved_older_than_60m]
+      properties:
+        outbox_backlog:
+          type: integer
+        unresolved_older_than_60m:
+          type: integer
+        manager_median_response_seconds:
+          type: number
+          nullable: true
+
+    OwnerOperationPreviewResponse:
+      type: object
+      required: [generated_at, mode, mode_label, settings_patch, current_settings, baseline, warnings, metric_meta]
+      properties:
+        generated_at:
+          type: string
+        mode:
+          type: string
+          enum: [capture_leads, stable_quality, team_protection]
+        mode_label:
+          type: string
+        settings_patch:
+          $ref: "#/components/schemas/OwnerOperationSettingsPatch"
+        current_settings:
+          $ref: "#/components/schemas/OwnerOperationSettingsPatch"
+        baseline:
+          $ref: "#/components/schemas/OwnerOperationMetricSnapshot"
+        warnings:
+          type: array
+          items:
+            type: string
+        metric_meta:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/MetricFactMeta"
+
+    OwnerOperationApplyResponse:
+      type: object
+      required: [success, operation_id, mode, mode_label, applied_settings, previous_settings, baseline, applied_at, impact_check_due_at, metric_meta]
+      properties:
+        success:
+          type: boolean
+        operation_id:
+          type: string
+          format: uuid
+        mode:
+          type: string
+          enum: [capture_leads, stable_quality, team_protection]
+        mode_label:
+          type: string
+        applied_settings:
+          $ref: "#/components/schemas/OwnerOperationSettingsPatch"
+        previous_settings:
+          $ref: "#/components/schemas/OwnerOperationSettingsPatch"
+        baseline:
+          $ref: "#/components/schemas/OwnerOperationMetricSnapshot"
+        applied_at:
+          type: string
+        impact_check_due_at:
+          type: string
+        metric_meta:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/MetricFactMeta"
+
+    OwnerOperationRollbackRequest:
+      type: object
+      properties:
+        operation_id:
+          type: string
+          format: uuid
+          nullable: true
+
+    OwnerOperationRollbackResponse:
+      type: object
+      required: [success, operation_id, restored_settings, rolled_back_at, message]
+      properties:
+        success:
+          type: boolean
+        operation_id:
+          type: string
+          format: uuid
+        restored_settings:
+          $ref: "#/components/schemas/OwnerOperationSettingsPatch"
+        rolled_back_at:
+          type: string
+        message:
+          type: string
+
+    OwnerOperationMetricDelta:
+      type: object
+      required: [trend]
+      properties:
+        baseline:
+          type: number
+          nullable: true
+        current:
+          type: number
+          nullable: true
+        delta:
+          type: number
+          nullable: true
+        trend:
+          type: string
+          enum: [up, down, stable, unknown]
+
+    OwnerOperationImpactResponse:
+      type: object
+      required: [operation_id, mode, checked_at, due_at, summary, baseline, current, metrics, metric_meta]
+      properties:
+        operation_id:
+          type: string
+          format: uuid
+        mode:
+          type: string
+          enum: [capture_leads, stable_quality, team_protection]
+        checked_at:
+          type: string
+        due_at:
+          type: string
+        summary:
+          type: string
+          enum: [improved, regressed, mixed_or_stable]
+        baseline:
+          $ref: "#/components/schemas/OwnerOperationMetricSnapshot"
+        current:
+          $ref: "#/components/schemas/OwnerOperationMetricSnapshot"
+        metrics:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/OwnerOperationMetricDelta"
+        metric_meta:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/MetricFactMeta"
 
     KpiStatus:
       type: string
