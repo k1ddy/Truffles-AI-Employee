@@ -115,6 +115,7 @@ Legend
 
 - Integrations page реализована, но RBAC уже канона (owner/admin без доступа).
 - Team Users не поддерживает invite/disable; Specialists без управления working_hours/availability.
+- `Company Workspace` реализован, но не отражён как отдельная страница в канонической IA (`SPECS/CONTROL_PLANE.md`).
 
 ---
 
