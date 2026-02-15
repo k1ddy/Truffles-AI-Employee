@@ -370,7 +370,7 @@ def test_update_booking_from_message_overrides_date_only_datetime_with_exact_tim
     "tool_action",
     ["calendar.get_booking", "calendar.reschedule", "calendar.cancel"],
 )
-def test_tool_registry_invalid_appointment_id_does_not_raise(tool_action):
+def test_tool_registry_invalid_appointment_id_returns_contract_error(tool_action):
     db = Mock()
     branch = SimpleNamespace(
         id=uuid4(),
@@ -394,7 +394,9 @@ def test_tool_registry_invalid_appointment_id_does_not_raise(tool_action):
 
     assert result.handled is True
     assert result.ok is False
-    assert result.error_code == "booking_not_found"
+    assert result.error_code == "tool_args_invalid"
+    assert result.decision_meta.get("tool_decision") == "invalid_args"
+    assert result.decision_meta.get("tool_args_error") == "appointment_id_invalid"
 
 
 def test_tool_registry_get_booking_reports_time_mismatch():
@@ -746,6 +748,48 @@ def test_tool_registry_skips_capability_block_when_enforcement_disabled(monkeypa
 
     assert result.error_code != "tool_action_disabled"
     assert result.decision_meta.get("tool_decision") != "capability_blocked"
+
+
+def test_tool_registry_rejects_invalid_args_contract_for_book_slot():
+    db = Mock()
+
+    result = tool_registry_service.execute_tool_action(
+        db,
+        tool_action="calendar.book_slot",
+        tool_args={"start_at": {"date": "2026-02-20"}},
+        conversation_id=uuid4(),
+        branch_id=uuid4(),
+        client_slug="demo_salon",
+        service_query="Маникюр",
+    )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "tool_args_invalid"
+    assert result.decision_meta.get("tool_decision") == "invalid_args"
+    assert result.decision_meta.get("tool_args_contract") == "invalid"
+    assert result.decision_meta.get("tool_args_error") == "start_at_type_invalid"
+
+
+def test_tool_registry_rejects_invalid_args_contract_for_get_booking():
+    db = Mock()
+
+    result = tool_registry_service.execute_tool_action(
+        db,
+        tool_action="calendar.get_booking",
+        tool_args={"appointment_id": "not-a-uuid"},
+        conversation_id=uuid4(),
+        branch_id=uuid4(),
+        client_slug="demo_salon",
+        service_query=None,
+    )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "tool_args_invalid"
+    assert result.decision_meta.get("tool_decision") == "invalid_args"
+    assert result.decision_meta.get("tool_args_error") == "appointment_id_invalid"
+    assert result.decision_meta.get("tool_args_error_field") == "appointment_id"
 
 
 def test_tool_registry_catalog_location_includes_parking_section():

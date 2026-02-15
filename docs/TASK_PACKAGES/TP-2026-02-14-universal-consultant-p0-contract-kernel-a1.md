@@ -72,6 +72,11 @@
 - Realism + replay:
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode all --fail-on-thresholds --run-id universal-lock-a1`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/universal-lock-a1/scenarios.json --baseline-summary /tmp/booking_quality/universal-lock-a1/summary.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression`
+- Manual verification (обязательно после каждого replay):
+- `jq '.metrics.stages' /tmp/booking_quality/offline-replay-20260215-p0-r29-kernel/summary.json` и ручная проверка `controller/tool_selection/tool_args/state_transition/response_contract`.
+- `jq -r 'select(.decision_meta.tool_args_contract==\"invalid\") | [.dialog_index,.turn_index,.decision_meta.tool_action,.decision_meta.tool_args_error] | @tsv' /tmp/booking_quality/offline-replay-20260215-p0-r29-kernel/responses.jsonl` (должно быть пусто либо с явным RCA).
+- `jq -r '.decision_meta.controller_skipped_reason // empty' /tmp/booking_quality/offline-replay-20260215-p0-r29-kernel/responses.jsonl | sort | uniq -c | sort -nr` и ручной разбор top-skip.
+- Ручная сверка `top_failures` и `brief.md` перед любым merge/rollout.
 
 ## Evidence
 - `summary.json`, `brief.md`, `responses.jsonl`, `trace_bundle.jsonl` для lock/replay.

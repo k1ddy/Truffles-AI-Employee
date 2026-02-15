@@ -7936,6 +7936,37 @@ async def _handle_webhook_payload(
                 if not (isinstance(value, str) and value.strip()):
                     collect_slot = slot_key
                     break
+        original_collect_slot = collect_slot
+        info_query_override = False
+        if (
+            collect_slot in {"service", "datetime", "name"}
+            and message_text
+            and _looks_like_info_query(message_text, client_slug=payload.client_slug)
+            and not _is_booking_request(message_text, client_slug=payload.client_slug)
+        ):
+            # Fail-closed for degraded policy-core: avoid forcing booking prompts
+            # when the current user turn is an info question.
+            collect_slot = None
+            info_query_override = True
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_core_guard",
+                    "decision": "info_query_override",
+                    "state": conversation.state,
+                    "mode": policy_core_mode,
+                    "reason": policy_core_degrade_reason,
+                    "missing_slot": original_collect_slot,
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "policy_core_guard_info_query": True,
+                        "policy_core_guard_slot_override": original_collect_slot,
+                    },
+                )
 
         collect_prompt = MSG_FACT_GUARD_CLARIFY
         collect_action = "reply"
@@ -7991,6 +8022,8 @@ async def _handle_webhook_payload(
                 "mode": policy_core_mode,
                 "reason": policy_core_degrade_reason,
                 "missing_slot": collect_slot,
+                "missing_slot_original": original_collect_slot,
+                "info_query_override": info_query_override,
             },
         )
         _record_message_decision_meta(
@@ -8972,6 +9005,14 @@ async def _handle_webhook_payload(
                 user_phone=getattr(user, "phone", None) if user else None,
             )
             if tool_result.handled:
+                if isinstance(tool_result.decision_meta, dict):
+                    tool_result.decision_meta.setdefault("tool_args_checked", True)
+                    if tool_result.decision_meta.get("tool_args_contract") not in {"valid", "invalid"}:
+                        tool_result.decision_meta["tool_args_contract"] = "valid"
+                if isinstance(tool_result.trace, dict):
+                    tool_result.trace.setdefault("tool_args_checked", True)
+                    if tool_result.trace.get("tool_args_contract") not in {"valid", "invalid"}:
+                        tool_result.trace["tool_args_contract"] = "valid"
                 if (
                     policy_tool_action == "catalog.service_query"
                     and isinstance(policy_service_query, str)

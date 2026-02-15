@@ -212,6 +212,119 @@ def _expected_reply_prompt_from_hint(expected_reply_type: str | None) -> str | N
     return None
 
 
+def _validate_tool_args_contract(
+    *,
+    tool_action: str,
+    tool_args: Any,
+    fallback_tz: str | None = None,
+) -> tuple[str | None, str | None]:
+    if not isinstance(tool_args, dict):
+        return "tool_args_not_dict", "tool_args"
+
+    def _validate_optional_text(field: str) -> tuple[str | None, str | None]:
+        value = tool_args.get(field)
+        if value is None:
+            return None, None
+        if not isinstance(value, str):
+            return f"{field}_type_invalid", field
+        if not value.strip():
+            return f"{field}_empty", field
+        return None, None
+
+    def _validate_optional_uuid(field: str) -> tuple[str | None, str | None]:
+        value = tool_args.get(field)
+        if value is None:
+            return None, None
+        if not isinstance(value, str):
+            return f"{field}_type_invalid", field
+        if not value.strip():
+            return None, None
+        if _parse_uuid(value) is None:
+            return f"{field}_invalid", field
+        return None, None
+
+    def _validate_optional_datetime(field: str) -> tuple[str | None, str | None]:
+        value = tool_args.get(field)
+        if value is None:
+            return None, None
+        if not isinstance(value, str):
+            return f"{field}_type_invalid", field
+        if not value.strip():
+            return None, None
+        if _parse_datetime(value, fallback_tz=fallback_tz) is None:
+            return f"{field}_invalid", field
+        return None, None
+
+    def _validate_optional_duration(field: str) -> tuple[str | None, str | None]:
+        value = tool_args.get(field)
+        if value is None:
+            return None, None
+        if isinstance(value, bool):
+            return f"{field}_type_invalid", field
+        if isinstance(value, (int, float)):
+            minutes = int(value)
+            if minutes <= 0:
+                return f"{field}_non_positive", field
+            return None, None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None, None
+            if stripped.isdigit():
+                if int(stripped) <= 0:
+                    return f"{field}_non_positive", field
+                return None, None
+            return f"{field}_invalid", field
+        return f"{field}_type_invalid", field
+
+    checks: list[tuple[str | None, str | None]] = []
+    if tool_action == "calendar.list_slots":
+        checks.extend(
+            [
+                _validate_optional_text("date"),
+                # list_slots supports fuzzy values like "завтра" or "18:30";
+                # strict datetime parsing is enforced later in slot resolver flow.
+                _validate_optional_text("start_at"),
+                _validate_optional_duration("duration_min"),
+                _validate_optional_text("specialist_id"),
+                _validate_optional_text("specialist_name"),
+            ]
+        )
+    elif tool_action == "calendar.book_slot":
+        checks.extend(
+            [
+                _validate_optional_datetime("start_at"),
+                _validate_optional_datetime("end_at"),
+                _validate_optional_text("specialist_id"),
+                _validate_optional_text("specialist_name"),
+                _validate_optional_text("customer_name"),
+                _validate_optional_text("customer_phone"),
+            ]
+        )
+    elif tool_action == "calendar.get_booking":
+        checks.append(_validate_optional_uuid("appointment_id"))
+    elif tool_action == "calendar.reschedule":
+        checks.extend(
+            [
+                _validate_optional_uuid("appointment_id"),
+                _validate_optional_datetime("start_at"),
+                _validate_optional_datetime("end_at"),
+            ]
+        )
+    elif tool_action == "calendar.cancel":
+        checks.extend(
+            [
+                _validate_optional_uuid("appointment_id"),
+                _validate_optional_text("reason"),
+            ]
+        )
+
+    for error_code, field in checks:
+        if error_code:
+            return error_code, field
+    return None, None
+
+
 def _is_photo_offer_message(text: str | None) -> bool:
     if not isinstance(text, str) or not text.strip():
         return False
@@ -811,6 +924,37 @@ def execute_tool_action(
             error_code="tool_action_invalid",
             decision_meta={},
             trace={},
+        )
+
+    tool_args_error, tool_args_field = _validate_tool_args_contract(
+        tool_action=tool_action,
+        tool_args=tool_args,
+    )
+    if tool_args_error:
+        return ToolExecutionResult(
+            handled=True,
+            ok=False,
+            response_text=(
+                "Не получилось обработать запрос автоматически. "
+                "Уточните детали, пожалуйста, и я помогу."
+            ),
+            error_code="tool_args_invalid",
+            decision_meta={
+                "tool_action": tool_action,
+                "tool_decision": "invalid_args",
+                "tool_args_checked": True,
+                "tool_args_contract": "invalid",
+                "tool_args_error": tool_args_error,
+                "tool_args_error_field": tool_args_field,
+            },
+            trace={
+                "stage": "tool_registry",
+                "decision": "invalid_args",
+                "tool_action": tool_action,
+                "tool_args_contract": "invalid",
+                "tool_args_error": tool_args_error,
+                "tool_args_error_field": tool_args_field,
+            },
         )
 
     allow_tokens, deny_tokens, capability_source = _resolve_runtime_tool_policy()
