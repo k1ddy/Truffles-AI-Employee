@@ -76,6 +76,8 @@ from app.schemas.console import (
     ConsoleBranchIntegrationStatus,
     ConsoleBranchListResponse,
     ConsoleBranchUpdateRequest,
+    ConsoleBusinessActionItem,
+    ConsoleBusinessSummaryResponse,
     ConsoleCapabilitiesPatchRequest,
     ConsoleCapabilitiesRecord,
     ConsoleCapabilitiesResponse,
@@ -96,6 +98,7 @@ from app.schemas.console import (
     ConsoleCompanyUpdateRequest,
     ConsoleConfirmationCreateRequest,
     ConsoleConfirmationResponse,
+    ConsoleDataTrustSummaryResponse,
     ConsoleErrorResponse,
     ConsoleFleetAttentionItem,
     ConsoleFleetAttentionResponse,
@@ -161,7 +164,11 @@ from app.schemas.console import (
     ConsoleSettingsResponse,
     ConsoleSettingsUpdateRequest,
     ConsoleSettingsUpdateResponse,
+    ConsoleSubscriptionEvidenceItem,
+    ConsoleSubscriptionSummaryResponse,
     ConsoleSyncStatus,
+    ConsoleTeamManagerPerformanceItem,
+    ConsoleTeamPerformanceSummaryResponse,
     ConsoleTelegramHealthResponse,
     ConsoleTelegramLinkResponse,
     ConsoleTelegramTestRequest,
@@ -5592,6 +5599,969 @@ async def send_manager_media(
     return response
 
 
+def _parse_positive_int(value: object) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def _first_non_empty_string(values: list[object]) -> Optional[str]:
+    for value in values:
+        if isinstance(value, str):
+            normalized = value.strip()
+            if normalized:
+                return normalized
+    return None
+
+
+def _resolve_subscription_contract_info(context: ConsoleAuthContext) -> tuple[
+    Optional[str],
+    Optional[str],
+    Optional[str],
+    Optional[int],
+    str,
+]:
+    company = next(
+        (item for item in context.companies if item.id == context.client.company_id),
+        None,
+    )
+    company_billing = company.billing_info if company and isinstance(company.billing_info, dict) else {}
+    client_config = context.client.config if isinstance(context.client.config, dict) else {}
+    client_billing = client_config.get("billing") if isinstance(client_config.get("billing"), dict) else {}
+    sources: list[tuple[str, dict]] = [
+        ("company_billing_info", company_billing),
+        ("client_config", client_billing),
+    ]
+
+    plan_name = _first_non_empty_string(
+        [
+            company_billing.get("plan_name") if isinstance(company_billing, dict) else None,
+            company_billing.get("plan") if isinstance(company_billing, dict) else None,
+            client_billing.get("plan_name") if isinstance(client_billing, dict) else None,
+            client_billing.get("plan") if isinstance(client_billing, dict) else None,
+            company_billing.get("tariff") if isinstance(company_billing, dict) else None,
+            client_billing.get("tariff") if isinstance(client_billing, dict) else None,
+        ]
+    )
+    contract_label = _first_non_empty_string(
+        [
+            company_billing.get("contract") if isinstance(company_billing, dict) else None,
+            company_billing.get("contract_label") if isinstance(company_billing, dict) else None,
+            client_billing.get("contract") if isinstance(client_billing, dict) else None,
+            client_billing.get("contract_label") if isinstance(client_billing, dict) else None,
+        ]
+    )
+    currency = _first_non_empty_string(
+        [
+            company_billing.get("currency") if isinstance(company_billing, dict) else None,
+            client_billing.get("currency") if isinstance(client_billing, dict) else None,
+        ]
+    )
+    if currency:
+        currency = currency.upper()
+
+    quota_keys = ("monthly_quota", "message_quota", "included_messages", "messages_quota", "quota")
+    for source_name, source_payload in sources:
+        if not isinstance(source_payload, dict):
+            continue
+        nested_subscription = source_payload.get("subscription")
+        candidate_maps = [source_payload]
+        if isinstance(nested_subscription, dict):
+            candidate_maps.insert(0, nested_subscription)
+        for payload in candidate_maps:
+            for key in quota_keys:
+                parsed_quota = _parse_positive_int(payload.get(key))
+                if parsed_quota is not None:
+                    return plan_name, contract_label, currency, parsed_quota, source_name
+
+    return plan_name, contract_label, currency, None, "unknown"
+
+
+def _apply_billable_outbox_filters(query):
+    return (
+        query.filter(text("outbox_messages.payload_json->'tenant_context'->>'source' = 'system'"))
+        .filter(text("COALESCE(LOWER(outbox_messages.meta->'simulation'->>'mode'), 'false') <> 'true'"))
+        .filter(
+            text(
+                """
+                (
+                    LOWER(outbox_messages.meta->'provider_status'->>'status') IN ('sent', 'delivered', 'read')
+                    OR (
+                        outbox_messages.meta->'provider_status' IS NULL
+                        AND outbox_messages.status = 'SENT'
+                    )
+                )
+                """
+            )
+        )
+    )
+
+
+def _derive_business_status(
+    *,
+    outbox_backlog: int,
+    outbox_failed_24h: int,
+    unresolved_cases: int,
+) -> tuple[str, str]:
+    if outbox_backlog >= 1000 or outbox_failed_24h >= 100:
+        return "unhealthy", "Критичный риск: сообщения клиентов могут приходить с задержкой."
+    if outbox_backlog >= 500 or outbox_failed_24h >= 30 or unresolved_cases >= 20:
+        return "degraded", "Есть риск деградации: требуется контроль очереди и скорости ответа."
+    return "healthy", "Система работает стабильно, критичных рисков не выявлено."
+
+
+def _build_owner_actions(
+    *,
+    outbox_backlog: int,
+    outbox_failed_24h: int,
+    unresolved_cases: int,
+    first_response_p90_seconds: Optional[float],
+) -> list[ConsoleBusinessActionItem]:
+    actions: list[ConsoleBusinessActionItem] = []
+    if outbox_backlog >= 500 or outbox_failed_24h >= 30:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="review_ops_health",
+                severity="critical" if outbox_backlog >= 1000 or outbox_failed_24h >= 100 else "warn",
+                title="Проверьте очередь отправки",
+                description="Откройте Статус и убедитесь, что failed/pending не растут.",
+                href="/ops",
+            )
+        )
+    if unresolved_cases > 0:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="review_unresolved_cases",
+                severity="warn",
+                title="Проверьте неразобранные заявки",
+                description="Есть диалоги без завершения. Проверьте очередь заявок и назначение менеджеров.",
+                href="/",
+            )
+        )
+    if first_response_p90_seconds is not None and first_response_p90_seconds > 900:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="review_team_speed",
+                severity="warn",
+                title="Проверьте скорость ответа менеджеров",
+                description="Время первого ответа превышает целевой диапазон, есть риск потери заявок.",
+                href="/insights",
+            )
+        )
+    if not actions:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="monitor_daily",
+                severity="info",
+                title="Контроль в норме",
+                description="Проверяйте ежедневные показатели и обновляйте базовые настройки по расписанию.",
+                href="/insights",
+            )
+        )
+    return actions
+
+
+def _safe_int(value: object) -> Optional[int]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_float(value: object) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_latest_analytics_row(
+    *,
+    db: Session,
+    client_id: UUID,
+    metric_date: dt_date,
+    analytics_scope_limited: bool,
+):
+    if analytics_scope_limited:
+        return None
+    return db.execute(
+        text(
+            """
+            SELECT
+              metric_date,
+              first_response_missing_total,
+              escalation_meta_missing_total,
+              intent_missing_total,
+              first_response_p90_seconds,
+              manager_median_response_seconds
+            FROM metrics_analytics_daily
+            WHERE client_id = :client_id
+              AND metric_date <= :metric_date
+            ORDER BY metric_date DESC
+            LIMIT 1
+            """
+        ),
+        {"client_id": client_id, "metric_date": metric_date},
+    ).mappings().first()
+
+
+def _derive_data_trust_status(
+    *,
+    first_response_missing_total: Optional[int],
+    escalation_meta_missing_total: Optional[int],
+    intent_missing_total: Optional[int],
+    knowledge_stale_hours: Optional[int],
+    critical_audit_events_24h: int,
+    analytics_scope_limited: bool,
+) -> tuple[str, str]:
+    missing_total = sum(
+        value
+        for value in (
+            first_response_missing_total,
+            escalation_meta_missing_total,
+            intent_missing_total,
+        )
+        if value is not None and value > 0
+    )
+    if (
+        critical_audit_events_24h >= 5
+        or (knowledge_stale_hours is not None and knowledge_stale_hours >= 168)
+        or missing_total >= 50
+    ):
+        return "unhealthy", "Высокий риск: качество данных и трассировок может быть недостоверным."
+    if (
+        analytics_scope_limited
+        or critical_audit_events_24h >= 1
+        or (knowledge_stale_hours is not None and knowledge_stale_hours >= 72)
+        or missing_total >= 10
+    ):
+        return "degraded", "Есть риск по качеству данных: требуется проверка метрик, знаний и аудита."
+    return "healthy", "Качество данных стабильное, критичных разрывов не обнаружено."
+
+
+def _build_data_trust_actions(
+    *,
+    first_response_missing_total: Optional[int],
+    escalation_meta_missing_total: Optional[int],
+    intent_missing_total: Optional[int],
+    knowledge_stale_hours: Optional[int],
+    critical_audit_events_24h: int,
+    analytics_scope_limited: bool,
+) -> list[ConsoleBusinessActionItem]:
+    actions: list[ConsoleBusinessActionItem] = []
+    missing_total = sum(
+        value
+        for value in (
+            first_response_missing_total,
+            escalation_meta_missing_total,
+            intent_missing_total,
+        )
+        if value is not None and value > 0
+    )
+    if analytics_scope_limited:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="review_scope_for_analytics",
+                severity="warn",
+                title="Проверьте полноту скоупа метрик",
+                description="Для branch-режима часть quality-метрик недоступна. Проверьте company scope перед решением.",
+                href="/business",
+            )
+        )
+    if knowledge_stale_hours is not None and knowledge_stale_hours >= 72:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="refresh_knowledge",
+                severity="warn" if knowledge_stale_hours < 168 else "critical",
+                title="Обновите базу знаний",
+                description="Публикация знаний устарела, есть риск устаревших ответов клиентам.",
+                href="/knowledge",
+            )
+        )
+    if critical_audit_events_24h > 0:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="review_audit_incidents",
+                severity="critical" if critical_audit_events_24h >= 5 else "warn",
+                title="Проверьте критичные события аудита",
+                description="За 24 часа зафиксированы failed/blocked/rejected события.",
+                href="/audit",
+            )
+        )
+    if missing_total >= 10:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="fix_missing_quality_metrics",
+                severity="warn" if missing_total < 50 else "critical",
+                title="Снизьте пробелы quality-метрик",
+                description="Есть неполные записи по first-response/escalation/intent, это снижает доверие к аналитике.",
+                href="/insights",
+            )
+        )
+    if not actions:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="monitor_data_trust",
+                severity="info",
+                title="Контроль качества данных в норме",
+                description="Сохраняйте регулярный аудит и плановую публикацию знаний.",
+                href="/audit",
+            )
+        )
+    return actions
+
+
+def _derive_team_performance_status(
+    *,
+    unresolved_cases: int,
+    unresolved_older_than_60m: int,
+    manager_median_response_seconds: Optional[float],
+) -> tuple[str, str]:
+    if (
+        unresolved_older_than_60m >= 20
+        or unresolved_cases >= 40
+        or (manager_median_response_seconds is not None and manager_median_response_seconds > 900)
+    ):
+        return "unhealthy", "Высокий риск: команда не успевает обрабатывать поток обращений."
+    if (
+        unresolved_older_than_60m >= 5
+        or unresolved_cases >= 15
+        or (manager_median_response_seconds is not None and manager_median_response_seconds > 600)
+    ):
+        return "degraded", "Есть перегрузка команды: контролируйте SLA и распределение заявок."
+    return "healthy", "Команда держит стабильную скорость и нагрузку в целевом диапазоне."
+
+
+def _build_team_performance_actions(
+    *,
+    unresolved_older_than_60m: int,
+    manager_median_response_seconds: Optional[float],
+    top_manager_name: Optional[str],
+    top_manager_unresolved: int,
+    analytics_scope_limited: bool,
+) -> list[ConsoleBusinessActionItem]:
+    actions: list[ConsoleBusinessActionItem] = []
+    if unresolved_older_than_60m > 0:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="clear_stale_cases",
+                severity="critical" if unresolved_older_than_60m >= 20 else "warn",
+                title="Разберите просроченные заявки",
+                description="Есть открытые заявки старше 60 минут. Проверьте очереди и назначение менеджеров.",
+                href="/",
+            )
+        )
+    if manager_median_response_seconds is not None and manager_median_response_seconds > 900:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="improve_manager_speed",
+                severity="warn",
+                title="Ускорьте первый ответ менеджеров",
+                description="Медиана ответа менеджеров превышает целевой порог, есть риск потери обращений.",
+                href="/team",
+            )
+        )
+    if top_manager_unresolved >= 8 and top_manager_name:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="rebalance_manager_load",
+                severity="warn",
+                title="Перераспределите нагрузку в команде",
+                description=f"У менеджера «{top_manager_name}» высокий объём открытых заявок.",
+                href="/team",
+            )
+        )
+    if analytics_scope_limited:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="confirm_company_scope_kpi",
+                severity="info",
+                title="Подтвердите KPI в company scope",
+                description="Часть аналитики недоступна в branch-режиме. Для финальных решений проверьте полный scope.",
+                href="/business",
+            )
+        )
+    if not actions:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="monitor_team_daily",
+                severity="info",
+                title="Команда работает стабильно",
+                description="Поддерживайте ежедневный контроль SLA и балансировки очереди.",
+                href="/insights",
+            )
+        )
+    return actions
+
+
+@router.get(
+    "/business/summary",
+    response_model=ConsoleBusinessSummaryResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_business_summary(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleBusinessSummaryResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can access business summary",
+    )
+
+    now = datetime.now(timezone.utc)
+    day_start = datetime.combine(now.date(), time.min).replace(tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+    outbox_failed_window_start = now - timedelta(hours=24)
+    allowed_branch_ids = _resolve_branch_scope(context)
+
+    handover_base = db.query(Handover).filter(Handover.client_id == context.client.id)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            pending_cases = 0
+            active_cases = 0
+            unresolved_cases = 0
+            oldest_unresolved_minutes = None
+        else:
+            handover_base = handover_base.join(
+                Conversation,
+                Handover.conversation_id == Conversation.id,
+            ).filter(Conversation.branch_id.in_(allowed_branch_ids))
+            pending_cases = handover_base.filter(Handover.status == "pending").count()
+            active_cases = handover_base.filter(Handover.status == "active").count()
+            unresolved_cases = pending_cases + active_cases
+            oldest_unresolved_row = (
+                handover_base.filter(Handover.status.in_(["pending", "active"]))
+                .order_by(Handover.created_at.asc())
+                .first()
+            )
+            oldest_unresolved_minutes = None
+            if oldest_unresolved_row and oldest_unresolved_row.created_at:
+                delta_seconds = (now - oldest_unresolved_row.created_at).total_seconds()
+                oldest_unresolved_minutes = max(0, int(delta_seconds // 60))
+    else:
+        pending_cases = handover_base.filter(Handover.status == "pending").count()
+        active_cases = handover_base.filter(Handover.status == "active").count()
+        unresolved_cases = pending_cases + active_cases
+        oldest_unresolved_row = (
+            handover_base.filter(Handover.status.in_(["pending", "active"]))
+            .order_by(Handover.created_at.asc())
+            .first()
+        )
+        oldest_unresolved_minutes = None
+        if oldest_unresolved_row and oldest_unresolved_row.created_at:
+            delta_seconds = (now - oldest_unresolved_row.created_at).total_seconds()
+            oldest_unresolved_minutes = max(0, int(delta_seconds // 60))
+
+    outbox_query = db.query(OutboxMessage).filter(OutboxMessage.client_id == context.client.id)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            outbox_backlog = 0
+            outbox_failed_24h = 0
+        else:
+            outbox_query = outbox_query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
+            outbox_backlog = outbox_query.filter(
+                OutboxMessage.status.in_(["PENDING", "PROCESSING"])
+            ).count()
+            outbox_failed_24h = outbox_query.filter(
+                OutboxMessage.status == "FAILED",
+                OutboxMessage.created_at >= outbox_failed_window_start,
+                OutboxMessage.created_at < day_end,
+            ).count()
+    else:
+        outbox_backlog = outbox_query.filter(
+            OutboxMessage.status.in_(["PENDING", "PROCESSING"])
+        ).count()
+        outbox_failed_24h = outbox_query.filter(
+            OutboxMessage.status == "FAILED",
+            OutboxMessage.created_at >= outbox_failed_window_start,
+            OutboxMessage.created_at < day_end,
+        ).count()
+
+    analytics_row = db.execute(
+        text(
+            """
+            SELECT first_response_p90_seconds
+            FROM metrics_analytics_daily
+            WHERE client_id = :client_id
+              AND metric_date <= :metric_date
+            ORDER BY metric_date DESC
+            LIMIT 1
+            """
+        ),
+        {"client_id": context.client.id, "metric_date": now.date()},
+    ).mappings().first()
+    first_response_p90_seconds = (
+        float(analytics_row.get("first_response_p90_seconds"))
+        if analytics_row and analytics_row.get("first_response_p90_seconds") is not None
+        else None
+    )
+
+    status, status_label = _derive_business_status(
+        outbox_backlog=outbox_backlog,
+        outbox_failed_24h=outbox_failed_24h,
+        unresolved_cases=unresolved_cases,
+    )
+    actions = _build_owner_actions(
+        outbox_backlog=outbox_backlog,
+        outbox_failed_24h=outbox_failed_24h,
+        unresolved_cases=unresolved_cases,
+        first_response_p90_seconds=first_response_p90_seconds,
+    )
+
+    return ConsoleBusinessSummaryResponse(
+        generated_at=now.isoformat(),
+        status=status,
+        status_label=status_label,
+        outbox_backlog=outbox_backlog,
+        outbox_failed_24h=outbox_failed_24h,
+        pending_cases=pending_cases,
+        active_cases=active_cases,
+        unresolved_cases=unresolved_cases,
+        oldest_unresolved_minutes=oldest_unresolved_minutes,
+        first_response_p90_seconds=first_response_p90_seconds,
+        actions=actions,
+    )
+
+
+@router.get(
+    "/subscription/summary",
+    response_model=ConsoleSubscriptionSummaryResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_subscription_summary(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleSubscriptionSummaryResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "subscription",
+        "read",
+        message="Only owner/admin can access subscription summary",
+    )
+
+    now = datetime.now(timezone.utc)
+    period_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    if now.month == 12:
+        period_end = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        period_end = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+    allowed_branch_ids = _resolve_branch_scope(context)
+
+    usage_query = db.query(OutboxMessage).filter(
+        OutboxMessage.client_id == context.client.id,
+        OutboxMessage.created_at >= period_start,
+        OutboxMessage.created_at < period_end,
+    )
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            usage_query = usage_query.filter(text("1 = 0"))
+        else:
+            usage_query = usage_query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
+    usage_query = _apply_billable_outbox_filters(usage_query)
+
+    billable_messages = int(usage_query.count())
+    evidence_rows = (
+        usage_query.order_by(OutboxMessage.created_at.desc(), OutboxMessage.id.desc())
+        .limit(25)
+        .all()
+    )
+
+    plan_name, contract_label, currency, monthly_quota, quota_source = _resolve_subscription_contract_info(context)
+
+    elapsed_days = max(1, (now.date() - period_start.date()).days + 1)
+    total_days = max(1, (period_end.date() - period_start.date()).days)
+    projected_month_total = int(round((billable_messages / elapsed_days) * total_days))
+
+    remaining_quota = None
+    usage_percent = None
+    over_quota = False
+    if monthly_quota is not None and monthly_quota > 0:
+        remaining_quota = max(0, monthly_quota - billable_messages)
+        usage_percent = round((billable_messages / monthly_quota) * 100, 1)
+        over_quota = billable_messages > monthly_quota
+
+    evidence_items = []
+    for row in evidence_rows:
+        meta = row.meta if isinstance(row.meta, dict) else {}
+        provider_status_meta = meta.get("provider_status") if isinstance(meta.get("provider_status"), dict) else {}
+        evidence_items.append(
+            ConsoleSubscriptionEvidenceItem(
+                outbox_id=row.id,
+                conversation_id=row.conversation_id,
+                inbound_message_id=row.inbound_message_id,
+                created_at=row.created_at.isoformat(),
+                status=row.status,
+                provider_status=provider_status_meta.get("status"),
+                provider_message_id=provider_status_meta.get("provider_message_id"),
+            )
+        )
+
+    return ConsoleSubscriptionSummaryResponse(
+        generated_at=now.isoformat(),
+        period_start=period_start.date().isoformat(),
+        period_end=(period_end.date() - timedelta(days=1)).isoformat(),
+        plan_name=plan_name,
+        contract_label=contract_label,
+        currency=currency,
+        monthly_quota=monthly_quota,
+        quota_source=quota_source,
+        billable_messages=billable_messages,
+        remaining_quota=remaining_quota,
+        projected_month_total=projected_month_total,
+        usage_percent=usage_percent,
+        over_quota=over_quota,
+        evidence=evidence_items,
+    )
+
+
+@router.get(
+    "/business/data-trust",
+    response_model=ConsoleDataTrustSummaryResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_business_data_trust(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleDataTrustSummaryResponse:
+    from app.services.audit_service import AuditEvent
+
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can access data trust summary",
+    )
+
+    now = datetime.now(timezone.utc)
+    allowed_branch_ids = _resolve_branch_scope(context)
+    analytics_scope_limited = allowed_branch_ids is not None
+
+    analytics_row = _load_latest_analytics_row(
+        db=db,
+        client_id=context.client.id,
+        metric_date=now.date(),
+        analytics_scope_limited=analytics_scope_limited,
+    )
+    metric_date = analytics_row.get("metric_date").isoformat() if analytics_row and analytics_row.get("metric_date") else None
+    first_response_missing_total = _safe_int(
+        analytics_row.get("first_response_missing_total") if analytics_row else None
+    )
+    escalation_meta_missing_total = _safe_int(
+        analytics_row.get("escalation_meta_missing_total") if analytics_row else None
+    )
+    intent_missing_total = _safe_int(analytics_row.get("intent_missing_total") if analytics_row else None)
+
+    knowledge_query = db.query(KnowledgeVersion).filter(
+        KnowledgeVersion.client_id == context.client.id,
+        KnowledgeVersion.status == "published",
+    )
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            knowledge_query = knowledge_query.filter(text("1 = 0"))
+        else:
+            knowledge_query = knowledge_query.filter(KnowledgeVersion.branch_id.in_(allowed_branch_ids))
+    latest_knowledge = (
+        knowledge_query.order_by(
+            KnowledgeVersion.published_at.desc(),
+            KnowledgeVersion.created_at.desc(),
+        ).first()
+    )
+    knowledge_last_published_at = (
+        latest_knowledge.published_at.isoformat()
+        if latest_knowledge and latest_knowledge.published_at is not None
+        else None
+    )
+    knowledge_stale_hours = None
+    if latest_knowledge and latest_knowledge.published_at is not None:
+        knowledge_stale_hours = max(0, int((now - latest_knowledge.published_at).total_seconds() // 3600))
+
+    audit_window_start = now - timedelta(hours=24)
+    audit_query = db.query(AuditEvent).filter(
+        AuditEvent.client_id == context.client.id,
+        AuditEvent.created_at >= audit_window_start,
+        AuditEvent.created_at < now,
+    )
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            audit_query = audit_query.filter(text("1 = 0"))
+        else:
+            audit_query = audit_query.filter(AuditEvent.branch_id.in_(allowed_branch_ids))
+    audit_events_24h = audit_query.count()
+    critical_audit_events_24h = audit_query.filter(
+        or_(
+            AuditEvent.event_type.ilike("%failed%"),
+            AuditEvent.event_type.ilike("%blocked%"),
+            AuditEvent.event_type.ilike("%rejected%"),
+        )
+    ).count()
+
+    status, status_label = _derive_data_trust_status(
+        first_response_missing_total=first_response_missing_total,
+        escalation_meta_missing_total=escalation_meta_missing_total,
+        intent_missing_total=intent_missing_total,
+        knowledge_stale_hours=knowledge_stale_hours,
+        critical_audit_events_24h=critical_audit_events_24h,
+        analytics_scope_limited=analytics_scope_limited,
+    )
+    actions = _build_data_trust_actions(
+        first_response_missing_total=first_response_missing_total,
+        escalation_meta_missing_total=escalation_meta_missing_total,
+        intent_missing_total=intent_missing_total,
+        knowledge_stale_hours=knowledge_stale_hours,
+        critical_audit_events_24h=critical_audit_events_24h,
+        analytics_scope_limited=analytics_scope_limited,
+    )
+
+    return ConsoleDataTrustSummaryResponse(
+        generated_at=now.isoformat(),
+        status=status,
+        status_label=status_label,
+        metric_date=metric_date,
+        analytics_scope_limited=analytics_scope_limited,
+        first_response_missing_total=first_response_missing_total,
+        escalation_meta_missing_total=escalation_meta_missing_total,
+        intent_missing_total=intent_missing_total,
+        knowledge_last_published_at=knowledge_last_published_at,
+        knowledge_stale_hours=knowledge_stale_hours,
+        audit_events_24h=audit_events_24h,
+        critical_audit_events_24h=critical_audit_events_24h,
+        actions=actions,
+    )
+
+
+@router.get(
+    "/business/team-performance",
+    response_model=ConsoleTeamPerformanceSummaryResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_business_team_performance(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleTeamPerformanceSummaryResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can access team performance summary",
+    )
+
+    now = datetime.now(timezone.utc)
+    allowed_branch_ids = _resolve_branch_scope(context)
+    analytics_scope_limited = allowed_branch_ids is not None
+
+    analytics_row = _load_latest_analytics_row(
+        db=db,
+        client_id=context.client.id,
+        metric_date=now.date(),
+        analytics_scope_limited=analytics_scope_limited,
+    )
+    metric_date = analytics_row.get("metric_date").isoformat() if analytics_row and analytics_row.get("metric_date") else None
+    manager_median_response_seconds = _safe_float(
+        analytics_row.get("manager_median_response_seconds") if analytics_row else None
+    )
+    first_response_p90_seconds = _safe_float(
+        analytics_row.get("first_response_p90_seconds") if analytics_row else None
+    )
+
+    handover_base = db.query(Handover).filter(Handover.client_id == context.client.id)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            unresolved_cases = 0
+            unresolved_older_than_60m = 0
+            managers: list[ConsoleTeamManagerPerformanceItem] = []
+            top_manager_name = None
+            top_manager_unresolved = 0
+        else:
+            handover_base = handover_base.join(
+                Conversation,
+                Handover.conversation_id == Conversation.id,
+            ).filter(Conversation.branch_id.in_(allowed_branch_ids))
+            unresolved_query = handover_base.filter(Handover.status.in_(["pending", "active"]))
+            unresolved_cases = unresolved_query.count()
+            unresolved_older_than_60m = unresolved_query.filter(
+                Handover.created_at < (now - timedelta(minutes=60))
+            ).count()
+            manager_name_expr = func.coalesce(
+                func.nullif(func.trim(Handover.assigned_to_name), ""),
+                func.nullif(func.trim(Handover.assigned_to), ""),
+                "Не назначен",
+            )
+            manager_rows = (
+                unresolved_query.with_entities(
+                    manager_name_expr.label("manager_name"),
+                    func.count().label("unresolved_cases"),
+                    func.sum(case((Handover.status == "pending", 1), else_=0)).label("pending_cases"),
+                    func.sum(case((Handover.status == "active", 1), else_=0)).label("active_cases"),
+                    func.min(Handover.created_at).label("oldest_created_at"),
+                )
+                .group_by(manager_name_expr)
+                .order_by(func.count().desc())
+                .limit(8)
+                .all()
+            )
+            avg_response_rows = (
+                handover_base.filter(
+                    Handover.first_response_at.isnot(None),
+                    Handover.created_at >= (now - timedelta(days=30)),
+                    Handover.first_response_at >= Handover.created_at,
+                )
+                .with_entities(
+                    manager_name_expr.label("manager_name"),
+                    func.avg(func.extract("epoch", Handover.first_response_at - Handover.created_at)).label(
+                        "avg_first_response_seconds_30d"
+                    ),
+                )
+                .group_by(manager_name_expr)
+                .all()
+            )
+            avg_response_by_manager = {
+                row.manager_name: _safe_float(row.avg_first_response_seconds_30d)
+                for row in avg_response_rows
+            }
+            managers = []
+            top_manager_name = None
+            top_manager_unresolved = 0
+            for row in manager_rows:
+                unresolved_value = int(row.unresolved_cases or 0)
+                pending_value = int(row.pending_cases or 0)
+                active_value = int(row.active_cases or 0)
+                oldest_unresolved_minutes = None
+                if row.oldest_created_at is not None:
+                    oldest_unresolved_minutes = max(
+                        0,
+                        int((now - row.oldest_created_at).total_seconds() // 60),
+                    )
+                manager_name = row.manager_name or "Не назначен"
+                if unresolved_value > top_manager_unresolved:
+                    top_manager_unresolved = unresolved_value
+                    top_manager_name = manager_name
+                managers.append(
+                    ConsoleTeamManagerPerformanceItem(
+                        manager_name=manager_name,
+                        unresolved_cases=unresolved_value,
+                        pending_cases=pending_value,
+                        active_cases=active_value,
+                        oldest_unresolved_minutes=oldest_unresolved_minutes,
+                        avg_first_response_seconds_30d=avg_response_by_manager.get(manager_name),
+                    )
+                )
+    else:
+        unresolved_query = handover_base.filter(Handover.status.in_(["pending", "active"]))
+        unresolved_cases = unresolved_query.count()
+        unresolved_older_than_60m = unresolved_query.filter(
+            Handover.created_at < (now - timedelta(minutes=60))
+        ).count()
+        manager_name_expr = func.coalesce(
+            func.nullif(func.trim(Handover.assigned_to_name), ""),
+            func.nullif(func.trim(Handover.assigned_to), ""),
+            "Не назначен",
+        )
+        manager_rows = (
+            unresolved_query.with_entities(
+                manager_name_expr.label("manager_name"),
+                func.count().label("unresolved_cases"),
+                func.sum(case((Handover.status == "pending", 1), else_=0)).label("pending_cases"),
+                func.sum(case((Handover.status == "active", 1), else_=0)).label("active_cases"),
+                func.min(Handover.created_at).label("oldest_created_at"),
+            )
+            .group_by(manager_name_expr)
+            .order_by(func.count().desc())
+            .limit(8)
+            .all()
+        )
+        avg_response_rows = (
+            handover_base.filter(
+                Handover.first_response_at.isnot(None),
+                Handover.created_at >= (now - timedelta(days=30)),
+                Handover.first_response_at >= Handover.created_at,
+            )
+            .with_entities(
+                manager_name_expr.label("manager_name"),
+                func.avg(func.extract("epoch", Handover.first_response_at - Handover.created_at)).label(
+                    "avg_first_response_seconds_30d"
+                ),
+            )
+            .group_by(manager_name_expr)
+            .all()
+        )
+        avg_response_by_manager = {
+            row.manager_name: _safe_float(row.avg_first_response_seconds_30d)
+            for row in avg_response_rows
+        }
+        managers = []
+        top_manager_name = None
+        top_manager_unresolved = 0
+        for row in manager_rows:
+            unresolved_value = int(row.unresolved_cases or 0)
+            pending_value = int(row.pending_cases or 0)
+            active_value = int(row.active_cases or 0)
+            oldest_unresolved_minutes = None
+            if row.oldest_created_at is not None:
+                oldest_unresolved_minutes = max(
+                    0,
+                    int((now - row.oldest_created_at).total_seconds() // 60),
+                )
+            manager_name = row.manager_name or "Не назначен"
+            if unresolved_value > top_manager_unresolved:
+                top_manager_unresolved = unresolved_value
+                top_manager_name = manager_name
+            managers.append(
+                ConsoleTeamManagerPerformanceItem(
+                    manager_name=manager_name,
+                    unresolved_cases=unresolved_value,
+                    pending_cases=pending_value,
+                    active_cases=active_value,
+                    oldest_unresolved_minutes=oldest_unresolved_minutes,
+                    avg_first_response_seconds_30d=avg_response_by_manager.get(manager_name),
+                )
+            )
+
+    status, status_label = _derive_team_performance_status(
+        unresolved_cases=unresolved_cases,
+        unresolved_older_than_60m=unresolved_older_than_60m,
+        manager_median_response_seconds=manager_median_response_seconds,
+    )
+    actions = _build_team_performance_actions(
+        unresolved_older_than_60m=unresolved_older_than_60m,
+        manager_median_response_seconds=manager_median_response_seconds,
+        top_manager_name=top_manager_name,
+        top_manager_unresolved=top_manager_unresolved,
+        analytics_scope_limited=analytics_scope_limited,
+    )
+
+    return ConsoleTeamPerformanceSummaryResponse(
+        generated_at=now.isoformat(),
+        status=status,
+        status_label=status_label,
+        metric_date=metric_date,
+        analytics_scope_limited=analytics_scope_limited,
+        manager_median_response_seconds=manager_median_response_seconds,
+        first_response_p90_seconds=first_response_p90_seconds,
+        unresolved_cases=unresolved_cases,
+        unresolved_older_than_60m=unresolved_older_than_60m,
+        managers=managers,
+        actions=actions,
+    )
+
+
 @router.get(
     "/health",
     response_model=ConsoleHealthResponse,
@@ -6696,6 +7666,56 @@ async def send_telegram_test(
     )
 
 
+def _validate_console_settings_update(body: ConsoleSettingsUpdateRequest) -> None:
+    if body.reminder_1_minutes is not None and not 5 <= body.reminder_1_minutes <= 60:
+        raise ConsoleAPIError(400, "INVALID_INPUT", "reminder_1_minutes must be between 5 and 60")
+    if body.reminder_2_minutes is not None and not 30 <= body.reminder_2_minutes <= 180:
+        raise ConsoleAPIError(400, "INVALID_INPUT", "reminder_2_minutes must be between 30 and 180")
+    if body.escalation_timeout_minutes is not None and not 30 <= body.escalation_timeout_minutes <= 360:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_INPUT",
+            "escalation_timeout_minutes must be between 30 and 360",
+        )
+    if (
+        body.reminder_1_minutes is not None
+        and body.reminder_2_minutes is not None
+        and body.reminder_1_minutes >= body.reminder_2_minutes
+    ):
+        raise ConsoleAPIError(
+            400,
+            "INVALID_INPUT",
+            "reminder_1_minutes must be less than reminder_2_minutes",
+        )
+    if (
+        body.reminder_2_minutes is not None
+        and body.escalation_timeout_minutes is not None
+        and body.reminder_2_minutes >= body.escalation_timeout_minutes
+    ):
+        raise ConsoleAPIError(
+            400,
+            "INVALID_INPUT",
+            "reminder_2_minutes must be less than escalation_timeout_minutes",
+        )
+
+
+def _apply_console_settings_update(
+    settings: ClientSettings,
+    body: ConsoleSettingsUpdateRequest,
+) -> list[str]:
+    updated_fields: list[str] = []
+    if body.reminder_1_minutes is not None:
+        settings.reminder_timeout_1 = body.reminder_1_minutes
+        updated_fields.append("reminder_timeout_1")
+    if body.reminder_2_minutes is not None:
+        settings.reminder_timeout_2 = body.reminder_2_minutes
+        updated_fields.append("reminder_timeout_2")
+    if body.escalation_timeout_minutes is not None:
+        settings.auto_close_timeout = body.escalation_timeout_minutes
+        updated_fields.append("auto_close_timeout")
+    return updated_fields
+
+
 @router.patch(
     "/settings",
     response_model=ConsoleSettingsUpdateResponse,
@@ -6707,8 +7727,6 @@ async def update_settings(
     db: Session = Depends(get_db),
 ) -> ConsoleSettingsUpdateResponse:
     """Update client settings (owner/admin only)."""
-    from app.schemas.console import ConsoleSettingsUpdateRequest, ConsoleSettingsUpdateResponse
-    
     context = get_console_context(request, db)
     require_console_permission(
         context,
@@ -6716,34 +7734,21 @@ async def update_settings(
         "write",
         message="Only owner/admin can update settings",
     )
-    
-    # Get client settings
-    from app.models import ClientSettings
-    
+
+    _validate_console_settings_update(body)
+
     settings = db.query(ClientSettings).filter(
         ClientSettings.client_id == context.client.id
     ).first()
-    
+
     if not settings:
-        # Create settings if not exists
         settings = ClientSettings(client_id=context.client.id)
         db.add(settings)
-    
-    # Update fields if provided
-    updated_fields = []
-    if body.reminder_1_minutes is not None:
-        settings.reminder_1_minutes = body.reminder_1_minutes
-        updated_fields.append("reminder_1_minutes")
-    if body.reminder_2_minutes is not None:
-        settings.reminder_2_minutes = body.reminder_2_minutes
-        updated_fields.append("reminder_2_minutes")
-    if body.escalation_timeout_minutes is not None:
-        settings.escalation_timeout_minutes = body.escalation_timeout_minutes
-        updated_fields.append("escalation_timeout_minutes")
-    
+
+    updated_fields = _apply_console_settings_update(settings, body)
+
     db.commit()
-    
-    # Audit log
+
     record_audit_event(
         db,
         client_id=context.client.id,
@@ -6754,7 +7759,7 @@ async def update_settings(
         entity_id=str(context.client.id),
         payload={"updated_fields": updated_fields},
     )
-    
+
     return ConsoleSettingsUpdateResponse(
         success=True,
         message=f"Updated: {', '.join(updated_fields)}" if updated_fields else "No changes"

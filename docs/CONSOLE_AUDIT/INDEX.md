@@ -24,6 +24,12 @@ Comparison
 Reports
 - `docs/REPORTS/2026-02-01-console-web-fact-audit.md`
 - `docs/REPORTS/2026-02-15-platform-admin-baseline-v1.md`
+- `docs/REPORTS/2026-02-15-platform-admin-baseline-v2.md`
+- `docs/REPORTS/2026-02-15-platform-admin-baseline-v3.md`
+- `docs/REPORTS/2026-02-15-owner-admin-business-control-plane-v1.md`
+- `docs/REPORTS/2026-02-15-owner-admin-wave1-implementation-v1.md`
+- `docs/REPORTS/2026-02-15-owner-admin-wave2-data-trust-team-v1.md`
+- `docs/REPORTS/2026-02-15-owner-admin-wave3-simple-settings-v1.md`
 
 Backlog
 - `docs/CONSOLE_AUDIT/UX_BACKLOG.md`
@@ -46,6 +52,10 @@ Pages
 - `docs/CONSOLE_AUDIT/pages/audit.md`
 - `docs/CONSOLE_AUDIT/pages/ops.md`
 - `docs/CONSOLE_AUDIT/pages/insights.md`
+- `docs/CONSOLE_AUDIT/pages/business.md`
+- `docs/CONSOLE_AUDIT/pages/business-data-trust.md`
+- `docs/CONSOLE_AUDIT/pages/business-team-performance.md`
+- `docs/CONSOLE_AUDIT/pages/subscription.md`
 - `docs/CONSOLE_AUDIT/pages/tenants.md`
 - `docs/CONSOLE_AUDIT/pages/integrations.md`
 - `docs/CONSOLE_AUDIT/pages/company-workspace.md`

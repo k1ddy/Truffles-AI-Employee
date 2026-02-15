@@ -600,6 +600,99 @@ class ConsoleHealthResponse(BaseModel):
     outbox_backlog: int
 
 
+ConsoleBusinessSeverity = Literal["critical", "warn", "info"]
+ConsoleBusinessStatus = Literal["healthy", "degraded", "unhealthy"]
+ConsoleSubscriptionQuotaSource = Literal["company_billing_info", "client_config", "unknown"]
+
+
+class ConsoleBusinessActionItem(BaseModel):
+    id: str
+    title: str
+    description: str
+    href: str
+    severity: ConsoleBusinessSeverity
+
+
+class ConsoleBusinessSummaryResponse(BaseModel):
+    generated_at: str
+    status: ConsoleBusinessStatus
+    status_label: str
+    outbox_backlog: int
+    outbox_failed_24h: int
+    pending_cases: int
+    active_cases: int
+    unresolved_cases: int
+    oldest_unresolved_minutes: Optional[int] = None
+    first_response_p90_seconds: Optional[float] = None
+    actions: list[ConsoleBusinessActionItem] = []
+
+
+class ConsoleSubscriptionEvidenceItem(BaseModel):
+    outbox_id: UUID
+    conversation_id: Optional[UUID] = None
+    inbound_message_id: str
+    created_at: str
+    status: str
+    provider_status: Optional[str] = None
+    provider_message_id: Optional[str] = None
+
+
+class ConsoleSubscriptionSummaryResponse(BaseModel):
+    generated_at: str
+    period_start: str
+    period_end: str
+    plan_name: Optional[str] = None
+    contract_label: Optional[str] = None
+    currency: Optional[str] = None
+    monthly_quota: Optional[int] = None
+    quota_source: ConsoleSubscriptionQuotaSource = "unknown"
+    billable_messages: int
+    remaining_quota: Optional[int] = None
+    projected_month_total: Optional[int] = None
+    usage_percent: Optional[float] = None
+    over_quota: bool = False
+    evidence: list[ConsoleSubscriptionEvidenceItem] = []
+
+
+class ConsoleDataTrustSummaryResponse(BaseModel):
+    generated_at: str
+    status: ConsoleBusinessStatus
+    status_label: str
+    metric_date: Optional[str] = None
+    analytics_scope_limited: bool = False
+    first_response_missing_total: Optional[int] = None
+    escalation_meta_missing_total: Optional[int] = None
+    intent_missing_total: Optional[int] = None
+    knowledge_last_published_at: Optional[str] = None
+    knowledge_stale_hours: Optional[int] = None
+    audit_events_24h: int
+    critical_audit_events_24h: int
+    actions: list[ConsoleBusinessActionItem] = []
+
+
+class ConsoleTeamManagerPerformanceItem(BaseModel):
+    manager_name: str
+    unresolved_cases: int
+    pending_cases: int
+    active_cases: int
+    oldest_unresolved_minutes: Optional[int] = None
+    avg_first_response_seconds_30d: Optional[float] = None
+
+
+class ConsoleTeamPerformanceSummaryResponse(BaseModel):
+    generated_at: str
+    status: ConsoleBusinessStatus
+    status_label: str
+    metric_date: Optional[str] = None
+    analytics_scope_limited: bool = False
+    manager_median_response_seconds: Optional[float] = None
+    first_response_p90_seconds: Optional[float] = None
+    unresolved_cases: int
+    unresolved_older_than_60m: int
+    managers: list[ConsoleTeamManagerPerformanceItem] = []
+    actions: list[ConsoleBusinessActionItem] = []
+
+
 class ConsoleOutboxCounts(BaseModel):
     pending: int
     processing: int

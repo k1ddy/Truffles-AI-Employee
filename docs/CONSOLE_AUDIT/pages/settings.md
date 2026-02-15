@@ -40,6 +40,20 @@ Provisioning Wizard
   - "Далее" calls onboarding advance and is blocked when required fields are missing or the step is locked.
 
 Settings cards
+- Simple business settings (owner/admin/platform_admin write):
+  - Preset profiles:
+    - `Быстрый сервис` (5 / 30 / 60)
+    - `Сбалансированный` (10 / 45 / 120)
+    - `Бережный к команде` (15 / 60 / 180)
+  - Manual fields:
+    - first reminder (`5-60`)
+    - second reminder (`30-180`)
+    - escalation timeout (`30-360`)
+  - Validation rule: `reminder_1 < reminder_2 < escalation_timeout`.
+  - Save action: `PATCH /console/v1/settings`.
+- Owner explainability card:
+  - business-language impact preview for configured values,
+  - guidance to switch profile based on queue pressure visible in `Team KPI`.
 - SLA and reminders (read-only from bot_config): reminder_1/2, auto-close, reminders enabled, owner escalation.
 - Quiet hours (read-only): enabled, start, end.
 - Bot behavior (read-only): tone, autolearn_enabled, booking_enabled.
@@ -62,6 +76,7 @@ Team link
 
 API endpoints used
 - Settings: `GET /console/v1/settings`.
+- Settings update: `PATCH /console/v1/settings`.
 - Telegram verify/test: `POST /console/v1/telegram/verify|test`.
 - Provisioning wizard:
   - `GET/POST /console/v1/admin/companies|clients|branches|agents`.

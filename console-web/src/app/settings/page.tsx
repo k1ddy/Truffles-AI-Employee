@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
-import { authApi, canAccessConsole, telegramApi } from "@/lib/api-client";
+import { authApi, canAccessConsole, settingsApi, telegramApi } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
@@ -44,9 +44,59 @@ interface SettingsData {
     bot_config: BotConfig | null;
 }
 
+interface SimpleSettingsForm {
+    reminder1: string;
+    reminder2: string;
+    escalation: string;
+}
+
+interface SettingsPreset {
+    id: string;
+    label: string;
+    reminder1: number;
+    reminder2: number;
+    escalation: number;
+    description: string;
+}
+
 async function fetchSettings(): Promise<SettingsData> {
     const response = await api.get("/settings");
     return response.data;
+}
+
+const SETTINGS_PRESETS: SettingsPreset[] = [
+    {
+        id: "fast",
+        label: "Быстрый сервис",
+        reminder1: 5,
+        reminder2: 30,
+        escalation: 60,
+        description: "Подходит для активного sales-окна и быстрой реакции менеджера.",
+    },
+    {
+        id: "balanced",
+        label: "Сбалансированный",
+        reminder1: 10,
+        reminder2: 45,
+        escalation: 120,
+        description: "Рекомендуемый профиль по умолчанию для стабильной нагрузки.",
+    },
+    {
+        id: "careful",
+        label: "Бережный к команде",
+        reminder1: 15,
+        reminder2: 60,
+        escalation: 180,
+        description: "Для небольших команд, когда важнее снизить давление на менеджеров.",
+    },
+];
+
+function parsePositiveInt(value: string): number | null {
+    const parsed = Number(value.trim());
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+        return null;
+    }
+    return parsed;
 }
 
 
@@ -103,6 +153,112 @@ export default function SettingsPage() {
         queryFn: fetchSettings,
         enabled: !!session && canReadSettings,
     });
+    const config = data?.bot_config;
+    const [simpleSettings, setSimpleSettings] = useState<SimpleSettingsForm>({
+        reminder1: "",
+        reminder2: "",
+        escalation: "",
+    });
+    const [selectedPresetId, setSelectedPresetId] = useState<string>("balanced");
+
+    useEffect(() => {
+        if (!config) {
+            return;
+        }
+        setSimpleSettings({
+            reminder1: String(config.reminder_timeout_1 ?? 10),
+            reminder2: String(config.reminder_timeout_2 ?? 45),
+            escalation: String(config.auto_close_timeout ?? 120),
+        });
+        if (config.reminder_timeout_1 === 5 && config.reminder_timeout_2 === 30 && config.auto_close_timeout === 60) {
+            setSelectedPresetId("fast");
+            return;
+        }
+        if (config.reminder_timeout_1 === 15 && config.reminder_timeout_2 === 60 && config.auto_close_timeout === 180) {
+            setSelectedPresetId("careful");
+            return;
+        }
+        setSelectedPresetId("balanced");
+    }, [config]);
+
+    const updateSettingsMutation = useMutation({
+        mutationFn: async (payload: { reminder_1_minutes: number; reminder_2_minutes: number; escalation_timeout_minutes: number }) => {
+            const { data } = await settingsApi.update(payload);
+            return data;
+        },
+        onSuccess: () => {
+            toast.success("Простые настройки сохранены");
+            refetch();
+        },
+        onError: (updateError) => {
+            handleError(updateError);
+        },
+    });
+
+    const explainabilityLines = useMemo(() => {
+        const reminder1 = parsePositiveInt(simpleSettings.reminder1);
+        const reminder2 = parsePositiveInt(simpleSettings.reminder2);
+        const escalation = parsePositiveInt(simpleSettings.escalation);
+        if (!reminder1 || !reminder2 || !escalation) {
+            return [
+                "Введите корректные значения, чтобы увидеть прогноз влияния.",
+            ];
+        }
+        return [
+            `Через ${reminder1} мин система напомнит менеджеру о необработанной заявке.`,
+            `Через ${reminder2} мин включится повторное напоминание и риск потери лида растет.`,
+            `Через ${escalation} мин заявка попадет в авто-контур эскалации/закрытия.`,
+        ];
+    }, [simpleSettings.escalation, simpleSettings.reminder1, simpleSettings.reminder2]);
+
+    function applyPreset(preset: SettingsPreset): void {
+        setSelectedPresetId(preset.id);
+        setSimpleSettings({
+            reminder1: String(preset.reminder1),
+            reminder2: String(preset.reminder2),
+            escalation: String(preset.escalation),
+        });
+    }
+
+    function updateSimpleSetting(field: keyof SimpleSettingsForm, value: string): void {
+        setSimpleSettings((current) => ({
+            ...current,
+            [field]: value,
+        }));
+    }
+
+    function saveSimpleSettings(): void {
+        const reminder1 = parsePositiveInt(simpleSettings.reminder1);
+        const reminder2 = parsePositiveInt(simpleSettings.reminder2);
+        const escalation = parsePositiveInt(simpleSettings.escalation);
+
+        if (!reminder1 || reminder1 < 5 || reminder1 > 60) {
+            toast.error("Первое напоминание должно быть 5-60 мин");
+            return;
+        }
+        if (!reminder2 || reminder2 < 30 || reminder2 > 180) {
+            toast.error("Второе напоминание должно быть 30-180 мин");
+            return;
+        }
+        if (!escalation || escalation < 30 || escalation > 360) {
+            toast.error("Таймаут эскалации должен быть 30-360 мин");
+            return;
+        }
+        if (reminder1 >= reminder2) {
+            toast.error("Первое напоминание должно быть меньше второго");
+            return;
+        }
+        if (reminder2 >= escalation) {
+            toast.error("Второе напоминание должно быть меньше таймаута эскалации");
+            return;
+        }
+
+        updateSettingsMutation.mutate({
+            reminder_1_minutes: reminder1,
+            reminder_2_minutes: reminder2,
+            escalation_timeout_minutes: escalation,
+        });
+    }
 
     const verifyMutation = useMutation({
         mutationFn: async (action: { targetKey: string; label: string; payload: { scope: "client" | "branch"; branch_id?: string } }) => {
@@ -206,7 +362,6 @@ export default function SettingsPage() {
         );
     }
 
-    const config = data?.bot_config;
     const provisioningAccessSection = canReadSettings ? "settings" : "provisioning";
 
     return (
@@ -227,7 +382,134 @@ export default function SettingsPage() {
             )}
 
             {canReadSettings && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <section className="mb-6 grid grid-cols-1 gap-6 md:grid-cols-2">
+                    <div className="rounded-xl border border-border/60 bg-card p-5" data-testid="settings-simple-card">
+                        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <h2 className="text-lg font-semibold">Простые бизнес-настройки</h2>
+                                <p className="text-sm text-muted-foreground">
+                                    Меняет скорость реакции менеджеров и таймаут эскалации.
+                                </p>
+                            </div>
+                            {!canWriteSettings && (
+                                <span className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
+                                    Только owner/admin
+                                </span>
+                            )}
+                        </div>
+                        <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3" data-testid="settings-simple-presets">
+                            {SETTINGS_PRESETS.map((preset) => (
+                                <button
+                                    key={preset.id}
+                                    type="button"
+                                    className={`rounded-lg border px-3 py-2 text-left text-xs transition ${selectedPresetId === preset.id
+                                        ? "border-primary bg-primary/5 text-primary"
+                                        : "border-border/60 hover:bg-muted"
+                                        }`}
+                                    onClick={() => {
+                                        applyPreset(preset);
+                                    }}
+                                    disabled={!canWriteSettings || updateSettingsMutation.isPending}
+                                    data-testid={`settings-preset-${preset.id}`}
+                                >
+                                    <p className="font-semibold">{preset.label}</p>
+                                    <p className="mt-1 text-muted-foreground">
+                                        {preset.reminder1}/{preset.reminder2}/{preset.escalation} мин
+                                    </p>
+                                </button>
+                            ))}
+                        </div>
+                        <p className="mb-4 text-xs text-muted-foreground">
+                            {SETTINGS_PRESETS.find((item) => item.id === selectedPresetId)?.description}
+                        </p>
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <label className="text-sm">
+                                <span className="mb-1 block text-xs text-muted-foreground">1-е напоминание (5-60)</span>
+                                <input
+                                    type="number"
+                                    min={5}
+                                    max={60}
+                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                                    value={simpleSettings.reminder1}
+                                    onChange={(event) => {
+                                        updateSimpleSetting("reminder1", event.target.value);
+                                    }}
+                                    disabled={!canWriteSettings || updateSettingsMutation.isPending}
+                                    data-testid="settings-input-reminder1"
+                                />
+                            </label>
+                            <label className="text-sm">
+                                <span className="mb-1 block text-xs text-muted-foreground">2-е напоминание (30-180)</span>
+                                <input
+                                    type="number"
+                                    min={30}
+                                    max={180}
+                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                                    value={simpleSettings.reminder2}
+                                    onChange={(event) => {
+                                        updateSimpleSetting("reminder2", event.target.value);
+                                    }}
+                                    disabled={!canWriteSettings || updateSettingsMutation.isPending}
+                                    data-testid="settings-input-reminder2"
+                                />
+                            </label>
+                            <label className="text-sm">
+                                <span className="mb-1 block text-xs text-muted-foreground">Эскалация (30-360)</span>
+                                <input
+                                    type="number"
+                                    min={30}
+                                    max={360}
+                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                                    value={simpleSettings.escalation}
+                                    onChange={(event) => {
+                                        updateSimpleSetting("escalation", event.target.value);
+                                    }}
+                                    disabled={!canWriteSettings || updateSettingsMutation.isPending}
+                                    data-testid="settings-input-escalation"
+                                />
+                            </label>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                            <p className="text-xs text-muted-foreground" data-testid="settings-save-hint">
+                                Сохраняется в `client_settings` и сразу влияет на SLA-процессы.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    saveSimpleSettings();
+                                }}
+                                className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                                disabled={!canWriteSettings || updateSettingsMutation.isPending}
+                                data-testid="settings-save-simple"
+                            >
+                                {updateSettingsMutation.isPending ? "Сохраняю..." : "Сохранить"}
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="rounded-xl border border-border/60 bg-card p-5" data-testid="settings-explainability">
+                        <h2 className="text-lg font-semibold">Объяснение для владельца</h2>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                            Как текущие значения влияют на продажи, SLA и нагрузку команды.
+                        </p>
+                        <div className="mt-4 space-y-2">
+                            {explainabilityLines.map((line) => (
+                                <p key={line} className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-sm text-foreground">
+                                    {line}
+                                </p>
+                            ))}
+                        </div>
+                        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                            Если видите рост `pending` и просроченных диалогов на странице `Команда KPI`, выбирайте более быстрый профиль.
+                        </div>
+                    </div>
+                </section>
+            )}
+
+            {canReadSettings && (
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                     {/* SLA & Reminders */}
                     <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-sla">
                         <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
