@@ -198,6 +198,12 @@ from app.services.console_idempotency import (
     release_idempotency,
     start_idempotency,
 )
+from app.services.console_knowledge_preflight import (
+    DEFAULT_PREFLIGHT_WINDOW_MINUTES,
+    build_knowledge_draft_hash,
+    build_knowledge_validate_payload,
+    has_recent_knowledge_preflight,
+)
 from app.services.console_owner_admin import (
     build_data_trust_actions as _build_data_trust_actions,
 )
@@ -7597,6 +7603,7 @@ async def validate_knowledge(
         require_booking=require_booking,
     )
     valid = not errors
+    draft_hash = build_knowledge_draft_hash(body.draft_text)
     if payload:
         upsert_draft(
             db,
@@ -7611,11 +7618,12 @@ async def validate_knowledge(
             event_type="knowledge_validate",
             entity_type="branch",
             entity_id=branch.id,
-            payload={
-                "valid": valid,
-                "errors": errors,
-                "warnings": warnings,
-            },
+            payload=build_knowledge_validate_payload(
+                valid=valid,
+                errors=errors,
+                warnings=warnings,
+                draft_hash=draft_hash,
+            ),
             client_id=context.client.id,
             branch_id=branch.id,
             actor_id=context.agent.id,
@@ -7633,7 +7641,7 @@ async def validate_knowledge(
 @router.post(
     "/knowledge/publish",
     response_model=ConsoleKnowledgePublishResponse,
-    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+    responses={400: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 409: {"model": ConsoleErrorResponse}},
 )
 async def publish_knowledge(
     body: ConsoleKnowledgePublishRequest,
@@ -7655,6 +7663,26 @@ async def publish_knowledge(
         if onboarding_inputs.has_capabilities
         else None
     )
+    draft_hash = build_knowledge_draft_hash(body.draft_text)
+
+    if not body.skip_preflight_check:
+        has_preflight = has_recent_knowledge_preflight(
+            db=db,
+            client_id=context.client.id,
+            branch_id=branch.id,
+            draft_hash=draft_hash,
+            window_minutes=DEFAULT_PREFLIGHT_WINDOW_MINUTES,
+        )
+        if not has_preflight:
+            raise ConsoleAPIError(
+                409,
+                "KNOWLEDGE_PREFLIGHT_REQUIRED",
+                "Run Validate for this draft before Publish",
+                {
+                    "draft_hash": draft_hash,
+                    "window_minutes": DEFAULT_PREFLIGHT_WINDOW_MINUTES,
+                },
+            )
 
     current = get_current_published(db, branch_id=branch.id)
     current_payload = current.payload_json if current else None
@@ -7728,6 +7756,8 @@ async def publish_knowledge(
             payload={
                 "version_id": str(version.id),
                 "warnings": warnings,
+                "draft_hash": draft_hash,
+                "skip_preflight_check": body.skip_preflight_check,
             },
             client_id=context.client.id,
             branch_id=branch.id,
@@ -7748,6 +7778,8 @@ async def publish_knowledge(
             payload={
                 "version_id": str(version.id),
                 "error": str(exc),
+                "draft_hash": draft_hash,
+                "skip_preflight_check": body.skip_preflight_check,
             },
             client_id=context.client.id,
             branch_id=branch.id,

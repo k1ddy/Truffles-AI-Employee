@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
 from uuid import uuid4
@@ -5,7 +6,7 @@ from uuid import uuid4
 import pytest
 
 from app.routers import console as console_router
-from app.schemas.console import ConsoleSettingsUpdateRequest
+from app.schemas.console import ConsoleKnowledgePublishRequest, ConsoleSettingsUpdateRequest
 from app.services.console_errors import ConsoleAPIError
 
 
@@ -226,6 +227,111 @@ def test_validate_console_settings_update_rejects_invalid_range() -> None:
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.code == "INVALID_INPUT"
+
+
+def test_knowledge_publish_request_defaults_preflight_gate_enabled() -> None:
+    body = ConsoleKnowledgePublishRequest(draft_text="test")
+
+    assert body.skip_preflight_check is False
+
+
+@pytest.mark.asyncio
+async def test_publish_knowledge_requires_recent_preflight(monkeypatch):
+    branch = SimpleNamespace(id=uuid4())
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=uuid4(), company_id=uuid4(), name="demo_salon", config={}),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        companies=[],
+    )
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_resolve_branch_from_context", lambda _context: branch)
+    monkeypatch.setattr(console_router, "ensure_onboarding_step", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_inputs",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            has_capabilities=False,
+            reference_pack_domain_slug=None,
+        ),
+    )
+    monkeypatch.setattr(console_router, "has_recent_knowledge_preflight", lambda *_args, **_kwargs: False)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.publish_knowledge(
+            body=ConsoleKnowledgePublishRequest(draft_text="knowledge draft"),
+            request=SimpleNamespace(),
+            db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.code == "KNOWLEDGE_PREFLIGHT_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_publish_knowledge_allows_skip_preflight_override(monkeypatch):
+    branch = SimpleNamespace(
+        id=uuid4(),
+        knowledge_safe_mode=True,
+        knowledge_safe_mode_reason="old",
+        knowledge_safe_mode_at=None,
+    )
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=uuid4(), company_id=uuid4(), name="demo_salon", config={}),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        companies=[],
+    )
+    db = Mock()
+    version_id = uuid4()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_resolve_branch_from_context", lambda _context: branch)
+    monkeypatch.setattr(console_router, "ensure_onboarding_step", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "build_onboarding_inputs",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            has_capabilities=False,
+            reference_pack_domain_slug=None,
+        ),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "has_recent_knowledge_preflight",
+        lambda *_args, **_kwargs: pytest.fail("preflight check must be skipped when override is true"),
+    )
+    monkeypatch.setattr(console_router, "get_current_published", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "validate_draft", lambda *_args, **_kwargs: ({"sections": []}, [], [], None))
+    monkeypatch.setattr(
+        console_router,
+        "publish_version",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            id=version_id,
+            payload_json={"sections": []},
+            published_at=datetime.now(timezone.utc),
+        ),
+    )
+    monkeypatch.setattr(console_router, "sync_published_branch_docs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "extract_compiled_artifacts", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
+
+    response = await console_router.publish_knowledge(
+        body=ConsoleKnowledgePublishRequest(
+            draft_text="knowledge draft",
+            skip_preflight_check=True,
+        ),
+        request=SimpleNamespace(),
+        db=db,
+    )
+
+    assert response.success is True
+    assert response.version_id == version_id
+    assert branch.knowledge_safe_mode is False
+    assert branch.knowledge_safe_mode_reason is None
+    assert db.commit.call_count == 2
 
 
 @pytest.mark.asyncio

@@ -103,6 +103,18 @@ function isGatewayLikeError(error: unknown) {
         || code === "UPSTREAM_INVALID_RESPONSE";
 }
 
+function extractApiErrorCode(error: unknown): string | null {
+    if (!axios.isAxiosError(error)) {
+        return null;
+    }
+    const payload = error.response?.data as { error?: { code?: unknown } } | undefined;
+    const code = payload?.error?.code;
+    if (typeof code === "string" && code.trim()) {
+        return code.trim();
+    }
+    return null;
+}
+
 function normalizeStringList(value: unknown): string[] {
     if (!Array.isArray(value)) {
         return [];
@@ -1100,6 +1112,11 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         onError: (error) => {
             if (isApiUnavailable(error)) {
                 setApiUnavailable(true);
+                return;
+            }
+            if (extractApiErrorCode(error) === "KNOWLEDGE_PREFLIGHT_REQUIRED") {
+                toast.error("Сначала выполните Validate для текущего draft, затем Publish.");
+                setStepIndex(1);
                 return;
             }
             handleError(error);

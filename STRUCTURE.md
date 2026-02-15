@@ -70,6 +70,7 @@
 | `ops/diagnose.py` | Диагностика диалогов/trace/outbox + `dialog-report` (one-command) | QA/OPS/Brain |
 | `ops/console_platform_admin_kpi_snapshot.py` | Weekly KPI snapshot для Platform Admin (runtime + LOC + UX/e2e signals) | Brain/OPS/QA |
 | `ops/console_owner_admin_kpi_snapshot.py` | KPI snapshot для Owner/Admin (`T+0/T+24`, impact baseline/replay, fail-fast guard) | Brain/OPS/QA |
+| `ops/owner_admin_control_loop.py` | Orchestration wrapper Owner/Admin control-loop (`t0/t24`: snapshot + gate + brief + log) | Brain/OPS/QA |
 | `ops/shadow_replay.py` | Shadow replay report (decision_meta/trace comparison) | QA/OPS/Brain |
 | `ops/backfill_branch_rag.py` | Backfill Qdrant branch metadata from published knowledge | OPS/Brain |
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
@@ -79,6 +80,7 @@
 | `truffles-api/app/services/onboarding_state.py` | Server-side onboarding state machine (Console) | Backend |
 | `truffles-api/app/services/console_confirmations.py` | Confirmation safeguards for destructive Console actions | Backend |
 | `truffles-api/app/services/console_owner_admin.py` | Owner/Admin business helpers extracted from `console.py` | Backend |
+| `truffles-api/app/services/console_knowledge_preflight.py` | Knowledge publish preflight helpers (`draft_hash`, recent validate gate) | Backend |
 | `truffles-api/app/services/capabilities_runtime.py` | Runtime capabilities context (client_capabilities → decision/booking) | Backend |
 | `truffles-api/app/services/knowledge_runtime.py` | Runtime published pack truth (knowledge_versions → demo_salon resolver) | Backend |
 | `truffles-api/app/services/reasoning_core.py` | Unified Reasoning Core API (signals -> gates -> actions -> compose -> trace) | Backend/Architect |
@@ -140,6 +142,7 @@
 | `docs/REPORTS/2026-02-15-platform-admin-baseline-v2.md` | Report: Platform Admin runtime/code baseline + control-loop wave results | Brain/Architect |
 | `docs/REPORTS/2026-02-15-platform-admin-baseline-v3.md` | Report: Platform Admin wave 1+2 follow-up (outbox guard + inline validation recovery) | Brain/Architect |
 | `docs/REPORTS/2026-02-15-owner-admin-wave5-control-hardening-v1.md` | Report: Owner/Admin wave-5 (control hardening + rollback + decomposition start) | Brain/Architect |
+| `docs/REPORTS/2026-02-15-owner-admin-wave6-automation-v1.md` | Report: Owner/Admin wave-6 (automation wrapper + goal-mode + publish preflight gate) | Brain/Architect |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 

@@ -1334,6 +1334,7 @@ class ConsoleKnowledgeValidateResponse(BaseModel):
 
 class ConsoleKnowledgePublishRequest(BaseModel):
     draft_text: str
+    skip_preflight_check: bool = False
 
 
 class ConsoleKnowledgePublishResponse(BaseModel):

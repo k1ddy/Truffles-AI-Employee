@@ -1,0 +1,23 @@
+# SESSION 2026-02-15-owner-admin-wave6-automation-a1 — Session 2026-02-15-owner-admin-wave6-automation-a1
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave6-automation-a1.md
+- branch: feat/2026-02-15-owner-admin-wave6-automation-a1
+- worktree: /home/zhan/worktrees/2026-02-15-owner-admin-wave6-automation-a1
+- base_ref: origin/main
+- scope: Wave-6 owner/admin control-loop automation + goal-mode settings + knowledge publish preflight gate.
+- done:
+  - Added `ops/owner_admin_control_loop.py` (`t0/t24` orchestration, gate + brief + log artifacts).
+  - Added owner goal-mode actions in `console-web/src/app/settings/page.tsx` and smoke coverage in `console-web/e2e/owner-admin-business.spec.ts`.
+  - Added backend knowledge publish preflight gate (`ConsoleKnowledgePublishRequest.skip_preflight_check`, `KNOWLEDGE_PREFLIGHT_REQUIRED`) and helper service `app/services/console_knowledge_preflight.py`.
+  - Updated contracts/API client/knowledge page handling for preflight conflict.
+  - Added tests for preflight helpers and router behavior; checks green (`62 passed` for owner/admin+rbac slice).
+- next:
+  - Push branch and open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave6-automation-a1.md
+  - docs/REPORTS/2026-02-15-owner-admin-wave6-automation-v1.md
+  - /tmp/owner_admin_control_loop/owner-admin-wave6-t0/demo_salon_t0.json
+  - /tmp/owner_admin_control_loop/owner-admin-wave6-t24/demo_salon_t24.json
+- last_updated: 2026-02-15
