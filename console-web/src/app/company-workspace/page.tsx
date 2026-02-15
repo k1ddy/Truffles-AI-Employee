@@ -17,11 +17,9 @@ import {
     type IntegrationBranchActionRequest,
     type ProviderOpsAction,
 } from "@/lib/api-client";
-import { useErrorHandler } from "@/lib/api-hooks";
+import { useConsoleContextScope } from "@/lib/use-console-context-scope";
+import { useInlineErrorSummary } from "@/lib/use-inline-error-summary";
 
-const COMPANY_ID_STORAGE_KEY = "console:company_id";
-const CLIENT_ID_STORAGE_KEY = "console:client_id";
-const BRANCH_ID_STORAGE_KEY = "console:branch_id";
 const WORKSPACE_RECOMMENDED_ACTION_KEY = "console:workspace_recommended_action";
 
 type ProviderActionDialogState = {
@@ -247,12 +245,7 @@ function statusCardClass(ok: boolean): string {
 
 export default function CompanyWorkspacePage() {
     const { data: session } = useSession();
-    const { handleError } = useErrorHandler();
-
-    const [scopeCompanyId, setScopeCompanyId] = useState("");
-    const [scopeClientId, setScopeClientId] = useState("");
-    const [scopeBranchId, setScopeBranchId] = useState("");
-    const [scopeInitialized, setScopeInitialized] = useState(false);
+    const { errors: inlineErrors, reportError, clearErrors } = useInlineErrorSummary();
 
     const [staleAfterMinutes] = useState(60);
 
@@ -282,38 +275,29 @@ export default function CompanyWorkspacePage() {
         },
         enabled: !!session,
     });
+    const {
+        scope,
+        setCompanyId: setScopeCompanyId,
+        setClientId: setScopeClientId,
+        setBranchId: setScopeBranchId,
+        syncFromRuntime,
+        persistScopeToStorage,
+    } = useConsoleContextScope(meData);
+    const scopeCompanyId = scope.companyId;
+    const scopeClientId = scope.clientId;
+    const scopeBranchId = scope.branchId;
 
     const role = meData?.agent?.role ?? "manager";
     const canReadTenants = canAccessConsole(role, "tenants", "read");
     const canWriteTenants = canAccessConsole(role, "tenants", "write");
     const canReadIntegrations = canAccessConsole(role, "integrations", "read");
 
-    useEffect(() => {
-        if (!meData || scopeInitialized) {
-            return;
-        }
-        const storedCompanyId = readLocalStorageValue(COMPANY_ID_STORAGE_KEY);
-        const storedClientId = readLocalStorageValue(CLIENT_ID_STORAGE_KEY);
-        const storedBranchId = readLocalStorageValue(BRANCH_ID_STORAGE_KEY);
-        setScopeCompanyId(meData.selected_company_id ?? meData.client?.company_id ?? storedCompanyId ?? "");
-        setScopeClientId(meData.client?.id ?? storedClientId ?? "");
-        setScopeBranchId(meData.selected_branch_id ?? storedBranchId ?? "");
-        setScopeInitialized(true);
-    }, [meData, scopeInitialized]);
-
     const syncScopeFromContext = () => {
-        const storedCompanyId = readLocalStorageValue(COMPANY_ID_STORAGE_KEY);
-        const storedClientId = readLocalStorageValue(CLIENT_ID_STORAGE_KEY);
-        const storedBranchId = readLocalStorageValue(BRANCH_ID_STORAGE_KEY);
-        setScopeCompanyId(meData?.selected_company_id ?? meData?.client?.company_id ?? storedCompanyId ?? "");
-        setScopeClientId(meData?.client?.id ?? storedClientId ?? "");
-        setScopeBranchId(meData?.selected_branch_id ?? storedBranchId ?? "");
+        syncFromRuntime();
     };
 
     const persistScopeAsContext = () => {
-        setLocalStorageValue(COMPANY_ID_STORAGE_KEY, scopeCompanyId || null);
-        setLocalStorageValue(CLIENT_ID_STORAGE_KEY, scopeClientId || null);
-        setLocalStorageValue(BRANCH_ID_STORAGE_KEY, scopeBranchId || null);
+        persistScopeToStorage();
         toast.success("Контекст сохранен");
     };
 
@@ -420,21 +404,21 @@ export default function CompanyWorkspacePage() {
 
     useEffect(() => {
         if (integrationsError) {
-            handleError(integrationsError);
+            reportError(integrationsError);
         }
-    }, [integrationsError, handleError]);
+    }, [integrationsError, reportError]);
 
     useEffect(() => {
         if (scorecardError) {
-            handleError(scorecardError);
+            reportError(scorecardError);
         }
-    }, [scorecardError, handleError]);
+    }, [scorecardError, reportError]);
 
     useEffect(() => {
         if (providerLifecycleError) {
-            handleError(providerLifecycleError);
+            reportError(providerLifecycleError);
         }
-    }, [providerLifecycleError, handleError]);
+    }, [providerLifecycleError, reportError]);
 
     useEffect(() => {
         if (!scopeClientId) {
@@ -445,7 +429,7 @@ export default function CompanyWorkspacePage() {
         }
         setScopeClientId("");
         setScopeBranchId("");
-    }, [clientOptions, scopeClientId]);
+    }, [clientOptions, scopeClientId, setScopeBranchId, setScopeClientId]);
 
     useEffect(() => {
         if (!scopeBranchId) {
@@ -455,7 +439,7 @@ export default function CompanyWorkspacePage() {
             return;
         }
         setScopeBranchId("");
-    }, [branchOptions, scopeBranchId]);
+    }, [branchOptions, scopeBranchId, setScopeBranchId]);
 
     const selectedBranch = useMemo(
         () => branchOptions.find((branch) => branch.id === scopeBranchId) ?? null,
@@ -568,7 +552,7 @@ export default function CompanyWorkspacePage() {
                 toast.error("API вернул limit вне диапазона 1..100. Обновите страницу и повторите.");
                 return;
             }
-            handleError(error);
+            reportError(error);
         } finally {
             setRunningAction(null);
         }
@@ -671,7 +655,7 @@ export default function CompanyWorkspacePage() {
             toast.success("WhatsApp-идентичность филиала сохранена");
             await Promise.all([refetchIntegrations(), refetchProviderLifecycle()]);
         } catch (error) {
-            handleError(error);
+            reportError(error);
         } finally {
             setBranchSaving(false);
         }
@@ -691,7 +675,7 @@ export default function CompanyWorkspacePage() {
             setWebhookUrl(response.data.webhook_url ?? "");
             toast.success("Webhook-контракт обновлен");
         } catch (error) {
-            handleError(error);
+            reportError(error);
         }
     };
 
@@ -711,7 +695,7 @@ export default function CompanyWorkspacePage() {
             toast.success("Go-live подтвержден");
             await Promise.all([refetchIntegrations(), refetchProviderLifecycle(), refetchScorecard()]);
         } catch (error) {
-            handleError(error);
+            reportError(error);
         } finally {
             setGoLiveSaving(null);
         }
@@ -733,7 +717,7 @@ export default function CompanyWorkspacePage() {
             toast.success("Go-live отклонен");
             await Promise.all([refetchIntegrations(), refetchProviderLifecycle(), refetchScorecard()]);
         } catch (error) {
-            handleError(error);
+            reportError(error);
         } finally {
             setGoLiveSaving(null);
         }
@@ -755,7 +739,7 @@ export default function CompanyWorkspacePage() {
             toast.success("Отсрочка go-live применена на 24 часа");
             await Promise.all([refetchIntegrations(), refetchProviderLifecycle(), refetchScorecard()]);
         } catch (error) {
-            handleError(error);
+            reportError(error);
         } finally {
             setGoLiveSaving(null);
         }
@@ -899,6 +883,27 @@ export default function CompanyWorkspacePage() {
                     </div>
                 </div>
             </div>
+
+            {inlineErrors.length > 0 && (
+                <section className="mt-4 rounded-lg border border-red-300/60 bg-red-50 p-4" data-testid="workspace-error-summary">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-sm font-semibold text-red-900">Ошибки последних операций</div>
+                        <button className="btn-ghost" onClick={clearErrors}>Очистить</button>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                        {inlineErrors.map((error) => (
+                            <div key={error.id} className="rounded-md border border-red-200/80 bg-background/90 p-3 text-xs">
+                                <div className="font-mono text-red-900">{error.code}</div>
+                                <div className="mt-1 text-foreground">{error.message}</div>
+                                <div className="mt-1 text-muted-foreground">
+                                    {new Date(error.capturedAt).toLocaleString("ru-RU")}
+                                    {error.traceId ? ` · trace: ${error.traceId}` : ""}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+            )}
 
             <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5" data-testid="company-workspace-status-cards">
                 <div className={`rounded-lg border p-3 text-xs ${statusCardClass(hasContext)}`}>

@@ -1,0 +1,21 @@
+# SESSION 2026-02-15-console-context-incident-errors-a1 — Console Context + Incident/Error Surfaces
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-14-company-workspace-ux-a1.md
+- branch: feat/console-context-incident-errors
+- worktree: /home/zhan/truffles-main
+- base_ref: origin/main
+- scope: incident banner in shell, shared console context scope, persistent inline error summaries for platform admin UX paths.
+- done:
+  - Implemented code changes in console-web pages/components/lib.
+  - Ran lint and build successfully.
+  - Ran targeted e2e checks for new data-testid surfaces.
+- next:
+  - Commit staged scope-only files.
+  - Push branch and open PR.
+- evidence:
+  - npm --prefix console-web run lint
+  - npm --prefix console-web run build
+  - PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 npx playwright test _tmp_platform_admin_context_and_errors.spec.ts --config=e2e/_tmp.playwright.config.ts
+- last_updated: 2026-02-15

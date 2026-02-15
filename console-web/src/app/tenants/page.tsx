@@ -9,22 +9,12 @@ import type { components } from "@/types/api.generated";
 import AccessDenied from "@/components/AccessDenied";
 import ProvisioningWizard from "@/components/ProvisioningWizard";
 import { adminApi, auditApi, authApi, canAccessConsole, confirmationsApi, opsApi } from "@/lib/api-client";
-import { useErrorHandler } from "@/lib/api-hooks";
-
-const CLIENT_ID_STORAGE_KEY = "console:client_id";
-const BRANCH_ID_STORAGE_KEY = "console:branch_id";
-const COMPANY_ID_STORAGE_KEY = "console:company_id";
-
-function setLocalStorageValue(key: string, value?: string | null) {
-    if (typeof window === "undefined") {
-        return;
-    }
-    if (!value) {
-        window.localStorage.removeItem(key);
-        return;
-    }
-    window.localStorage.setItem(key, value);
-}
+import {
+    setConsoleBranchContext,
+    setConsoleClientContext,
+    setConsoleCompanyContext,
+} from "@/lib/console-context-storage";
+import { useInlineErrorSummary } from "@/lib/use-inline-error-summary";
 
 type CompanyEditorState = {
     id: string;
@@ -805,7 +795,7 @@ export default function TenantsPage() {
     const { data: session } = useSession();
     const router = useRouter();
     const queryClient = useQueryClient();
-    const { handleError } = useErrorHandler();
+    const { errors: inlineErrors, reportError, clearErrors } = useInlineErrorSummary();
     const [clientQuery, setClientQuery] = useState("");
     const [branchQuery, setBranchQuery] = useState("");
     const [companyQuery, setCompanyQuery] = useState("");
@@ -1256,21 +1246,17 @@ export default function TenantsPage() {
     };
 
     const setCompanyContext = (companyId?: string | null) => {
-        setLocalStorageValue(COMPANY_ID_STORAGE_KEY, companyId);
-        setLocalStorageValue(CLIENT_ID_STORAGE_KEY, null);
-        setLocalStorageValue(BRANCH_ID_STORAGE_KEY, null);
+        setConsoleCompanyContext(companyId);
         refreshContext();
     };
 
     const setClientContext = (clientId?: string | null, companyId?: string | null) => {
-        setLocalStorageValue(COMPANY_ID_STORAGE_KEY, companyId ?? null);
-        setLocalStorageValue(CLIENT_ID_STORAGE_KEY, clientId ?? null);
-        setLocalStorageValue(BRANCH_ID_STORAGE_KEY, null);
+        setConsoleClientContext(clientId, companyId);
         refreshContext();
     };
 
     const setBranchContext = (branchId?: string | null) => {
-        setLocalStorageValue(BRANCH_ID_STORAGE_KEY, branchId ?? null);
+        setConsoleBranchContext(branchId);
         refreshContext();
     };
 
@@ -1297,7 +1283,7 @@ export default function TenantsPage() {
             refreshTenants();
             toast.success("Компания создана");
         } catch (error) {
-            handleError(error);
+            reportError(error);
         } finally {
             setQuickCreateRunning(null);
         }
@@ -1339,7 +1325,7 @@ export default function TenantsPage() {
             refreshTenants();
             toast.success("Клиент создан");
         } catch (error) {
-            handleError(error);
+            reportError(error);
         } finally {
             setQuickCreateRunning(null);
         }
@@ -1396,7 +1382,7 @@ export default function TenantsPage() {
             refreshTenants();
             toast.success("Филиал создан и выбран в контексте");
         } catch (error) {
-            handleError(error);
+            reportError(error);
         } finally {
             setQuickCreateRunning(null);
         }
@@ -1556,7 +1542,7 @@ export default function TenantsPage() {
             setLastMetricsSnapshotJob(response.data.job);
             toast.success(mode === "dry_run" ? "Snapshot dry-run выполнен" : "Snapshot execute выполнен");
         } catch (error) {
-            handleError(error);
+            reportError(error);
         } finally {
             setRunningMetricsSnapshotMode(null);
         }
@@ -1668,7 +1654,7 @@ export default function TenantsPage() {
             refreshTenants();
             refreshContext();
         } catch (error) {
-            handleError(error);
+            reportError(error);
         } finally {
             setSavingCompany(false);
         }
@@ -1712,7 +1698,7 @@ export default function TenantsPage() {
             refreshTenants();
             refreshContext();
         } catch (error) {
-            handleError(error);
+            reportError(error);
         } finally {
             setSavingClient(false);
         }
@@ -1817,7 +1803,7 @@ export default function TenantsPage() {
             refreshTenants();
             refreshContext();
         } catch (error) {
-            const parsed = handleError(error) as
+            const parsed = reportError(error) as
                 | { message?: string; trace_id?: string }
                 | undefined;
             setClientLifecycleAuditById((prev) => pushLifecycleAuditEntry(prev, {
@@ -1897,7 +1883,7 @@ export default function TenantsPage() {
             }
             await branchChangesQuery.refetch();
         } catch (error) {
-            handleError(error);
+            reportError(error);
         } finally {
             setSavingBranch(false);
         }
@@ -1933,7 +1919,7 @@ export default function TenantsPage() {
             refreshTenants();
             refreshContext();
         } catch (error) {
-            handleError(error);
+            reportError(error);
         } finally {
             setPublishingBranchChange(false);
         }
@@ -1986,7 +1972,7 @@ export default function TenantsPage() {
             refreshTenants();
             refreshContext();
         } catch (error) {
-            handleError(error);
+            reportError(error);
         } finally {
             setRollingBackBranchChange(false);
         }
@@ -2129,6 +2115,26 @@ export default function TenantsPage() {
                         </span>
                     ) : null}
                 </div>
+                {inlineErrors.length > 0 ? (
+                    <section className="rounded-lg border border-red-300/60 bg-red-50 p-3" data-testid="tenants-error-summary">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-sm font-semibold text-red-900">Ошибки последних операций</div>
+                            <button className="btn-ghost" onClick={clearErrors}>Очистить</button>
+                        </div>
+                        <div className="mt-2 space-y-2">
+                            {inlineErrors.map((error) => (
+                                <div key={error.id} className="rounded-md border border-red-200/80 bg-background/90 p-2 text-xs">
+                                    <div className="font-mono text-red-900">{error.code}</div>
+                                    <div className="mt-1 text-foreground">{error.message}</div>
+                                    <div className="mt-1 text-muted-foreground">
+                                        {new Date(error.capturedAt).toLocaleString("ru-RU")}
+                                        {error.traceId ? ` · trace: ${error.traceId}` : ""}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
+                ) : null}
                 <div className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-workspace-modes">
                     <div className="text-xs text-muted-foreground mb-2">Рабочая зона Tenants:</div>
                     <div className="flex flex-wrap items-center gap-2">
