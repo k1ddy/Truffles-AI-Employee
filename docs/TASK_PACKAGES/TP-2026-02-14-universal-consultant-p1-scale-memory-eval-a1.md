@@ -1,5 +1,8 @@
 # TP-2026-02-14-universal-consultant-p1-scale-memory-eval-a1
 
+> Superseded: канонический единый пакет ведется в `docs/TASK_PACKAGES/TP-2026-02-14-universal-consultant-p0-contract-kernel-a1.md`.
+> Этот файл оставлен только как исторический контекст.
+
 - Название/цель: построить масштабируемый контур универсального консультанта для любых бизнесов и инструментов: `semantic parser -> planner -> tool executor -> verifier -> response composer`, с управляемой памятью длинных диалогов и cross-business quality loop, чтобы удерживать `99%` контрактной надежности на сопоставимых replay-run.
 - Canon refs: `STATE.md` (NOW/GAP по quality stability), `AGENTS.md` (Local-first realism law, Anti Test-Fitting Gate, Demo-Neutral Gate), `SPECS/SYSTEM_REFERENCE.md` (decision/meta/trace контракт), `TECH.md` (quality runner и окружение).
 

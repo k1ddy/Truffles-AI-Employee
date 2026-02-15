@@ -116,6 +116,20 @@ def test_calendar_hook_blocks_non_success_outcome():
     assert should_send(signal, []) is False
 
 
+def test_calendar_hook_allows_pending_for_non_list_slots():
+    ns = _load_tool_evidence_helpers()
+    should_send = ns["_llm_quality_should_send_calendar_hook"]
+
+    signal = {
+        "calendar": {
+            "intent": "calendar.get_booking",
+            "tool_decision": None,
+            "outcome": "pending",
+        }
+    }
+    assert should_send(signal, []) is True
+
+
 def test_extract_tool_signals_normalizes_check_booking_intent_to_confirm_signal():
     ns = _load_tool_evidence_helpers()
     extract_tool_signals = ns["_llm_quality_extract_tool_signals"]

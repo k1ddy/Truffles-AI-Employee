@@ -307,6 +307,65 @@ def test_resolve_booking_info_intents_uses_parking_signal_with_expected_reply_sh
     assert "parking" in resolved
 
 
+def test_looks_like_booking_reschedule_request_detects_change_time_phrase():
+    assert booking_router._looks_like_booking_reschedule_request(
+        "Я хочу изменить время на утро."
+    )
+
+
+def test_looks_like_booking_reschedule_request_skips_regular_duration_question():
+    assert not booking_router._looks_like_booking_reschedule_request(
+        "Сколько длится процедура маникюра?"
+    )
+
+
+def test_validate_datetime_slot_accepts_date_only_hint():
+    assert booking_router._validate_datetime_slot(
+        "Я хочу выбрать время на завтра.",
+        allow_freeform=True,
+        client_slug="demo_salon",
+    ) == "завтра"
+
+
+def test_validate_datetime_slot_accepts_explicit_time_marker():
+    assert booking_router._validate_datetime_slot(
+        "Я хочу выбрать время на завтра в 15:00.",
+        allow_freeform=True,
+        client_slug="demo_salon",
+    ) == "15:00"
+
+
+def test_next_booking_prompt_requests_precise_time_for_date_only_slot():
+    booking_state, prompt = booking_router._next_booking_prompt(
+        {
+            "active": True,
+            "service": "Стрижка",
+            "datetime": "завтра",
+        }
+    )
+
+    assert booking_state.get("last_question") == "datetime"
+    assert isinstance(prompt, str)
+    assert "точное время" in prompt.lower()
+
+
+def test_update_booking_from_message_overrides_date_only_datetime_with_exact_time():
+    booking = {
+        "active": True,
+        "service": "Стрижка",
+        "datetime": "завтра",
+        "last_question": "datetime",
+    }
+
+    updated = booking_router._update_booking_from_message(
+        booking,
+        "Тогда в 15:00.",
+        client_slug="demo_salon",
+    )
+
+    assert updated.get("datetime") == "15:00"
+
+
 @pytest.mark.parametrize(
     "tool_action",
     ["calendar.get_booking", "calendar.reschedule", "calendar.cancel"],
@@ -659,6 +718,34 @@ def test_tool_registry_blocks_action_on_allowlist_miss():
     assert result.error_code == "tool_action_disabled"
     assert result.decision_meta.get("tool_decision") == "capability_blocked"
     assert result.decision_meta.get("capability_reason") == "allowlist_miss"
+
+
+def test_tool_registry_skips_capability_block_when_enforcement_disabled(monkeypatch):
+    monkeypatch.setenv("TOOL_POLICY_ENFORCEMENT", "0")
+    db = Mock()
+    runtime = RuntimeCapabilities(
+        payload=CapabilitiesPayload.model_validate({"tools": {"allow": ["catalog.location"]}}),
+        client_id=uuid4(),
+        branch_id=None,
+        source="client_capabilities",
+        has_records=True,
+    )
+    set_runtime_capabilities(runtime)
+    try:
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="catalog.portfolio",
+            tool_args={},
+            conversation_id=uuid4(),
+            branch_id=None,
+            client_slug="demo_salon",
+            service_query=None,
+        )
+    finally:
+        set_runtime_capabilities(None)
+
+    assert result.error_code != "tool_action_disabled"
+    assert result.decision_meta.get("tool_decision") != "capability_blocked"
 
 
 def test_tool_registry_catalog_location_includes_parking_section():

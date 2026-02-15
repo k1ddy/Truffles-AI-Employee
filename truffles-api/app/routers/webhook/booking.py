@@ -783,6 +783,18 @@ def _resolve_booking_info_intents(
     return booking_info_intents
 
 
+def _looks_like_booking_reschedule_request(message_text: str | None) -> bool:
+    from . import _legacy as legacy
+
+    normalized = legacy._normalize_text(message_text or "")
+    if not normalized:
+        return False
+    has_change_signal = any(stem in normalized for stem in ("измен", "перенес", "перенест", "сдвин"))
+    if not has_change_signal:
+        return False
+    return any(stem in normalized for stem in ("врем", "дат", "утр", "вечер", "дн"))
+
+
 def _select_expected_reply_message(
     messages: list[str],
     *,
@@ -815,7 +827,16 @@ def _apply_booking_slot(
     client_slug: str | None,
 ) -> dict:
     if booking.get(slot_key):
-        return booking
+        if slot_key != "datetime":
+            return booking
+        existing_datetime = str(booking.get("datetime") or "").strip()
+        if existing_datetime:
+            from . import _legacy as legacy
+
+            if legacy.TIME_PATTERN.search(existing_datetime) or legacy.TIME_HOUR_PATTERN.search(
+                existing_datetime
+            ):
+                return booking
     validator = BOOKING_SLOT_VALIDATORS.get(slot_key)
     if not validator:
         return booking
@@ -871,10 +892,22 @@ def _next_booking_prompt(booking: dict, *, refusal_flags: dict | None = None) ->
         from . import _legacy as legacy
 
         return booking, legacy.MSG_BOOKING_ASK_SERVICE
-    if not booking.get("datetime"):
+    datetime_value = booking.get("datetime")
+    datetime_grounded = False
+    if isinstance(datetime_value, str) and datetime_value.strip():
+        from . import _legacy as legacy
+
+        datetime_grounded = bool(
+            legacy.TIME_PATTERN.search(datetime_value)
+            or legacy.TIME_HOUR_PATTERN.search(datetime_value)
+        )
+    if not datetime_grounded:
         booking["last_question"] = "datetime"
         from . import _legacy as legacy
 
+        if isinstance(datetime_value, str) and datetime_value.strip():
+            prompt = f"Понял, {datetime_value.strip()}. Подскажите, пожалуйста, точное время."
+            return booking, prompt
         return booking, legacy.MSG_BOOKING_ASK_DATETIME
     if not booking.get("name"):
         from . import _legacy as legacy
@@ -1460,6 +1493,7 @@ def _handle_booking_interrupt(
         build_info_combined_reply,
         compose_multi_truth_reply,
         format_reply_from_truth,
+        get_pack_decision,
         phrase_match_intent,
     )
 
@@ -1479,6 +1513,72 @@ def _handle_booking_interrupt(
         batch_non_booking_message=batch_non_booking_message,
         client_slug=client_slug,
     )
+    if (
+        _looks_like_booking_reschedule_request(booking_interrupt_text)
+        and conversation.state == legacy.ConversationState.BOT_ACTIVE.value
+        and routing.get("allow_handover_create", False)
+    ):
+        handover_message = booking_interrupt_text or message_text or "Клиент просит изменить время записи."
+        _, reused, telegram_sent = legacy._reuse_active_handover(
+            db=db,
+            conversation=conversation,
+            user=user,
+            message=handover_message,
+            source="booking_interrupt",
+            intent="reschedule_request",
+        )
+        if reused:
+            result_message = (
+                f"Booking reschedule handoff reused, telegram={'sent' if telegram_sent else 'failed'}"
+            )
+        else:
+            result = legacy.escalate_to_pending(
+                db=db,
+                conversation=conversation,
+                user_message=handover_message,
+                trigger_type="intent",
+                trigger_value="reschedule_request",
+            )
+            if result.ok:
+                handover = result.value
+                telegram_sent = legacy.send_telegram_notification(
+                    db=db,
+                    handover=handover,
+                    conversation=conversation,
+                    user=user,
+                    message=handover_message,
+                )
+                result_message = (
+                    f"Booking reschedule handoff created, telegram={'sent' if telegram_sent else 'failed'}"
+                )
+            else:
+                result_message = f"Booking reschedule handoff failed: {result.error}"
+        legacy._record_decision_trace(
+            conversation,
+            {
+                "stage": "booking_interrupt",
+                "decision": "handoff",
+                "intent": "reschedule_request",
+                "state": conversation.state,
+            },
+        )
+        legacy._record_message_decision_meta(
+            saved_message,
+            action="escalate",
+            intent="reschedule_request",
+            source="booking_interrupt",
+            fast_intent=False,
+        )
+        bot_response, sent = send_and_save(legacy.MSG_ESCALATED)
+        if not sent:
+            result_message = f"{result_message}; response_send=failed"
+        db.commit()
+        return WebhookResponse(
+            success=True,
+            message=result_message,
+            conversation_id=conversation.id,
+            bot_response=bot_response,
+        )
     booking_time_service_candidate = (
         expected_reply_type == legacy.EXPECTED_REPLY_TIME
         and expected_reply_matched is False
@@ -1624,9 +1724,19 @@ def _handle_booking_interrupt(
             or booking_time_service_candidate
             or (batch_non_booking_message and not expected_reply_shortcircuit)
         )
-        if allow_booking_interrupt_info and policy_handler and routing.get("allow_truth_gate_reply"):
+        if allow_booking_interrupt_info and routing.get("allow_truth_gate_reply"):
             info_decision = None
             info_source = None
+            service_matcher = (
+                policy_handler.get("service_matcher")
+                if isinstance(policy_handler, dict)
+                else None
+            )
+            truth_gate = (
+                policy_handler.get("truth_gate")
+                if isinstance(policy_handler, dict)
+                else None
+            )
             if guest_policy_hit:
                 guest_reply, guest_meta = build_info_combined_reply(
                     include_parking=False,
@@ -1662,7 +1772,6 @@ def _handle_booking_interrupt(
                     {"pricing", "duration", "promotions", "master"} & set(booking_info_intents)
                 )
                 if not info_decision and prefer_truth_gate:
-                    truth_gate = policy_handler.get("truth_gate")
                     if truth_gate:
                         info_decision = truth_gate(
                             booking_interrupt_text,
@@ -1672,7 +1781,6 @@ def _handle_booking_interrupt(
                         if info_decision:
                             info_source = "truth_gate"
                 if not info_decision:
-                    service_matcher = policy_handler.get("service_matcher")
                     if service_matcher:
                         info_decision = service_matcher(
                             booking_interrupt_text,
@@ -1682,7 +1790,6 @@ def _handle_booking_interrupt(
                         if info_decision:
                             info_source = "service_matcher"
                 if not info_decision and not prefer_truth_gate:
-                    truth_gate = policy_handler.get("truth_gate")
                     if truth_gate:
                         info_decision = truth_gate(
                             booking_interrupt_text,
@@ -1707,8 +1814,50 @@ def _handle_booking_interrupt(
                             },
                         )
                         info_source = "truth_gate"
+                if not info_decision and "pricing" in booking_info_intents:
+                    service_hint = booking_state.get("service")
+                    if isinstance(service_hint, str) and service_hint.strip():
+                        service_enriched_text = f"{booking_interrupt_text or ''} {service_hint.strip()}".strip()
+                        candidate = get_pack_decision(
+                            service_enriched_text,
+                            client_slug=client_slug,
+                            intent_decomp=intent_decomp_payload,
+                        )
+                        if candidate and candidate.action == "reply":
+                            candidate_meta = candidate.meta if isinstance(candidate.meta, dict) else {}
+                            candidate_meta = dict(candidate_meta)
+                            fact_intents = candidate_meta.get("fact_intents")
+                            if isinstance(fact_intents, list):
+                                merged_fact_intents = [
+                                    item.strip()
+                                    for item in fact_intents
+                                    if isinstance(item, str) and item.strip()
+                                ]
+                            else:
+                                merged_fact_intents = []
+                            if "pricing" not in merged_fact_intents:
+                                merged_fact_intents.append("pricing")
+                            candidate_meta["fact_intents"] = merged_fact_intents
+                            info_sections = candidate_meta.get("info_sections")
+                            if isinstance(info_sections, list):
+                                merged_info_sections = [
+                                    item.strip()
+                                    for item in info_sections
+                                    if isinstance(item, str) and item.strip()
+                                ]
+                            else:
+                                merged_info_sections = []
+                            if "pricing" not in merged_info_sections:
+                                merged_info_sections.append("pricing")
+                            candidate_meta["info_sections"] = merged_info_sections
+                            info_decision = PackDecision(
+                                action="reply",
+                                response=candidate.response,
+                                intent="pricing",
+                                meta=candidate_meta,
+                            )
+                            info_source = "service_enriched_pricing"
             if not info_decision and batch_non_booking_message and not booking_info_intents:
-                service_matcher = policy_handler.get("service_matcher")
                 if service_matcher:
                     info_decision = service_matcher(
                         booking_interrupt_text,
@@ -1718,7 +1867,6 @@ def _handle_booking_interrupt(
                     if info_decision:
                         info_source = "service_matcher"
                 if not info_decision:
-                    truth_gate = policy_handler.get("truth_gate")
                     if truth_gate:
                         info_decision = truth_gate(
                             booking_interrupt_text,
@@ -1728,7 +1876,6 @@ def _handle_booking_interrupt(
                         if info_decision:
                             info_source = "truth_gate"
             if not info_decision and booking_time_service_candidate:
-                service_matcher = policy_handler.get("service_matcher")
                 if service_matcher:
                     candidate = service_matcher(
                         booking_interrupt_text,
@@ -1739,7 +1886,6 @@ def _handle_booking_interrupt(
                         info_decision = candidate
                         info_source = "service_matcher"
                 if not info_decision:
-                    truth_gate = policy_handler.get("truth_gate")
                     if truth_gate:
                         candidate = truth_gate(
                             booking_interrupt_text,
@@ -1750,7 +1896,11 @@ def _handle_booking_interrupt(
                             info_decision = candidate
                             info_source = "truth_gate"
 
-            if not info_decision and booking_interrupt_text and booking_info_intents:
+            if (
+                not info_decision
+                and booking_interrupt_text
+                and (booking_info_intents or expected_reply_blocked_by_info)
+            ):
                 multi_result = compose_multi_truth_reply(
                     booking_interrupt_text,
                     client_slug,
@@ -1787,6 +1937,18 @@ def _handle_booking_interrupt(
                     )
                     info_source = "truth_fallback"
                     break
+            if not info_decision and expected_reply_blocked_by_info:
+                info_decision = PackDecision(
+                    action="reply",
+                    response=legacy.MSG_FACT_GUARD_CLARIFY,
+                    intent="info_clarify",
+                    meta={
+                        "fact_source": "info_clarify",
+                        "fact_intents": ["info_clarify"],
+                        "info_sections": [],
+                    },
+                )
+                info_source = "info_clarify"
 
             if info_decision and info_decision.action == "escalate":
                 info_meta = info_decision.meta if isinstance(info_decision.meta, dict) else {}

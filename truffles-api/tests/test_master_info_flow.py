@@ -102,6 +102,30 @@ def test_detect_info_class_intents_duration_signal_for_colloquial_phrase():
     assert meta.get("info_signals", {}).get("duration") is True
 
 
+def test_detect_info_class_intents_hours_signal_for_work_schedule_phrase():
+    intents, meta = _detect_info_class_intents(
+        "Какое у вас рабочее время?",
+        intent_decomp_set=set(),
+        client_slug="demo_salon",
+    )
+
+    assert "hours" in intents
+    assert meta.get("info_signals", {}).get("hours") is True
+
+
+def test_detect_info_class_intents_hours_signal_for_how_long_you_work_phrase():
+    intents, meta = _detect_info_class_intents(
+        "Как долго вы работаете?",
+        intent_decomp_set=set(),
+        client_slug="demo_salon",
+    )
+
+    assert "hours" in intents
+    assert "duration" not in intents
+    assert meta.get("info_signals", {}).get("hours") is True
+    assert meta.get("info_signals", {}).get("duration") is False
+
+
 def test_detect_info_class_intents_contact_signal():
     intents, meta = _detect_info_class_intents(
         "Какой у вас номер телефона?",
