@@ -186,6 +186,10 @@ test.describe('Owner/Admin Business Control', () => {
             await expect(page.getByTestId('team-performance-quick-profile-apply')).toBeVisible();
             await expect(page.getByTestId('team-performance-remediation-guide')).toBeVisible();
             await expect(page.getByTestId('team-performance-quick-profile-rollback-card')).toBeVisible();
+            const operationState = page
+                .getByTestId('team-performance-quick-profile-rollback-empty')
+                .or(page.getByTestId('team-performance-operation-impact'));
+            await expect(operationState).toBeVisible();
         }
         const teamTable = page.getByTestId('team-performance-table');
         const teamEmpty = page.getByText('Нет открытых заявок в текущем scope.');
@@ -207,6 +211,9 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('settings-subscription-snapshot')).toBeVisible();
         await expect(page.getByTestId('settings-goal-mode')).toBeVisible();
         await expect(page.getByTestId('settings-goal-capture_leads')).toBeVisible();
+        await expect(page.getByTestId('settings-goal-stable_quality')).toBeVisible();
+        await expect(page.getByTestId('settings-goal-team_protection')).toBeVisible();
+        await expect(page.getByTestId('settings-owner-operation')).toBeVisible();
         await expect(page.getByTestId('settings-input-reminder1')).toBeVisible();
         await expect(page.getByTestId('settings-input-reminder2')).toBeVisible();
         await expect(page.getByTestId('settings-input-escalation')).toBeVisible();

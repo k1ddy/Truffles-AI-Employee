@@ -14,6 +14,7 @@ Evidence sources
 - `docs/REPORTS/2026-02-15-owner-admin-wave4-action-loop-v1.md`
 - `docs/REPORTS/2026-02-15-owner-admin-wave5-control-hardening-v1.md`
 - `docs/REPORTS/2026-02-15-owner-admin-wave6-automation-v1.md`
+- `docs/REPORTS/2026-02-15-owner-admin-wave7-fact-os-v1.md`
 - `Business/Sales/BILLING_COUNTING.md`
 - `docs/CONSOLE_AUDIT/roles/owner.md`
 - `docs/CONSOLE_AUDIT/roles/admin.md`
@@ -47,6 +48,8 @@ Evidence sources
 | UX-21 | P1 | Manual control-loop overhead | Post-merge owner/admin loop still required manual command choreography and inconsistent artifact naming. | Hard to scale governance across many clients and releases. | `ops/owner_admin_control_loop.py`, `docs/runbooks/OWNER_ADMIN_POSTMERGE_24H.md`. | Fixed |
 | UX-22 | P1 | Goal-to-action gap in settings | Owners still had to interpret technical presets instead of choosing business outcomes directly. | Slower decisions and higher configuration mistakes for non-technical operators. | `console-web/src/app/settings/page.tsx` (`settings-goal-mode`). | Fixed |
 | UX-23 | P1 | Publish safety enforcement gap | Knowledge publish could bypass explicit preflight discipline at backend level. | Higher risk of accidental publish without recent validation of the same draft. | `truffles-api/app/services/console_knowledge_preflight.py`, `truffles-api/app/routers/console.py`, `console-web/src/app/knowledge/page.tsx`, `truffles-api/tests/test_console_knowledge_preflight.py`. | Fixed |
+| UX-24 | P0 | Owner KPI fact integrity | KPI cards on owner/admin pages lacked machine-readable fact provenance (`source/as_of/scope/sample`). | Users could not distinguish factual vs. estimated/missing numbers, hurting trust in business decisions. | `truffles-api/app/schemas/console.py`, `truffles-api/app/routers/console.py`, `console-web/src/app/business/page.tsx`, `console-web/src/app/subscription/page.tsx`, `console-web/src/app/business/data-trust/page.tsx`, `console-web/src/app/business/team-performance/page.tsx`. | Fixed |
+| UX-25 | P1 | Settings/Team action loop still client-driven | Goal actions and quick profile relied on client-side presets without durable server operation/rollback/impact contract. | Hard to scale changes safely across many owners and impossible to audit/rollback consistently. | `truffles-api/app/routers/console.py` (`/business/operations/owner-mode/*`), `console-web/src/app/settings/page.tsx`, `console-web/src/app/business/team-performance/page.tsx`, `contracts/console_api/openapi.v1.yaml`, `console-web/e2e/owner-admin-business.spec.ts`. | Fixed |
 
 ## 30-day execution waves
 
@@ -55,6 +58,7 @@ Evidence sources
 3. Wave C (P1): reduce error-surface entropy in `tenants` and `company-workspace` (contextual inline errors, not only toasts).
 4. Wave D (P1): start router/component decomposition (`console.py`, `ProvisioningWizard.tsx`) with contract tests guarding behavior.
 5. Wave E (P0/P1): ship owner/admin business control layer (`Business Home`, `Subscription`, `Data & Trust`, `Team Performance`).
+6. Wave F (P0/P1): enforce owner/admin fact contract + server-driven owner operations with rollback/impact evidence.
 
 ## This wave delivery (2026-02-15)
 
@@ -81,5 +85,10 @@ Evidence sources
   - orchestration script for control-loop phases (`ops/owner_admin_control_loop.py`),
   - business goal-mode actions in settings (`settings-goal-*`),
   - backend knowledge publish preflight gate (`KNOWLEDGE_PREFLIGHT_REQUIRED`) with draft hash validation.
+- Added Wave-7 owner/admin fact + operation contract:
+  - KPI fact metadata (`kind/source/as_of/scope/sample_size`) in `business/subscription/data-trust/team-performance` APIs and owner/admin UI cards,
+  - server-driven owner mode operations (`preview/apply/rollback/impact`) with audit snapshot and due-at check,
+  - smoke coverage refresh for owner/admin operation surfaces (`owner-admin-business.spec.ts`),
+  - health API no longer reports hardcoded Redis connected state; returns fact-based `connected/error/unknown`.
 - Added outbox guard thresholds and fail-fast gate (`--fail-on-breach`, `--fail-level`).
 - Replaced toast-only validation flows with `reportValidationError` (toast + inline summary) for `tenants` and `company-workspace`.

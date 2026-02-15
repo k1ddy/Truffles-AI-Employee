@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 
 import AccessDenied from "@/components/AccessDenied";
-import { authApi, businessApi, canAccessConsole } from "@/lib/api-client";
+import { authApi, businessApi, canAccessConsole, type MetricFactMeta } from "@/lib/api-client";
 
 function formatNumber(value?: number | null): string {
     if (value === null || value === undefined || Number.isNaN(value)) {
@@ -37,6 +37,14 @@ function subscriptionAlertClass(level: "normal" | "warning_80" | "limit_100"): s
         return "border-amber-300 bg-amber-50 text-amber-900";
     }
     return "border-emerald-300 bg-emerald-50 text-emerald-900";
+}
+
+function formatMetricMeta(meta?: MetricFactMeta): string {
+    if (!meta) {
+        return "missing · source: n/a";
+    }
+    const asOf = meta.as_of ? ` · as_of: ${meta.as_of}` : "";
+    return `${meta.kind} · source: ${meta.source}${asOf}`;
 }
 
 export default function SubscriptionPage() {
@@ -150,21 +158,25 @@ export default function SubscriptionPage() {
                     <p className="text-sm text-muted-foreground">План</p>
                     <p className="mt-1 text-lg font-semibold text-foreground">{data.plan_name || data.contract_label || "Не указан"}</p>
                     <p className="text-xs text-muted-foreground">Источник: {data.quota_source}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.monthly_quota)}</p>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
                     <p className="text-sm text-muted-foreground">Лимит в месяц</p>
                     <p className="mt-1 text-2xl font-semibold text-foreground">{formatNumber(data.monthly_quota)}</p>
                     <p className="text-xs text-muted-foreground">Валюта: {data.currency || "—"}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.monthly_quota)}</p>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
                     <p className="text-sm text-muted-foreground">Использовано</p>
                     <p className="mt-1 text-2xl font-semibold text-foreground">{formatNumber(data.billable_messages)}</p>
                     <p className="text-xs text-muted-foreground">Остаток: {formatNumber(data.remaining_quota)}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.billable_messages)}</p>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
                     <p className="text-sm text-muted-foreground">Прогноз за месяц</p>
                     <p className="mt-1 text-2xl font-semibold text-foreground">{formatNumber(data.projected_month_total)}</p>
                     <p className="text-xs text-muted-foreground">Загрузка лимита: {formatPercent(data.usage_percent)}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.projected_month_total)}</p>
                 </div>
             </section>
 
