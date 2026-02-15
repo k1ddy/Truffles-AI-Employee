@@ -1,0 +1,28 @@
+# SESSION 2026-02-15-owner-admin-wave8-incident-control-a88 — Session 2026-02-15-owner-admin-wave8-incident-control-a88
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave8-incident-control-a88.md
+- branch: feat/2026-02-15-owner-admin-wave8-incident-control-a88
+- worktree: /home/zhan/worktrees/2026-02-15-owner-admin-wave8-incident-control-a88
+- base_ref: origin/main
+- scope: Incident control loop для Platform Admin (fleet) и Owner/Admin (business) с безопасной remediation моделью
+- done:
+  - Session created.
+  - Added backend incident schemas and role-scoped endpoints: `/business/incidents`, `/admin/incidents`.
+  - Implemented fact-based reason classification and safe action recommendations (`dry_run` first).
+  - Updated Ops and Business UI with incident panels and actionable steps.
+  - Updated OpenAPI contract + generated frontend API types.
+  - Added/updated tests and checks, report, structure/state entries.
+- next:
+  - Open PR and run CI.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave8-incident-control-a88.md
+  - docs/REPORTS/2026-02-15-owner-admin-wave8-incident-control-v1.md
+  - pytest -q truffles-api/tests/test_console_owner_business.py truffles-api/tests/test_console_rbac.py truffles-api/tests/test_console_fleet_attention.py
+  - python3 truffles-api/scripts/generate_openapi.py --check
+  - npm --prefix console-web run generate:api
+  - npm --prefix console-web run lint
+  - npm --prefix console-web run build
+  - npm --prefix console-web run test:e2e:smoke -- --list
+- last_updated: 2026-02-16

@@ -483,6 +483,52 @@ export type BusinessSummaryAction = {
     href: string;
     severity: "critical" | "warn" | "info";
 };
+export type IncidentAction = {
+    id: string;
+    title: string;
+    description: string;
+    href?: string | null;
+    job_type?: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | null;
+    mode?: "dry_run" | "execute" | null;
+    params?: Record<string, unknown> | null;
+    dry_run_first: boolean;
+    requires_confirmation: boolean;
+};
+export type IncidentItem = {
+    id: string;
+    scope: "fleet" | "client" | "branch";
+    severity: "critical" | "warn" | "info";
+    title: string;
+    summary: string;
+    reason_code:
+        | "outbox_backlog"
+        | "provider_unavailable"
+        | "provider_auth"
+        | "provider_rate_limited"
+        | "integration_degraded"
+        | "handover_backlog"
+        | "unknown";
+    reason_label: string;
+    source: string;
+    detected_at: string;
+    client_id?: string | null;
+    client_slug?: string | null;
+    branch_id?: string | null;
+    metrics: Record<string, string | number | boolean | null>;
+    actions: IncidentAction[];
+};
+export type IncidentSummary = {
+    total: number;
+    critical: number;
+    warn: number;
+    info: number;
+};
+export type IncidentListResponse = {
+    generated_at: string;
+    scope: "fleet" | "client" | "branch";
+    summary: IncidentSummary;
+    items: IncidentItem[];
+};
 export type MetricFactMeta = {
     kind: "fact" | "estimate" | "missing";
     source: string;
@@ -781,6 +827,7 @@ export const opsApi = {
 /** Owner/Admin business control endpoints */
 export const businessApi = {
     getSummary: () => apiClient.get<BusinessSummaryResponse>("/business/summary"),
+    getIncidents: () => apiClient.get<IncidentListResponse>("/business/incidents"),
     getSubscriptionSummary: () => apiClient.get<SubscriptionSummaryResponse>("/subscription/summary"),
     getDataTrustSummary: () => apiClient.get<DataTrustSummaryResponse>("/business/data-trust"),
     getTeamPerformanceSummary: () => apiClient.get<TeamPerformanceSummaryResponse>("/business/team-performance"),
@@ -833,6 +880,8 @@ export const adminApi = {
         apiClient.get<components["schemas"]["BranchListResponse"]>("/admin/branches", { params }),
     listFleetAttention: (params?: ListFleetAttentionParams) =>
         apiClient.get<components["schemas"]["FleetAttentionResponse"]>("/admin/fleet/attention", { params }),
+    listIncidents: (params?: { limit?: number }) =>
+        apiClient.get<IncidentListResponse>("/admin/incidents", { params }),
     listIntegrations: (params?: ListIntegrationsParams) =>
         apiClient.get<components["schemas"]["IntegrationsListResponse"]>("/admin/integrations", { params }),
     listProviderLifecycle: (params?: ListProviderLifecycleParams) =>
