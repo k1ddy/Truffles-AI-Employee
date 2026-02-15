@@ -156,6 +156,53 @@ async function openIntegrations(page: import('@playwright/test').Page) {
     await expect(page.getByTestId('integrations-title')).toBeVisible();
 }
 
+async function mockCriticalHealthIncident(page: import('@playwright/test').Page, backlog = 1656) {
+    await page.route('**/api/proxy/health**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                status: 'ok',
+                outbox_backlog: backlog,
+                version: 'e2e-mock',
+            }),
+        });
+    });
+}
+
+test.describe('Platform Admin Incident Banner', () => {
+    test('should collapse, snooze, and restore incident banner @smoke', async ({ page }) => {
+        await mockCriticalHealthIncident(page);
+        await ensureLoggedIn(page);
+        await gotoConsoleRoot(page);
+
+        const banner = page.getByTestId('global-health-incident-banner');
+        await expect(banner).toBeVisible();
+        await expect(page.getByTestId('global-health-incident-summary')).toContainText('status=ok');
+        await expect(page.getByTestId('global-health-incident-summary')).toContainText('outbox_backlog=1656');
+        await expect(page.getByTestId('global-health-incident-toggle')).toHaveText(/Развернуть/i);
+
+        await expect(page.getByTestId('global-health-incident-reasons')).toHaveCount(0);
+        await expect(page.getByTestId('global-health-incident-runbook')).toHaveCount(0);
+
+        await page.getByTestId('global-health-incident-toggle').click();
+        await expect(page.getByTestId('global-health-incident-toggle')).toHaveText(/Свернуть/i);
+        await expect(page.getByTestId('global-health-incident-reasons')).toBeVisible();
+        await expect(page.getByTestId('global-health-incident-runbook')).toBeVisible();
+
+        await page.getByTestId('global-health-incident-snooze').click();
+        await expect(page.getByTestId('global-health-incident-hidden')).toBeVisible();
+        await expect(page.getByTestId('global-health-incident-banner')).toHaveCount(0);
+
+        await page.getByTestId('global-health-incident-show').click();
+        await expect(page.getByTestId('global-health-incident-banner')).toBeVisible();
+    });
+});
+
 test.describe('Platform Admin Navigation', () => {
     test.beforeEach(async ({ page }) => {
         await ensureLoggedIn(page);
