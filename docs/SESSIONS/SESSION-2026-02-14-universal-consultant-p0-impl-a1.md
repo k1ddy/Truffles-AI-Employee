@@ -14,8 +14,10 @@
   - Added degraded policy-core info rescue hook (`_policy_core_reason_supports_info_rescue`) before critical fallback collect.
   - Added tests in `test_intent.py`, `test_capabilities_runtime.py`, `test_booking_appointments.py`, and `test_message_endpoint.py`.
   - Pushed branch and opened stacked PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/663
+  - Merged policy-core rescue update and replay evidence via PRs #668 and #669.
+  - Added CI/session-gate PR triggers for non-main base branches and opened PR #670.
 - next:
-  - Run full quality replay on frozen scenarios and build failure-ledger for remaining 99% contract gaps.
+  - Monitor PR #670 checks and stabilize remaining replay degradations (`pack_refs_missing`, `collect_slot_missing`).
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-14-universal-consultant-p0-contract-kernel-a1.md
   - pytest -q truffles-api/tests/test_intent.py
@@ -24,4 +26,6 @@
   - pytest -q truffles-api/tests/test_message_endpoint.py -k "degraded_booking_guard_uses_safe_collect or policy_core_reason_supports_info_rescue_prefixes"
   - pytest -q truffles-api/tests/test_onboarding_contract_service.py truffles-api/tests/test_console_onboarding_contract_api.py truffles-api/tests/test_console_onboarding_state.py
   - scripts/session_check.sh
-- last_updated: 2026-02-14
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/668
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/670
+- last_updated: 2026-02-15

@@ -3826,6 +3826,7 @@ POLICY_CORE_INFO_RESCUE_REASON_PREFIXES = (
     "policy_validation:",
     "llm_degraded:",
 )
+POLICY_STYLE_REFERENCE_HINT_INTENTS = {"style_reference", "ask_photo", "send_photo"}
 
 
 def _normalize_controller_fallback_reason(*, error: str | None) -> str | None:
@@ -3849,6 +3850,26 @@ def _policy_core_reason_supports_info_rescue(reason: str | None) -> bool:
     if not normalized:
         return False
     return normalized.startswith(POLICY_CORE_INFO_RESCUE_REASON_PREFIXES)
+
+
+def _policy_has_style_reference_hint(
+    *,
+    policy_intent: str | None,
+    policy_reason: str | None,
+) -> bool:
+    if isinstance(policy_intent, str):
+        normalized_intent = policy_intent.strip().casefold()
+        if normalized_intent in POLICY_STYLE_REFERENCE_HINT_INTENTS:
+            return True
+        if "style" in normalized_intent:
+            return True
+    if isinstance(policy_reason, str):
+        normalized_reason = policy_reason.strip().casefold()
+        if normalized_reason.startswith("style_reference"):
+            return True
+        if "style" in normalized_reason:
+            return True
+    return False
 
 
 def _resolve_controller_signal_class(*, intent_decomp_set: set[str], booking_signal: bool) -> str | None:
@@ -7095,6 +7116,7 @@ async def _handle_webhook_payload(
     policy_slot_state_validated: dict[str, str] = {}
     policy_tool_args: dict[str, Any] = {}
     policy_goal = None
+    policy_reason = None
     policy_validation_error = None
     policy_valid = False
     policy_collect_slot = None
@@ -7163,6 +7185,10 @@ async def _handle_webhook_payload(
             if isinstance(raw_goal, str):
                 normalized_goal = raw_goal.strip().casefold()
                 policy_goal = normalized_goal or None
+            raw_reason = policy_payload.get("reason")
+            if isinstance(raw_reason, str):
+                normalized_reason = raw_reason.strip().casefold()
+                policy_reason = normalized_reason or None
             policy_slot_state_normalized = _normalize_plan_slot_state(policy_payload.get("slots"))
             for slot_key, value in policy_slot_state_normalized.items():
                 validated_value = _validate_plan_slot_value(
@@ -7236,36 +7262,72 @@ async def _handle_webhook_payload(
                 if policy_validation_error is None and policy_tool_action == "info" and not policy_pack_refs:
                     # Rescue common policy-core drift: style-reference asks and booking slot replies
                     # sometimes arrive as "info" without refs.
-                    style_reference_signal = bool(
-                        message_text and _is_style_reference_request(message_text, has_media=has_media)
-                    )
-                    if style_reference_signal and not has_media:
-                        policy_action = "fact"
-                        policy_tool_action = "catalog.portfolio"
-                    elif message_text and _has_lateness_signal(
-                        message_text,
-                        client_slug=payload.client_slug,
-                    ):
-                        policy_pack_refs = ["hours"]
-                    elif (
-                        conversation.state == ConversationState.BOT_ACTIVE.value
-                        and policy_slot_state_validated
-                        and (
-                            expected_reply_type
-                            in {
-                                EXPECTED_REPLY_SERVICE,
-                                EXPECTED_REPLY_TIME,
-                                EXPECTED_REPLY_NAME,
-                            }
-                            or booking_active
-                            or booking_wants_flow
+                    info_refs_from_tool_args = _normalize_plan_refs(policy_tool_args.get("info_refs"))
+                    if not info_refs_from_tool_args:
+                        info_ref_single = policy_tool_args.get("info_ref")
+                        if isinstance(info_ref_single, str) and info_ref_single.strip():
+                            info_refs_from_tool_args = _normalize_plan_refs([info_ref_single])
+                    if info_refs_from_tool_args:
+                        policy_pack_refs = info_refs_from_tool_args
+                    if not policy_pack_refs:
+                        style_reference_signal = bool(
+                            _policy_has_style_reference_hint(
+                                policy_intent=policy_intent,
+                                policy_reason=policy_reason,
+                            )
+                            or (
+                                message_text
+                                and _is_style_reference_request(message_text, has_media=has_media)
+                            )
                         )
-                        and not info_class_intents
-                    ):
-                        policy_action = "collect"
-                        policy_tool_action = "collect"
+                        booking_collect_context = bool(
+                            (
+                                expected_reply_type
+                                in {
+                                    EXPECTED_REPLY_SERVICE,
+                                    EXPECTED_REPLY_TIME,
+                                    EXPECTED_REPLY_NAME,
+                                }
+                                or booking_active
+                                or booking_wants_flow
+                            )
+                            and not info_class_intents
+                        )
+                        booking_collect_intent = bool(
+                            (
+                                isinstance(policy_intent, str)
+                                and (
+                                    "booking" in policy_intent
+                                    or policy_intent
+                                    in {"reschedule", "cancel", "introduce", "provide_name"}
+                                )
+                            )
+                            or policy_goal == "booking"
+                        )
+                        if style_reference_signal and not has_media:
+                            policy_action = "fact"
+                            policy_tool_action = "catalog.portfolio"
+                        elif message_text and _has_lateness_signal(
+                            message_text,
+                            client_slug=payload.client_slug,
+                        ):
+                            policy_pack_refs = ["hours"]
+                        elif (
+                            booking_collect_context
+                            and booking_collect_intent
+                            and (
+                                policy_slot_state_validated
+                                or policy_intent in {"introduce", "provide_name"}
+                            )
+                        ):
+                            policy_action = "collect"
+                            policy_tool_action = "collect"
                 if policy_validation_error is None and policy_tool_action == "info" and not policy_pack_refs:
                     info_refs_from_tool_args = _normalize_plan_refs(policy_tool_args.get("info_refs"))
+                    if not info_refs_from_tool_args:
+                        info_ref_single = policy_tool_args.get("info_ref")
+                        if isinstance(info_ref_single, str) and info_ref_single.strip():
+                            info_refs_from_tool_args = _normalize_plan_refs([info_ref_single])
                     if info_refs_from_tool_args:
                         policy_pack_refs = info_refs_from_tool_args
                     elif info_class_intents:
@@ -7353,8 +7415,7 @@ async def _handle_webhook_payload(
                         )
                 if not policy_collect_slot:
                     if (
-                        conversation.state == ConversationState.BOT_ACTIVE.value
-                        and policy_tool_action
+                        policy_tool_action
                         in {
                             "collect",
                             "booking",
@@ -7770,7 +7831,11 @@ async def _handle_webhook_payload(
             collect_action = "booking_prompt"
             collect_intent = "booking"
         style_signal_for_collect = bool(
-            message_text and _is_style_reference_request(message_text, has_media=has_media)
+            _policy_has_style_reference_hint(
+                policy_intent=policy_intent,
+                policy_reason=policy_reason,
+            )
+            or (message_text and _is_style_reference_request(message_text, has_media=has_media))
         )
         if style_signal_for_collect and not has_media:
             collect_prompt = _combine_sidecar(MSG_STYLE_REFERENCE_NEED_MEDIA, collect_prompt)
@@ -8005,7 +8070,11 @@ async def _handle_webhook_payload(
                     early_out_of_domain = False
 
     style_reference_text_signal = bool(
-        message_text and _is_style_reference_request(message_text, has_media=has_media)
+        _policy_has_style_reference_hint(
+            policy_intent=policy_intent,
+            policy_reason=policy_reason,
+        )
+        or (message_text and _is_style_reference_request(message_text, has_media=has_media))
     )
     policy_topic_signal = bool(
         message_text
@@ -9494,6 +9563,7 @@ async def _handle_webhook_payload(
                     saved_message=saved_message,
                     client_slug=payload.client_slug,
                     routing=routing,
+                    has_media=has_media,
                     bypass_domain_flows=bypass_domain_flows,
                     booking_wants_flow=booking_wants_flow,
                     consult_intent=False,
@@ -10447,6 +10517,7 @@ async def _handle_webhook_payload(
             saved_message=saved_message,
             client_slug=payload.client_slug,
             routing=routing,
+            has_media=has_media,
             bypass_domain_flows=bypass_domain_flows,
             booking_wants_flow=booking_wants_flow,
             consult_intent=consult_intent,
