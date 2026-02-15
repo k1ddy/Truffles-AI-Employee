@@ -483,6 +483,14 @@ export type BusinessSummaryAction = {
     href: string;
     severity: "critical" | "warn" | "info";
 };
+export type MetricFactMeta = {
+    kind: "fact" | "estimate" | "missing";
+    source: string;
+    as_of?: string | null;
+    scope: "system" | "client" | "branch";
+    sample_size?: number | null;
+    note?: string | null;
+};
 export type BusinessSummaryResponse = {
     generated_at: string;
     status: "healthy" | "degraded" | "unhealthy";
@@ -495,6 +503,7 @@ export type BusinessSummaryResponse = {
     oldest_unresolved_minutes?: number | null;
     first_response_p90_seconds?: number | null;
     actions: BusinessSummaryAction[];
+    metric_meta: Record<string, MetricFactMeta>;
 };
 export type SubscriptionEvidenceItem = {
     outbox_id: string;
@@ -527,6 +536,7 @@ export type SubscriptionSummaryResponse = {
     overage_policy_message: string;
     over_quota: boolean;
     evidence: SubscriptionEvidenceItem[];
+    metric_meta: Record<string, MetricFactMeta>;
 };
 export type DataTrustSummaryResponse = {
     generated_at: string;
@@ -542,6 +552,7 @@ export type DataTrustSummaryResponse = {
     audit_events_24h: number;
     critical_audit_events_24h: number;
     actions: BusinessSummaryAction[];
+    metric_meta: Record<string, MetricFactMeta>;
 };
 export type TeamManagerPerformanceItem = {
     manager_name: string;
@@ -563,6 +574,64 @@ export type TeamPerformanceSummaryResponse = {
     unresolved_older_than_60m: number;
     managers: TeamManagerPerformanceItem[];
     actions: BusinessSummaryAction[];
+    metric_meta: Record<string, MetricFactMeta>;
+};
+export type OwnerOperationMode = "capture_leads" | "stable_quality" | "team_protection";
+export type OwnerOperationSettingsPatch = {
+    reminder_1_minutes: number;
+    reminder_2_minutes: number;
+    escalation_timeout_minutes: number;
+};
+export type OwnerOperationMetricSnapshot = {
+    outbox_backlog: number;
+    unresolved_older_than_60m: number;
+    manager_median_response_seconds?: number | null;
+};
+export type OwnerOperationMetricDelta = {
+    baseline?: number | null;
+    current?: number | null;
+    delta?: number | null;
+    trend: "up" | "down" | "stable" | "unknown";
+};
+export type OwnerOperationPreviewResponse = {
+    generated_at: string;
+    mode: OwnerOperationMode;
+    mode_label: string;
+    settings_patch: OwnerOperationSettingsPatch;
+    current_settings: OwnerOperationSettingsPatch;
+    baseline: OwnerOperationMetricSnapshot;
+    warnings: string[];
+    metric_meta: Record<string, MetricFactMeta>;
+};
+export type OwnerOperationApplyResponse = {
+    success: boolean;
+    operation_id: string;
+    mode: OwnerOperationMode;
+    mode_label: string;
+    applied_settings: OwnerOperationSettingsPatch;
+    previous_settings: OwnerOperationSettingsPatch;
+    baseline: OwnerOperationMetricSnapshot;
+    applied_at: string;
+    impact_check_due_at: string;
+    metric_meta: Record<string, MetricFactMeta>;
+};
+export type OwnerOperationRollbackResponse = {
+    success: boolean;
+    operation_id: string;
+    restored_settings: OwnerOperationSettingsPatch;
+    rolled_back_at: string;
+    message: string;
+};
+export type OwnerOperationImpactResponse = {
+    operation_id: string;
+    mode: OwnerOperationMode;
+    checked_at: string;
+    due_at: string;
+    summary: "improved" | "regressed" | "mixed_or_stable";
+    baseline: OwnerOperationMetricSnapshot;
+    current: OwnerOperationMetricSnapshot;
+    metrics: Record<string, OwnerOperationMetricDelta>;
+    metric_meta: Record<string, MetricFactMeta>;
 };
 export type SettingsResponse = components["schemas"]["SettingsResponse"];
 export type AuditEvent = components["schemas"]["AuditEvent"];
@@ -715,6 +784,14 @@ export const businessApi = {
     getSubscriptionSummary: () => apiClient.get<SubscriptionSummaryResponse>("/subscription/summary"),
     getDataTrustSummary: () => apiClient.get<DataTrustSummaryResponse>("/business/data-trust"),
     getTeamPerformanceSummary: () => apiClient.get<TeamPerformanceSummaryResponse>("/business/team-performance"),
+    previewOwnerModeOperation: (data: { mode: OwnerOperationMode }) =>
+        apiClient.post<OwnerOperationPreviewResponse>("/business/operations/owner-mode/preview", data),
+    applyOwnerModeOperation: (data: { mode: OwnerOperationMode }) =>
+        apiClient.post<OwnerOperationApplyResponse>("/business/operations/owner-mode/apply", data),
+    rollbackOwnerModeOperation: (data?: { operation_id?: string }) =>
+        apiClient.post<OwnerOperationRollbackResponse>("/business/operations/owner-mode/rollback", data ?? {}),
+    getOwnerOperationImpact: (operationId: string) =>
+        apiClient.get<OwnerOperationImpactResponse>(`/business/operations/${operationId}/impact`),
 };
 
 /** Telegram connector endpoints */
