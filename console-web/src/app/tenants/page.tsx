@@ -780,7 +780,11 @@ export default function TenantsPage() {
     const { data: session } = useSession();
     const router = useRouter();
     const queryClient = useQueryClient();
-    const { errors: inlineErrors, reportError, clearErrors } = useInlineErrorSummary();
+    const { errors: inlineErrors, reportError, reportInlineError, clearErrors } = useInlineErrorSummary();
+    const reportValidationError = (message: string, code = "VALIDATION_ERROR") => {
+        reportInlineError({ code, message });
+        toast.error(message);
+    };
     const [clientQuery, setClientQuery] = useState("");
     const [branchQuery, setBranchQuery] = useState("");
     const [companyQuery, setCompanyQuery] = useState("");
@@ -1239,7 +1243,7 @@ export default function TenantsPage() {
     const handleQuickCreateCompany = async () => {
         const companyName = quickCreateForm.companyName.trim();
         if (!companyName) {
-            toast.error("Укажите название компании");
+            reportValidationError("Укажите название компании");
             return;
         }
         setQuickCreateRunning("company");
@@ -1247,7 +1251,7 @@ export default function TenantsPage() {
             const response = await adminApi.createCompany({ name: companyName });
             const companyId = response.data.company?.id;
             if (!companyId) {
-                toast.error("Компания создана, но company_id не вернулся");
+                reportValidationError("Компания создана, но company_id не вернулся");
                 return;
             }
             setQuickCreateForm((prev) => ({
@@ -1269,15 +1273,15 @@ export default function TenantsPage() {
         const slug = quickCreateForm.clientSlug.trim().toLowerCase();
         const companyId = quickCreateCompanyId;
         if (!companyId) {
-            toast.error("Сначала выберите или создайте компанию");
+            reportValidationError("Сначала выберите или создайте компанию");
             return;
         }
         if (!slug) {
-            toast.error("Укажите slug клиента");
+            reportValidationError("Укажите slug клиента");
             return;
         }
         if (!SLUG_INPUT_PATTERN.test(slug)) {
-            toast.error("slug: [a-z0-9_-], без пробелов");
+            reportValidationError("slug: [a-z0-9_-], без пробелов");
             return;
         }
         setQuickCreateRunning("client");
@@ -1288,7 +1292,7 @@ export default function TenantsPage() {
             });
             const clientId = response.data.client?.id;
             if (!clientId) {
-                toast.error("Клиент создан, но client_id не вернулся");
+                reportValidationError("Клиент создан, но client_id не вернулся");
                 return;
             }
             setQuickCreateForm((prev) => ({
@@ -1315,27 +1319,27 @@ export default function TenantsPage() {
         const phone = quickCreateForm.branchPhone.trim();
         const instanceId = quickCreateForm.branchInstanceId.trim();
         if (!clientId) {
-            toast.error("Сначала выберите или создайте клиента");
+            reportValidationError("Сначала выберите или создайте клиента");
             return;
         }
         if (!branchName || !branchSlug) {
-            toast.error("Укажите название и slug филиала");
+            reportValidationError("Укажите название и slug филиала");
             return;
         }
         if (!SLUG_INPUT_PATTERN.test(branchSlug)) {
-            toast.error("branch slug: [a-z0-9_-], без пробелов");
+            reportValidationError("branch slug: [a-z0-9_-], без пробелов");
             return;
         }
         if (timezone && !isValidTimezoneName(timezone)) {
-            toast.error("timezone должен быть в формате IANA, например Asia/Almaty");
+            reportValidationError("timezone должен быть в формате IANA, например Asia/Almaty");
             return;
         }
         if (phone && !BRANCH_PHONE_INPUT_PATTERN.test(phone)) {
-            toast.error("phone: 7-15 цифр (допускаются +, пробелы, скобки и -)");
+            reportValidationError("phone: 7-15 цифр (допускаются +, пробелы, скобки и -)");
             return;
         }
         if (instanceId && !phone) {
-            toast.error("Для instance_id укажите phone филиала");
+            reportValidationError("Для instance_id укажите phone филиала");
             return;
         }
         setQuickCreateRunning("branch");
@@ -1351,7 +1355,7 @@ export default function TenantsPage() {
             });
             const branchId = response.data.branch?.id;
             if (!branchId) {
-                toast.error("Филиал создан, но branch_id не вернулся");
+                reportValidationError("Филиал создан, но branch_id не вернулся");
                 return;
             }
             setBranchContext(branchId);
@@ -1499,13 +1503,13 @@ export default function TenantsPage() {
             await navigator.clipboard.writeText(serialized);
             toast.success("Alert payload скопирован");
         } catch {
-            toast.error("Не удалось скопировать payload");
+            reportValidationError("Не удалось скопировать payload");
         }
     };
 
     const runMetricsSnapshotHook = async (mode: "dry_run" | "execute") => {
         if (!selectedClientId) {
-            toast.error("Сначала выберите клиента в контексте");
+            reportValidationError("Сначала выберите клиента в контексте");
             return;
         }
         setRunningMetricsSnapshotMode(mode);
@@ -1526,7 +1530,7 @@ export default function TenantsPage() {
 
     const startCompanyEdit = (company: components["schemas"]["Company"]) => {
         if (!company.id) {
-            toast.error("Не удалось открыть компанию без ID");
+            reportValidationError("Не удалось открыть компанию без ID");
             return;
         }
         setClientLifecycleDraft(null);
@@ -1545,7 +1549,7 @@ export default function TenantsPage() {
 
     const startClientEdit = (client: components["schemas"]["Client"]) => {
         if (!client.id) {
-            toast.error("Не удалось открыть клиента без ID");
+            reportValidationError("Не удалось открыть клиента без ID");
             return;
         }
         setClientLifecycleDraft(null);
@@ -1564,7 +1568,7 @@ export default function TenantsPage() {
 
     const startBranchEdit = (branch: components["schemas"]["Branch"]) => {
         if (!branch.id) {
-            toast.error("Не удалось открыть филиал без ID");
+            reportValidationError("Не удалось открыть филиал без ID");
             return;
         }
         setClientLifecycleDraft(null);
@@ -1603,12 +1607,12 @@ export default function TenantsPage() {
         }
         const name = companyEditor.name.trim();
         if (!name) {
-            toast.error("Укажите название компании");
+            reportValidationError("Укажите название компании");
             return;
         }
         const billing = parseOptionalJson(companyEditor.billingInfo, "billing_info");
         if (billing.error) {
-            toast.error(billing.error);
+            reportValidationError(billing.error);
             return;
         }
         const payload: components["schemas"]["CompanyUpdateRequest"] = {};
@@ -1642,11 +1646,11 @@ export default function TenantsPage() {
         }
         const slug = clientEditor.slug.trim();
         if (!slug) {
-            toast.error("Укажите slug клиента");
+            reportValidationError("Укажите slug клиента");
             return;
         }
         if (!SLUG_INPUT_PATTERN.test(slug)) {
-            toast.error("slug: [a-z0-9_-], без пробелов");
+            reportValidationError("slug: [a-z0-9_-], без пробелов");
             return;
         }
         const payload: components["schemas"]["ClientUpdateRequest"] = {};
@@ -1656,7 +1660,7 @@ export default function TenantsPage() {
         const companyId = clientEditor.companyId.trim();
         const companyLocked = clientEditor.totalBranches > 0 && !!clientEditor.originalCompanyId;
         if (companyLocked && companyId !== clientEditor.originalCompanyId) {
-            toast.error("company_id нельзя менять после создания филиалов");
+            reportValidationError("company_id нельзя менять после создания филиалов");
             return;
         }
         if (companyId !== clientEditor.originalCompanyId) {
@@ -1693,7 +1697,7 @@ export default function TenantsPage() {
         mode: ClientLifecycleMode,
     ) => {
         if (!client.id) {
-            toast.error("Не удалось выполнить действие без ID клиента");
+            reportValidationError("Не удалось выполнить действие без ID клиента");
             return;
         }
         setClientLifecycleDraft({
@@ -1723,22 +1727,22 @@ export default function TenantsPage() {
 
     const handleClientLifecycleAction = async () => {
         if (!clientLifecycleDraft) {
-            toast.error("Сначала подготовьте действие");
+            reportValidationError("Сначала подготовьте действие");
             return;
         }
         const lifecycleDraft = clientLifecycleDraft;
         const clientId = lifecycleDraft.clientId;
         if (!clientId) {
-            toast.error("Не удалось выполнить действие без ID клиента");
+            reportValidationError("Не удалось выполнить действие без ID клиента");
             return;
         }
         const reason = clientLifecycleDraft.reason.trim();
         if (!reason) {
-            toast.error("Укажите причину");
+            reportValidationError("Укажите причину");
             return;
         }
         if (!clientLifecycleDraft.confirmChecked) {
-            toast.error("Подтвердите действие");
+            reportValidationError("Подтвердите действие");
             return;
         }
         if (
@@ -1746,7 +1750,7 @@ export default function TenantsPage() {
             || !clientLifecycleDraft.checkImpactReview
             || !clientLifecycleDraft.checkOwnerAligned
         ) {
-            toast.error("Заполните checklist перед выполнением действия");
+            reportValidationError("Заполните checklist перед выполнением действия");
             return;
         }
         const mode = lifecycleDraft.mode;
@@ -1825,12 +1829,12 @@ export default function TenantsPage() {
         }
         const reason = branchEditor.changeReason.trim();
         if (!reason) {
-            toast.error("Укажите причину изменения");
+            reportValidationError("Укажите причину изменения");
             return;
         }
         const { patch, hasChanges, error } = buildBranchChangePatch(branchEditor);
         if (error) {
-            toast.error(error);
+            reportValidationError(error);
             return;
         }
         if (!hasChanges) {
@@ -1846,7 +1850,7 @@ export default function TenantsPage() {
             });
             const draftChangeId = draftResponse.data.change?.id;
             if (!draftChangeId) {
-                toast.error("Не удалось создать черновик");
+                reportValidationError("Не удалось создать черновик");
                 return;
             }
             const validateResponse = await adminApi.validateBranchChange(draftChangeId);
@@ -1855,7 +1859,7 @@ export default function TenantsPage() {
             if (status === "validated") {
                 toast.success("Черновик прошел проверку. Можно применять.");
             } else {
-                toast.error("Черновик не прошел проверку. Исправьте ошибки.");
+                reportValidationError("Черновик не прошел проверку. Исправьте ошибки.");
             }
             await branchChangesQuery.refetch();
         } catch (error) {
@@ -1871,7 +1875,7 @@ export default function TenantsPage() {
         }
         const changeId = branchChangePreview?.change?.id;
         if (!changeId) {
-            toast.error("Сначала подготовьте и проверьте черновик");
+            reportValidationError("Сначала подготовьте и проверьте черновик");
             return;
         }
         setPublishingBranchChange(true);
@@ -1880,7 +1884,7 @@ export default function TenantsPage() {
             if (requiresBranchConfirmation(branchEditor)) {
                 const confirmationReason = branchEditor.confirmReason.trim() || branchEditor.changeReason.trim();
                 if (!confirmationReason) {
-                    toast.error("Укажите причину подтверждения");
+                    reportValidationError("Укажите причину подтверждения");
                     return;
                 }
                 confirmationId = await createBranchDeactivateConfirmation(branchEditor.id, confirmationReason);
@@ -1910,12 +1914,12 @@ export default function TenantsPage() {
             : latestPublishedBranchChange;
         const changeId = targetChange?.id;
         if (!changeId) {
-            toast.error("Нет примененного изменения для отката");
+            reportValidationError("Нет примененного изменения для отката");
             return;
         }
         const reason = branchEditor.rollbackReason.trim();
         if (!reason) {
-            toast.error("Укажите причину отката");
+            reportValidationError("Укажите причину отката");
             return;
         }
 
@@ -2096,6 +2100,9 @@ export default function TenantsPage() {
                         <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="text-sm font-semibold text-red-900">Ошибки последних операций</div>
                             <button className="btn-ghost" onClick={clearErrors}>Очистить</button>
+                        </div>
+                        <div className="mt-1 text-xs text-red-900/80">
+                            Исправьте отмеченные поля и повторите действие. Для API ошибок используйте `trace` из записи ниже.
                         </div>
                         <div className="mt-2 space-y-2">
                             {inlineErrors.map((error) => (

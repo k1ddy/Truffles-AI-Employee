@@ -14,19 +14,27 @@
   - Audit artifacts refreshed: `docs/REPORTS/2026-02-15-platform-admin-baseline-v2.md`, `docs/CONSOLE_AUDIT/UX_BACKLOG.md`, `docs/CONSOLE_AUDIT/CANON_VS_IMPLEMENTED.md`.
   - Runbook added: `docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md`.
   - Canon maps updated: `STRUCTURE.md`, `STATE.md`.
+  - Follow-up `1+2` implemented: outbox threshold guard with fail-fast gate (`--fail-on-breach --fail-level`) added to KPI tool and runbook.
+  - Follow-up `2` implemented: validation error paths in `tenants` and `company-workspace` converted from toast-only to `reportValidationError` (toast + inline summary), with explicit recovery hints in summary cards.
+  - Follow-up evidence report added: `docs/REPORTS/2026-02-15-platform-admin-baseline-v3.md`.
 - checks:
   - `python3 ops/console_platform_admin_kpi_snapshot.py --help` (pass)
   - `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/platform_admin_kpi_20260215_0734.json` (pass)
+  - `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/platform_admin_kpi_20260215_1250_wave12.json` (pass)
+  - `python3 ops/console_platform_admin_kpi_snapshot.py --fail-on-breach --fail-level critical --pretty --output /tmp/platform_admin_kpi_20260215_1250_gate.json` (expected fail exit=2)
   - `npm --prefix console-web run lint` (pass)
-  - `npm --prefix console-web exec -- playwright test --list` (pass)
+  - `npm --prefix console-web exec -- playwright test --list` (pass, 27 tests listed)
   - `npm --prefix console-web run build` (pass)
   - `scripts/session_check.sh` (pass)
 - notes:
   - One accidental command (`npm --prefix console-web exec playwright test --list` without `--`) executed tests; result `20 passed / 2 failed / 5 skipped` in current environment and not used as acceptance signal for this wave.
 - next:
-  - Commit, push branch, open PR.
+  - Push follow-up commit to PR #675.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-15-platform-admin-wave12345-a1.md
   - docs/REPORTS/2026-02-15-platform-admin-baseline-v2.md
+  - docs/REPORTS/2026-02-15-platform-admin-baseline-v3.md
   - /tmp/platform_admin_kpi_20260215_0734.json
-- last_updated: 2026-02-15
+  - /tmp/platform_admin_kpi_20260215_1250_wave12.json
+  - /tmp/platform_admin_kpi_20260215_1250_gate.json
+- last_updated: 2026-02-15T08:06:10Z

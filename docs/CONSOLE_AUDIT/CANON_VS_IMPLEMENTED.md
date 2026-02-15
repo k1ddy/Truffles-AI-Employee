@@ -121,5 +121,6 @@ Legend
 ## 7) Platform Admin operating loop readiness
 
 - [match] Platform Admin critical UI regressions вынесены в отдельный e2e suite (`console-web/e2e/platform-admin.spec.ts`) вместо концентрации в `smoke.spec.ts`.
-- [partial] KPI snapshot для weekly контроля добавлен (`ops/console_platform_admin_kpi_snapshot.py`), но CI threshold gate для этих метрик пока не внедрен.
+- [match] KPI snapshot для weekly контроля добавлен (`ops/console_platform_admin_kpi_snapshot.py`) с outbox threshold/fail-fast guard (`--fail-on-breach`, `--fail-level`).
+- [match] Validation/операторские ошибки на `tenants` и `company-workspace` больше не toast-only: ошибки фиксируются в inline summary с recovery hints.
 - [partial] Runbook регулярного контроля добавлен (`docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md`), но remediation jobs остаются частично manual.
