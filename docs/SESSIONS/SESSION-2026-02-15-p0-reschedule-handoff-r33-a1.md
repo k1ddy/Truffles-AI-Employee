@@ -1,0 +1,22 @@
+# SESSION 2026-02-15-p0-reschedule-handoff-r33-a1 — P0 Reschedule Missing Slot Handoff Fix
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-14-universal-consultant-p0-contract-kernel-a1.md
+- branch: fix/p0-reschedule-handoff-r33-a1
+- worktree: /home/zhan/truffles-main
+- base_ref: origin/main
+- scope: Close proven expected_action mismatch for reschedule turn routed through calendar.list_slots/missing_slot and keep contract-first behavior.
+- done:
+  - Added tool-path fail-safe handoff for reschedule-intent text when policy tool result is calendar.list_slots/missing_slot.
+  - Added regression test for the reschedule-missing-slot escalation path.
+  - Ran mandatory deterministic tests and frozen replay without judge.
+- next:
+  - Capture evidence in PR description and open PR.
+- evidence:
+  - /tmp/booking_quality/offline-replay-20260215-r33/summary.json
+  - /tmp/booking_quality/offline-replay-20260215-r33/brief.md
+  - pytest -q truffles-api/tests/test_message_endpoint.py
+  - pytest -q truffles-api/tests/test_booking_appointments.py
+  - pytest -q truffles-api/tests/test_booking_quality_response_guard.py
+- last_updated: 2026-02-15
