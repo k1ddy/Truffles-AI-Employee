@@ -76,6 +76,8 @@ export type ConsoleSection =
     | "team"
     | "calendar"
     | "insights"
+    | "business"
+    | "subscription"
     | "settings"
     | "ops"
     | "audit"
@@ -102,6 +104,14 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
         write: ["platform_admin", "owner", "admin", "manager", "specialist"],
     },
     insights: {
+        read: ["platform_admin", "owner", "admin"],
+        write: [],
+    },
+    business: {
+        read: ["platform_admin", "owner", "admin"],
+        write: [],
+    },
+    subscription: {
         read: ["platform_admin", "owner", "admin"],
         write: [],
     },
@@ -460,6 +470,51 @@ export type Agent = components["schemas"]["Agent"];
 export type Branch = components["schemas"]["Branch"];
 export type HealthResponse = components["schemas"]["HealthResponse"];
 export type MetricsDailyResponse = components["schemas"]["MetricsDailyResponse"];
+export type BusinessSummaryAction = {
+    id: string;
+    title: string;
+    description: string;
+    href: string;
+    severity: "critical" | "warn" | "info";
+};
+export type BusinessSummaryResponse = {
+    generated_at: string;
+    status: "healthy" | "degraded" | "unhealthy";
+    status_label: string;
+    outbox_backlog: number;
+    outbox_failed_24h: number;
+    pending_cases: number;
+    active_cases: number;
+    unresolved_cases: number;
+    oldest_unresolved_minutes?: number | null;
+    first_response_p90_seconds?: number | null;
+    actions: BusinessSummaryAction[];
+};
+export type SubscriptionEvidenceItem = {
+    outbox_id: string;
+    conversation_id?: string | null;
+    inbound_message_id: string;
+    created_at: string;
+    status: string;
+    provider_status?: string | null;
+    provider_message_id?: string | null;
+};
+export type SubscriptionSummaryResponse = {
+    generated_at: string;
+    period_start: string;
+    period_end: string;
+    plan_name?: string | null;
+    contract_label?: string | null;
+    currency?: string | null;
+    monthly_quota?: number | null;
+    quota_source: "company_billing_info" | "client_config" | "unknown";
+    billable_messages: number;
+    remaining_quota?: number | null;
+    projected_month_total?: number | null;
+    usage_percent?: number | null;
+    over_quota: boolean;
+    evidence: SubscriptionEvidenceItem[];
+};
 export type SettingsResponse = components["schemas"]["SettingsResponse"];
 export type AuditEvent = components["schemas"]["AuditEvent"];
 export type AuditListResponse = components["schemas"]["AuditListResponse"];
@@ -603,6 +658,12 @@ export const opsApi = {
         apiClient.get<OpsJobRunResponse>(`/ops/jobs/${jobId}`),
     runJob: (data: OpsJobRunRequest) =>
         apiClient.post<OpsJobRunResponse>("/ops/jobs/run", data),
+};
+
+/** Owner/Admin business control endpoints */
+export const businessApi = {
+    getSummary: () => apiClient.get<BusinessSummaryResponse>("/business/summary"),
+    getSubscriptionSummary: () => apiClient.get<SubscriptionSummaryResponse>("/subscription/summary"),
 };
 
 /** Telegram connector endpoints */

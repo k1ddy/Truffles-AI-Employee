@@ -370,6 +370,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/business/summary": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** Owner/Admin business summary */
+        get: operations["getBusinessSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscription/summary": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** Owner/Admin subscription summary */
+        get: operations["getSubscriptionSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/telegram/health": {
         parameters: {
             query?: never;
@@ -4056,6 +4100,64 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    getBusinessSummary: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Business control summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getSubscriptionSummary: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Subscription usage and billing evidence summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getTelegramHealth: {

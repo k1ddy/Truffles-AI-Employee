@@ -101,6 +101,8 @@ from app.schemas.console import (
     ConsoleFleetAttentionResponse,
     ConsoleFleetAttentionSummary,
     ConsoleFleetSummary,
+    ConsoleBusinessActionItem,
+    ConsoleBusinessSummaryResponse,
     ConsoleHealthResponse,
     ConsoleIntegrationBranchActionRequest,
     ConsoleIntegrationBranchActionResponse,
@@ -161,6 +163,8 @@ from app.schemas.console import (
     ConsoleSettingsResponse,
     ConsoleSettingsUpdateRequest,
     ConsoleSettingsUpdateResponse,
+    ConsoleSubscriptionEvidenceItem,
+    ConsoleSubscriptionSummaryResponse,
     ConsoleSyncStatus,
     ConsoleTelegramHealthResponse,
     ConsoleTelegramLinkResponse,
@@ -5590,6 +5594,400 @@ async def send_manager_media(
             response_body=response.model_dump(mode="json"),
         )
     return response
+
+
+def _parse_positive_int(value: object) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def _first_non_empty_string(values: list[object]) -> Optional[str]:
+    for value in values:
+        if isinstance(value, str):
+            normalized = value.strip()
+            if normalized:
+                return normalized
+    return None
+
+
+def _resolve_subscription_contract_info(context: ConsoleAuthContext) -> tuple[
+    Optional[str],
+    Optional[str],
+    Optional[str],
+    Optional[int],
+    str,
+]:
+    company = next(
+        (item for item in context.companies if item.id == context.client.company_id),
+        None,
+    )
+    company_billing = company.billing_info if company and isinstance(company.billing_info, dict) else {}
+    client_config = context.client.config if isinstance(context.client.config, dict) else {}
+    client_billing = client_config.get("billing") if isinstance(client_config.get("billing"), dict) else {}
+    sources: list[tuple[str, dict]] = [
+        ("company_billing_info", company_billing),
+        ("client_config", client_billing),
+    ]
+
+    plan_name = _first_non_empty_string(
+        [
+            company_billing.get("plan_name") if isinstance(company_billing, dict) else None,
+            company_billing.get("plan") if isinstance(company_billing, dict) else None,
+            client_billing.get("plan_name") if isinstance(client_billing, dict) else None,
+            client_billing.get("plan") if isinstance(client_billing, dict) else None,
+            company_billing.get("tariff") if isinstance(company_billing, dict) else None,
+            client_billing.get("tariff") if isinstance(client_billing, dict) else None,
+        ]
+    )
+    contract_label = _first_non_empty_string(
+        [
+            company_billing.get("contract") if isinstance(company_billing, dict) else None,
+            company_billing.get("contract_label") if isinstance(company_billing, dict) else None,
+            client_billing.get("contract") if isinstance(client_billing, dict) else None,
+            client_billing.get("contract_label") if isinstance(client_billing, dict) else None,
+        ]
+    )
+    currency = _first_non_empty_string(
+        [
+            company_billing.get("currency") if isinstance(company_billing, dict) else None,
+            client_billing.get("currency") if isinstance(client_billing, dict) else None,
+        ]
+    )
+    if currency:
+        currency = currency.upper()
+
+    quota_keys = ("monthly_quota", "message_quota", "included_messages", "messages_quota", "quota")
+    for source_name, source_payload in sources:
+        if not isinstance(source_payload, dict):
+            continue
+        nested_subscription = source_payload.get("subscription")
+        candidate_maps = [source_payload]
+        if isinstance(nested_subscription, dict):
+            candidate_maps.insert(0, nested_subscription)
+        for payload in candidate_maps:
+            for key in quota_keys:
+                parsed_quota = _parse_positive_int(payload.get(key))
+                if parsed_quota is not None:
+                    return plan_name, contract_label, currency, parsed_quota, source_name
+
+    return plan_name, contract_label, currency, None, "unknown"
+
+
+def _apply_billable_outbox_filters(query):
+    return (
+        query.filter(text("outbox_messages.payload_json->'tenant_context'->>'source' = 'system'"))
+        .filter(text("COALESCE(LOWER(outbox_messages.meta->'simulation'->>'mode'), 'false') <> 'true'"))
+        .filter(
+            text(
+                """
+                (
+                    LOWER(outbox_messages.meta->'provider_status'->>'status') IN ('sent', 'delivered', 'read')
+                    OR (
+                        outbox_messages.meta->'provider_status' IS NULL
+                        AND outbox_messages.status = 'SENT'
+                    )
+                )
+                """
+            )
+        )
+    )
+
+
+def _derive_business_status(
+    *,
+    outbox_backlog: int,
+    outbox_failed_24h: int,
+    unresolved_cases: int,
+) -> tuple[str, str]:
+    if outbox_backlog >= 1000 or outbox_failed_24h >= 100:
+        return "unhealthy", "Критичный риск: сообщения клиентов могут приходить с задержкой."
+    if outbox_backlog >= 500 or outbox_failed_24h >= 30 or unresolved_cases >= 20:
+        return "degraded", "Есть риск деградации: требуется контроль очереди и скорости ответа."
+    return "healthy", "Система работает стабильно, критичных рисков не выявлено."
+
+
+def _build_owner_actions(
+    *,
+    outbox_backlog: int,
+    outbox_failed_24h: int,
+    unresolved_cases: int,
+    first_response_p90_seconds: Optional[float],
+) -> list[ConsoleBusinessActionItem]:
+    actions: list[ConsoleBusinessActionItem] = []
+    if outbox_backlog >= 500 or outbox_failed_24h >= 30:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="review_ops_health",
+                severity="critical" if outbox_backlog >= 1000 or outbox_failed_24h >= 100 else "warn",
+                title="Проверьте очередь отправки",
+                description="Откройте Статус и убедитесь, что failed/pending не растут.",
+                href="/ops",
+            )
+        )
+    if unresolved_cases > 0:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="review_unresolved_cases",
+                severity="warn",
+                title="Проверьте неразобранные заявки",
+                description="Есть диалоги без завершения. Проверьте очередь заявок и назначение менеджеров.",
+                href="/",
+            )
+        )
+    if first_response_p90_seconds is not None and first_response_p90_seconds > 900:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="review_team_speed",
+                severity="warn",
+                title="Проверьте скорость ответа менеджеров",
+                description="Время первого ответа превышает целевой диапазон, есть риск потери заявок.",
+                href="/insights",
+            )
+        )
+    if not actions:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="monitor_daily",
+                severity="info",
+                title="Контроль в норме",
+                description="Проверяйте ежедневные показатели и обновляйте базовые настройки по расписанию.",
+                href="/insights",
+            )
+        )
+    return actions
+
+
+@router.get(
+    "/business/summary",
+    response_model=ConsoleBusinessSummaryResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_business_summary(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleBusinessSummaryResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can access business summary",
+    )
+
+    now = datetime.now(timezone.utc)
+    day_start = datetime.combine(now.date(), time.min).replace(tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+    outbox_failed_window_start = now - timedelta(hours=24)
+    allowed_branch_ids = _resolve_branch_scope(context)
+
+    handover_base = db.query(Handover).filter(Handover.client_id == context.client.id)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            pending_cases = 0
+            active_cases = 0
+            unresolved_cases = 0
+            oldest_unresolved_minutes = None
+        else:
+            handover_base = handover_base.join(
+                Conversation,
+                Handover.conversation_id == Conversation.id,
+            ).filter(Conversation.branch_id.in_(allowed_branch_ids))
+            pending_cases = handover_base.filter(Handover.status == "pending").count()
+            active_cases = handover_base.filter(Handover.status == "active").count()
+            unresolved_cases = pending_cases + active_cases
+            oldest_unresolved_row = (
+                handover_base.filter(Handover.status.in_(["pending", "active"]))
+                .order_by(Handover.created_at.asc())
+                .first()
+            )
+            oldest_unresolved_minutes = None
+            if oldest_unresolved_row and oldest_unresolved_row.created_at:
+                delta_seconds = (now - oldest_unresolved_row.created_at).total_seconds()
+                oldest_unresolved_minutes = max(0, int(delta_seconds // 60))
+    else:
+        pending_cases = handover_base.filter(Handover.status == "pending").count()
+        active_cases = handover_base.filter(Handover.status == "active").count()
+        unresolved_cases = pending_cases + active_cases
+        oldest_unresolved_row = (
+            handover_base.filter(Handover.status.in_(["pending", "active"]))
+            .order_by(Handover.created_at.asc())
+            .first()
+        )
+        oldest_unresolved_minutes = None
+        if oldest_unresolved_row and oldest_unresolved_row.created_at:
+            delta_seconds = (now - oldest_unresolved_row.created_at).total_seconds()
+            oldest_unresolved_minutes = max(0, int(delta_seconds // 60))
+
+    outbox_query = db.query(OutboxMessage).filter(OutboxMessage.client_id == context.client.id)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            outbox_backlog = 0
+            outbox_failed_24h = 0
+        else:
+            outbox_query = outbox_query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
+            outbox_backlog = outbox_query.filter(
+                OutboxMessage.status.in_(["PENDING", "PROCESSING"])
+            ).count()
+            outbox_failed_24h = outbox_query.filter(
+                OutboxMessage.status == "FAILED",
+                OutboxMessage.created_at >= outbox_failed_window_start,
+                OutboxMessage.created_at < day_end,
+            ).count()
+    else:
+        outbox_backlog = outbox_query.filter(
+            OutboxMessage.status.in_(["PENDING", "PROCESSING"])
+        ).count()
+        outbox_failed_24h = outbox_query.filter(
+            OutboxMessage.status == "FAILED",
+            OutboxMessage.created_at >= outbox_failed_window_start,
+            OutboxMessage.created_at < day_end,
+        ).count()
+
+    analytics_row = db.execute(
+        text(
+            """
+            SELECT first_response_p90_seconds
+            FROM metrics_analytics_daily
+            WHERE client_id = :client_id
+              AND metric_date <= :metric_date
+            ORDER BY metric_date DESC
+            LIMIT 1
+            """
+        ),
+        {"client_id": context.client.id, "metric_date": now.date()},
+    ).mappings().first()
+    first_response_p90_seconds = (
+        float(analytics_row.get("first_response_p90_seconds"))
+        if analytics_row and analytics_row.get("first_response_p90_seconds") is not None
+        else None
+    )
+
+    status, status_label = _derive_business_status(
+        outbox_backlog=outbox_backlog,
+        outbox_failed_24h=outbox_failed_24h,
+        unresolved_cases=unresolved_cases,
+    )
+    actions = _build_owner_actions(
+        outbox_backlog=outbox_backlog,
+        outbox_failed_24h=outbox_failed_24h,
+        unresolved_cases=unresolved_cases,
+        first_response_p90_seconds=first_response_p90_seconds,
+    )
+
+    return ConsoleBusinessSummaryResponse(
+        generated_at=now.isoformat(),
+        status=status,
+        status_label=status_label,
+        outbox_backlog=outbox_backlog,
+        outbox_failed_24h=outbox_failed_24h,
+        pending_cases=pending_cases,
+        active_cases=active_cases,
+        unresolved_cases=unresolved_cases,
+        oldest_unresolved_minutes=oldest_unresolved_minutes,
+        first_response_p90_seconds=first_response_p90_seconds,
+        actions=actions,
+    )
+
+
+@router.get(
+    "/subscription/summary",
+    response_model=ConsoleSubscriptionSummaryResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_subscription_summary(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleSubscriptionSummaryResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "subscription",
+        "read",
+        message="Only owner/admin can access subscription summary",
+    )
+
+    now = datetime.now(timezone.utc)
+    period_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    if now.month == 12:
+        period_end = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        period_end = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+    allowed_branch_ids = _resolve_branch_scope(context)
+
+    usage_query = db.query(OutboxMessage).filter(
+        OutboxMessage.client_id == context.client.id,
+        OutboxMessage.created_at >= period_start,
+        OutboxMessage.created_at < period_end,
+    )
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            usage_query = usage_query.filter(text("1 = 0"))
+        else:
+            usage_query = usage_query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
+    usage_query = _apply_billable_outbox_filters(usage_query)
+
+    billable_messages = int(usage_query.count())
+    evidence_rows = (
+        usage_query.order_by(OutboxMessage.created_at.desc(), OutboxMessage.id.desc())
+        .limit(25)
+        .all()
+    )
+
+    plan_name, contract_label, currency, monthly_quota, quota_source = _resolve_subscription_contract_info(context)
+
+    elapsed_days = max(1, (now.date() - period_start.date()).days + 1)
+    total_days = max(1, (period_end.date() - period_start.date()).days)
+    projected_month_total = int(round((billable_messages / elapsed_days) * total_days))
+
+    remaining_quota = None
+    usage_percent = None
+    over_quota = False
+    if monthly_quota is not None and monthly_quota > 0:
+        remaining_quota = max(0, monthly_quota - billable_messages)
+        usage_percent = round((billable_messages / monthly_quota) * 100, 1)
+        over_quota = billable_messages > monthly_quota
+
+    evidence_items = []
+    for row in evidence_rows:
+        meta = row.meta if isinstance(row.meta, dict) else {}
+        provider_status_meta = meta.get("provider_status") if isinstance(meta.get("provider_status"), dict) else {}
+        evidence_items.append(
+            ConsoleSubscriptionEvidenceItem(
+                outbox_id=row.id,
+                conversation_id=row.conversation_id,
+                inbound_message_id=row.inbound_message_id,
+                created_at=row.created_at.isoformat(),
+                status=row.status,
+                provider_status=provider_status_meta.get("status"),
+                provider_message_id=provider_status_meta.get("provider_message_id"),
+            )
+        )
+
+    return ConsoleSubscriptionSummaryResponse(
+        generated_at=now.isoformat(),
+        period_start=period_start.date().isoformat(),
+        period_end=(period_end.date() - timedelta(days=1)).isoformat(),
+        plan_name=plan_name,
+        contract_label=contract_label,
+        currency=currency,
+        monthly_quota=monthly_quota,
+        quota_source=quota_source,
+        billable_messages=billable_messages,
+        remaining_quota=remaining_quota,
+        projected_month_total=projected_month_total,
+        usage_percent=usage_percent,
+        over_quota=over_quota,
+        evidence=evidence_items,
+    )
 
 
 @router.get(

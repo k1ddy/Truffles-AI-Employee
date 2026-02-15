@@ -1,0 +1,32 @@
+# SESSION 2026-02-15-owner-admin-business-deep-audit-a1 — Owner/Admin Business Control Plane Deep Audit
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-business-deep-audit-a1.md
+- branch: feat/2026-02-15-owner-admin-business-audit-a1
+- worktree: /home/zhan/worktrees/2026-02-15-owner-admin-business-audit-a1
+- base_ref: origin/main
+- scope: deep business analytics for inexperienced owners/admins (subscription transparency, data trust, manager visibility, simple settings)
+- done:
+  - Synced local `main` with `origin/main`.
+  - Created dedicated worktree and branch for this session.
+  - Prepared Task Package with invariants, checks, and evidence plan.
+  - Published deep owner/admin business control-plane report with `FACT`/`INFERENCE`, KPI contract, and 30/60/90 plan.
+  - Added owner/admin `P0/P1` backlog items to Console UX backlog.
+  - Updated Console Audit index with latest reports.
+  - Prepared implementation-ready Wave-1 Task Package (`Business Home`, `Subscription`, incident banner).
+  - Implemented Wave-1 owner/admin control layer in code:
+    - backend endpoints `/console/v1/business/summary` and `/console/v1/subscription/summary`;
+    - frontend routes `/business` and `/subscription`;
+    - owner/admin-friendly global incident banner in `ConsoleShell`.
+  - Added/updated docs pages for business/subscription and owner/admin role inventory.
+  - Ran backend checks (`py_compile`, pytest for RBAC + owner business tests).
+- next:
+  - Align report priorities with Brain/Top Architect and split implementation into Wave-1 Task Packages.
+  - Execute Wave-1 (`Business Home`, `Subscription`, `Incident banner`) in separate implementation session.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-business-deep-audit-a1.md
+  - docs/REPORTS/2026-02-15-owner-admin-business-control-plane-v1.md
+  - docs/REPORTS/2026-02-15-owner-admin-wave1-implementation-v1.md
+  - runtime snapshot (`/api/health/full`, `/admin/version`)
+- last_updated: 2026-02-15

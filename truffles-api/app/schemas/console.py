@@ -600,6 +600,60 @@ class ConsoleHealthResponse(BaseModel):
     outbox_backlog: int
 
 
+ConsoleBusinessSeverity = Literal["critical", "warn", "info"]
+ConsoleBusinessStatus = Literal["healthy", "degraded", "unhealthy"]
+ConsoleSubscriptionQuotaSource = Literal["company_billing_info", "client_config", "unknown"]
+
+
+class ConsoleBusinessActionItem(BaseModel):
+    id: str
+    title: str
+    description: str
+    href: str
+    severity: ConsoleBusinessSeverity
+
+
+class ConsoleBusinessSummaryResponse(BaseModel):
+    generated_at: str
+    status: ConsoleBusinessStatus
+    status_label: str
+    outbox_backlog: int
+    outbox_failed_24h: int
+    pending_cases: int
+    active_cases: int
+    unresolved_cases: int
+    oldest_unresolved_minutes: Optional[int] = None
+    first_response_p90_seconds: Optional[float] = None
+    actions: list[ConsoleBusinessActionItem] = []
+
+
+class ConsoleSubscriptionEvidenceItem(BaseModel):
+    outbox_id: UUID
+    conversation_id: Optional[UUID] = None
+    inbound_message_id: str
+    created_at: str
+    status: str
+    provider_status: Optional[str] = None
+    provider_message_id: Optional[str] = None
+
+
+class ConsoleSubscriptionSummaryResponse(BaseModel):
+    generated_at: str
+    period_start: str
+    period_end: str
+    plan_name: Optional[str] = None
+    contract_label: Optional[str] = None
+    currency: Optional[str] = None
+    monthly_quota: Optional[int] = None
+    quota_source: ConsoleSubscriptionQuotaSource = "unknown"
+    billable_messages: int
+    remaining_quota: Optional[int] = None
+    projected_month_total: Optional[int] = None
+    usage_percent: Optional[float] = None
+    over_quota: bool = False
+    evidence: list[ConsoleSubscriptionEvidenceItem] = []
+
+
 class ConsoleOutboxCounts(BaseModel):
     pending: int
     processing: int

@@ -31,6 +31,7 @@ Legend
 
 ### Owner/Admin
 - [match] Полный доступ к Inbox/Calendar/Knowledge/Team/Settings/Ops/Audit. Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/roles/owner.md`, `docs/CONSOLE_AUDIT/roles/admin.md`.
+- [ahead] Добавлены owner/admin разделы `Business` и `Subscription` (read-only control layer для операционного и коммерческого контроля). Canon пока не фиксирует эти страницы как отдельные IA-элементы.
 - [partial] Integrations страница есть в IA, но RBAC ограничен platform_admin (owner/admin без доступа). Canon: `SPECS/CONTROL_PLANE.md` (IA). Impl: `console-web/src/components/ConsoleShell.tsx`, `console-web/src/lib/api-client.ts`.
 
 ### Manager
@@ -55,6 +56,7 @@ Legend
 ## 3) Navigation / IA
 
 - [match] Реализованные пункты навигации: Inbox, Calendar, Knowledge, Team, Settings, Ops, Audit, Insights, Tenants, Integrations. Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/components/ConsoleShell.tsx`.
+- [ahead] Реализованы пункты `Business` и `Subscription` для owner/admin/platform_admin. Canon IA не содержит этих пунктов как самостоятельные страницы.
 - [partial] Integrations доступен только platform_admin (owner/admin не включены в текущий RBAC). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/lib/api-client.ts`.
 - [match] Insights/Analytics (optional). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/app/insights/page.tsx`, `console-web/src/components/ConsoleShell.tsx`.
 
@@ -99,6 +101,12 @@ Legend
 ### Audit
 - [match] Read‑only Audit доступен owner/admin/support. Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/pages/audit.md`.
 
+### Business + Subscription (owner/admin)
+- [ahead] Реализованы owner/admin страницы `Business` и `Subscription`:
+  - `/business` агрегирует риски (`outbox backlog`, failed 24h, unresolved cases, first-response p90) и выдаёт action queue.
+  - `/subscription` показывает plan/quota/usage/projection и evidence rows из billable outbox.
+  Канон не фиксирует эти страницы как обязательные элементы IA.
+
 ### Tenants (platform admin)
 - [match] Управление company/client/branch + подтверждения для destructive. Canon: `SPECS/CONTROL_PLANE.md` (Platform Admin scope + safeguards). Impl: `docs/CONSOLE_AUDIT/pages/tenants.md`.
 
@@ -115,6 +123,7 @@ Legend
 
 - Integrations page реализована, но RBAC уже канона (owner/admin без доступа).
 - Team Users не поддерживает invite/disable; Specialists без управления working_hours/availability.
+- `Business`/`Subscription` уже в реализации, но не отражены в `SPECS/CONTROL_PLANE.md` как отдельные owner/admin разделы.
 
 ---
 
