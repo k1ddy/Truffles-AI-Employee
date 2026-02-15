@@ -65,6 +65,7 @@ from app.routers.webhook.booking import (
     _is_booking_related_message,
     _is_booking_slot_signal,
     _is_booking_time_service_decision,
+    _looks_like_booking_reschedule_request,
     _match_expected_reply,
     _next_booking_prompt,
     _resolve_datetime_offline,
@@ -9335,6 +9336,11 @@ async def _handle_webhook_payload(
                             or has_booking_reference
                             or active_handover_exists
                         )
+                    )
+                    or (
+                        policy_tool_action == "calendar.list_slots"
+                        and tool_decision == "missing_slot"
+                        and _looks_like_booking_reschedule_request(message_text)
                     )
                 )
                 if booking_verification_handoff:
