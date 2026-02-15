@@ -1,0 +1,47 @@
+# SESSION 2026-02-15-owner-admin-wave4-action-loop-a1 — Owner/Admin Wave-4 Action Loop
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave4-action-loop-a1.md
+- branch: feat/2026-02-15-owner-admin-wave4-action-loop-a1
+- worktree: /home/zhan/worktrees/2026-02-15-owner-admin-business-audit-a1
+- base_ref: origin/main
+- scope: выполнить 4 направления сразу: post-merge 24h control, Team KPI closed-loop action, onboarding-lite settings, subscription transparency v2
+- done:
+  - Создан Wave-4 Task Package и ветка от `origin/main`.
+  - Расширен backend contract `GET /subscription/summary`:
+    - `next_billing_date`,
+    - projection/overage fields,
+    - `quota_alert_level` + `quota_alert_message`,
+    - `overage_policy_message` (каноническая формула).
+  - Добавлены backend tests для subscription alert и update-settings persistence.
+  - Реализован Team KPI closed-loop CTA:
+    - кнопка "Применить быстрый профиль" (5/30/60) с подтверждением;
+    - write только через `settings:write`.
+  - Реализован Settings onboarding-lite:
+    - default: SLA + эскалация + Telegram + подписка;
+    - сложные блоки перенесены в `Расширенные`.
+  - Реализована Subscription transparency v2:
+    - дата следующего списания,
+    - алерт 80/100,
+    - прогноз перерасхода/остатка,
+    - явное правило overage.
+  - Обновлены e2e smoke сценарии под Wave-4 surfaces.
+  - Выполнен post-merge evidence контур:
+    - `livecheck-auto` (CA10 outbox dedupe),
+    - `explain` для inbound message,
+    - KPI snapshot и DB KPI query.
+  - Прогоны локальных проверок:
+    - `ruff`, `pytest` (`54 passed`),
+    - `console-web lint/build`,
+    - e2e smoke list.
+- next:
+  - Открыть PR Wave-4.
+  - Дождаться CI checks и подготовить merge handoff.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave4-action-loop-a1.md
+  - /tmp/livecheck_owner_wave4_20260215-154354.log
+  - /tmp/livecheck_owner_wave4_explain_LC-DEDUP-20260215-104354-4cbfd75e.log
+  - /tmp/owner_admin_wave4_kpi_snapshot_20260215-154458.json
+  - DB KPI snapshot (`outbox_backlog=1667`, `unresolved_cases=3`, `first_response_p90_seconds=0.03`)
+- last_updated: 2026-02-15

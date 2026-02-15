@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
+import toast from "react-hot-toast";
 
 import AccessDenied from "@/components/AccessDenied";
-import { authApi, businessApi, canAccessConsole } from "@/lib/api-client";
+import { authApi, businessApi, canAccessConsole, settingsApi } from "@/lib/api-client";
 
 function formatNumber(value?: number | null): string {
     if (value === null || value === undefined || Number.isNaN(value)) {
@@ -71,6 +72,7 @@ export default function BusinessTeamPerformancePage() {
 
     const role = meData?.agent?.role ?? "manager";
     const canReadBusiness = canAccessConsole(role, "business", "read");
+    const canWriteSettings = canAccessConsole(role, "settings", "write");
 
     const { data, isLoading, error, refetch, isFetching } = useQuery({
         queryKey: ["business-team-performance"],
@@ -81,6 +83,38 @@ export default function BusinessTeamPerformancePage() {
         enabled: !!session && canReadBusiness,
         refetchInterval: 45000,
     });
+
+    const quickProfileMutation = useMutation({
+        mutationFn: async () => {
+            const { data: response } = await settingsApi.update({
+                reminder_1_minutes: 5,
+                reminder_2_minutes: 30,
+                escalation_timeout_minutes: 60,
+            });
+            return response;
+        },
+        onSuccess: () => {
+            toast.success("Быстрый профиль применён: 5/30/60");
+            refetch();
+        },
+        onError: () => {
+            toast.error("Не удалось применить быстрый профиль");
+        },
+    });
+
+    function applyQuickProfile(): void {
+        if (!canWriteSettings) {
+            toast.error("Недостаточно прав для изменения настроек");
+            return;
+        }
+        const confirmed = window.confirm(
+            "Применить быстрый профиль 5/30/60? Это изменит SLA и эскалацию для текущего клиента.",
+        );
+        if (!confirmed) {
+            return;
+        }
+        quickProfileMutation.mutate();
+    }
 
     if (!session) {
         return <div className="p-8 text-center text-muted-foreground">Пожалуйста, войдите для просмотра Team KPI.</div>;
@@ -189,6 +223,30 @@ export default function BusinessTeamPerformancePage() {
                     <p className="mt-1 text-2xl font-semibold text-foreground">{formatSeconds(data.first_response_p90_seconds)}</p>
                 </div>
             </section>
+
+            {data.status !== "healthy" ? (
+                <section className="mt-4 rounded-xl border border-border/60 bg-card p-4" data-testid="team-performance-quick-profile">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <p className="text-sm font-semibold text-foreground">Быстрый фикс SLA</p>
+                            <p className="text-xs text-muted-foreground">
+                                Для снижения очереди можно сразу применить профиль 5/30/60.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                applyQuickProfile();
+                            }}
+                            disabled={!canWriteSettings || quickProfileMutation.isPending}
+                            className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                            data-testid="team-performance-quick-profile-apply"
+                        >
+                            {quickProfileMutation.isPending ? "Применяю..." : "Применить быстрый профиль"}
+                        </button>
+                    </div>
+                </section>
+            ) : null}
 
             <section className="mt-6 rounded-xl border border-border/60 bg-card p-4" data-testid="team-performance-managers">
                 <div className="mb-3 flex items-center justify-between">

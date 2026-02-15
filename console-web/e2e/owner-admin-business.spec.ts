@@ -181,6 +181,10 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('team-performance-status-card')).toBeVisible();
         await expect(page.getByTestId('team-performance-kpi-grid')).toBeVisible();
         await expect(page.getByTestId('team-performance-actions')).toBeVisible();
+        const quickProfile = page.getByTestId('team-performance-quick-profile');
+        if (await quickProfile.isVisible().catch(() => false)) {
+            await expect(page.getByTestId('team-performance-quick-profile-apply')).toBeVisible();
+        }
         const teamTable = page.getByTestId('team-performance-table');
         const teamEmpty = page.getByText('Нет открытых заявок в текущем scope.');
         await expect(teamTable.or(teamEmpty)).toBeVisible();
@@ -188,13 +192,17 @@ test.describe('Owner/Admin Business Control', () => {
         await page.getByTestId('nav-subscription').click();
         await expect(page).toHaveURL(urlPathPattern('/subscription'));
         await expect(page.getByTestId('subscription-title')).toBeVisible();
+        await expect(page.getByTestId('subscription-alert')).toBeVisible();
+        await expect(page.getByTestId('subscription-forecast-v2')).toBeVisible();
     });
 
     test('should render simple owner settings and explainability surface @smoke', async ({ page }) => {
         await page.getByTestId('nav-settings').click();
         await expect(page).toHaveURL(urlPathPattern('/settings'));
         await expect(page.getByTestId('settings-simple-card')).toBeVisible();
-        await expect(page.getByTestId('settings-explainability')).toBeVisible();
+        await expect(page.getByTestId('settings-after-save')).toBeVisible();
+        await expect(page.getByTestId('settings-telegram-connector')).toBeVisible();
+        await expect(page.getByTestId('settings-subscription-snapshot')).toBeVisible();
         await expect(page.getByTestId('settings-input-reminder1')).toBeVisible();
         await expect(page.getByTestId('settings-input-reminder2')).toBeVisible();
         await expect(page.getByTestId('settings-input-escalation')).toBeVisible();
@@ -204,5 +212,8 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('settings-input-reminder1')).toHaveValue('5');
         await expect(page.getByTestId('settings-input-reminder2')).toHaveValue('30');
         await expect(page.getByTestId('settings-input-escalation')).toHaveValue('60');
+
+        await page.getByTestId('settings-advanced-toggle').click();
+        await expect(page.getByTestId('settings-branches')).toBeVisible();
     });
 });

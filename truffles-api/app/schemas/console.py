@@ -603,6 +603,7 @@ class ConsoleHealthResponse(BaseModel):
 ConsoleBusinessSeverity = Literal["critical", "warn", "info"]
 ConsoleBusinessStatus = Literal["healthy", "degraded", "unhealthy"]
 ConsoleSubscriptionQuotaSource = Literal["company_billing_info", "client_config", "unknown"]
+ConsoleSubscriptionAlertLevel = Literal["normal", "warning_80", "limit_100"]
 
 
 class ConsoleBusinessActionItem(BaseModel):
@@ -641,6 +642,7 @@ class ConsoleSubscriptionSummaryResponse(BaseModel):
     generated_at: str
     period_start: str
     period_end: str
+    next_billing_date: str
     plan_name: Optional[str] = None
     contract_label: Optional[str] = None
     currency: Optional[str] = None
@@ -650,6 +652,12 @@ class ConsoleSubscriptionSummaryResponse(BaseModel):
     remaining_quota: Optional[int] = None
     projected_month_total: Optional[int] = None
     usage_percent: Optional[float] = None
+    projected_remaining_quota: Optional[int] = None
+    projected_over_quota: bool = False
+    projected_overage_messages: Optional[int] = None
+    quota_alert_level: ConsoleSubscriptionAlertLevel = "normal"
+    quota_alert_message: str
+    overage_policy_message: str
     over_quota: bool = False
     evidence: list[ConsoleSubscriptionEvidenceItem] = []
 

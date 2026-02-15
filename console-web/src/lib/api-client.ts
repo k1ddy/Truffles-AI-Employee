@@ -503,6 +503,7 @@ export type SubscriptionSummaryResponse = {
     generated_at: string;
     period_start: string;
     period_end: string;
+    next_billing_date: string;
     plan_name?: string | null;
     contract_label?: string | null;
     currency?: string | null;
@@ -512,6 +513,12 @@ export type SubscriptionSummaryResponse = {
     remaining_quota?: number | null;
     projected_month_total?: number | null;
     usage_percent?: number | null;
+    projected_remaining_quota?: number | null;
+    projected_over_quota: boolean;
+    projected_overage_messages?: number | null;
+    quota_alert_level: "normal" | "warning_80" | "limit_100";
+    quota_alert_message: string;
+    overage_policy_message: string;
     over_quota: boolean;
     evidence: SubscriptionEvidenceItem[];
 };

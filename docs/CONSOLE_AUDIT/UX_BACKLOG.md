@@ -11,6 +11,7 @@ Evidence sources
 - `docs/REPORTS/2026-02-15-owner-admin-business-control-plane-v1.md`
 - `docs/REPORTS/2026-02-15-owner-admin-wave2-data-trust-team-v1.md`
 - `docs/REPORTS/2026-02-15-owner-admin-wave3-simple-settings-v1.md`
+- `docs/REPORTS/2026-02-15-owner-admin-wave4-action-loop-v1.md`
 - `Business/Sales/BILLING_COUNTING.md`
 - `docs/CONSOLE_AUDIT/roles/owner.md`
 - `docs/CONSOLE_AUDIT/roles/admin.md`
@@ -38,6 +39,7 @@ Evidence sources
 | UX-15 | P0 | Owner incident clarity | Runtime health risk was visible only in technical framing; owner path lacked business-language incident guidance. | Business owners discovered service degradation too late. | `console-web/src/components/ConsoleShell.tsx` (owner/admin incident text), `truffles-api/app/routers/console.py` (`/business/summary`). | Fixed |
 | UX-16 | P1 | Data trust and manager accountability | Owner/Admin lacked dedicated control surfaces for data-governance status and manager performance accountability. | Hard to answer client trust questions and improve team outcomes. | `console-web/src/app/business/data-trust/page.tsx`, `console-web/src/app/business/team-performance/page.tsx`, `truffles-api/app/routers/console.py` (`/business/data-trust`, `/business/team-performance`), `docs/REPORTS/2026-02-15-owner-admin-wave2-data-trust-team-v1.md`. | Fixed |
 | UX-17 | P0 | Simple settings and explainability | Owner/Admin lacked simple SLA controls and could not understand how timing settings affect lead loss/escalation. | Wrong settings stayed unnoticed; high risk of missed leads and trust issues. | `console-web/src/app/settings/page.tsx` (simple settings + explainability), `truffles-api/app/routers/console.py` (`PATCH /settings` fix), `console-web/e2e/owner-admin-business.spec.ts`, `docs/REPORTS/2026-02-15-owner-admin-wave3-simple-settings-v1.md`. | Fixed |
+| UX-18 | P0 | Action loop closure | Team KPI had diagnosis but no direct remediation action; settings default still overloaded by technical blocks; subscription lacked next-charge + alert semantics. | Owner/Admin saw issues but could not act quickly, causing slower recovery and billing ambiguity. | `console-web/src/app/business/team-performance/page.tsx`, `console-web/src/app/settings/page.tsx`, `console-web/src/app/subscription/page.tsx`, `truffles-api/app/schemas/console.py`, `truffles-api/app/routers/console.py`, `docs/REPORTS/2026-02-15-owner-admin-wave4-action-loop-v1.md`. | Fixed |
 
 ## 30-day execution waves
 
@@ -59,5 +61,9 @@ Evidence sources
 - Added owner/admin route `Data Trust` (`/business/data-trust`) with quality gaps, knowledge freshness, and audit pressure.
 - Added owner/admin route `Team Performance` (`/business/team-performance`) with stale queue pressure and manager accountability table.
 - Added owner/admin `Settings` Wave-3 simple controls with explainability and fixed `PATCH /settings` persistence mapping.
+- Added Wave-4 owner/admin action-loop:
+  - Team KPI quick profile apply (`5/30/60`) with confirm,
+  - Settings onboarding-lite default + `Расширенные` для технических блоков,
+  - Subscription v2 alerts (`80/100`), next billing date, projected overage semantics.
 - Added outbox guard thresholds and fail-fast gate (`--fail-on-breach`, `--fail-level`).
 - Replaced toast-only validation flows with `reportValidationError` (toast + inline summary) for `tenants` and `company-workspace`.
