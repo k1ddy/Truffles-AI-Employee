@@ -603,6 +603,48 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /business/data-trust:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    get:
+      operationId: getBusinessDataTrust
+      tags: [ops]
+      summary: Owner/Admin data trust summary
+      responses:
+        "200":
+          description: Data trust and governance summary
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /business/team-performance:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    get:
+      operationId: getBusinessTeamPerformance
+      tags: [ops]
+      summary: Owner/Admin team performance summary
+      responses:
+        "200":
+          description: Team workload and responsiveness summary
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /subscription/summary:
     parameters:
       - $ref: "#/components/parameters/client_id_header"

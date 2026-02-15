@@ -13,6 +13,8 @@ Navigation (sidebar + mobile)
 - Журнал (`/audit`)
 - Аналитика (`/insights`)
 - Бизнес (`/business`)
+- Данные (`/business/data-trust`)
+- Команда KPI (`/business/team-performance`)
 - Подписка (`/subscription`)
 - Настройки (`/settings`)
 
@@ -26,6 +28,8 @@ Access summary (RBAC)
 - Audit: read-only.
 - Insights: read-only (daily metrics).
 - Business: read-only (owner/admin business summary + action queue).
+- Data Trust: read-only (quality completeness, knowledge freshness, critical audit pressure).
+- Team Performance: read-only (stale queue pressure, manager responsiveness, manager workload).
 - Subscription: read-only (quota/usage/projection + billable evidence).
 
 Selection gates
@@ -46,6 +50,10 @@ Key UI actions
   - Outbox retry (`POST /console/v1/ops/outbox/retry`).
 - Business
   - Business summary (`GET /console/v1/business/summary`).
+- Data Trust
+  - Data trust summary (`GET /console/v1/business/data-trust`).
+- Team Performance
+  - Team performance summary (`GET /console/v1/business/team-performance`).
 - Subscription
   - Subscription summary (`GET /console/v1/subscription/summary`).
 

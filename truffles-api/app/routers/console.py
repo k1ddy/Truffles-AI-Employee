@@ -165,6 +165,9 @@ from app.schemas.console import (
     ConsoleSettingsUpdateResponse,
     ConsoleSubscriptionEvidenceItem,
     ConsoleSubscriptionSummaryResponse,
+    ConsoleDataTrustSummaryResponse,
+    ConsoleTeamManagerPerformanceItem,
+    ConsoleTeamPerformanceSummaryResponse,
     ConsoleSyncStatus,
     ConsoleTelegramHealthResponse,
     ConsoleTelegramLinkResponse,
@@ -5766,6 +5769,243 @@ def _build_owner_actions(
     return actions
 
 
+def _safe_int(value: object) -> Optional[int]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_float(value: object) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_latest_analytics_row(
+    *,
+    db: Session,
+    client_id: UUID,
+    metric_date: dt_date,
+    analytics_scope_limited: bool,
+):
+    if analytics_scope_limited:
+        return None
+    return db.execute(
+        text(
+            """
+            SELECT
+              metric_date,
+              first_response_missing_total,
+              escalation_meta_missing_total,
+              intent_missing_total,
+              first_response_p90_seconds,
+              manager_median_response_seconds
+            FROM metrics_analytics_daily
+            WHERE client_id = :client_id
+              AND metric_date <= :metric_date
+            ORDER BY metric_date DESC
+            LIMIT 1
+            """
+        ),
+        {"client_id": client_id, "metric_date": metric_date},
+    ).mappings().first()
+
+
+def _derive_data_trust_status(
+    *,
+    first_response_missing_total: Optional[int],
+    escalation_meta_missing_total: Optional[int],
+    intent_missing_total: Optional[int],
+    knowledge_stale_hours: Optional[int],
+    critical_audit_events_24h: int,
+    analytics_scope_limited: bool,
+) -> tuple[str, str]:
+    missing_total = sum(
+        value
+        for value in (
+            first_response_missing_total,
+            escalation_meta_missing_total,
+            intent_missing_total,
+        )
+        if value is not None and value > 0
+    )
+    if (
+        critical_audit_events_24h >= 5
+        or (knowledge_stale_hours is not None and knowledge_stale_hours >= 168)
+        or missing_total >= 50
+    ):
+        return "unhealthy", "Высокий риск: качество данных и трассировок может быть недостоверным."
+    if (
+        analytics_scope_limited
+        or critical_audit_events_24h >= 1
+        or (knowledge_stale_hours is not None and knowledge_stale_hours >= 72)
+        or missing_total >= 10
+    ):
+        return "degraded", "Есть риск по качеству данных: требуется проверка метрик, знаний и аудита."
+    return "healthy", "Качество данных стабильное, критичных разрывов не обнаружено."
+
+
+def _build_data_trust_actions(
+    *,
+    first_response_missing_total: Optional[int],
+    escalation_meta_missing_total: Optional[int],
+    intent_missing_total: Optional[int],
+    knowledge_stale_hours: Optional[int],
+    critical_audit_events_24h: int,
+    analytics_scope_limited: bool,
+) -> list[ConsoleBusinessActionItem]:
+    actions: list[ConsoleBusinessActionItem] = []
+    missing_total = sum(
+        value
+        for value in (
+            first_response_missing_total,
+            escalation_meta_missing_total,
+            intent_missing_total,
+        )
+        if value is not None and value > 0
+    )
+    if analytics_scope_limited:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="review_scope_for_analytics",
+                severity="warn",
+                title="Проверьте полноту скоупа метрик",
+                description="Для branch-режима часть quality-метрик недоступна. Проверьте company scope перед решением.",
+                href="/business",
+            )
+        )
+    if knowledge_stale_hours is not None and knowledge_stale_hours >= 72:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="refresh_knowledge",
+                severity="warn" if knowledge_stale_hours < 168 else "critical",
+                title="Обновите базу знаний",
+                description="Публикация знаний устарела, есть риск устаревших ответов клиентам.",
+                href="/knowledge",
+            )
+        )
+    if critical_audit_events_24h > 0:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="review_audit_incidents",
+                severity="critical" if critical_audit_events_24h >= 5 else "warn",
+                title="Проверьте критичные события аудита",
+                description="За 24 часа зафиксированы failed/blocked/rejected события.",
+                href="/audit",
+            )
+        )
+    if missing_total >= 10:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="fix_missing_quality_metrics",
+                severity="warn" if missing_total < 50 else "critical",
+                title="Снизьте пробелы quality-метрик",
+                description="Есть неполные записи по first-response/escalation/intent, это снижает доверие к аналитике.",
+                href="/insights",
+            )
+        )
+    if not actions:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="monitor_data_trust",
+                severity="info",
+                title="Контроль качества данных в норме",
+                description="Сохраняйте регулярный аудит и плановую публикацию знаний.",
+                href="/audit",
+            )
+        )
+    return actions
+
+
+def _derive_team_performance_status(
+    *,
+    unresolved_cases: int,
+    unresolved_older_than_60m: int,
+    manager_median_response_seconds: Optional[float],
+) -> tuple[str, str]:
+    if (
+        unresolved_older_than_60m >= 20
+        or unresolved_cases >= 40
+        or (manager_median_response_seconds is not None and manager_median_response_seconds > 900)
+    ):
+        return "unhealthy", "Высокий риск: команда не успевает обрабатывать поток обращений."
+    if (
+        unresolved_older_than_60m >= 5
+        or unresolved_cases >= 15
+        or (manager_median_response_seconds is not None and manager_median_response_seconds > 600)
+    ):
+        return "degraded", "Есть перегрузка команды: контролируйте SLA и распределение заявок."
+    return "healthy", "Команда держит стабильную скорость и нагрузку в целевом диапазоне."
+
+
+def _build_team_performance_actions(
+    *,
+    unresolved_older_than_60m: int,
+    manager_median_response_seconds: Optional[float],
+    top_manager_name: Optional[str],
+    top_manager_unresolved: int,
+    analytics_scope_limited: bool,
+) -> list[ConsoleBusinessActionItem]:
+    actions: list[ConsoleBusinessActionItem] = []
+    if unresolved_older_than_60m > 0:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="clear_stale_cases",
+                severity="critical" if unresolved_older_than_60m >= 20 else "warn",
+                title="Разберите просроченные заявки",
+                description="Есть открытые заявки старше 60 минут. Проверьте очереди и назначение менеджеров.",
+                href="/",
+            )
+        )
+    if manager_median_response_seconds is not None and manager_median_response_seconds > 900:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="improve_manager_speed",
+                severity="warn",
+                title="Ускорьте первый ответ менеджеров",
+                description="Медиана ответа менеджеров превышает целевой порог, есть риск потери обращений.",
+                href="/team",
+            )
+        )
+    if top_manager_unresolved >= 8 and top_manager_name:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="rebalance_manager_load",
+                severity="warn",
+                title="Перераспределите нагрузку в команде",
+                description=f"У менеджера «{top_manager_name}» высокий объём открытых заявок.",
+                href="/team",
+            )
+        )
+    if analytics_scope_limited:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="confirm_company_scope_kpi",
+                severity="info",
+                title="Подтвердите KPI в company scope",
+                description="Часть аналитики недоступна в branch-режиме. Для финальных решений проверьте полный scope.",
+                href="/business",
+            )
+        )
+    if not actions:
+        actions.append(
+            ConsoleBusinessActionItem(
+                id="monitor_team_daily",
+                severity="info",
+                title="Команда работает стабильно",
+                description="Поддерживайте ежедневный контроль SLA и балансировки очереди.",
+                href="/insights",
+            )
+        )
+    return actions
+
+
 @router.get(
     "/business/summary",
     response_model=ConsoleBusinessSummaryResponse,
@@ -5987,6 +6227,338 @@ async def get_subscription_summary(
         usage_percent=usage_percent,
         over_quota=over_quota,
         evidence=evidence_items,
+    )
+
+
+@router.get(
+    "/business/data-trust",
+    response_model=ConsoleDataTrustSummaryResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_business_data_trust(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleDataTrustSummaryResponse:
+    from app.services.audit_service import AuditEvent
+
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can access data trust summary",
+    )
+
+    now = datetime.now(timezone.utc)
+    allowed_branch_ids = _resolve_branch_scope(context)
+    analytics_scope_limited = allowed_branch_ids is not None
+
+    analytics_row = _load_latest_analytics_row(
+        db=db,
+        client_id=context.client.id,
+        metric_date=now.date(),
+        analytics_scope_limited=analytics_scope_limited,
+    )
+    metric_date = analytics_row.get("metric_date").isoformat() if analytics_row and analytics_row.get("metric_date") else None
+    first_response_missing_total = _safe_int(
+        analytics_row.get("first_response_missing_total") if analytics_row else None
+    )
+    escalation_meta_missing_total = _safe_int(
+        analytics_row.get("escalation_meta_missing_total") if analytics_row else None
+    )
+    intent_missing_total = _safe_int(analytics_row.get("intent_missing_total") if analytics_row else None)
+
+    knowledge_query = db.query(KnowledgeVersion).filter(
+        KnowledgeVersion.client_id == context.client.id,
+        KnowledgeVersion.status == "published",
+    )
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            knowledge_query = knowledge_query.filter(text("1 = 0"))
+        else:
+            knowledge_query = knowledge_query.filter(KnowledgeVersion.branch_id.in_(allowed_branch_ids))
+    latest_knowledge = (
+        knowledge_query.order_by(
+            KnowledgeVersion.published_at.desc(),
+            KnowledgeVersion.created_at.desc(),
+        ).first()
+    )
+    knowledge_last_published_at = (
+        latest_knowledge.published_at.isoformat()
+        if latest_knowledge and latest_knowledge.published_at is not None
+        else None
+    )
+    knowledge_stale_hours = None
+    if latest_knowledge and latest_knowledge.published_at is not None:
+        knowledge_stale_hours = max(0, int((now - latest_knowledge.published_at).total_seconds() // 3600))
+
+    audit_window_start = now - timedelta(hours=24)
+    audit_query = db.query(AuditEvent).filter(
+        AuditEvent.client_id == context.client.id,
+        AuditEvent.created_at >= audit_window_start,
+        AuditEvent.created_at < now,
+    )
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            audit_query = audit_query.filter(text("1 = 0"))
+        else:
+            audit_query = audit_query.filter(AuditEvent.branch_id.in_(allowed_branch_ids))
+    audit_events_24h = audit_query.count()
+    critical_audit_events_24h = audit_query.filter(
+        or_(
+            AuditEvent.event_type.ilike("%failed%"),
+            AuditEvent.event_type.ilike("%blocked%"),
+            AuditEvent.event_type.ilike("%rejected%"),
+        )
+    ).count()
+
+    status, status_label = _derive_data_trust_status(
+        first_response_missing_total=first_response_missing_total,
+        escalation_meta_missing_total=escalation_meta_missing_total,
+        intent_missing_total=intent_missing_total,
+        knowledge_stale_hours=knowledge_stale_hours,
+        critical_audit_events_24h=critical_audit_events_24h,
+        analytics_scope_limited=analytics_scope_limited,
+    )
+    actions = _build_data_trust_actions(
+        first_response_missing_total=first_response_missing_total,
+        escalation_meta_missing_total=escalation_meta_missing_total,
+        intent_missing_total=intent_missing_total,
+        knowledge_stale_hours=knowledge_stale_hours,
+        critical_audit_events_24h=critical_audit_events_24h,
+        analytics_scope_limited=analytics_scope_limited,
+    )
+
+    return ConsoleDataTrustSummaryResponse(
+        generated_at=now.isoformat(),
+        status=status,
+        status_label=status_label,
+        metric_date=metric_date,
+        analytics_scope_limited=analytics_scope_limited,
+        first_response_missing_total=first_response_missing_total,
+        escalation_meta_missing_total=escalation_meta_missing_total,
+        intent_missing_total=intent_missing_total,
+        knowledge_last_published_at=knowledge_last_published_at,
+        knowledge_stale_hours=knowledge_stale_hours,
+        audit_events_24h=audit_events_24h,
+        critical_audit_events_24h=critical_audit_events_24h,
+        actions=actions,
+    )
+
+
+@router.get(
+    "/business/team-performance",
+    response_model=ConsoleTeamPerformanceSummaryResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_business_team_performance(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleTeamPerformanceSummaryResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can access team performance summary",
+    )
+
+    now = datetime.now(timezone.utc)
+    allowed_branch_ids = _resolve_branch_scope(context)
+    analytics_scope_limited = allowed_branch_ids is not None
+
+    analytics_row = _load_latest_analytics_row(
+        db=db,
+        client_id=context.client.id,
+        metric_date=now.date(),
+        analytics_scope_limited=analytics_scope_limited,
+    )
+    metric_date = analytics_row.get("metric_date").isoformat() if analytics_row and analytics_row.get("metric_date") else None
+    manager_median_response_seconds = _safe_float(
+        analytics_row.get("manager_median_response_seconds") if analytics_row else None
+    )
+    first_response_p90_seconds = _safe_float(
+        analytics_row.get("first_response_p90_seconds") if analytics_row else None
+    )
+
+    handover_base = db.query(Handover).filter(Handover.client_id == context.client.id)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            unresolved_cases = 0
+            unresolved_older_than_60m = 0
+            managers: list[ConsoleTeamManagerPerformanceItem] = []
+            top_manager_name = None
+            top_manager_unresolved = 0
+        else:
+            handover_base = handover_base.join(
+                Conversation,
+                Handover.conversation_id == Conversation.id,
+            ).filter(Conversation.branch_id.in_(allowed_branch_ids))
+            unresolved_query = handover_base.filter(Handover.status.in_(["pending", "active"]))
+            unresolved_cases = unresolved_query.count()
+            unresolved_older_than_60m = unresolved_query.filter(
+                Handover.created_at < (now - timedelta(minutes=60))
+            ).count()
+            manager_name_expr = func.coalesce(
+                func.nullif(func.trim(Handover.assigned_to_name), ""),
+                func.nullif(func.trim(Handover.assigned_to), ""),
+                "Не назначен",
+            )
+            manager_rows = (
+                unresolved_query.with_entities(
+                    manager_name_expr.label("manager_name"),
+                    func.count().label("unresolved_cases"),
+                    func.sum(case((Handover.status == "pending", 1), else_=0)).label("pending_cases"),
+                    func.sum(case((Handover.status == "active", 1), else_=0)).label("active_cases"),
+                    func.min(Handover.created_at).label("oldest_created_at"),
+                )
+                .group_by(manager_name_expr)
+                .order_by(func.count().desc())
+                .limit(8)
+                .all()
+            )
+            avg_response_rows = (
+                handover_base.filter(
+                    Handover.first_response_at.isnot(None),
+                    Handover.created_at >= (now - timedelta(days=30)),
+                    Handover.first_response_at >= Handover.created_at,
+                )
+                .with_entities(
+                    manager_name_expr.label("manager_name"),
+                    func.avg(func.extract("epoch", Handover.first_response_at - Handover.created_at)).label(
+                        "avg_first_response_seconds_30d"
+                    ),
+                )
+                .group_by(manager_name_expr)
+                .all()
+            )
+            avg_response_by_manager = {
+                row.manager_name: _safe_float(row.avg_first_response_seconds_30d)
+                for row in avg_response_rows
+            }
+            managers = []
+            top_manager_name = None
+            top_manager_unresolved = 0
+            for row in manager_rows:
+                unresolved_value = int(row.unresolved_cases or 0)
+                pending_value = int(row.pending_cases or 0)
+                active_value = int(row.active_cases or 0)
+                oldest_unresolved_minutes = None
+                if row.oldest_created_at is not None:
+                    oldest_unresolved_minutes = max(
+                        0,
+                        int((now - row.oldest_created_at).total_seconds() // 60),
+                    )
+                manager_name = row.manager_name or "Не назначен"
+                if unresolved_value > top_manager_unresolved:
+                    top_manager_unresolved = unresolved_value
+                    top_manager_name = manager_name
+                managers.append(
+                    ConsoleTeamManagerPerformanceItem(
+                        manager_name=manager_name,
+                        unresolved_cases=unresolved_value,
+                        pending_cases=pending_value,
+                        active_cases=active_value,
+                        oldest_unresolved_minutes=oldest_unresolved_minutes,
+                        avg_first_response_seconds_30d=avg_response_by_manager.get(manager_name),
+                    )
+                )
+    else:
+        unresolved_query = handover_base.filter(Handover.status.in_(["pending", "active"]))
+        unresolved_cases = unresolved_query.count()
+        unresolved_older_than_60m = unresolved_query.filter(
+            Handover.created_at < (now - timedelta(minutes=60))
+        ).count()
+        manager_name_expr = func.coalesce(
+            func.nullif(func.trim(Handover.assigned_to_name), ""),
+            func.nullif(func.trim(Handover.assigned_to), ""),
+            "Не назначен",
+        )
+        manager_rows = (
+            unresolved_query.with_entities(
+                manager_name_expr.label("manager_name"),
+                func.count().label("unresolved_cases"),
+                func.sum(case((Handover.status == "pending", 1), else_=0)).label("pending_cases"),
+                func.sum(case((Handover.status == "active", 1), else_=0)).label("active_cases"),
+                func.min(Handover.created_at).label("oldest_created_at"),
+            )
+            .group_by(manager_name_expr)
+            .order_by(func.count().desc())
+            .limit(8)
+            .all()
+        )
+        avg_response_rows = (
+            handover_base.filter(
+                Handover.first_response_at.isnot(None),
+                Handover.created_at >= (now - timedelta(days=30)),
+                Handover.first_response_at >= Handover.created_at,
+            )
+            .with_entities(
+                manager_name_expr.label("manager_name"),
+                func.avg(func.extract("epoch", Handover.first_response_at - Handover.created_at)).label(
+                    "avg_first_response_seconds_30d"
+                ),
+            )
+            .group_by(manager_name_expr)
+            .all()
+        )
+        avg_response_by_manager = {
+            row.manager_name: _safe_float(row.avg_first_response_seconds_30d)
+            for row in avg_response_rows
+        }
+        managers = []
+        top_manager_name = None
+        top_manager_unresolved = 0
+        for row in manager_rows:
+            unresolved_value = int(row.unresolved_cases or 0)
+            pending_value = int(row.pending_cases or 0)
+            active_value = int(row.active_cases or 0)
+            oldest_unresolved_minutes = None
+            if row.oldest_created_at is not None:
+                oldest_unresolved_minutes = max(
+                    0,
+                    int((now - row.oldest_created_at).total_seconds() // 60),
+                )
+            manager_name = row.manager_name or "Не назначен"
+            if unresolved_value > top_manager_unresolved:
+                top_manager_unresolved = unresolved_value
+                top_manager_name = manager_name
+            managers.append(
+                ConsoleTeamManagerPerformanceItem(
+                    manager_name=manager_name,
+                    unresolved_cases=unresolved_value,
+                    pending_cases=pending_value,
+                    active_cases=active_value,
+                    oldest_unresolved_minutes=oldest_unresolved_minutes,
+                    avg_first_response_seconds_30d=avg_response_by_manager.get(manager_name),
+                )
+            )
+
+    status, status_label = _derive_team_performance_status(
+        unresolved_cases=unresolved_cases,
+        unresolved_older_than_60m=unresolved_older_than_60m,
+        manager_median_response_seconds=manager_median_response_seconds,
+    )
+    actions = _build_team_performance_actions(
+        unresolved_older_than_60m=unresolved_older_than_60m,
+        manager_median_response_seconds=manager_median_response_seconds,
+        top_manager_name=top_manager_name,
+        top_manager_unresolved=top_manager_unresolved,
+        analytics_scope_limited=analytics_scope_limited,
+    )
+
+    return ConsoleTeamPerformanceSummaryResponse(
+        generated_at=now.isoformat(),
+        status=status,
+        status_label=status_label,
+        metric_date=metric_date,
+        analytics_scope_limited=analytics_scope_limited,
+        manager_median_response_seconds=manager_median_response_seconds,
+        first_response_p90_seconds=first_response_p90_seconds,
+        unresolved_cases=unresolved_cases,
+        unresolved_older_than_60m=unresolved_older_than_60m,
+        managers=managers,
+        actions=actions,
     )
 
 

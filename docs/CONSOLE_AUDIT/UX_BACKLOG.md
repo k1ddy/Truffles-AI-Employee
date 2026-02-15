@@ -9,11 +9,14 @@ Evidence sources
 - `docs/REPORTS/2026-02-15-platform-admin-baseline-v2.md`
 - `docs/REPORTS/2026-02-15-platform-admin-baseline-v3.md`
 - `docs/REPORTS/2026-02-15-owner-admin-business-control-plane-v1.md`
+- `docs/REPORTS/2026-02-15-owner-admin-wave2-data-trust-team-v1.md`
 - `Business/Sales/BILLING_COUNTING.md`
 - `docs/CONSOLE_AUDIT/roles/owner.md`
 - `docs/CONSOLE_AUDIT/roles/admin.md`
 - `docs/CONSOLE_AUDIT/pages/insights.md`
 - `docs/CONSOLE_AUDIT/pages/ops.md`
+- `docs/CONSOLE_AUDIT/pages/business-data-trust.md`
+- `docs/CONSOLE_AUDIT/pages/business-team-performance.md`
 - `console-web/e2e/smoke.spec.ts`
 - `console-web/e2e/platform-admin.spec.ts`
 - `console-web/src/app/tenants/page.tsx`
@@ -32,7 +35,7 @@ Evidence sources
 | UX-13 | P2 | Governance loop | No standard weekly control-loop runbook existed for Platform Admin KPI snapshots and anti-drift artifacts. | Inconsistent evidence quality between sessions. | New runbook and script introduced in this wave. | Fixed |
 | UX-14 | P0 | Owner billing transparency | Owner/Admin lacked dedicated UI for plan/quota/usage and evidence drill-down. | High dispute risk and low trust in subscription charges. | `console-web/src/app/subscription/page.tsx`, `truffles-api/app/routers/console.py` (`/subscription/summary`), `Business/Sales/BILLING_COUNTING.md`. | Fixed |
 | UX-15 | P0 | Owner incident clarity | Runtime health risk was visible only in technical framing; owner path lacked business-language incident guidance. | Business owners discovered service degradation too late. | `console-web/src/components/ConsoleShell.tsx` (owner/admin incident text), `truffles-api/app/routers/console.py` (`/business/summary`). | Fixed |
-| UX-16 | P1 | Data trust and manager accountability | Owner/Admin lacks a dedicated control surface for data-governance status and manager performance accountability. | Hard to answer client trust questions and improve team outcomes. | `docs/CONSOLE_AUDIT/pages/audit.md`, `docs/CONSOLE_AUDIT/pages/insights.md`, `docs/REPORTS/2026-02-15-owner-admin-business-control-plane-v1.md`. | Open |
+| UX-16 | P1 | Data trust and manager accountability | Owner/Admin lacked dedicated control surfaces for data-governance status and manager performance accountability. | Hard to answer client trust questions and improve team outcomes. | `console-web/src/app/business/data-trust/page.tsx`, `console-web/src/app/business/team-performance/page.tsx`, `truffles-api/app/routers/console.py` (`/business/data-trust`, `/business/team-performance`), `docs/REPORTS/2026-02-15-owner-admin-wave2-data-trust-team-v1.md`. | Fixed |
 
 ## 30-day execution waves
 
@@ -51,5 +54,7 @@ Evidence sources
 - Added owner/admin route `Business` (`/business`) with risk-aware action queue.
 - Added owner/admin route `Subscription` (`/subscription`) with quota/usage/projection + evidence rows.
 - Added owner/admin-friendly incident banner copy in `ConsoleShell`.
+- Added owner/admin route `Data Trust` (`/business/data-trust`) with quality gaps, knowledge freshness, and audit pressure.
+- Added owner/admin route `Team Performance` (`/business/team-performance`) with stale queue pressure and manager accountability table.
 - Added outbox guard thresholds and fail-fast gate (`--fail-on-breach`, `--fail-level`).
 - Replaced toast-only validation flows with `reportValidationError` (toast + inline summary) for `tenants` and `company-workspace`.

@@ -654,6 +654,45 @@ class ConsoleSubscriptionSummaryResponse(BaseModel):
     evidence: list[ConsoleSubscriptionEvidenceItem] = []
 
 
+class ConsoleDataTrustSummaryResponse(BaseModel):
+    generated_at: str
+    status: ConsoleBusinessStatus
+    status_label: str
+    metric_date: Optional[str] = None
+    analytics_scope_limited: bool = False
+    first_response_missing_total: Optional[int] = None
+    escalation_meta_missing_total: Optional[int] = None
+    intent_missing_total: Optional[int] = None
+    knowledge_last_published_at: Optional[str] = None
+    knowledge_stale_hours: Optional[int] = None
+    audit_events_24h: int
+    critical_audit_events_24h: int
+    actions: list[ConsoleBusinessActionItem] = []
+
+
+class ConsoleTeamManagerPerformanceItem(BaseModel):
+    manager_name: str
+    unresolved_cases: int
+    pending_cases: int
+    active_cases: int
+    oldest_unresolved_minutes: Optional[int] = None
+    avg_first_response_seconds_30d: Optional[float] = None
+
+
+class ConsoleTeamPerformanceSummaryResponse(BaseModel):
+    generated_at: str
+    status: ConsoleBusinessStatus
+    status_label: str
+    metric_date: Optional[str] = None
+    analytics_scope_limited: bool = False
+    manager_median_response_seconds: Optional[float] = None
+    first_response_p90_seconds: Optional[float] = None
+    unresolved_cases: int
+    unresolved_older_than_60m: int
+    managers: list[ConsoleTeamManagerPerformanceItem] = []
+    actions: list[ConsoleBusinessActionItem] = []
+
+
 class ConsoleOutboxCounts(BaseModel):
     pending: int
     processing: int

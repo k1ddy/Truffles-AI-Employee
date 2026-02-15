@@ -90,6 +90,8 @@ const NAV_ITEMS: NavItem[] = [
     { label: "Журнал", href: "/audit", section: "audit", action: "read", testId: "nav-audit" },
     { label: "Аналитика", href: "/insights", section: "insights", action: "read", testId: "nav-insights" },
     { label: "Бизнес", href: "/business", section: "business", action: "read", testId: "nav-business" },
+    { label: "Данные", href: "/business/data-trust", section: "business", action: "read", testId: "nav-data-trust" },
+    { label: "Команда KPI", href: "/business/team-performance", section: "business", action: "read", testId: "nav-team-performance" },
     { label: "Подписка", href: "/subscription", section: "subscription", action: "read", testId: "nav-subscription" },
     { label: "Настройки", href: "/settings", section: "settings", action: "read", testId: "nav-settings" },
 ];

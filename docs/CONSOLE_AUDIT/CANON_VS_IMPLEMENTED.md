@@ -56,7 +56,7 @@ Legend
 ## 3) Navigation / IA
 
 - [match] Реализованные пункты навигации: Inbox, Calendar, Knowledge, Team, Settings, Ops, Audit, Insights, Tenants, Integrations. Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/components/ConsoleShell.tsx`.
-- [ahead] Реализованы пункты `Business` и `Subscription` для owner/admin/platform_admin. Canon IA не содержит этих пунктов как самостоятельные страницы.
+- [ahead] Реализованы пункты `Business`, `Data Trust`, `Team Performance` и `Subscription` для owner/admin/platform_admin. Canon IA не содержит этих пунктов как самостоятельные страницы.
 - [partial] Integrations доступен только platform_admin (owner/admin не включены в текущий RBAC). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/lib/api-client.ts`.
 - [match] Insights/Analytics (optional). Canon: `SPECS/CONTROL_PLANE.md` IA. Impl: `console-web/src/app/insights/page.tsx`, `console-web/src/components/ConsoleShell.tsx`.
 
@@ -101,9 +101,11 @@ Legend
 ### Audit
 - [match] Read‑only Audit доступен owner/admin/support. Canon: `SPECS/CONTROL_PLANE.md` (RBAC). Impl: `docs/CONSOLE_AUDIT/pages/audit.md`.
 
-### Business + Subscription (owner/admin)
-- [ahead] Реализованы owner/admin страницы `Business` и `Subscription`:
+### Business + Subscription + Control Surfaces (owner/admin)
+- [ahead] Реализованы owner/admin страницы `Business`, `Data Trust`, `Team Performance` и `Subscription`:
   - `/business` агрегирует риски (`outbox backlog`, failed 24h, unresolved cases, first-response p90) и выдаёт action queue.
+  - `/business/data-trust` показывает качество данных (quality gaps, freshness знаний, critical audit pressure) и action queue.
+  - `/business/team-performance` показывает KPI команды (stale queue, manager responsiveness, manager workload) и action queue.
   - `/subscription` показывает plan/quota/usage/projection и evidence rows из billable outbox.
   Канон не фиксирует эти страницы как обязательные элементы IA.
 
@@ -123,7 +125,7 @@ Legend
 
 - Integrations page реализована, но RBAC уже канона (owner/admin без доступа).
 - Team Users не поддерживает invite/disable; Specialists без управления working_hours/availability.
-- `Business`/`Subscription` уже в реализации, но не отражены в `SPECS/CONTROL_PLANE.md` как отдельные owner/admin разделы.
+- `Business`/`Data Trust`/`Team Performance`/`Subscription` уже в реализации, но не отражены в `SPECS/CONTROL_PLANE.md` как отдельные owner/admin разделы.
 - `Company Workspace` реализован, но не отражён как отдельная страница в канонической IA (`SPECS/CONTROL_PLANE.md`).
 
 ---

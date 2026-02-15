@@ -209,6 +209,29 @@ export default function BusinessPage() {
                     ))}
                 </div>
             </section>
+
+            <section className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2" data-testid="business-wave2-shortcuts">
+                <article className="rounded-xl border border-border/60 bg-card p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Data Trust</p>
+                    <h2 className="mt-1 text-lg font-semibold">Надежность данных</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        Проверка полноты quality-метрик, свежести знаний и критичных audit-событий.
+                    </p>
+                    <div className="mt-3">
+                        <Link href="/business/data-trust" className="btn-ghost">Открыть Data Trust</Link>
+                    </div>
+                </article>
+                <article className="rounded-xl border border-border/60 bg-card p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Team Performance</p>
+                    <h2 className="mt-1 text-lg font-semibold">Эффективность команды</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        Контроль скорости первого ответа, просроченных заявок и баланса нагрузки менеджеров.
+                    </p>
+                    <div className="mt-3">
+                        <Link href="/business/team-performance" className="btn-ghost">Открыть Team KPI</Link>
+                    </div>
+                </article>
+            </section>
         </div>
     );
 }

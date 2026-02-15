@@ -23,6 +23,9 @@ Sections
   - response speed (`first_response_p90_seconds`) + oldest unresolved age.
 - Action queue:
   - prioritized actions with severity (`critical|warn|info`) and route CTA.
+- Wave-2 shortcuts:
+  - `Data Trust` (`/business/data-trust`),
+  - `Team Performance` (`/business/team-performance`).
 
 API endpoints used
 - `GET /console/v1/me`
@@ -39,5 +42,6 @@ Data sources
 
 Related code
 - UI: `console-web/src/app/business/page.tsx`
+- UI subpages: `console-web/src/app/business/data-trust/page.tsx`, `console-web/src/app/business/team-performance/page.tsx`
 - Shell/nav: `console-web/src/components/ConsoleShell.tsx`
 - RBAC: `console-web/src/lib/api-client.ts`, `truffles-api/app/services/console_auth.py`

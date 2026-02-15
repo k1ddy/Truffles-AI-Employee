@@ -99,6 +99,59 @@ def test_derive_business_status_thresholds() -> None:
     assert healthy_status == "healthy"
 
 
+def test_derive_data_trust_status_thresholds() -> None:
+    unhealthy_status, _ = console_router._derive_data_trust_status(
+        first_response_missing_total=30,
+        escalation_meta_missing_total=20,
+        intent_missing_total=10,
+        knowledge_stale_hours=200,
+        critical_audit_events_24h=0,
+        analytics_scope_limited=False,
+    )
+    degraded_status, _ = console_router._derive_data_trust_status(
+        first_response_missing_total=5,
+        escalation_meta_missing_total=0,
+        intent_missing_total=0,
+        knowledge_stale_hours=80,
+        critical_audit_events_24h=1,
+        analytics_scope_limited=False,
+    )
+    healthy_status, _ = console_router._derive_data_trust_status(
+        first_response_missing_total=0,
+        escalation_meta_missing_total=0,
+        intent_missing_total=0,
+        knowledge_stale_hours=12,
+        critical_audit_events_24h=0,
+        analytics_scope_limited=False,
+    )
+
+    assert unhealthy_status == "unhealthy"
+    assert degraded_status == "degraded"
+    assert healthy_status == "healthy"
+
+
+def test_derive_team_performance_status_thresholds() -> None:
+    unhealthy_status, _ = console_router._derive_team_performance_status(
+        unresolved_cases=45,
+        unresolved_older_than_60m=21,
+        manager_median_response_seconds=1000.0,
+    )
+    degraded_status, _ = console_router._derive_team_performance_status(
+        unresolved_cases=18,
+        unresolved_older_than_60m=6,
+        manager_median_response_seconds=700.0,
+    )
+    healthy_status, _ = console_router._derive_team_performance_status(
+        unresolved_cases=3,
+        unresolved_older_than_60m=0,
+        manager_median_response_seconds=220.0,
+    )
+
+    assert unhealthy_status == "unhealthy"
+    assert degraded_status == "degraded"
+    assert healthy_status == "healthy"
+
+
 @pytest.mark.asyncio
 async def test_business_summary_requires_business_permission(monkeypatch):
     context = _build_context(role="manager")
@@ -118,6 +171,30 @@ async def test_subscription_summary_requires_subscription_permission(monkeypatch
 
     with pytest.raises(ConsoleAPIError) as exc_info:
         await console_router.get_subscription_summary(request=SimpleNamespace(), db=SimpleNamespace())
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_data_trust_summary_requires_business_permission(monkeypatch):
+    context = _build_context(role="manager")
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.get_business_data_trust(request=SimpleNamespace(), db=SimpleNamespace())
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_team_performance_summary_requires_business_permission(monkeypatch):
+    context = _build_context(role="support")
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.get_business_team_performance(request=SimpleNamespace(), db=SimpleNamespace())
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.code == "ACCESS_DENIED"

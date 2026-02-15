@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-business-deep-audit-a1.md
+- task_package: docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave2-data-trust-team-a1.md
 - branch: feat/2026-02-15-owner-admin-business-audit-a1
 - worktree: /home/zhan/worktrees/2026-02-15-owner-admin-business-audit-a1
 - base_ref: origin/main
@@ -21,12 +21,23 @@
     - owner/admin-friendly global incident banner in `ConsoleShell`.
   - Added/updated docs pages for business/subscription and owner/admin role inventory.
   - Ran backend checks (`py_compile`, pytest for RBAC + owner business tests).
+  - Opened PR for Wave-1 and sync-merged latest `origin/main`: https://github.com/k1ddy/Truffles-AI-Employee/pull/679
+  - Prepared Wave-2 Task Package (`Data Trust`, `Team Performance`) to expand owner/admin control loop.
+  - Implemented Wave-2 owner/admin control surfaces:
+    - backend endpoints `/console/v1/business/data-trust` and `/console/v1/business/team-performance`;
+    - frontend routes `/business/data-trust` and `/business/team-performance`;
+    - owner/admin nav entries `Данные` and `Команда KPI`.
+  - Updated console audit docs/backlog and published Wave-2 report.
+  - Ran checks: pytest (`49 passed`), OpenAPI check, TS type generation, console-web lint/build.
 - next:
-  - Align report priorities with Brain/Top Architect and split implementation into Wave-1 Task Packages.
-  - Execute Wave-1 (`Business Home`, `Subscription`, `Incident banner`) in separate implementation session.
+  - Collect product feedback from owner/admin users and prioritize Wave-3 (`simple settings` + onboarding explainability).
+  - Decide whether to split owner/admin control pages into dedicated IA section in canon docs (`SPECS/CONTROL_PLANE.md` update).
 - evidence:
-  - docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-business-deep-audit-a1.md
+  - docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave2-data-trust-team-a1.md
+  - docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave1-business-home-a1.md
   - docs/REPORTS/2026-02-15-owner-admin-business-control-plane-v1.md
   - docs/REPORTS/2026-02-15-owner-admin-wave1-implementation-v1.md
+  - docs/REPORTS/2026-02-15-owner-admin-wave2-data-trust-team-v1.md
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/679
   - runtime snapshot (`/api/health/full`, `/admin/version`)
 - last_updated: 2026-02-15
