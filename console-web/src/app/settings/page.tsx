@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
-import { authApi, canAccessConsole, settingsApi, telegramApi } from "@/lib/api-client";
+import { authApi, businessApi, canAccessConsole, settingsApi, telegramApi } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
@@ -99,6 +99,13 @@ function parsePositiveInt(value: string): number | null {
     return parsed;
 }
 
+function formatNumber(value?: number | null): string {
+    if (value === null || value === undefined || Number.isNaN(value)) {
+        return "—";
+    }
+    return value.toLocaleString("ru-RU");
+}
+
 
 function ConfigCard({ label, value, type = "text" }: { label: string; value: string | number | boolean | null | undefined; type?: string }) {
     let displayValue: React.ReactNode = value;
@@ -128,6 +135,7 @@ export default function SettingsPage() {
     const { handleError } = useErrorHandler();
     const [verifyTarget, setVerifyTarget] = useState<string | null>(null);
     const [testTarget, setTestTarget] = useState<string | null>(null);
+    const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
     const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA;
     const buildTime = process.env.NEXT_PUBLIC_BUILD_TIME;
     const buildShaLabel = buildSha ? buildSha.slice(0, 7) : "unknown";
@@ -146,12 +154,22 @@ export default function SettingsPage() {
     const canReadSettings = canAccessConsole(role, "settings", "read");
     const canWriteSettings = canAccessConsole(role, "settings", "write");
     const canReadProvisioning = canAccessConsole(role, "provisioning", "read");
+    const canReadSubscription = canAccessConsole(role, "subscription", "read");
     const canViewSettings = canReadSettings || canReadProvisioning;
 
     const { data, isLoading, error, refetch } = useQuery({
         queryKey: ["settings"],
         queryFn: fetchSettings,
         enabled: !!session && canReadSettings,
+    });
+    const { data: subscriptionSummary } = useQuery({
+        queryKey: ["settings-subscription-summary"],
+        queryFn: async () => {
+            const response = await businessApi.getSubscriptionSummary();
+            return response.data;
+        },
+        enabled: !!session && canReadSettings && canReadSubscription,
+        refetchInterval: 60000,
     });
     const config = data?.bot_config;
     const [simpleSettings, setSimpleSettings] = useState<SimpleSettingsForm>({
@@ -194,22 +212,6 @@ export default function SettingsPage() {
             handleError(updateError);
         },
     });
-
-    const explainabilityLines = useMemo(() => {
-        const reminder1 = parsePositiveInt(simpleSettings.reminder1);
-        const reminder2 = parsePositiveInt(simpleSettings.reminder2);
-        const escalation = parsePositiveInt(simpleSettings.escalation);
-        if (!reminder1 || !reminder2 || !escalation) {
-            return [
-                "Введите корректные значения, чтобы увидеть прогноз влияния.",
-            ];
-        }
-        return [
-            `Через ${reminder1} мин система напомнит менеджеру о необработанной заявке.`,
-            `Через ${reminder2} мин включится повторное напоминание и риск потери лида растет.`,
-            `Через ${escalation} мин заявка попадет в авто-контур эскалации/закрытия.`,
-        ];
-    }, [simpleSettings.escalation, simpleSettings.reminder1, simpleSettings.reminder2]);
 
     function applyPreset(preset: SettingsPreset): void {
         setSelectedPresetId(preset.id);
@@ -377,333 +379,366 @@ export default function SettingsPage() {
                 <span className="font-mono">{buildTimeLabel}</span>
             </div>
 
-            {canReadProvisioning && (
-                <ProvisioningWizard session={session} accessSection={provisioningAccessSection} />
-            )}
-
             {canReadSettings && (
-                <section className="mb-6 grid grid-cols-1 gap-6 md:grid-cols-2">
-                    <div className="rounded-xl border border-border/60 bg-card p-5" data-testid="settings-simple-card">
-                        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                                <h2 className="text-lg font-semibold">Простые бизнес-настройки</h2>
-                                <p className="text-sm text-muted-foreground">
-                                    Меняет скорость реакции менеджеров и таймаут эскалации.
-                                </p>
-                            </div>
-                            {!canWriteSettings && (
-                                <span className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
-                                    Только owner/admin
-                                </span>
-                            )}
-                        </div>
-                        <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3" data-testid="settings-simple-presets">
-                            {SETTINGS_PRESETS.map((preset) => (
-                                <button
-                                    key={preset.id}
-                                    type="button"
-                                    className={`rounded-lg border px-3 py-2 text-left text-xs transition ${selectedPresetId === preset.id
-                                        ? "border-primary bg-primary/5 text-primary"
-                                        : "border-border/60 hover:bg-muted"
-                                        }`}
-                                    onClick={() => {
-                                        applyPreset(preset);
-                                    }}
-                                    disabled={!canWriteSettings || updateSettingsMutation.isPending}
-                                    data-testid={`settings-preset-${preset.id}`}
-                                >
-                                    <p className="font-semibold">{preset.label}</p>
-                                    <p className="mt-1 text-muted-foreground">
-                                        {preset.reminder1}/{preset.reminder2}/{preset.escalation} мин
+                <>
+                    <section className="mb-6 grid grid-cols-1 gap-6 md:grid-cols-2">
+                        <div className="rounded-xl border border-border/60 bg-card p-5" data-testid="settings-simple-card">
+                            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                    <h2 className="text-lg font-semibold">SLA и эскалация</h2>
+                                    <p className="text-sm text-muted-foreground">
+                                        Базовые бизнес-поля: первое/второе напоминание и таймаут эскалации.
                                     </p>
-                                </button>
-                            ))}
-                        </div>
-                        <p className="mb-4 text-xs text-muted-foreground">
-                            {SETTINGS_PRESETS.find((item) => item.id === selectedPresetId)?.description}
-                        </p>
-
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                            <label className="text-sm">
-                                <span className="mb-1 block text-xs text-muted-foreground">1-е напоминание (5-60)</span>
-                                <input
-                                    type="number"
-                                    min={5}
-                                    max={60}
-                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
-                                    value={simpleSettings.reminder1}
-                                    onChange={(event) => {
-                                        updateSimpleSetting("reminder1", event.target.value);
-                                    }}
-                                    disabled={!canWriteSettings || updateSettingsMutation.isPending}
-                                    data-testid="settings-input-reminder1"
-                                />
-                            </label>
-                            <label className="text-sm">
-                                <span className="mb-1 block text-xs text-muted-foreground">2-е напоминание (30-180)</span>
-                                <input
-                                    type="number"
-                                    min={30}
-                                    max={180}
-                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
-                                    value={simpleSettings.reminder2}
-                                    onChange={(event) => {
-                                        updateSimpleSetting("reminder2", event.target.value);
-                                    }}
-                                    disabled={!canWriteSettings || updateSettingsMutation.isPending}
-                                    data-testid="settings-input-reminder2"
-                                />
-                            </label>
-                            <label className="text-sm">
-                                <span className="mb-1 block text-xs text-muted-foreground">Эскалация (30-360)</span>
-                                <input
-                                    type="number"
-                                    min={30}
-                                    max={360}
-                                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
-                                    value={simpleSettings.escalation}
-                                    onChange={(event) => {
-                                        updateSimpleSetting("escalation", event.target.value);
-                                    }}
-                                    disabled={!canWriteSettings || updateSettingsMutation.isPending}
-                                    data-testid="settings-input-escalation"
-                                />
-                            </label>
-                        </div>
-
-                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                            <p className="text-xs text-muted-foreground" data-testid="settings-save-hint">
-                                Сохраняется в `client_settings` и сразу влияет на SLA-процессы.
+                                </div>
+                                {!canWriteSettings && (
+                                    <span className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">
+                                        Только owner/admin
+                                    </span>
+                                )}
+                            </div>
+                            <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3" data-testid="settings-simple-presets">
+                                {SETTINGS_PRESETS.map((preset) => (
+                                    <button
+                                        key={preset.id}
+                                        type="button"
+                                        className={`rounded-lg border px-3 py-2 text-left text-xs transition ${selectedPresetId === preset.id
+                                            ? "border-primary bg-primary/5 text-primary"
+                                            : "border-border/60 hover:bg-muted"
+                                            }`}
+                                        onClick={() => {
+                                            applyPreset(preset);
+                                        }}
+                                        disabled={!canWriteSettings || updateSettingsMutation.isPending}
+                                        data-testid={`settings-preset-${preset.id}`}
+                                    >
+                                        <p className="font-semibold">{preset.label}</p>
+                                        <p className="mt-1 text-muted-foreground">
+                                            {preset.reminder1}/{preset.reminder2}/{preset.escalation} мин
+                                        </p>
+                                    </button>
+                                ))}
+                            </div>
+                            <p className="mb-4 text-xs text-muted-foreground">
+                                {SETTINGS_PRESETS.find((item) => item.id === selectedPresetId)?.description}
                             </p>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    saveSimpleSettings();
-                                }}
-                                className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                                disabled={!canWriteSettings || updateSettingsMutation.isPending}
-                                data-testid="settings-save-simple"
-                            >
-                                {updateSettingsMutation.isPending ? "Сохраняю..." : "Сохранить"}
-                            </button>
-                        </div>
-                    </div>
 
-                    <div className="rounded-xl border border-border/60 bg-card p-5" data-testid="settings-explainability">
-                        <h2 className="text-lg font-semibold">Объяснение для владельца</h2>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                            Как текущие значения влияют на продажи, SLA и нагрузку команды.
-                        </p>
-                        <div className="mt-4 space-y-2">
-                            {explainabilityLines.map((line) => (
-                                <p key={line} className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-sm text-foreground">
-                                    {line}
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                <label className="text-sm">
+                                    <span className="mb-1 block text-xs text-muted-foreground">1-е напоминание (5-60)</span>
+                                    <input
+                                        type="number"
+                                        min={5}
+                                        max={60}
+                                        className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                                        value={simpleSettings.reminder1}
+                                        onChange={(event) => {
+                                            updateSimpleSetting("reminder1", event.target.value);
+                                        }}
+                                        disabled={!canWriteSettings || updateSettingsMutation.isPending}
+                                        data-testid="settings-input-reminder1"
+                                    />
+                                </label>
+                                <label className="text-sm">
+                                    <span className="mb-1 block text-xs text-muted-foreground">2-е напоминание (30-180)</span>
+                                    <input
+                                        type="number"
+                                        min={30}
+                                        max={180}
+                                        className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                                        value={simpleSettings.reminder2}
+                                        onChange={(event) => {
+                                            updateSimpleSetting("reminder2", event.target.value);
+                                        }}
+                                        disabled={!canWriteSettings || updateSettingsMutation.isPending}
+                                        data-testid="settings-input-reminder2"
+                                    />
+                                </label>
+                                <label className="text-sm">
+                                    <span className="mb-1 block text-xs text-muted-foreground">Эскалация (30-360)</span>
+                                    <input
+                                        type="number"
+                                        min={30}
+                                        max={360}
+                                        className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+                                        value={simpleSettings.escalation}
+                                        onChange={(event) => {
+                                            updateSimpleSetting("escalation", event.target.value);
+                                        }}
+                                        disabled={!canWriteSettings || updateSettingsMutation.isPending}
+                                        data-testid="settings-input-escalation"
+                                    />
+                                </label>
+                            </div>
+
+                            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                                <p className="text-xs text-muted-foreground" data-testid="settings-save-hint">
+                                    Сохраняется в `client_settings` и сразу влияет на SLA-процессы.
                                 </p>
-                            ))}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        saveSimpleSettings();
+                                    }}
+                                    className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                                    disabled={!canWriteSettings || updateSettingsMutation.isPending}
+                                    data-testid="settings-save-simple"
+                                >
+                                    {updateSettingsMutation.isPending ? "Сохраняю..." : "Сохранить"}
+                                </button>
+                            </div>
                         </div>
-                        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-                            Если видите рост `pending` и просроченных диалогов на странице `Команда KPI`, выбирайте более быстрый профиль.
+
+                        <div className="rounded-xl border border-border/60 bg-card p-5" data-testid="settings-after-save">
+                            <h2 className="text-lg font-semibold">Что будет после сохранения</h2>
+                            <div className="mt-4 space-y-2">
+                                <p className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-sm text-foreground">
+                                    1-е напоминание ({simpleSettings.reminder1 || "—"} мин): менеджер быстрее получит сигнал о новой заявке.
+                                </p>
+                                <p className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-sm text-foreground">
+                                    2-е напоминание ({simpleSettings.reminder2 || "—"} мин): система усилит контроль, если диалог все еще без ответа.
+                                </p>
+                                <p className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-sm text-foreground">
+                                    Эскалация ({simpleSettings.escalation || "—"} мин): кейс попадет в авто-контур эскалации/закрытия.
+                                </p>
+                                <p className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-sm text-foreground">
+                                    Telegram и Подписка: проверяйте связь и квоту в блоках ниже перед запуском активных кампаний.
+                                </p>
+                            </div>
+                            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                                Если видите рост `pending` и просроченных диалогов на странице `Команда KPI`, выбирайте более быстрый профиль.
+                            </div>
                         </div>
-                    </div>
-                </section>
+                    </section>
+
+                    <section className="mb-6 grid grid-cols-1 gap-6 md:grid-cols-2">
+                        <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-telegram-connector">
+                            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                                📨 Telegram
+                            </h2>
+                            <p className="text-sm text-muted-foreground mb-3">
+                                Проверка и тест отправки в Telegram (client scope, owner/admin/platform admin).
+                            </p>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onClick={() =>
+                                        verifyMutation.mutate({
+                                            targetKey: "client",
+                                            label: "client",
+                                            payload: { scope: "client" },
+                                        })
+                                    }
+                                    disabled={verifyTarget === "client" || !canWriteSettings}
+                                    data-testid="settings-telegram-verify"
+                                >
+                                    {verifyTarget === "client" ? "Отправка..." : "Verify"}
+                                </button>
+                                <button
+                                    type="button"
+                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onClick={() =>
+                                        testMutation.mutate({
+                                            targetKey: "client",
+                                            label: "client",
+                                            payload: { scope: "client" },
+                                        })
+                                    }
+                                    disabled={testTarget === "client" || !canWriteSettings}
+                                    data-testid="settings-telegram-test"
+                                >
+                                    {testTarget === "client" ? "Отправка..." : "Send test"}
+                                </button>
+                            </div>
+                            {!canWriteSettings && (
+                                <p className="mt-2 text-xs text-muted-foreground">Только owner/admin/platform admin</p>
+                            )}
+                        </div>
+
+                        <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-subscription-snapshot">
+                            <h2 className="text-lg font-semibold mb-2">💳 Подписка</h2>
+                            {subscriptionSummary ? (
+                                <div className="space-y-1 text-sm">
+                                    <p className="text-muted-foreground">
+                                        План: <span className="font-medium text-foreground">{subscriptionSummary.plan_name || subscriptionSummary.contract_label || "Не указан"}</span>
+                                    </p>
+                                    <p className="text-muted-foreground">
+                                        Использовано: <span className="font-medium text-foreground">{formatNumber(subscriptionSummary.billable_messages)}</span> / {formatNumber(subscriptionSummary.monthly_quota)}
+                                    </p>
+                                    <p className="text-muted-foreground">
+                                        Следующее списание: <span className="font-medium text-foreground">{subscriptionSummary.next_billing_date}</span>
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">{subscriptionSummary.quota_alert_message}</p>
+                                </div>
+                            ) : (
+                                <p className="text-sm text-muted-foreground">Нет данных подписки в текущем scope.</p>
+                            )}
+                            <div className="mt-3">
+                                <Link className="btn-ghost" href="/subscription">Открыть подписку</Link>
+                            </div>
+                        </div>
+                    </section>
+                </>
             )}
 
-            {canReadSettings && (
-                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                    {/* SLA & Reminders */}
-                    <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-sla">
-                        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                            ⏱️ SLA и напоминания
-                        </h2>
-                        {config ? (
-                            <div>
-                                <ConfigCard label="Первое напоминание" value={config.reminder_timeout_1} type="minutes" />
-                                <ConfigCard label="Второе напоминание" value={config.reminder_timeout_2} type="minutes" />
-                                <ConfigCard label="Авто-закрытие" value={config.auto_close_timeout} type="minutes" />
-                                <ConfigCard label="Напоминания включены" value={config.enable_reminders} type="boolean" />
-                                <ConfigCard label="Эскалация на владельца" value={config.enable_owner_escalation} type="boolean" />
-                            </div>
-                        ) : (
-                            <p className="text-muted-foreground text-center py-4">Нет данных</p>
-                        )}
-                    </div>
-
-                    {/* Quiet Hours */}
-                    <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-quiet-hours">
-                        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                            🌙 Тихие часы
-                        </h2>
-                        {config ? (
-                            <div>
-                                <ConfigCard label="Тихие часы" value={config.quiet_hours_enabled} type="boolean" />
-                                <ConfigCard label="Начало" value={config.quiet_hours_start} />
-                                <ConfigCard label="Конец" value={config.quiet_hours_end} />
-                            </div>
-                        ) : (
-                            <p className="text-muted-foreground text-center py-4">Нет данных</p>
-                        )}
-                    </div>
-
-                    {/* Bot Behavior */}
-                    <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-bot">
-                        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                            🤖 Поведение бота
-                        </h2>
-                        {config ? (
-                            <div>
-                                <ConfigCard label="Тон общения" value={config.tone} />
-                                <ConfigCard label="Авто-обучение" value={config.autolearn_enabled} type="boolean" />
-                                <ConfigCard label="Бронирование" value={config.booking_enabled} type="boolean" />
-                            </div>
-                        ) : (
-                            <p className="text-muted-foreground text-center py-4">Нет данных</p>
-                        )}
-                    </div>
-
-                    {/* Learning & Data */}
-                    <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-learning">
-                        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                            🧠 Обучение и данные
-                        </h2>
-                        {config ? (
-                            <div>
-                                <ConfigCard label="Consent статус" value={config.learning_consent_status} />
-                                <ConfigCard label="Анонимизация" value={config.learning_anonymization_mode} />
-                                <ConfigCard label="Retention (дней)" value={config.learning_retention_days} />
-                                <ConfigCard label="Data sharing" value={config.data_sharing} />
-                            </div>
-                        ) : (
-                            <p className="text-muted-foreground text-center py-4">Нет данных</p>
-                        )}
-                    </div>
-
-                    {/* Telegram Connector */}
-                    <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-telegram-connector">
-                        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                            📨 Telegram коннектор
-                        </h2>
-                        <p className="text-sm text-muted-foreground mb-3">
-                            Проверка и тест отправки в Telegram (client scope, owner/admin/platform admin).
-                        </p>
-                        <div className="flex items-center gap-2">
-                            <button
-                                type="button"
-                                className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                onClick={() =>
-                                    verifyMutation.mutate({
-                                        targetKey: "client",
-                                        label: "client",
-                                        payload: { scope: "client" },
-                                    })
-                                }
-                                disabled={verifyTarget === "client" || !canWriteSettings}
-                                data-testid="settings-telegram-verify"
-                            >
-                                {verifyTarget === "client" ? "Отправка..." : "Verify"}
-                            </button>
-                            <button
-                                type="button"
-                                className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                onClick={() =>
-                                    testMutation.mutate({
-                                        targetKey: "client",
-                                        label: "client",
-                                        payload: { scope: "client" },
-                                    })
-                                }
-                                disabled={testTarget === "client" || !canWriteSettings}
-                                data-testid="settings-telegram-test"
-                            >
-                                {testTarget === "client" ? "Отправка..." : "Send test"}
-                            </button>
-                            {!canWriteSettings && (
-                                <span className="text-xs text-muted-foreground">Только owner/admin/platform admin</span>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Branches (TG-02) */}
-                    <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-branches">
-                        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                            🏢 Филиалы
-                        </h2>
-                        <div className="space-y-2">
-                            {data?.branches.map((branch) => (
-                                <div
-                                    key={branch.id}
-                                    className="flex items-center justify-between p-3 bg-muted rounded"
-                                    data-testid="settings-branch-row"
-                                >
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-2">
-                                            <span className="font-medium">{branch.name}</span>
-                                            <span className="text-sm text-muted-foreground">({branch.slug})</span>
-                                        </div>
-                                        <div className="text-xs text-muted-foreground mt-1">
-                                            instance_id: {branch.instance_id || "—"}
-                                        </div>
-                                        {/* Telegram status */}
-                                        <div className="flex items-center gap-1 mt-1">
-                                            {branch.telegram_chat_id ? (
-                                                <>
-                                                    <span className="text-primary text-xs">📨</span>
-                                                    <span className="text-xs text-muted-foreground font-mono">
-                                                        {branch.telegram_chat_id.slice(0, 15)}...
-                                                    </span>
-                                                </>
-                                            ) : (
-                                                <span className="text-xs text-muted-foreground">Telegram не настроен</span>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span
-                                            className={`px-2 py-0.5 rounded text-xs ${branch.is_active
-                                                ? "bg-green-100 text-green-800"
-                                                : "bg-muted text-muted-foreground"
-                                                }`}
-                                        >
-                                            {branch.is_active ? "Активен" : "Неактивен"}
-                                        </span>
-                                        <button
-                                            type="button"
-                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() =>
-                                                verifyMutation.mutate({
-                                                    targetKey: branch.id,
-                                                    label: branch.name,
-                                                    payload: { scope: "branch", branch_id: branch.id },
-                                                })
-                                            }
-                                            disabled={!branch.telegram_chat_id || verifyTarget === branch.id || !canWriteSettings}
-                                            data-testid="settings-branch-verify"
-                                        >
-                                            {verifyTarget === branch.id ? "Отправка..." : "Verify"}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                                            onClick={() =>
-                                                testMutation.mutate({
-                                                    targetKey: branch.id,
-                                                    label: branch.name,
-                                                    payload: { scope: "branch", branch_id: branch.id },
-                                                })
-                                            }
-                                            disabled={!branch.telegram_chat_id || testTarget === branch.id || !canWriteSettings}
-                                            data-testid="settings-branch-test"
-                                        >
-                                            {testTarget === branch.id ? "Отправка..." : "Send test"}
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                            {data?.branches.length === 0 && (
-                                <p className="text-muted-foreground text-center py-2" data-testid="settings-branches-empty">Нет филиалов</p>
-                            )}
-                        </div>
-                    </div>
+            {(canReadSettings || canReadProvisioning) && (
+                <div className="mb-6 flex items-center justify-end">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setShowAdvanced((current) => !current);
+                        }}
+                        className="rounded-full border border-border/60 px-4 py-2 text-sm font-medium hover:bg-muted"
+                        data-testid="settings-advanced-toggle"
+                    >
+                        {showAdvanced ? "Скрыть расширенные" : "Показать расширенные"}
+                    </button>
                 </div>
+            )}
+
+            {(showAdvanced || (!canReadSettings && canReadProvisioning)) && (
+                <>
+                    {canReadProvisioning && (
+                        <ProvisioningWizard session={session} accessSection={provisioningAccessSection} />
+                    )}
+
+                    {canReadSettings && (
+                        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                            <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-sla">
+                                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">⏱️ SLA и напоминания</h2>
+                                {config ? (
+                                    <div>
+                                        <ConfigCard label="Первое напоминание" value={config.reminder_timeout_1} type="minutes" />
+                                        <ConfigCard label="Второе напоминание" value={config.reminder_timeout_2} type="minutes" />
+                                        <ConfigCard label="Авто-закрытие" value={config.auto_close_timeout} type="minutes" />
+                                        <ConfigCard label="Напоминания включены" value={config.enable_reminders} type="boolean" />
+                                        <ConfigCard label="Эскалация на владельца" value={config.enable_owner_escalation} type="boolean" />
+                                    </div>
+                                ) : (
+                                    <p className="text-muted-foreground text-center py-4">Нет данных</p>
+                                )}
+                            </div>
+
+                            <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-quiet-hours">
+                                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">🌙 Тихие часы</h2>
+                                {config ? (
+                                    <div>
+                                        <ConfigCard label="Тихие часы" value={config.quiet_hours_enabled} type="boolean" />
+                                        <ConfigCard label="Начало" value={config.quiet_hours_start} />
+                                        <ConfigCard label="Конец" value={config.quiet_hours_end} />
+                                    </div>
+                                ) : (
+                                    <p className="text-muted-foreground text-center py-4">Нет данных</p>
+                                )}
+                            </div>
+
+                            <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-bot">
+                                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">🤖 Поведение бота</h2>
+                                {config ? (
+                                    <div>
+                                        <ConfigCard label="Тон общения" value={config.tone} />
+                                        <ConfigCard label="Авто-обучение" value={config.autolearn_enabled} type="boolean" />
+                                        <ConfigCard label="Бронирование" value={config.booking_enabled} type="boolean" />
+                                    </div>
+                                ) : (
+                                    <p className="text-muted-foreground text-center py-4">Нет данных</p>
+                                )}
+                            </div>
+
+                            <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-learning">
+                                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">🧠 Обучение и данные</h2>
+                                {config ? (
+                                    <div>
+                                        <ConfigCard label="Consent статус" value={config.learning_consent_status} />
+                                        <ConfigCard label="Анонимизация" value={config.learning_anonymization_mode} />
+                                        <ConfigCard label="Retention (дней)" value={config.learning_retention_days} />
+                                        <ConfigCard label="Data sharing" value={config.data_sharing} />
+                                    </div>
+                                ) : (
+                                    <p className="text-muted-foreground text-center py-4">Нет данных</p>
+                                )}
+                            </div>
+
+                            <div className="bg-card border border-border/60 rounded-lg p-5" data-testid="settings-branches">
+                                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">🏢 Филиалы</h2>
+                                <div className="space-y-2">
+                                    {data?.branches.map((branch) => (
+                                        <div
+                                            key={branch.id}
+                                            className="flex items-center justify-between p-3 bg-muted rounded"
+                                            data-testid="settings-branch-row"
+                                        >
+                                            <div className="flex-1">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-medium">{branch.name}</span>
+                                                    <span className="text-sm text-muted-foreground">({branch.slug})</span>
+                                                </div>
+                                                <div className="text-xs text-muted-foreground mt-1">
+                                                    instance_id: {branch.instance_id || "—"}
+                                                </div>
+                                                <div className="flex items-center gap-1 mt-1">
+                                                    {branch.telegram_chat_id ? (
+                                                        <>
+                                                            <span className="text-primary text-xs">📨</span>
+                                                            <span className="text-xs text-muted-foreground font-mono">
+                                                                {branch.telegram_chat_id.slice(0, 15)}...
+                                                            </span>
+                                                        </>
+                                                    ) : (
+                                                        <span className="text-xs text-muted-foreground">Telegram не настроен</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span
+                                                    className={`px-2 py-0.5 rounded text-xs ${branch.is_active
+                                                        ? "bg-green-100 text-green-800"
+                                                        : "bg-muted text-muted-foreground"
+                                                        }`}
+                                                >
+                                                    {branch.is_active ? "Активен" : "Неактивен"}
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    onClick={() =>
+                                                        verifyMutation.mutate({
+                                                            targetKey: branch.id,
+                                                            label: branch.name,
+                                                            payload: { scope: "branch", branch_id: branch.id },
+                                                        })
+                                                    }
+                                                    disabled={!branch.telegram_chat_id || verifyTarget === branch.id || !canWriteSettings}
+                                                    data-testid="settings-branch-verify"
+                                                >
+                                                    {verifyTarget === branch.id ? "Отправка..." : "Verify"}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    onClick={() =>
+                                                        testMutation.mutate({
+                                                            targetKey: branch.id,
+                                                            label: branch.name,
+                                                            payload: { scope: "branch", branch_id: branch.id },
+                                                        })
+                                                    }
+                                                    disabled={!branch.telegram_chat_id || testTarget === branch.id || !canWriteSettings}
+                                                    data-testid="settings-branch-test"
+                                                >
+                                                    {testTarget === branch.id ? "Отправка..." : "Send test"}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {data?.branches.length === 0 && (
+                                        <p className="text-muted-foreground text-center py-2" data-testid="settings-branches-empty">Нет филиалов</p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </>
             )}
 
             <div className="card-surface p-5 mt-6" data-testid="settings-team-link">

@@ -13,15 +13,23 @@ Purpose
 - Owner/Admin transparent subscription view: period usage, quota posture, forecast, and billable evidence rows.
 
 Sections
-- Header: billing period + refresh.
+- Header: billing period + next billing date + refresh.
 - KPI cards:
   - plan/contract/source,
   - monthly quota + currency,
   - billable messages + remaining quota,
   - projected month total + quota usage.
+- Alert band:
+  - `quota_alert_level` (`normal|warning_80|limit_100`),
+  - human-readable `quota_alert_message`,
+  - explicit overage rule from canon (`overage = max(0, billable - quota)`).
 - Usage bar:
   - `usage_percent`,
   - `over_quota` state.
+- Forecast v2:
+  - projected remaining quota,
+  - projected overage messages,
+  - next billing date.
 - Evidence table:
   - recent billable outbox rows (`created_at`, `outbox_id`, `status`, provider status, inbound id).
 

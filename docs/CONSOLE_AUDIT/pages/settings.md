@@ -16,7 +16,7 @@ Header
 - "Назад в Inbox" link in the header.
 
 Provisioning Wizard
-- Embedded at top (accessSection "settings").
+- Moved under `Расширенные` toggle (not default surface for owner/admin).
 - Read-only banner shown when role lacks write access.
 - Company card:
   - Existing Company ID input (optional).
@@ -40,6 +40,11 @@ Provisioning Wizard
   - "Далее" calls onboarding advance and is blocked when required fields are missing or the step is locked.
 
 Settings cards
+- Default onboarding-lite surface (owner/admin focus):
+  - SLA + escalation block (presets + manual values + save),
+  - Telegram block (verify/test),
+  - Subscription snapshot block (plan, usage, next billing date),
+  - "Что будет после сохранения" explainer.
 - Simple business settings (owner/admin/platform_admin write):
   - Preset profiles:
     - `Быстрый сервис` (5 / 30 / 60)
@@ -51,12 +56,10 @@ Settings cards
     - escalation timeout (`30-360`)
   - Validation rule: `reminder_1 < reminder_2 < escalation_timeout`.
   - Save action: `PATCH /console/v1/settings`.
-- Owner explainability card:
-  - business-language impact preview for configured values,
-  - guidance to switch profile based on queue pressure visible in `Team KPI`.
-- SLA and reminders (read-only from bot_config): reminder_1/2, auto-close, reminders enabled, owner escalation.
-- Quiet hours (read-only): enabled, start, end.
-- Bot behavior (read-only): tone, autolearn_enabled, booking_enabled.
+- Advanced section (`Показать расширенные`):
+  - Provisioning Wizard,
+  - read-only technical cards (quiet hours, bot behavior, learning/data),
+  - branches operational table with branch verify/test controls.
 
 Telegram connector (client scope)
 - Buttons:
@@ -65,7 +68,7 @@ Telegram connector (client scope)
 - Buttons are disabled for read-only roles and show toast with code or error.
 
 Branches section
-- Lists branches with instance_id, telegram_chat_id, active status.
+- Lists branches with instance_id, telegram_chat_id, active status (inside `Расширенные`).
 - Per-branch buttons:
   - Verify (scope=branch).
   - Send test (scope=branch).

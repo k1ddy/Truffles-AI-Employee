@@ -30,6 +30,7 @@ Reports
 - `docs/REPORTS/2026-02-15-owner-admin-wave1-implementation-v1.md`
 - `docs/REPORTS/2026-02-15-owner-admin-wave2-data-trust-team-v1.md`
 - `docs/REPORTS/2026-02-15-owner-admin-wave3-simple-settings-v1.md`
+- `docs/REPORTS/2026-02-15-owner-admin-wave4-action-loop-v1.md`
 
 Backlog
 - `docs/CONSOLE_AUDIT/UX_BACKLOG.md`

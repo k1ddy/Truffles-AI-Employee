@@ -5705,6 +5705,34 @@ def _apply_billable_outbox_filters(query):
     )
 
 
+def _resolve_subscription_alert(
+    *,
+    monthly_quota: Optional[int],
+    usage_percent: Optional[float],
+    over_quota: bool,
+    projected_over_quota: bool,
+) -> tuple[str, str]:
+    if monthly_quota is None or monthly_quota <= 0:
+        return (
+            "normal",
+            "Лимит не задан: контролируйте биллинговые сообщения через таблицу доказательств.",
+        )
+    if over_quota or (usage_percent is not None and usage_percent >= 100):
+        return (
+            "limit_100",
+            "Лимит уже превышен: каждый следующий billable ответ увеличивает overage.",
+        )
+    if (usage_percent is not None and usage_percent >= 80) or projected_over_quota:
+        return (
+            "warning_80",
+            "Риск перерасхода: проверьте нагрузку и тариф до даты следующего списания.",
+        )
+    return (
+        "normal",
+        "Лимит в безопасной зоне.",
+    )
+
+
 def _derive_business_status(
     *,
     outbox_backlog: int,
@@ -6187,14 +6215,29 @@ async def get_subscription_summary(
     elapsed_days = max(1, (now.date() - period_start.date()).days + 1)
     total_days = max(1, (period_end.date() - period_start.date()).days)
     projected_month_total = int(round((billable_messages / elapsed_days) * total_days))
+    next_billing_date = period_end.date().isoformat()
 
     remaining_quota = None
     usage_percent = None
     over_quota = False
+    projected_remaining_quota = None
+    projected_over_quota = False
+    projected_overage_messages = None
     if monthly_quota is not None and monthly_quota > 0:
         remaining_quota = max(0, monthly_quota - billable_messages)
         usage_percent = round((billable_messages / monthly_quota) * 100, 1)
         over_quota = billable_messages > monthly_quota
+        projected_remaining_quota = monthly_quota - projected_month_total
+        projected_over_quota = projected_month_total > monthly_quota
+        projected_overage_messages = (
+            max(0, projected_month_total - monthly_quota) if projected_over_quota else 0
+        )
+    quota_alert_level, quota_alert_message = _resolve_subscription_alert(
+        monthly_quota=monthly_quota,
+        usage_percent=usage_percent,
+        over_quota=over_quota,
+        projected_over_quota=projected_over_quota,
+    )
 
     evidence_items = []
     for row in evidence_rows:
@@ -6216,6 +6259,7 @@ async def get_subscription_summary(
         generated_at=now.isoformat(),
         period_start=period_start.date().isoformat(),
         period_end=(period_end.date() - timedelta(days=1)).isoformat(),
+        next_billing_date=next_billing_date,
         plan_name=plan_name,
         contract_label=contract_label,
         currency=currency,
@@ -6225,6 +6269,12 @@ async def get_subscription_summary(
         remaining_quota=remaining_quota,
         projected_month_total=projected_month_total,
         usage_percent=usage_percent,
+        projected_remaining_quota=projected_remaining_quota,
+        projected_over_quota=projected_over_quota,
+        projected_overage_messages=projected_overage_messages,
+        quota_alert_level=quota_alert_level,
+        quota_alert_message=quota_alert_message,
+        overage_policy_message="Перерасход считается по формуле overage = max(0, billable - quota).",
         over_quota=over_quota,
         evidence=evidence_items,
     )

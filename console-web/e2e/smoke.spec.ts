@@ -887,8 +887,9 @@ test.describe('Navigation', () => {
 
     test('should navigate to Settings @smoke', async ({ page }) => {
         await openSettings(page);
-        await expect(page.getByTestId('settings-branches')).toBeVisible();
-        await expectRowsOrEmpty(page, 'settings-branch-row', 'settings-branches-empty');
+        await expect(page.getByTestId('settings-simple-card')).toBeVisible();
+        await expect(page.getByTestId('settings-telegram-connector')).toBeVisible();
+        await expect(page.getByTestId('settings-subscription-snapshot')).toBeVisible();
     });
 
     test('should open Calendar with local date default @smoke', async ({ page }) => {
@@ -1132,7 +1133,15 @@ test.describe('Settings Page', () => {
         await openSettings(page);
     });
 
-    test('should display branches section @smoke', async ({ page }) => {
+    test('should display default owner/admin settings surfaces @smoke', async ({ page }) => {
+        await expect(page.getByTestId('settings-simple-card')).toBeVisible();
+        await expect(page.getByTestId('settings-after-save')).toBeVisible();
+        await expect(page.getByTestId('settings-telegram-connector')).toBeVisible();
+        await expect(page.getByTestId('settings-subscription-snapshot')).toBeVisible();
+    });
+
+    test('should display branches section in advanced mode @smoke', async ({ page }) => {
+        await page.getByTestId('settings-advanced-toggle').click();
         await expect(page.getByTestId('settings-branches')).toBeVisible();
         await expectRowsOrEmpty(page, 'settings-branch-row', 'settings-branches-empty');
     });

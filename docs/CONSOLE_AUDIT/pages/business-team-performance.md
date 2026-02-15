@@ -17,6 +17,10 @@ Sections
 - Status card:
   - `healthy|degraded|unhealthy` with plain-language label,
   - scope warning for branch-limited KPI context.
+- Closed-loop quick action:
+  - when status is not `healthy`, owner/admin sees "Применить быстрый профиль",
+  - confirmation dialog before apply,
+  - applies `PATCH /console/v1/settings` with profile `5/30/60`.
 - KPI cards:
   - `unresolved_cases`,
   - `unresolved_older_than_60m`,
@@ -33,6 +37,7 @@ Sections
 API endpoints used
 - `GET /console/v1/me`
 - `GET /console/v1/business/team-performance`
+- `PATCH /console/v1/settings` (quick profile action)
 
 Backend handlers
 - `truffles-api/app/routers/console.py`:

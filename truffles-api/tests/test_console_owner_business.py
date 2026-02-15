@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -76,6 +77,31 @@ def test_resolve_subscription_contract_falls_back_to_client_config() -> None:
     assert currency == "USD"
     assert quota == 5000
     assert source == "client_config"
+
+
+def test_resolve_subscription_alert_levels() -> None:
+    normal_level, _normal_message = console_router._resolve_subscription_alert(
+        monthly_quota=1000,
+        usage_percent=42.0,
+        over_quota=False,
+        projected_over_quota=False,
+    )
+    warning_level, _warning_message = console_router._resolve_subscription_alert(
+        monthly_quota=1000,
+        usage_percent=79.0,
+        over_quota=False,
+        projected_over_quota=True,
+    )
+    limit_level, _limit_message = console_router._resolve_subscription_alert(
+        monthly_quota=1000,
+        usage_percent=101.0,
+        over_quota=True,
+        projected_over_quota=True,
+    )
+
+    assert normal_level == "normal"
+    assert warning_level == "warning_80"
+    assert limit_level == "limit_100"
 
 
 def test_derive_business_status_thresholds() -> None:
@@ -248,3 +274,49 @@ async def test_team_performance_summary_requires_business_permission(monkeypatch
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_update_settings_persists_mapped_client_settings_fields(monkeypatch):
+    client_id = uuid4()
+    settings = SimpleNamespace(
+        client_id=client_id,
+        reminder_timeout_1=30,
+        reminder_timeout_2=60,
+        auto_close_timeout=120,
+    )
+    db = Mock()
+    query = Mock()
+    db.query.return_value = query
+    query.filter.return_value = query
+    query.first.return_value = settings
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=client_id, company_id=uuid4(), config={}),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        companies=[],
+    )
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    audit_calls: list[dict] = []
+    monkeypatch.setattr(
+        console_router,
+        "record_audit_event",
+        lambda *_args, **kwargs: audit_calls.append(kwargs),
+    )
+
+    response = await console_router.update_settings(
+        request=SimpleNamespace(),
+        body=ConsoleSettingsUpdateRequest(
+            reminder_1_minutes=5,
+            reminder_2_minutes=30,
+            escalation_timeout_minutes=60,
+        ),
+        db=db,
+    )
+
+    assert settings.reminder_timeout_1 == 5
+    assert settings.reminder_timeout_2 == 30
+    assert settings.auto_close_timeout == 60
+    db.commit.assert_called_once()
+    assert response.success is True
+    assert audit_calls
