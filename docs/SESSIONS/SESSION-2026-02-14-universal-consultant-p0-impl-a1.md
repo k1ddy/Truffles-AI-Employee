@@ -33,8 +33,10 @@
   - Added verifier-lite `tool_args` contract in `tool_registry_service`: invalid payloads now fail closed with `tool_decision=invalid_args` and explicit `tool_args_error`.
   - Hardened degraded policy-core path: degraded collect no longer forces booking prompt on explicit info-query turns.
   - Added stage-wise KPI in `ops/diagnose.py` (`controller/tool_selection/tool_args/state_transition/response_contract`) and surfaced them in `brief.md`.
+  - Refined stage KPI semantics: `controller_attempt_rate` now uses eligible turns only, with explicit `non_eligible_reasons` (`expected_reply_deferred/law_gate/policy_gate/pending/not_run`) to avoid false “controller underuse” alarms.
   - Added manual replay verification checklist in TP (`metrics.stages`, `tool_args_contract`, controller skip-ledger).
   - Ran frozen replay `offline-replay-20260215-p0-r29-kernel` and targeted replay `offline-replay-20260215-p0-r30c-timephrase`; validated new stage metrics and fixed false `start_at_invalid` for `calendar.list_slots`.
+  - Ran targeted replay `offline-replay-20260215-p0-r31-metrics` after metrics refinement to verify `controller.total_expected/eligible/non_eligible` breakdown.
 - next:
   - Monitor PR #674 CI and merge after green gates.
   - After merge: replay frozen booking scenarios with judge off and publish fresh failure-ledger delta.
@@ -73,12 +75,16 @@
   - pytest -q truffles-api/tests/test_demo_salon_eval.py  # expected known non-blocking failure: E409 consult_cta
   - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18111 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-20260213-a1-main-r18-postfix5/scenarios.json --count 10 --tool-hooks auto --tool-evidence-policy strict --reset-before-dialog --jid-mode unique --skip-outbox --judge-mode off --allow-judge-off --timeout-profile realistic --run-id offline-replay-20260215-p0-r29-kernel
   - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18111 --client-slug demo_salon --scenarios-file /tmp/booking_quality/scenarios-timephrase-with-contract.json --count 3 --tool-hooks auto --tool-evidence-policy strict --reset-before-dialog --jid-mode unique --skip-outbox --judge-mode off --allow-judge-off --timeout-profile realistic --run-id offline-replay-20260215-p0-r30c-timephrase
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18111 --client-slug demo_salon --scenarios-file /tmp/booking_quality/scenarios-timephrase-with-contract.json --count 3 --tool-hooks auto --tool-evidence-policy strict --reset-before-dialog --jid-mode unique --skip-outbox --judge-mode off --allow-judge-off --timeout-profile realistic --run-id offline-replay-20260215-p0-r31-metrics
   - /tmp/booking_quality/offline-replay-20260215-p0-r29-kernel/summary.json
   - /tmp/booking_quality/offline-replay-20260215-p0-r29-kernel/brief.md
   - /tmp/booking_quality/offline-replay-20260215-p0-r29-kernel/responses.jsonl
   - /tmp/booking_quality/offline-replay-20260215-p0-r30c-timephrase/summary.json
   - /tmp/booking_quality/offline-replay-20260215-p0-r30c-timephrase/brief.md
   - /tmp/booking_quality/offline-replay-20260215-p0-r30c-timephrase/responses.jsonl
+  - /tmp/booking_quality/offline-replay-20260215-p0-r31-metrics/summary.json
+  - /tmp/booking_quality/offline-replay-20260215-p0-r31-metrics/brief.md
+  - /tmp/booking_quality/offline-replay-20260215-p0-r31-metrics/responses.jsonl
   - manual trace/meta check for turn `А как насчет парковки?` in `/tmp/booking_quality/offline-replay-20260215-p0-r27/responses.jsonl` (`action=reply`, `intent=parking`, `policy_gate=None`)
   - scripts/session_check.sh
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/684

@@ -8189,10 +8189,13 @@ def _run_llm_quality(args):
     }
     stage_stats = {
         "controller": {
-            "opportunities": 0,
+            "total_expected": 0,
+            "eligible": 0,
+            "non_eligible": 0,
             "attempted": 0,
             "skipped": 0,
             "skip_reasons": {},
+            "non_eligible_reasons": {},
         },
         "tool_selection": {
             "selected": 0,
@@ -8973,18 +8976,37 @@ def _run_llm_quality(args):
                 if isinstance(meta, dict):
                     controller_stats = stage_stats["controller"]
                     if expected_response:
-                        controller_stats["opportunities"] += 1
+                        controller_stats["total_expected"] += 1
+                        skip_reason = (
+                            _llm_quality_normalize_tool_token(meta.get("controller_skipped_reason"))
+                            or _llm_quality_normalize_tool_token(meta.get("router_skipped_reason"))
+                            or "not_attempted"
+                        )
+                        non_eligible_reasons = {
+                            "expected_reply_deferred",
+                            "law_gate",
+                            "policy_gate",
+                            "pending",
+                            "not_run",
+                            "guard_not_eligible",
+                        }
                         if meta.get("controller_attempted") is True:
+                            controller_stats["eligible"] += 1
                             controller_stats["attempted"] += 1
                         else:
-                            controller_stats["skipped"] += 1
-                            skip_reason = (
-                                _llm_quality_normalize_tool_token(meta.get("controller_skipped_reason"))
-                                or _llm_quality_normalize_tool_token(meta.get("router_skipped_reason"))
-                                or "not_attempted"
-                            )
                             skip_reasons = controller_stats.setdefault("skip_reasons", {})
                             skip_reasons[skip_reason] = skip_reasons.get(skip_reason, 0) + 1
+                            if skip_reason in non_eligible_reasons:
+                                controller_stats["non_eligible"] += 1
+                                non_eligible_map = controller_stats.setdefault(
+                                    "non_eligible_reasons", {}
+                                )
+                                non_eligible_map[skip_reason] = (
+                                    non_eligible_map.get(skip_reason, 0) + 1
+                                )
+                            else:
+                                controller_stats["eligible"] += 1
+                                controller_stats["skipped"] += 1
 
                     tool_action_token = _llm_quality_normalize_tool_token(meta.get("tool_action"))
                     if tool_action_token and "." in tool_action_token:
@@ -9651,23 +9673,34 @@ def _run_llm_quality(args):
     strict_contract_failed = stats.get("turns_strict_failed", 0)
     metrics["stages"] = {
         "controller": {
-            "opportunities": controller_stage.get("opportunities", 0),
+            "total_expected": controller_stage.get("total_expected", 0),
+            "opportunities": controller_stage.get("eligible", 0),
+            "eligible": controller_stage.get("eligible", 0),
+            "non_eligible": controller_stage.get("non_eligible", 0),
             "attempted": controller_stage.get("attempted", 0),
             "skipped": controller_stage.get("skipped", 0),
             "skip_reasons": controller_stage.get("skip_reasons", {}),
-            "attempt_rate": round(
-                controller_stage.get("attempted", 0)
-                / max(controller_stage.get("opportunities", 1), 1),
+            "non_eligible_reasons": controller_stage.get("non_eligible_reasons", {}),
+            "eligibility_rate": round(
+                controller_stage.get("eligible", 0)
+                / max(controller_stage.get("total_expected", 1), 1),
                 4,
             )
-            if controller_stage.get("opportunities", 0)
+            if controller_stage.get("total_expected", 0)
+            else None,
+            "attempt_rate": round(
+                controller_stage.get("attempted", 0)
+                / max(controller_stage.get("eligible", 1), 1),
+                4,
+            )
+            if controller_stage.get("eligible", 0)
             else None,
             "skip_rate": round(
                 controller_stage.get("skipped", 0)
-                / max(controller_stage.get("opportunities", 1), 1),
+                / max(controller_stage.get("eligible", 1), 1),
                 4,
             )
-            if controller_stage.get("opportunities", 0)
+            if controller_stage.get("eligible", 0)
             else None,
         },
         "tool_selection": {
