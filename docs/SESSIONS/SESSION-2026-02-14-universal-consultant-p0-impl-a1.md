@@ -16,16 +16,26 @@
   - Pushed branch and opened stacked PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/663
   - Merged policy-core rescue update and replay evidence via PRs #668 and #669.
   - Added CI/session-gate PR triggers for non-main base branches and opened PR #670.
+  - Merged follow-up fix path via PR #672 with replay `offline-replay-20260215-p0-r20` (`strict_pass_rate=1.0`, `failure_counts={}`).
+  - Implemented structured `policy_core` degradation taxonomy (`category/code/retryable/severity`) in `decision_meta` and `decision_trace`.
+  - Hardened booking prompt progression for weekday+daypart datetime phrasing (`в субботу вечером`) to advance to `name` slot.
+  - Fixed deterministic test drift for outbound send path (instance/outbox/chatflow mocks) without pack-specific hardcoding.
+  - Opened new PR with P0 + deterministic fixes: https://github.com/k1ddy/Truffles-AI-Employee/pull/674
 - next:
-  - Monitor PR #670 checks and stabilize remaining replay degradations (`pack_refs_missing`, `collect_slot_missing`).
+  - Monitor PR #674 CI and merge after green gates.
+  - After merge: replay frozen booking scenarios with judge off and publish fresh failure-ledger delta.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-14-universal-consultant-p0-contract-kernel-a1.md
   - pytest -q truffles-api/tests/test_intent.py
   - pytest -q truffles-api/tests/test_capabilities_runtime.py
   - pytest -q truffles-api/tests/test_booking_appointments.py
   - pytest -q truffles-api/tests/test_message_endpoint.py -k "degraded_booking_guard_uses_safe_collect or policy_core_reason_supports_info_rescue_prefixes"
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "policy_core_degraded_booking_guard_uses_safe_collect or policy_core_reason_supports_info_rescue_prefixes or classify_policy_core_degrade_reason_taxonomy or booking_prompt_skips_name_when_refused or booking_prompt_accepts_weekday_daypart_as_grounded_datetime or multi_intent_long_message_prioritizes_booking"
+  - python3 - <<'PY' ... tests.test_demo_salon_eval._run_webhook_conversation(case='E361a') ... PY
   - pytest -q truffles-api/tests/test_onboarding_contract_service.py truffles-api/tests/test_console_onboarding_contract_api.py truffles-api/tests/test_console_onboarding_state.py
   - scripts/session_check.sh
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/668
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/670
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/672
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/674
 - last_updated: 2026-02-15

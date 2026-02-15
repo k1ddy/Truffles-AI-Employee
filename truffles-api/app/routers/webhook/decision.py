@@ -3826,6 +3826,14 @@ POLICY_CORE_INFO_RESCUE_REASON_PREFIXES = (
     "policy_validation:",
     "llm_degraded:",
 )
+POLICY_CORE_RETRYABLE_ERROR_CODES = {
+    "timeout",
+    "connection_error",
+    "service_unavailable",
+    "rate_limit",
+    "deadline_exceeded",
+    "budget_exceeded",
+}
 POLICY_STYLE_REFERENCE_HINT_INTENTS = {"style_reference", "ask_photo", "send_photo"}
 
 
@@ -3844,12 +3852,81 @@ def _normalize_controller_fallback_reason(*, error: str | None) -> str | None:
 
 
 def _policy_core_reason_supports_info_rescue(reason: str | None) -> bool:
-    if not isinstance(reason, str):
+    classification = _classify_policy_core_degrade_reason(reason)
+    return bool(classification.get("info_rescue_eligible"))
+
+
+def _is_retryable_policy_core_error_code(code: str | None) -> bool:
+    if not isinstance(code, str):
         return False
-    normalized = reason.strip().casefold()
+    normalized = code.strip().casefold()
     if not normalized:
         return False
-    return normalized.startswith(POLICY_CORE_INFO_RESCUE_REASON_PREFIXES)
+    if normalized in POLICY_CORE_RETRYABLE_ERROR_CODES:
+        return True
+    if normalized.startswith("http_5"):
+        return True
+    return False
+
+
+def _classify_policy_core_degrade_reason(reason: str | None) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "category": "none",
+        "code": "none",
+        "retryable": False,
+        "info_rescue_eligible": False,
+        "severity": "none",
+    }
+    if not isinstance(reason, str):
+        return result
+
+    normalized = reason.strip().casefold()
+    if not normalized:
+        return result
+
+    category = "runtime"
+    code = normalized
+    if normalized == "guard_not_eligible":
+        category = "guard"
+    elif normalized == "envelope_missing":
+        category = "runtime"
+    elif ":" in normalized:
+        prefix, suffix = normalized.split(":", 1)
+        prefix = prefix.strip()
+        suffix = suffix.strip() or "unknown"
+        if prefix in {"policy_error", "policy_validation", "llm_degraded"}:
+            category = prefix
+            code = suffix
+
+    info_rescue_eligible = category in {"policy_error", "policy_validation", "llm_degraded"}
+
+    retryable = False
+    if category in {"policy_error", "llm_degraded"}:
+        retryable = _is_retryable_policy_core_error_code(code)
+    elif category == "runtime":
+        retryable = code == "envelope_missing"
+
+    if category == "guard":
+        severity = "low"
+    elif category == "policy_validation":
+        severity = "high"
+    elif category == "policy_error":
+        severity = "medium" if retryable else "high"
+    elif category == "llm_degraded":
+        severity = "medium" if retryable else "high"
+    else:
+        severity = "medium" if retryable else "low"
+
+    result.update(
+        {
+            "category": category,
+            "code": code,
+            "retryable": retryable,
+            "info_rescue_eligible": info_rescue_eligible,
+            "severity": severity,
+        }
+    )
+    return result
 
 
 def _policy_has_style_reference_hint(
@@ -7536,12 +7613,14 @@ async def _handle_webhook_payload(
                 policy_core_degrade_reason = f"llm_degraded:{timing_context.get('llm_degradation_reason')}"
             else:
                 policy_core_degrade_reason = "envelope_missing"
+        policy_core_failure = _classify_policy_core_degrade_reason(policy_core_degrade_reason)
         if saved_message:
             _update_message_decision_metadata(
                 saved_message,
                 {
                     "policy_core_mode": policy_core_mode,
                     "policy_core_degrade_reason": policy_core_degrade_reason,
+                    "policy_core_failure": policy_core_failure,
                 },
             )
         _record_decision_trace(
@@ -7550,6 +7629,9 @@ async def _handle_webhook_payload(
                 "stage": "policy_core_mode",
                 "decision": policy_core_mode,
                 "reason": policy_core_degrade_reason,
+                "failure_category": policy_core_failure.get("category"),
+                "failure_code": policy_core_failure.get("code"),
+                "failure_retryable": policy_core_failure.get("retryable"),
                 "validated": policy_valid,
                 "tool_action": policy_tool_action,
             },
@@ -9005,7 +9087,10 @@ async def _handle_webhook_payload(
                     for key, value in merged_slots.items():
                         if not booking_for_followup.get(key):
                             booking_for_followup[key] = value
-                    booking_for_followup, _ = _next_booking_prompt(booking_for_followup)
+                    booking_for_followup, _ = _next_booking_prompt(
+                        booking_for_followup,
+                        client_slug=payload.client_slug,
+                    )
                     derived_reply = _expected_reply_for_booking_question(
                         booking_for_followup.get("last_question")
                     )
@@ -9022,7 +9107,10 @@ async def _handle_webhook_payload(
                     for key, value in merged_slots.items():
                         if not booking_for_followup.get(key):
                             booking_for_followup[key] = value
-                    booking_for_followup, _ = _next_booking_prompt(booking_for_followup)
+                    booking_for_followup, _ = _next_booking_prompt(
+                        booking_for_followup,
+                        client_slug=payload.client_slug,
+                    )
                     derived_reply = _expected_reply_for_booking_question(
                         booking_for_followup.get("last_question")
                     )
@@ -9043,7 +9131,10 @@ async def _handle_webhook_payload(
                     for key, value in merged_slots.items():
                         if not booking_for_followup.get(key):
                             booking_for_followup[key] = value
-                    booking_for_followup, _ = _next_booking_prompt(booking_for_followup)
+                    booking_for_followup, _ = _next_booking_prompt(
+                        booking_for_followup,
+                        client_slug=payload.client_slug,
+                    )
                     derived_reply = _expected_reply_for_booking_question(
                         booking_for_followup.get("last_question")
                     )
@@ -10132,7 +10223,11 @@ async def _handle_webhook_payload(
             if carryover:
                 booking_state["service"] = carryover.get("service_query")
         refusal_flags = context_manager.get("refusal_flags") if isinstance(context_manager, dict) else None
-        booking_state, prompt = _next_booking_prompt(booking_state, refusal_flags=refusal_flags)
+        booking_state, prompt = _next_booking_prompt(
+            booking_state,
+            refusal_flags=refusal_flags,
+            client_slug=payload.client_slug,
+        )
         context = _set_booking_context(context, booking_state)
         _set_conversation_context(conversation, context)
         booking_expected = _expected_reply_for_booking_question(booking_state.get("last_question"))

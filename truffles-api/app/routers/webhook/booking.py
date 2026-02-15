@@ -42,6 +42,7 @@ DATETIME_DURATION_CONTEXT_MARKERS = (
     "по времени",
     "duration",
 )
+DATETIME_DAYPART_STEMS = ("утр", "дн", "веч", "ноч")
 _LAYOUT_SWAP_MAP = str.maketrans(
     {
         "q": "й",
@@ -914,7 +915,51 @@ def _update_booking_from_messages(
     return updated
 
 
-def _next_booking_prompt(booking: dict, *, refusal_flags: dict | None = None) -> tuple[dict, str | None]:
+def _is_datetime_grounded_for_prompt(
+    datetime_value: str | None,
+    *,
+    client_slug: str | None,
+) -> bool:
+    if not isinstance(datetime_value, str) or not datetime_value.strip():
+        return False
+    value = datetime_value.strip()
+    from . import _legacy as legacy
+
+    if legacy.TIME_PATTERN.search(value) or legacy.TIME_HOUR_PATTERN.search(value):
+        return True
+
+    parsed = _resolve_datetime_offline(value, client_slug=client_slug)
+    if not isinstance(parsed, dict):
+        return False
+    evidence = parsed.get("evidence")
+    if not isinstance(evidence, dict):
+        return False
+    if evidence.get("parser") != "lexicon":
+        return False
+    matches = evidence.get("lexicon_matches")
+    if not isinstance(matches, list) or len(matches) < 2:
+        return False
+    canonical_tokens: list[str] = []
+    for item in matches:
+        if not isinstance(item, dict):
+            continue
+        token = str(item.get("canonical") or item.get("variant") or "").strip().casefold()
+        if token:
+            canonical_tokens.append(token)
+    if len(canonical_tokens) < 2:
+        return False
+    return any(
+        any(stem in token for stem in DATETIME_DAYPART_STEMS)
+        for token in canonical_tokens
+    )
+
+
+def _next_booking_prompt(
+    booking: dict,
+    *,
+    refusal_flags: dict | None = None,
+    client_slug: str | None = None,
+) -> tuple[dict, str | None]:
     booking = dict(booking)
     if not booking.get("service"):
         booking["last_question"] = "service"
@@ -922,14 +967,7 @@ def _next_booking_prompt(booking: dict, *, refusal_flags: dict | None = None) ->
 
         return booking, legacy.MSG_BOOKING_ASK_SERVICE
     datetime_value = booking.get("datetime")
-    datetime_grounded = False
-    if isinstance(datetime_value, str) and datetime_value.strip():
-        from . import _legacy as legacy
-
-        datetime_grounded = bool(
-            legacy.TIME_PATTERN.search(datetime_value)
-            or legacy.TIME_HOUR_PATTERN.search(datetime_value)
-        )
+    datetime_grounded = _is_datetime_grounded_for_prompt(datetime_value, client_slug=client_slug)
     if not datetime_grounded:
         booking["last_question"] = "datetime"
         from . import _legacy as legacy
