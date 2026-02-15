@@ -228,7 +228,11 @@ function statusCardClass(ok: boolean): string {
 
 export default function CompanyWorkspacePage() {
     const { data: session } = useSession();
-    const { errors: inlineErrors, reportError, clearErrors } = useInlineErrorSummary();
+    const { errors: inlineErrors, reportError, reportInlineError, clearErrors } = useInlineErrorSummary();
+    const reportValidationError = (message: string, code = "VALIDATION_ERROR") => {
+        reportInlineError({ code, message });
+        toast.error(message);
+    };
 
     const [staleAfterMinutes] = useState(60);
 
@@ -287,18 +291,18 @@ export default function CompanyWorkspacePage() {
     const copyToClipboard = async (label: string, value?: string | null) => {
         const normalizedValue = (value ?? "").trim();
         if (!normalizedValue) {
-            toast.error(`${label}: нечего копировать`);
+            reportValidationError(`${label}: нечего копировать`);
             return;
         }
         if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
-            toast.error("Копирование недоступно в этом браузере");
+            reportValidationError("Копирование недоступно в этом браузере");
             return;
         }
         try {
             await navigator.clipboard.writeText(normalizedValue);
             toast.success(`${label} скопирован`);
         } catch {
-            toast.error(`Не удалось скопировать ${label.toLowerCase()}`);
+            reportValidationError(`Не удалось скопировать ${label.toLowerCase()}`);
         }
     };
 
@@ -511,7 +515,7 @@ export default function CompanyWorkspacePage() {
                 }
                 const normalizedReason = confirmationReason?.trim();
                 if (!normalizedReason) {
-                    toast.error("Укажите причину выполнения");
+                    reportValidationError("Укажите причину выполнения");
                     return;
                 }
                 const confirmationId = await createBranchConfirmation(branchId, normalizedReason, confirmationAction);
@@ -532,7 +536,7 @@ export default function CompanyWorkspacePage() {
                 parsed.code === "INVALID_PARAM"
                 && /limit must be between 1 and 100/i.test(parsed.message)
             ) {
-                toast.error("API вернул limit вне диапазона 1..100. Обновите страницу и повторите.");
+                reportValidationError("API вернул limit вне диапазона 1..100. Обновите страницу и повторите.");
                 return;
             }
             reportError(error);
@@ -543,7 +547,7 @@ export default function CompanyWorkspacePage() {
 
     const openProviderActionDialog = (action: ProviderOpsAction, mode: "dry_run" | "execute" = "execute") => {
         if (!selectedIntegration) {
-            toast.error("Сначала выберите филиал");
+            reportValidationError("Сначала выберите филиал");
             return;
         }
         setProviderActionDialog({
@@ -566,14 +570,14 @@ export default function CompanyWorkspacePage() {
 
     const buildDialogPayload = (dialog: ProviderActionDialogState): Partial<IntegrationBranchActionRequest> | null => {
         if (dialog.mode === "execute" && !dialog.reason.trim()) {
-            toast.error("Причина обязательна");
+            reportValidationError("Причина обязательна");
             return null;
         }
         if (dialog.action === "provider_renewal_confirmed") {
             const paidUntil = dialog.paidUntil.trim();
             const nextRenewalAt = dialog.nextRenewalAt.trim();
             if (!paidUntil && !nextRenewalAt) {
-                toast.error("Укажите paid_until или next_renewal_at");
+                reportValidationError("Укажите paid_until или next_renewal_at");
                 return null;
             }
             return {
@@ -619,13 +623,13 @@ export default function CompanyWorkspacePage() {
 
     const saveBranchWhatsappIdentity = async () => {
         if (!scopeBranchId) {
-            toast.error("Выберите филиал");
+            reportValidationError("Выберите филиал");
             return;
         }
         const normalizedPhone = branchPhone.trim();
         const normalizedInstanceId = branchInstanceId.trim();
         if (!normalizedPhone || !normalizedInstanceId) {
-            toast.error("Телефон и instance_id обязательны");
+            reportValidationError("Телефон и instance_id обязательны");
             return;
         }
         setBranchSaving(true);
@@ -646,7 +650,7 @@ export default function CompanyWorkspacePage() {
 
     const refreshWebhookSecret = async () => {
         if (!scopeBranchId) {
-            toast.error("Выберите филиал");
+            reportValidationError("Выберите филиал");
             return;
         }
         try {
@@ -664,12 +668,12 @@ export default function CompanyWorkspacePage() {
 
     const approveGoLive = async () => {
         if (!scopeBranchId) {
-            toast.error("Выберите филиал");
+            reportValidationError("Выберите филиал");
             return;
         }
         const reason = goLiveReason.trim();
         if (!reason) {
-            toast.error("Причина для go-live обязательна");
+            reportValidationError("Причина для go-live обязательна");
             return;
         }
         setGoLiveSaving("approve");
@@ -686,12 +690,12 @@ export default function CompanyWorkspacePage() {
 
     const rejectGoLive = async () => {
         if (!scopeBranchId) {
-            toast.error("Выберите филиал");
+            reportValidationError("Выберите филиал");
             return;
         }
         const reason = goLiveReason.trim();
         if (!reason) {
-            toast.error("Причина отклонения обязательна");
+            reportValidationError("Причина отклонения обязательна");
             return;
         }
         setGoLiveSaving("reject");
@@ -708,12 +712,12 @@ export default function CompanyWorkspacePage() {
 
     const waiveGoLive = async () => {
         if (!scopeBranchId) {
-            toast.error("Выберите филиал");
+            reportValidationError("Выберите филиал");
             return;
         }
         const reason = goLiveReason.trim();
         if (!reason) {
-            toast.error("Причина waiver обязательна");
+            reportValidationError("Причина waiver обязательна");
             return;
         }
         setGoLiveSaving("waive");
@@ -872,6 +876,9 @@ export default function CompanyWorkspacePage() {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="text-sm font-semibold text-red-900">Ошибки последних операций</div>
                         <button className="btn-ghost" onClick={clearErrors}>Очистить</button>
+                    </div>
+                    <div className="mt-1 text-xs text-red-900/80">
+                        Исправьте ввод в текущем блоке и повторите действие. Для API ошибок сверяйте `trace` в диагностике.
                     </div>
                     <div className="mt-3 space-y-2">
                         {inlineErrors.map((error) => (

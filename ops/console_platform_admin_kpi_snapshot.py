@@ -32,6 +32,13 @@ DEFAULT_TOAST_FILES = [
     "console-web/src/app/company-workspace/page.tsx",
 ]
 
+SEVERITY_ORDER = {
+    "ok": 0,
+    "unknown": 1,
+    "warning": 2,
+    "critical": 3,
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Capture Platform Admin KPI snapshot")
@@ -48,6 +55,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=10.0, help="HTTP timeout in seconds")
     parser.add_argument("--output", help="Output file path for JSON snapshot")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+    parser.add_argument("--outbox-pending-warning", type=int, default=500, help="Outbox pending warning threshold")
+    parser.add_argument("--outbox-pending-critical", type=int, default=1000, help="Outbox pending critical threshold")
+    parser.add_argument("--outbox-failed-warning", type=int, default=100, help="Outbox failed warning threshold")
+    parser.add_argument("--outbox-failed-critical", type=int, default=300, help="Outbox failed critical threshold")
+    parser.add_argument(
+        "--fail-on-breach",
+        action="store_true",
+        help="Exit non-zero when outbox guard reaches fail level",
+    )
+    parser.add_argument(
+        "--fail-level",
+        choices=["warning", "critical"],
+        default="critical",
+        help="Minimum outbox guard level that triggers non-zero exit with --fail-on-breach",
+    )
     return parser.parse_args()
 
 
@@ -128,6 +150,88 @@ def deep_find_first(obj: Any, wanted_keys: set[str]) -> Any:
     return None
 
 
+def coerce_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
+        try:
+            return int(float(normalized))
+        except ValueError:
+            return None
+    return None
+
+
+def classify_threshold(value: int | None, warning_threshold: int, critical_threshold: int) -> str:
+    if value is None:
+        return "unknown"
+    if value >= critical_threshold:
+        return "critical"
+    if value >= warning_threshold:
+        return "warning"
+    return "ok"
+
+
+def evaluate_outbox_guard(pending: Any, failed: Any, args: argparse.Namespace) -> dict[str, Any]:
+    pending_value = coerce_int(pending)
+    failed_value = coerce_int(failed)
+
+    pending_status = classify_threshold(
+        pending_value,
+        args.outbox_pending_warning,
+        args.outbox_pending_critical,
+    )
+    failed_status = classify_threshold(
+        failed_value,
+        args.outbox_failed_warning,
+        args.outbox_failed_critical,
+    )
+
+    overall_status = max(
+        [pending_status, failed_status],
+        key=lambda item: SEVERITY_ORDER.get(item, 0),
+    )
+
+    guidance: list[str] = []
+    if overall_status in {"warning", "critical"}:
+        guidance = [
+            "Проверить backlog outbox в Console Ops и зафиксировать trend за 24ч.",
+            "Запустить remediation runbook outbox и повторить snapshot после действий.",
+            "Если status=critical: stop-the-line для Platform Admin релизных решений.",
+        ]
+    elif overall_status == "unknown":
+        guidance = [
+            "Не удалось извлечь outbox metrics из health payload; проверить доступность endpoint и формат ответа.",
+        ]
+
+    return {
+        "status": overall_status,
+        "metrics": {
+            "pending": {
+                "value": pending_value,
+                "status": pending_status,
+                "warning_threshold": args.outbox_pending_warning,
+                "critical_threshold": args.outbox_pending_critical,
+            },
+            "failed": {
+                "value": failed_value,
+                "status": failed_status,
+                "warning_threshold": args.outbox_failed_warning,
+                "critical_threshold": args.outbox_failed_critical,
+            },
+        },
+        "guidance": guidance,
+    }
+
+
 def count_lines(path: Path) -> int:
     if not path.exists() or not path.is_file():
         return 0
@@ -187,6 +291,7 @@ def collect_snapshot(args: argparse.Namespace) -> dict[str, Any]:
     health_payload = console_health.get("payload", {}) if isinstance(console_health.get("payload"), dict) else {}
     outbox_pending = deep_find_first(health_payload, {"outbox_pending", "pending", "pending_count"})
     outbox_failed = deep_find_first(health_payload, {"outbox_failed", "failed", "failed_count"})
+    outbox_guard = evaluate_outbox_guard(outbox_pending, outbox_failed, args)
 
     loc_metrics = collect_loc_metrics(DEFAULT_LOC_FILES)
     toast_metrics = collect_toast_metrics(DEFAULT_TOAST_FILES)
@@ -208,6 +313,9 @@ def collect_snapshot(args: argparse.Namespace) -> dict[str, Any]:
             "derived": {
                 "outbox_pending_hint": outbox_pending,
                 "outbox_failed_hint": outbox_failed,
+            },
+            "guards": {
+                "outbox": outbox_guard,
             },
         },
         "code_metrics": loc_metrics,
@@ -238,6 +346,18 @@ def main() -> int:
         output_path.write_text(payload + "\n", encoding="utf-8")
 
     print(payload)
+    if args.fail_on_breach:
+        guard_status = (
+            snapshot
+            .get("runtime", {})
+            .get("guards", {})
+            .get("outbox", {})
+            .get("status", "ok")
+        )
+        fail_rank = SEVERITY_ORDER.get(args.fail_level, SEVERITY_ORDER["critical"])
+        guard_rank = SEVERITY_ORDER.get(str(guard_status), SEVERITY_ORDER["ok"])
+        if guard_rank >= fail_rank:
+            return 2
     return 0
 
 
