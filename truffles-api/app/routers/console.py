@@ -7,7 +7,7 @@ from datetime import date as dt_date
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Callable, Optional
+from typing import Callable, Literal, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request as URLRequest
@@ -131,6 +131,7 @@ from app.schemas.console import (
     ConsoleMeResponse,
     ConsoleMessage,
     ConsoleMessageListResponse,
+    ConsoleMetricFactMeta,
     ConsoleMetricsDailyResponse,
     ConsoleOnboardingAdvanceRequest,
     ConsoleOnboardingAutopilotIntake,
@@ -154,6 +155,16 @@ from app.schemas.console import (
     ConsoleOutboxListResponse,
     ConsoleOutboxRetryRequest,
     ConsoleOutboxRetryResponse,
+    ConsoleOwnerMode,
+    ConsoleOwnerOperationApplyRequest,
+    ConsoleOwnerOperationApplyResponse,
+    ConsoleOwnerOperationImpactResponse,
+    ConsoleOwnerOperationMetricDelta,
+    ConsoleOwnerOperationMetricSnapshot,
+    ConsoleOwnerOperationPreviewResponse,
+    ConsoleOwnerOperationRollbackRequest,
+    ConsoleOwnerOperationRollbackResponse,
+    ConsoleOwnerOperationSettingsPatch,
     ConsoleProviderLifecycleItem,
     ConsoleProviderLifecycleListResponse,
     ConsoleProviderOpsQueueItem,
@@ -188,7 +199,7 @@ from app.schemas.onboarding_contract import (
 from app.schemas.outbox_payload import validate_outbox_payload
 from app.services.agent_link_service import build_telegram_deep_link, create_agent_link_token
 from app.services.alert_service import alert_warning
-from app.services.audit_service import record_audit_event
+from app.services.audit_service import AuditEvent, record_audit_event
 from app.services.capabilities_service import merge_capabilities, payload_to_dict
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_confirmations import create_confirmation, mark_confirmation_used, require_confirmation
@@ -5657,6 +5668,306 @@ def _apply_billable_outbox_filters(query):
     )
 
 
+_DEFAULT_OWNER_MODE_SETTINGS = ConsoleOwnerOperationSettingsPatch(
+    reminder_1_minutes=10,
+    reminder_2_minutes=45,
+    escalation_timeout_minutes=120,
+)
+
+_OWNER_MODE_CONFIG: dict[ConsoleOwnerMode, dict[str, object]] = {
+    "capture_leads": {
+        "label": "Больше закрытых лидов",
+        "settings_patch": ConsoleOwnerOperationSettingsPatch(
+            reminder_1_minutes=5,
+            reminder_2_minutes=30,
+            escalation_timeout_minutes=60,
+        ),
+        "warnings": [
+            "Ускоренный режим повышает нагрузку на менеджеров в пиковые часы.",
+        ],
+    },
+    "stable_quality": {
+        "label": "Стабильное качество сервиса",
+        "settings_patch": ConsoleOwnerOperationSettingsPatch(
+            reminder_1_minutes=10,
+            reminder_2_minutes=45,
+            escalation_timeout_minutes=120,
+        ),
+        "warnings": [
+            "Сбалансированный режим безопасен по умолчанию, но требует ежедневного контроля backlog.",
+        ],
+    },
+    "team_protection": {
+        "label": "Беречь команду в пик",
+        "settings_patch": ConsoleOwnerOperationSettingsPatch(
+            reminder_1_minutes=15,
+            reminder_2_minutes=60,
+            escalation_timeout_minutes=180,
+        ),
+        "warnings": [
+            "Бережный режим снижает давление на команду, но может замедлить обработку лидов.",
+        ],
+    },
+}
+
+
+def _build_metric_meta(
+    *,
+    kind: Literal["fact", "estimate", "missing"],
+    source: str,
+    as_of: Optional[str] = None,
+    scope: Literal["system", "client", "branch"] = "client",
+    sample_size: Optional[int] = None,
+    note: Optional[str] = None,
+) -> ConsoleMetricFactMeta:
+    return ConsoleMetricFactMeta(
+        kind=kind,
+        source=source,
+        as_of=as_of,
+        scope=scope,
+        sample_size=sample_size,
+        note=note,
+    )
+
+
+def _resolve_owner_mode_profile(mode: ConsoleOwnerMode) -> tuple[str, ConsoleOwnerOperationSettingsPatch, list[str]]:
+    profile = _OWNER_MODE_CONFIG[mode]
+    label = str(profile["label"])
+    settings_patch = profile["settings_patch"]
+    warnings = profile.get("warnings")
+    return (
+        label,
+        settings_patch if isinstance(settings_patch, ConsoleOwnerOperationSettingsPatch) else _DEFAULT_OWNER_MODE_SETTINGS,
+        list(warnings) if isinstance(warnings, list) else [],
+    )
+
+
+def _normalize_owner_settings(settings: Optional[ClientSettings]) -> ConsoleOwnerOperationSettingsPatch:
+    if settings is None:
+        return _DEFAULT_OWNER_MODE_SETTINGS.model_copy(deep=True)
+
+    reminder_1 = settings.reminder_timeout_1 or _DEFAULT_OWNER_MODE_SETTINGS.reminder_1_minutes
+    reminder_2 = settings.reminder_timeout_2 or _DEFAULT_OWNER_MODE_SETTINGS.reminder_2_minutes
+    escalation = settings.auto_close_timeout or _DEFAULT_OWNER_MODE_SETTINGS.escalation_timeout_minutes
+    return ConsoleOwnerOperationSettingsPatch(
+        reminder_1_minutes=reminder_1,
+        reminder_2_minutes=reminder_2,
+        escalation_timeout_minutes=escalation,
+    )
+
+
+def _ensure_client_settings_row(db: Session, *, client_id: UUID) -> ClientSettings:
+    settings = db.query(ClientSettings).filter(ClientSettings.client_id == client_id).first()
+    if settings is None:
+        settings = ClientSettings(client_id=client_id)
+        db.add(settings)
+    return settings
+
+
+def _apply_owner_operation_settings(
+    *,
+    settings: ClientSettings,
+    patch: ConsoleOwnerOperationSettingsPatch,
+) -> None:
+    settings.reminder_timeout_1 = patch.reminder_1_minutes
+    settings.reminder_timeout_2 = patch.reminder_2_minutes
+    settings.auto_close_timeout = patch.escalation_timeout_minutes
+
+
+def _collect_owner_operation_metrics(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    now: datetime,
+) -> tuple[ConsoleOwnerOperationMetricSnapshot, dict[str, ConsoleMetricFactMeta]]:
+    allowed_branch_ids = _resolve_branch_scope(context)
+    scope: Literal["system", "client", "branch"] = "branch" if allowed_branch_ids is not None else "client"
+
+    outbox_query = db.query(OutboxMessage).filter(OutboxMessage.client_id == context.client.id)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            outbox_backlog = 0
+        else:
+            outbox_query = outbox_query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
+            outbox_backlog = outbox_query.filter(OutboxMessage.status.in_(["PENDING", "PROCESSING"])).count()
+    else:
+        outbox_backlog = outbox_query.filter(OutboxMessage.status.in_(["PENDING", "PROCESSING"])).count()
+
+    handover_query = db.query(Handover).filter(Handover.client_id == context.client.id)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            unresolved_older_than_60m = 0
+        else:
+            handover_query = handover_query.join(
+                Conversation,
+                Handover.conversation_id == Conversation.id,
+            ).filter(Conversation.branch_id.in_(allowed_branch_ids))
+            unresolved_older_than_60m = handover_query.filter(
+                Handover.status.in_(["pending", "active"]),
+                Handover.created_at < (now - timedelta(minutes=60)),
+            ).count()
+    else:
+        unresolved_older_than_60m = handover_query.filter(
+            Handover.status.in_(["pending", "active"]),
+            Handover.created_at < (now - timedelta(minutes=60)),
+        ).count()
+
+    analytics_scope_limited = allowed_branch_ids is not None
+    analytics_row = _load_latest_analytics_row(
+        db=db,
+        client_id=context.client.id,
+        metric_date=now.date(),
+        analytics_scope_limited=analytics_scope_limited,
+    )
+    manager_median_response_seconds = _safe_float(
+        analytics_row.get("manager_median_response_seconds") if analytics_row else None
+    )
+    metric_date = analytics_row.get("metric_date") if analytics_row else None
+    analytics_as_of = metric_date.isoformat() if metric_date else now.date().isoformat()
+
+    metric_meta = {
+        "outbox_backlog": _build_metric_meta(
+            kind="fact",
+            source="outbox_messages",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=outbox_backlog,
+        ),
+        "unresolved_older_than_60m": _build_metric_meta(
+            kind="fact",
+            source="handovers",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=unresolved_older_than_60m,
+        ),
+        "manager_median_response_seconds": _build_metric_meta(
+            kind="fact" if manager_median_response_seconds is not None else "missing",
+            source="metrics_analytics_daily",
+            as_of=analytics_as_of,
+            scope=scope,
+            sample_size=1 if manager_median_response_seconds is not None else None,
+            note=(
+                "company-level analytics unavailable in branch scope"
+                if analytics_scope_limited and manager_median_response_seconds is None
+                else None
+            ),
+        ),
+    }
+    snapshot = ConsoleOwnerOperationMetricSnapshot(
+        outbox_backlog=outbox_backlog,
+        unresolved_older_than_60m=unresolved_older_than_60m,
+        manager_median_response_seconds=manager_median_response_seconds,
+    )
+    return snapshot, metric_meta
+
+
+def _parse_owner_operation_settings(
+    payload: dict,
+    *,
+    key: str,
+) -> Optional[ConsoleOwnerOperationSettingsPatch]:
+    raw = payload.get(key)
+    if not isinstance(raw, dict):
+        return None
+    reminder_1 = _safe_int(raw.get("reminder_1_minutes"))
+    reminder_2 = _safe_int(raw.get("reminder_2_minutes"))
+    escalation = _safe_int(raw.get("escalation_timeout_minutes"))
+    if not reminder_1 or not reminder_2 or not escalation:
+        return None
+    return ConsoleOwnerOperationSettingsPatch(
+        reminder_1_minutes=reminder_1,
+        reminder_2_minutes=reminder_2,
+        escalation_timeout_minutes=escalation,
+    )
+
+
+def _parse_owner_operation_snapshot(
+    payload: dict,
+    *,
+    key: str = "baseline",
+) -> Optional[ConsoleOwnerOperationMetricSnapshot]:
+    raw = payload.get(key)
+    if not isinstance(raw, dict):
+        return None
+    outbox_backlog = _safe_int(raw.get("outbox_backlog"))
+    unresolved_older_than_60m = _safe_int(raw.get("unresolved_older_than_60m"))
+    manager_median = _safe_float(raw.get("manager_median_response_seconds"))
+    if outbox_backlog is None or unresolved_older_than_60m is None:
+        return None
+    return ConsoleOwnerOperationMetricSnapshot(
+        outbox_backlog=outbox_backlog,
+        unresolved_older_than_60m=unresolved_older_than_60m,
+        manager_median_response_seconds=manager_median,
+    )
+
+
+def _load_owner_mode_apply_event(
+    *,
+    db: Session,
+    context: ConsoleAuthContext,
+    operation_id: Optional[UUID] = None,
+) -> Optional[AuditEvent]:
+    query = db.query(AuditEvent).filter(
+        AuditEvent.client_id == context.client.id,
+        AuditEvent.event_type == "owner_mode_apply",
+    )
+    allowed_branch_ids = _resolve_branch_scope(context)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            return None
+        query = query.filter(AuditEvent.branch_id.in_(allowed_branch_ids))
+
+    if operation_id is not None:
+        return query.filter(AuditEvent.id == operation_id).first()
+    return query.order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc()).first()
+
+
+def _build_owner_operation_metric_delta(
+    *,
+    baseline: Optional[float],
+    current: Optional[float],
+) -> ConsoleOwnerOperationMetricDelta:
+    if baseline is None or current is None:
+        return ConsoleOwnerOperationMetricDelta(
+            baseline=baseline,
+            current=current,
+            delta=None,
+            trend="unknown",
+        )
+    delta = round(current - baseline, 3)
+    if abs(delta) < 1e-9:
+        trend = "stable"
+    elif current < baseline:
+        trend = "down"
+    else:
+        trend = "up"
+    return ConsoleOwnerOperationMetricDelta(
+        baseline=baseline,
+        current=current,
+        delta=delta,
+        trend=trend,
+    )
+
+
+def _summarize_owner_operation_delta(metrics: dict[str, ConsoleOwnerOperationMetricDelta]) -> Literal[
+    "improved",
+    "regressed",
+    "mixed_or_stable",
+]:
+    improved = 0
+    regressed = 0
+    for metric in metrics.values():
+        if metric.trend == "down":
+            improved += 1
+        elif metric.trend == "up":
+            regressed += 1
+    if improved > 0 and regressed == 0:
+        return "improved"
+    if regressed > 0 and improved == 0:
+        return "regressed"
+    return "mixed_or_stable"
+
+
 @router.get(
     "/business/summary",
     response_model=ConsoleBusinessSummaryResponse,
@@ -5746,7 +6057,7 @@ async def get_business_summary(
     analytics_row = db.execute(
         text(
             """
-            SELECT first_response_p90_seconds
+            SELECT metric_date, first_response_p90_seconds
             FROM metrics_analytics_daily
             WHERE client_id = :client_id
               AND metric_date <= :metric_date
@@ -5756,11 +6067,16 @@ async def get_business_summary(
         ),
         {"client_id": context.client.id, "metric_date": now.date()},
     ).mappings().first()
+    metric_date = None
+    if analytics_row and analytics_row.get("metric_date") is not None:
+        metric_date = analytics_row.get("metric_date")
     first_response_p90_seconds = (
         float(analytics_row.get("first_response_p90_seconds"))
         if analytics_row and analytics_row.get("first_response_p90_seconds") is not None
         else None
     )
+    scope: Literal["system", "client", "branch"] = "branch" if allowed_branch_ids is not None else "client"
+    analytics_as_of = metric_date.isoformat() if metric_date is not None else now.date().isoformat()
 
     status, status_label = _derive_business_status(
         outbox_backlog=outbox_backlog,
@@ -5773,6 +6089,58 @@ async def get_business_summary(
         unresolved_cases=unresolved_cases,
         first_response_p90_seconds=first_response_p90_seconds,
     )
+    metric_meta = {
+        "outbox_backlog": _build_metric_meta(
+            kind="fact",
+            source="outbox_messages",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=outbox_backlog,
+        ),
+        "outbox_failed_24h": _build_metric_meta(
+            kind="fact",
+            source="outbox_messages",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=outbox_failed_24h,
+        ),
+        "pending_cases": _build_metric_meta(
+            kind="fact",
+            source="handovers",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=pending_cases,
+        ),
+        "active_cases": _build_metric_meta(
+            kind="fact",
+            source="handovers",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=active_cases,
+        ),
+        "unresolved_cases": _build_metric_meta(
+            kind="fact",
+            source="handovers",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=unresolved_cases,
+        ),
+        "oldest_unresolved_minutes": _build_metric_meta(
+            kind="fact" if oldest_unresolved_minutes is not None else "missing",
+            source="handovers",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=1 if oldest_unresolved_minutes is not None else None,
+            note="no unresolved cases" if oldest_unresolved_minutes is None else None,
+        ),
+        "first_response_p90_seconds": _build_metric_meta(
+            kind="fact" if first_response_p90_seconds is not None else "missing",
+            source="metrics_analytics_daily",
+            as_of=analytics_as_of,
+            scope=scope,
+            sample_size=1 if first_response_p90_seconds is not None else None,
+        ),
+    }
 
     return ConsoleBusinessSummaryResponse(
         generated_at=now.isoformat(),
@@ -5786,6 +6154,7 @@ async def get_business_summary(
         oldest_unresolved_minutes=oldest_unresolved_minutes,
         first_response_p90_seconds=first_response_p90_seconds,
         actions=actions,
+        metric_meta=metric_meta,
     )
 
 
@@ -5861,6 +6230,61 @@ async def get_subscription_summary(
         over_quota=over_quota,
         projected_over_quota=projected_over_quota,
     )
+    scope: Literal["system", "client", "branch"] = "branch" if allowed_branch_ids is not None else "client"
+    metric_meta = {
+        "billable_messages": _build_metric_meta(
+            kind="fact",
+            source="outbox_messages",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=billable_messages,
+        ),
+        "monthly_quota": _build_metric_meta(
+            kind="fact" if monthly_quota is not None else "missing",
+            source=f"subscription_contract:{quota_source}",
+            as_of=now.isoformat(),
+            scope="client",
+            sample_size=1 if monthly_quota is not None else None,
+        ),
+        "remaining_quota": _build_metric_meta(
+            kind="fact" if remaining_quota is not None else "missing",
+            source=f"derived:billable_messages+monthly_quota:{quota_source}",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=1 if remaining_quota is not None else None,
+        ),
+        "usage_percent": _build_metric_meta(
+            kind="fact" if usage_percent is not None else "missing",
+            source=f"derived:billable_messages+monthly_quota:{quota_source}",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=1 if usage_percent is not None else None,
+        ),
+        "projected_month_total": _build_metric_meta(
+            kind="estimate",
+            source="linear_projection:period_elapsed_days",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=elapsed_days,
+            note="projection, not observed fact",
+        ),
+        "projected_remaining_quota": _build_metric_meta(
+            kind="estimate" if projected_remaining_quota is not None else "missing",
+            source="derived:projected_month_total+monthly_quota",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=elapsed_days if projected_remaining_quota is not None else None,
+            note="projection, not observed fact" if projected_remaining_quota is not None else None,
+        ),
+        "projected_overage_messages": _build_metric_meta(
+            kind="estimate" if projected_overage_messages is not None else "missing",
+            source="derived:projected_month_total+monthly_quota",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=elapsed_days if projected_overage_messages is not None else None,
+            note="projection, not observed fact" if projected_overage_messages is not None else None,
+        ),
+    }
 
     evidence_items = []
     for row in evidence_rows:
@@ -5900,6 +6324,7 @@ async def get_subscription_summary(
         overage_policy_message="Перерасход считается по формуле overage = max(0, billable - quota).",
         over_quota=over_quota,
         evidence=evidence_items,
+        metric_meta=metric_meta,
     )
 
 
@@ -5912,8 +6337,6 @@ async def get_business_data_trust(
     request: Request,
     db: Session = Depends(get_db),
 ) -> ConsoleDataTrustSummaryResponse:
-    from app.services.audit_service import AuditEvent
-
     context = get_console_context(request, db)
     require_console_permission(
         context,
@@ -6001,6 +6424,67 @@ async def get_business_data_trust(
         critical_audit_events_24h=critical_audit_events_24h,
         analytics_scope_limited=analytics_scope_limited,
     )
+    scope: Literal["system", "client", "branch"] = "branch" if allowed_branch_ids is not None else "client"
+    analytics_as_of = metric_date or now.date().isoformat()
+    metric_meta = {
+        "first_response_missing_total": _build_metric_meta(
+            kind="fact" if first_response_missing_total is not None else "missing",
+            source="metrics_analytics_daily",
+            as_of=analytics_as_of,
+            scope=scope,
+            sample_size=1 if first_response_missing_total is not None else None,
+            note=(
+                "company-level analytics unavailable in branch scope"
+                if analytics_scope_limited and first_response_missing_total is None
+                else None
+            ),
+        ),
+        "escalation_meta_missing_total": _build_metric_meta(
+            kind="fact" if escalation_meta_missing_total is not None else "missing",
+            source="metrics_analytics_daily",
+            as_of=analytics_as_of,
+            scope=scope,
+            sample_size=1 if escalation_meta_missing_total is not None else None,
+            note=(
+                "company-level analytics unavailable in branch scope"
+                if analytics_scope_limited and escalation_meta_missing_total is None
+                else None
+            ),
+        ),
+        "intent_missing_total": _build_metric_meta(
+            kind="fact" if intent_missing_total is not None else "missing",
+            source="metrics_analytics_daily",
+            as_of=analytics_as_of,
+            scope=scope,
+            sample_size=1 if intent_missing_total is not None else None,
+            note=(
+                "company-level analytics unavailable in branch scope"
+                if analytics_scope_limited and intent_missing_total is None
+                else None
+            ),
+        ),
+        "knowledge_stale_hours": _build_metric_meta(
+            kind="fact" if knowledge_stale_hours is not None else "missing",
+            source="knowledge_versions",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=1 if knowledge_stale_hours is not None else None,
+        ),
+        "audit_events_24h": _build_metric_meta(
+            kind="fact",
+            source="audit_events",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=audit_events_24h,
+        ),
+        "critical_audit_events_24h": _build_metric_meta(
+            kind="fact",
+            source="audit_events",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=critical_audit_events_24h,
+        ),
+    }
 
     return ConsoleDataTrustSummaryResponse(
         generated_at=now.isoformat(),
@@ -6016,6 +6500,7 @@ async def get_business_data_trust(
         audit_events_24h=audit_events_24h,
         critical_audit_events_24h=critical_audit_events_24h,
         actions=actions,
+        metric_meta=metric_meta,
     )
 
 
@@ -6219,6 +6704,48 @@ async def get_business_team_performance(
         top_manager_unresolved=top_manager_unresolved,
         analytics_scope_limited=analytics_scope_limited,
     )
+    scope: Literal["system", "client", "branch"] = "branch" if allowed_branch_ids is not None else "client"
+    analytics_as_of = metric_date or now.date().isoformat()
+    metric_meta = {
+        "unresolved_cases": _build_metric_meta(
+            kind="fact",
+            source="handovers",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=unresolved_cases,
+        ),
+        "unresolved_older_than_60m": _build_metric_meta(
+            kind="fact",
+            source="handovers",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=unresolved_older_than_60m,
+        ),
+        "manager_median_response_seconds": _build_metric_meta(
+            kind="fact" if manager_median_response_seconds is not None else "missing",
+            source="metrics_analytics_daily",
+            as_of=analytics_as_of,
+            scope=scope,
+            sample_size=1 if manager_median_response_seconds is not None else None,
+            note=(
+                "company-level analytics unavailable in branch scope"
+                if analytics_scope_limited and manager_median_response_seconds is None
+                else None
+            ),
+        ),
+        "first_response_p90_seconds": _build_metric_meta(
+            kind="fact" if first_response_p90_seconds is not None else "missing",
+            source="metrics_analytics_daily",
+            as_of=analytics_as_of,
+            scope=scope,
+            sample_size=1 if first_response_p90_seconds is not None else None,
+            note=(
+                "company-level analytics unavailable in branch scope"
+                if analytics_scope_limited and first_response_p90_seconds is None
+                else None
+            ),
+        ),
+    }
 
     return ConsoleTeamPerformanceSummaryResponse(
         generated_at=now.isoformat(),
@@ -6232,6 +6759,271 @@ async def get_business_team_performance(
         unresolved_older_than_60m=unresolved_older_than_60m,
         managers=managers,
         actions=actions,
+        metric_meta=metric_meta,
+    )
+
+
+@router.post(
+    "/business/operations/owner-mode/preview",
+    response_model=ConsoleOwnerOperationPreviewResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def preview_owner_mode_operation(
+    body: ConsoleOwnerOperationApplyRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleOwnerOperationPreviewResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "settings",
+        "write",
+        message="Only owner/admin can preview owner operation modes",
+    )
+    now = datetime.now(timezone.utc)
+    mode_label, settings_patch, warnings = _resolve_owner_mode_profile(body.mode)
+    settings = db.query(ClientSettings).filter(ClientSettings.client_id == context.client.id).first()
+    current_settings = _normalize_owner_settings(settings)
+    baseline, metric_meta = _collect_owner_operation_metrics(db=db, context=context, now=now)
+
+    if (
+        current_settings.reminder_1_minutes == settings_patch.reminder_1_minutes
+        and current_settings.reminder_2_minutes == settings_patch.reminder_2_minutes
+        and current_settings.escalation_timeout_minutes == settings_patch.escalation_timeout_minutes
+    ):
+        warnings.append("Профиль уже активен: изменения в SLA не требуются.")
+    if baseline.outbox_backlog >= 1000:
+        warnings.append("Outbox backlog критический: сначала подтвердите, что команда готова к изменению режима.")
+
+    return ConsoleOwnerOperationPreviewResponse(
+        generated_at=now.isoformat(),
+        mode=body.mode,
+        mode_label=mode_label,
+        settings_patch=settings_patch,
+        current_settings=current_settings,
+        baseline=baseline,
+        warnings=warnings,
+        metric_meta=metric_meta,
+    )
+
+
+@router.post(
+    "/business/operations/owner-mode/apply",
+    response_model=ConsoleOwnerOperationApplyResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def apply_owner_mode_operation(
+    body: ConsoleOwnerOperationApplyRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleOwnerOperationApplyResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "settings",
+        "write",
+        message="Only owner/admin can apply owner operation modes",
+    )
+    now = datetime.now(timezone.utc)
+    due_at = now + timedelta(hours=24)
+    mode_label, settings_patch, _warnings = _resolve_owner_mode_profile(body.mode)
+    baseline, metric_meta = _collect_owner_operation_metrics(db=db, context=context, now=now)
+
+    settings = _ensure_client_settings_row(db, client_id=context.client.id)
+    previous_settings = _normalize_owner_settings(settings)
+    _apply_owner_operation_settings(settings=settings, patch=settings_patch)
+
+    operation_id = uuid4()
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="owner_mode_apply",
+        entity_type="client_settings",
+        entity_id=context.client.id,
+        payload={
+            "operation_id": str(operation_id),
+            "mode": body.mode,
+            "mode_label": mode_label,
+            "previous_settings": previous_settings.model_dump(mode="json"),
+            "applied_settings": settings_patch.model_dump(mode="json"),
+            "baseline": baseline.model_dump(mode="json"),
+            "metric_meta": {key: value.model_dump(mode="json") for key, value in metric_meta.items()},
+            "applied_at": now.isoformat(),
+            "impact_check_due_at": due_at.isoformat(),
+        },
+        client_id=context.client.id,
+        branch_id=context.effective_branch_id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+    )
+    db.commit()
+
+    return ConsoleOwnerOperationApplyResponse(
+        success=True,
+        operation_id=operation_id,
+        mode=body.mode,
+        mode_label=mode_label,
+        applied_settings=settings_patch,
+        previous_settings=previous_settings,
+        baseline=baseline,
+        applied_at=now.isoformat(),
+        impact_check_due_at=due_at.isoformat(),
+        metric_meta=metric_meta,
+    )
+
+
+@router.post(
+    "/business/operations/owner-mode/rollback",
+    response_model=ConsoleOwnerOperationRollbackResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def rollback_owner_mode_operation(
+    body: ConsoleOwnerOperationRollbackRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleOwnerOperationRollbackResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "settings",
+        "write",
+        message="Only owner/admin can rollback owner operation modes",
+    )
+
+    source_event = _load_owner_mode_apply_event(
+        db=db,
+        context=context,
+        operation_id=body.operation_id,
+    )
+    if source_event is None:
+        raise ConsoleAPIError(404, "OWNER_OPERATION_NOT_FOUND", "Owner operation not found")
+
+    payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+    restore_patch = _parse_owner_operation_settings(payload, key="previous_settings")
+    if restore_patch is None:
+        raise ConsoleAPIError(409, "OWNER_OPERATION_ROLLBACK_UNAVAILABLE", "Rollback snapshot not available")
+
+    settings = _ensure_client_settings_row(db, client_id=context.client.id)
+    _apply_owner_operation_settings(settings=settings, patch=restore_patch)
+    rolled_back_at = datetime.now(timezone.utc)
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="owner_mode_rollback",
+        entity_type="client_settings",
+        entity_id=context.client.id,
+        payload={
+            "source_operation_id": str(source_event.id),
+            "mode": payload.get("mode"),
+            "restored_settings": restore_patch.model_dump(mode="json"),
+            "rolled_back_at": rolled_back_at.isoformat(),
+        },
+        client_id=context.client.id,
+        branch_id=context.effective_branch_id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+    )
+    db.commit()
+
+    return ConsoleOwnerOperationRollbackResponse(
+        success=True,
+        operation_id=source_event.id,
+        restored_settings=restore_patch,
+        rolled_back_at=rolled_back_at.isoformat(),
+        message="Rollback completed",
+    )
+
+
+@router.get(
+    "/business/operations/{operation_id}/impact",
+    response_model=ConsoleOwnerOperationImpactResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}, 404: {"model": ConsoleErrorResponse}},
+)
+async def get_owner_mode_operation_impact(
+    operation_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleOwnerOperationImpactResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can access owner operation impact",
+    )
+    event = _load_owner_mode_apply_event(
+        db=db,
+        context=context,
+        operation_id=operation_id,
+    )
+    if event is None:
+        raise ConsoleAPIError(404, "OWNER_OPERATION_NOT_FOUND", "Owner operation not found")
+
+    payload = event.payload if isinstance(event.payload, dict) else {}
+    mode_value = str(payload.get("mode", "stable_quality"))
+    mode: ConsoleOwnerMode = (
+        mode_value
+        if mode_value in {"capture_leads", "stable_quality", "team_protection"}
+        else "stable_quality"
+    )
+    baseline = _parse_owner_operation_snapshot(payload, key="baseline")
+    if baseline is None:
+        raise ConsoleAPIError(409, "OWNER_OPERATION_IMPACT_UNAVAILABLE", "Baseline snapshot not available")
+
+    due_at = payload.get("impact_check_due_at")
+    if not isinstance(due_at, str) or not due_at.strip():
+        due_at = event.created_at.isoformat() if event.created_at else datetime.now(timezone.utc).isoformat()
+
+    checked_at = datetime.now(timezone.utc)
+    current, metric_meta = _collect_owner_operation_metrics(db=db, context=context, now=checked_at)
+
+    metrics = {
+        "outbox_backlog": _build_owner_operation_metric_delta(
+            baseline=float(baseline.outbox_backlog),
+            current=float(current.outbox_backlog),
+        ),
+        "unresolved_older_than_60m": _build_owner_operation_metric_delta(
+            baseline=float(baseline.unresolved_older_than_60m),
+            current=float(current.unresolved_older_than_60m),
+        ),
+        "manager_median_response_seconds": _build_owner_operation_metric_delta(
+            baseline=baseline.manager_median_response_seconds,
+            current=current.manager_median_response_seconds,
+        ),
+    }
+    summary = _summarize_owner_operation_delta(metrics)
+
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="owner_mode_impact_check",
+        entity_type="client_settings",
+        entity_id=context.client.id,
+        payload={
+            "source_operation_id": str(event.id),
+            "mode": mode,
+            "summary": summary,
+            "metrics": {key: value.model_dump(mode="json") for key, value in metrics.items()},
+            "checked_at": checked_at.isoformat(),
+        },
+        client_id=context.client.id,
+        branch_id=context.effective_branch_id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+    )
+    db.commit()
+
+    return ConsoleOwnerOperationImpactResponse(
+        operation_id=event.id,
+        mode=mode,
+        checked_at=checked_at.isoformat(),
+        due_at=due_at,
+        summary=summary,
+        baseline=baseline,
+        current=current,
+        metrics=metrics,
+        metric_meta=metric_meta,
     )
 
 
@@ -6241,20 +7033,26 @@ async def get_business_team_performance(
 )
 async def get_health(db: Session = Depends(get_db)) -> ConsoleHealthResponse:
     """Get system health status."""
-    import os
-
     from app.models import OutboxMessage
-    from app.schemas.console import ConsoleHealthResponse
-    
+
     # Check database
     try:
-        from sqlalchemy import text
         db.execute(text("SELECT 1"))
         db_status = "connected"
-    except Exception as e:
-        print(f"DB health check error: {e}")
+    except Exception:
         db_status = "error"
-    
+
+    redis_status = "unknown"
+    redis_url = os.getenv("REDIS_URL")
+    if redis_url:
+        try:
+            import redis  # type: ignore
+
+            redis.Redis.from_url(redis_url, socket_connect_timeout=1, socket_timeout=1).ping()
+            redis_status = "connected"
+        except Exception:
+            redis_status = "error"
+
     # Count outbox backlog
     try:
         backlog = (
@@ -6264,12 +7062,12 @@ async def get_health(db: Session = Depends(get_db)) -> ConsoleHealthResponse:
         )
     except Exception:
         backlog = -1
-    
+
     return ConsoleHealthResponse(
-        status="ok" if db_status == "connected" else "degraded",
+        status="ok" if db_status == "connected" and redis_status == "connected" else "degraded",
         version=os.getenv("APP_VERSION", "dev"),
         database=db_status,
-        redis="connected",  # Simplified for MVP
+        redis=redis_status,
         outbox_backlog=backlog,
     )
 

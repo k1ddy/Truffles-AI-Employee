@@ -442,3 +442,4 @@
 | 2026-02-15-owner-admin-wave5-controls-a1 | active | feat/2026-02-15-owner-admin-wave5-controls-a1 | /home/zhan/worktrees/2026-02-15-owner-admin-wave5-controls-a1 | docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave5-controls-a1.md | 2026-02-15 |
 | 2026-02-15-owner-admin-wave6-automation-a1 | active | feat/2026-02-15-owner-admin-wave6-automation-a1 | /home/zhan/worktrees/2026-02-15-owner-admin-wave6-automation-a1 | docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave6-automation-a1.md | 2026-02-15 |
 | 2026-02-15-p0-reschedule-handoff-r33-a1 | active | fix/p0-reschedule-handoff-r33-a1 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-14-universal-consultant-p0-contract-kernel-a1.md | 2026-02-15 |
+| 2026-02-15-owner-admin-wave7-fact-os-a1 | active | feat/2026-02-15-owner-admin-wave7-fact-os-a1 | /home/zhan/worktrees/2026-02-15-owner-admin-wave7-fact-os-a1 | docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave7-fact-os-a1.md | 2026-02-15 |

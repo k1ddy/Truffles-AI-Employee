@@ -1,0 +1,26 @@
+# SESSION 2026-02-15-owner-admin-wave7-fact-os-a1 — Session 2026-02-15-owner-admin-wave7-fact-os-a1
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave7-fact-os-a1.md
+- branch: feat/2026-02-15-owner-admin-wave7-fact-os-a1
+- worktree: /home/zhan/worktrees/2026-02-15-owner-admin-wave7-fact-os-a1
+- base_ref: origin/main
+- scope: Owner/Admin Wave-7 — Fact Contract Layer + Owner Operating System (server-driven preview/apply/rollback/impact) across backend, UI, contracts, tests, and docs.
+- done:
+  - Added fact-metadata (`kind/source/as_of/scope/sample_size`) to owner/admin KPI payloads (`/business/summary`, `/subscription/summary`, `/business/data-trust`, `/business/team-performance`) and rendered source-confidence hints in UI cards.
+  - Added server-driven owner operation flow (`/business/operations/owner-mode/{preview,apply,rollback}` + `GET /business/operations/{operation_id}/impact`) with rollback snapshot in audit trail.
+  - Migrated Team Performance/Settings UI from local-only quick presets to server operations with impact/rollback controls.
+  - Updated OpenAPI + frontend API client types for new owner operation and fact-contract response models.
+  - Expanded backend unit coverage and owner/admin smoke assertions for owner-operation surfaces.
+  - Collected runtime artifacts for owner/admin control loop (`T+0/T+24`) and owner-operation preview/apply payloads.
+- next:
+  - Commit, push branch, open PR.
+- evidence:
+  - docs/REPORTS/2026-02-15-owner-admin-wave7-fact-os-v1.md
+  - docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave7-fact-os-a1.md
+  - /tmp/owner_admin_wave7_t0.json
+  - /tmp/owner_admin_wave7_t24.json
+  - /tmp/owner_admin_wave7_apply_preview.json
+  - /tmp/owner_admin_wave7_apply_result.json
+- last_updated: 2026-02-15T19:26:00Z

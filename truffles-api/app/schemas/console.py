@@ -604,6 +604,18 @@ ConsoleBusinessSeverity = Literal["critical", "warn", "info"]
 ConsoleBusinessStatus = Literal["healthy", "degraded", "unhealthy"]
 ConsoleSubscriptionQuotaSource = Literal["company_billing_info", "client_config", "unknown"]
 ConsoleSubscriptionAlertLevel = Literal["normal", "warning_80", "limit_100"]
+ConsoleFactKind = Literal["fact", "estimate", "missing"]
+ConsoleFactScope = Literal["system", "client", "branch"]
+ConsoleOwnerMode = Literal["capture_leads", "stable_quality", "team_protection"]
+
+
+class ConsoleMetricFactMeta(BaseModel):
+    kind: ConsoleFactKind
+    source: str
+    as_of: Optional[str] = None
+    scope: ConsoleFactScope = "client"
+    sample_size: Optional[int] = None
+    note: Optional[str] = None
 
 
 class ConsoleBusinessActionItem(BaseModel):
@@ -626,6 +638,7 @@ class ConsoleBusinessSummaryResponse(BaseModel):
     oldest_unresolved_minutes: Optional[int] = None
     first_response_p90_seconds: Optional[float] = None
     actions: list[ConsoleBusinessActionItem] = []
+    metric_meta: dict[str, ConsoleMetricFactMeta] = {}
 
 
 class ConsoleSubscriptionEvidenceItem(BaseModel):
@@ -660,6 +673,7 @@ class ConsoleSubscriptionSummaryResponse(BaseModel):
     overage_policy_message: str
     over_quota: bool = False
     evidence: list[ConsoleSubscriptionEvidenceItem] = []
+    metric_meta: dict[str, ConsoleMetricFactMeta] = {}
 
 
 class ConsoleDataTrustSummaryResponse(BaseModel):
@@ -676,6 +690,7 @@ class ConsoleDataTrustSummaryResponse(BaseModel):
     audit_events_24h: int
     critical_audit_events_24h: int
     actions: list[ConsoleBusinessActionItem] = []
+    metric_meta: dict[str, ConsoleMetricFactMeta] = {}
 
 
 class ConsoleTeamManagerPerformanceItem(BaseModel):
@@ -699,6 +714,78 @@ class ConsoleTeamPerformanceSummaryResponse(BaseModel):
     unresolved_older_than_60m: int
     managers: list[ConsoleTeamManagerPerformanceItem] = []
     actions: list[ConsoleBusinessActionItem] = []
+    metric_meta: dict[str, ConsoleMetricFactMeta] = {}
+
+
+class ConsoleOwnerOperationSettingsPatch(BaseModel):
+    reminder_1_minutes: int
+    reminder_2_minutes: int
+    escalation_timeout_minutes: int
+
+
+class ConsoleOwnerOperationMetricSnapshot(BaseModel):
+    outbox_backlog: int
+    unresolved_older_than_60m: int
+    manager_median_response_seconds: Optional[float] = None
+
+
+class ConsoleOwnerOperationMetricDelta(BaseModel):
+    baseline: Optional[float] = None
+    current: Optional[float] = None
+    delta: Optional[float] = None
+    trend: Literal["up", "down", "stable", "unknown"] = "unknown"
+
+
+class ConsoleOwnerOperationPreviewResponse(BaseModel):
+    generated_at: str
+    mode: ConsoleOwnerMode
+    mode_label: str
+    settings_patch: ConsoleOwnerOperationSettingsPatch
+    current_settings: ConsoleOwnerOperationSettingsPatch
+    baseline: ConsoleOwnerOperationMetricSnapshot
+    warnings: list[str] = []
+    metric_meta: dict[str, ConsoleMetricFactMeta] = {}
+
+
+class ConsoleOwnerOperationApplyRequest(BaseModel):
+    mode: ConsoleOwnerMode
+
+
+class ConsoleOwnerOperationApplyResponse(BaseModel):
+    success: bool
+    operation_id: UUID
+    mode: ConsoleOwnerMode
+    mode_label: str
+    applied_settings: ConsoleOwnerOperationSettingsPatch
+    previous_settings: ConsoleOwnerOperationSettingsPatch
+    baseline: ConsoleOwnerOperationMetricSnapshot
+    applied_at: str
+    impact_check_due_at: str
+    metric_meta: dict[str, ConsoleMetricFactMeta] = {}
+
+
+class ConsoleOwnerOperationRollbackRequest(BaseModel):
+    operation_id: Optional[UUID] = None
+
+
+class ConsoleOwnerOperationRollbackResponse(BaseModel):
+    success: bool
+    operation_id: UUID
+    restored_settings: ConsoleOwnerOperationSettingsPatch
+    rolled_back_at: str
+    message: str
+
+
+class ConsoleOwnerOperationImpactResponse(BaseModel):
+    operation_id: UUID
+    mode: ConsoleOwnerMode
+    checked_at: str
+    due_at: str
+    summary: Literal["improved", "regressed", "mixed_or_stable"]
+    baseline: ConsoleOwnerOperationMetricSnapshot
+    current: ConsoleOwnerOperationMetricSnapshot
+    metrics: dict[str, ConsoleOwnerOperationMetricDelta] = {}
+    metric_meta: dict[str, ConsoleMetricFactMeta] = {}
 
 
 class ConsoleOutboxCounts(BaseModel):

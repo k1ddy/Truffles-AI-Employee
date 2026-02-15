@@ -3,7 +3,15 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
-import { authApi, businessApi, canAccessConsole, settingsApi, telegramApi } from "@/lib/api-client";
+import {
+    authApi,
+    businessApi,
+    canAccessConsole,
+    settingsApi,
+    telegramApi,
+    type OwnerOperationApplyResponse,
+    type OwnerOperationMode,
+} from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
@@ -60,7 +68,7 @@ interface SettingsPreset {
 }
 
 interface BusinessGoal {
-    id: string;
+    id: OwnerOperationMode;
     label: string;
     outcome: string;
     presetId: SettingsPreset["id"];
@@ -212,6 +220,8 @@ export default function SettingsPage() {
     });
     const [selectedPresetId, setSelectedPresetId] = useState<string>("balanced");
     const [activeGoalId, setActiveGoalId] = useState<string>("stable_quality");
+    const [lastOwnerOperation, setLastOwnerOperation] = useState<OwnerOperationApplyResponse | null>(null);
+    const [lastOwnerImpact, setLastOwnerImpact] = useState<string | null>(null);
 
     useEffect(() => {
         if (!config) {
@@ -255,6 +265,91 @@ export default function SettingsPage() {
         },
     });
 
+    const ownerModeApplyMutation = useMutation({
+        mutationFn: async (mode: OwnerOperationMode) => {
+            const previewResponse = await businessApi.previewOwnerModeOperation({ mode });
+            const preview = previewResponse.data;
+            const warningSuffix = preview.warnings.length
+                ? `\n\nРиски:\n- ${preview.warnings.join("\n- ")}`
+                : "";
+            const confirmed = window.confirm(
+                `Применить режим «${preview.mode_label}»?\nНовые SLA: ${preview.settings_patch.reminder_1_minutes}/${preview.settings_patch.reminder_2_minutes}/${preview.settings_patch.escalation_timeout_minutes}.${warningSuffix}`,
+            );
+            if (!confirmed) {
+                throw new Error("owner_mode_cancelled");
+            }
+            const applyResponse = await businessApi.applyOwnerModeOperation({ mode });
+            return applyResponse.data;
+        },
+        onSuccess: (result) => {
+            setLastOwnerOperation(result);
+            setLastOwnerImpact(null);
+            setActiveGoalId(result.mode);
+            const matchedGoal = BUSINESS_GOALS.find((goal) => goal.id === result.mode);
+            if (matchedGoal) {
+                setSelectedPresetId(matchedGoal.presetId);
+            }
+            setSimpleSettings({
+                reminder1: String(result.applied_settings.reminder_1_minutes),
+                reminder2: String(result.applied_settings.reminder_2_minutes),
+                escalation: String(result.applied_settings.escalation_timeout_minutes),
+            });
+            toast.success(`Режим применён: ${result.mode_label}`);
+            refetch();
+        },
+        onError: (error) => {
+            if (error instanceof Error && error.message === "owner_mode_cancelled") {
+                return;
+            }
+            handleError(error);
+        },
+    });
+
+    const ownerModeRollbackMutation = useMutation({
+        mutationFn: async () => {
+            const response = await businessApi.rollbackOwnerModeOperation(
+                lastOwnerOperation ? { operation_id: lastOwnerOperation.operation_id } : undefined,
+            );
+            return response.data;
+        },
+        onSuccess: (result) => {
+            setSimpleSettings({
+                reminder1: String(result.restored_settings.reminder_1_minutes),
+                reminder2: String(result.restored_settings.reminder_2_minutes),
+                escalation: String(result.restored_settings.escalation_timeout_minutes),
+            });
+            setLastOwnerOperation(null);
+            setLastOwnerImpact(null);
+            toast.success("Откат выполнен");
+            refetch();
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+    });
+
+    const ownerModeImpactMutation = useMutation({
+        mutationFn: async () => {
+            if (!lastOwnerOperation?.operation_id) {
+                throw new Error("owner_operation_missing");
+            }
+            const response = await businessApi.getOwnerOperationImpact(lastOwnerOperation.operation_id);
+            return response.data;
+        },
+        onSuccess: (result) => {
+            setLastOwnerImpact(result.summary);
+            toast.success(`Impact check: ${result.summary}`);
+            refetch();
+        },
+        onError: (error) => {
+            if (error instanceof Error && error.message === "owner_operation_missing") {
+                toast.error("Сначала примените режим");
+                return;
+            }
+            handleError(error);
+        },
+    });
+
     function applyPreset(preset: SettingsPreset): void {
         setSelectedPresetId(preset.id);
         setActiveGoalId(goalIdFromPresetId(preset.id));
@@ -266,27 +361,10 @@ export default function SettingsPage() {
     }
 
     function applyBusinessGoal(goal: BusinessGoal): void {
-        if (!canWriteSettings || updateSettingsMutation.isPending) {
+        if (!canWriteSettings || ownerModeApplyMutation.isPending) {
             return;
         }
-        const preset = SETTINGS_PRESETS.find((item) => item.id === goal.presetId);
-        if (!preset) {
-            toast.error("Не удалось применить цель: профиль не найден");
-            return;
-        }
-        setActiveGoalId(goal.id);
-        setSelectedPresetId(preset.id);
-        setSimpleSettings({
-            reminder1: String(preset.reminder1),
-            reminder2: String(preset.reminder2),
-            escalation: String(preset.escalation),
-        });
-        updateSettingsMutation.mutate({
-            reminder_1_minutes: preset.reminder1,
-            reminder_2_minutes: preset.reminder2,
-            escalation_timeout_minutes: preset.escalation,
-            successMessage: `Цель применена: ${goal.label}`,
-        });
+        ownerModeApplyMutation.mutate(goal.id);
     }
 
     function updateSimpleSetting(field: keyof SimpleSettingsForm, value: string): void {
@@ -433,6 +511,7 @@ export default function SettingsPage() {
     }
 
     const provisioningAccessSection = canReadSettings ? "settings" : "provisioning";
+    const ownerModeBusy = ownerModeApplyMutation.isPending || ownerModeRollbackMutation.isPending || ownerModeImpactMutation.isPending;
 
     return (
         <div className="max-w-5xl mx-auto p-6" data-testid="settings-page">
@@ -481,13 +560,62 @@ export default function SettingsPage() {
                                             onClick={() => {
                                                 applyBusinessGoal(goal);
                                             }}
-                                            disabled={!canWriteSettings || updateSettingsMutation.isPending}
+                                            disabled={!canWriteSettings || ownerModeBusy}
                                             data-testid={`settings-goal-${goal.id}`}
                                         >
                                             <p className="font-semibold">{goal.label}</p>
                                             <p className="mt-1 text-muted-foreground">{goal.outcome}</p>
                                         </button>
                                     ))}
+                                </div>
+                                <div className="mt-3 rounded-lg border border-border/60 bg-background/80 p-3" data-testid="settings-owner-operation">
+                                    {lastOwnerOperation ? (
+                                        <div className="space-y-2 text-xs text-muted-foreground">
+                                            <p>
+                                                Последняя операция: <span className="font-semibold text-foreground">{lastOwnerOperation.mode_label}</span> · applied {new Date(lastOwnerOperation.applied_at).toLocaleString("ru-RU")}
+                                            </p>
+                                            <p>
+                                                Impact due: {new Date(lastOwnerOperation.impact_check_due_at).toLocaleString("ru-RU")}
+                                            </p>
+                                            {lastOwnerImpact ? (
+                                                <p className="text-foreground">
+                                                    Последний impact-check: <span className="font-semibold">{lastOwnerImpact}</span>
+                                                </p>
+                                            ) : null}
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <button
+                                                    type="button"
+                                                    className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                                                    onClick={() => {
+                                                        ownerModeImpactMutation.mutate();
+                                                    }}
+                                                    disabled={ownerModeBusy}
+                                                    data-testid="settings-owner-operation-impact"
+                                                >
+                                                    {ownerModeImpactMutation.isPending ? "Проверяю..." : "Проверить эффект"}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                                                    onClick={() => {
+                                                        const confirmed = window.confirm("Откатить последний server-applied режим?");
+                                                        if (!confirmed) {
+                                                            return;
+                                                        }
+                                                        ownerModeRollbackMutation.mutate();
+                                                    }}
+                                                    disabled={ownerModeBusy}
+                                                    data-testid="settings-owner-operation-rollback"
+                                                >
+                                                    {ownerModeRollbackMutation.isPending ? "Откатываю..." : "Откатить"}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-muted-foreground">
+                                            После применения цели здесь появится server operation ID и доступ к impact/rollback.
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                             <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3" data-testid="settings-simple-presets">

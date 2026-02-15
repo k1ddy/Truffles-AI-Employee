@@ -6,7 +6,14 @@ from uuid import uuid4
 import pytest
 
 from app.routers import console as console_router
-from app.schemas.console import ConsoleKnowledgePublishRequest, ConsoleSettingsUpdateRequest
+from app.schemas.console import (
+    ConsoleKnowledgePublishRequest,
+    ConsoleMetricFactMeta,
+    ConsoleOwnerOperationApplyRequest,
+    ConsoleOwnerOperationMetricSnapshot,
+    ConsoleOwnerOperationRollbackRequest,
+    ConsoleSettingsUpdateRequest,
+)
 from app.services.console_errors import ConsoleAPIError
 
 
@@ -180,6 +187,40 @@ def test_derive_team_performance_status_thresholds() -> None:
     assert healthy_status == "healthy"
 
 
+def test_resolve_owner_mode_profile_capture_leads() -> None:
+    label, settings, warnings = console_router._resolve_owner_mode_profile("capture_leads")
+
+    assert "лидов" in label.lower()
+    assert settings.reminder_1_minutes == 5
+    assert settings.reminder_2_minutes == 30
+    assert settings.escalation_timeout_minutes == 60
+    assert warnings
+
+
+def test_summarize_owner_operation_delta_states() -> None:
+    improved = console_router._summarize_owner_operation_delta(
+        {
+            "a": console_router.ConsoleOwnerOperationMetricDelta(trend="down"),
+            "b": console_router.ConsoleOwnerOperationMetricDelta(trend="stable"),
+        }
+    )
+    regressed = console_router._summarize_owner_operation_delta(
+        {
+            "a": console_router.ConsoleOwnerOperationMetricDelta(trend="up"),
+        }
+    )
+    mixed = console_router._summarize_owner_operation_delta(
+        {
+            "a": console_router.ConsoleOwnerOperationMetricDelta(trend="up"),
+            "b": console_router.ConsoleOwnerOperationMetricDelta(trend="down"),
+        }
+    )
+
+    assert improved == "improved"
+    assert regressed == "regressed"
+    assert mixed == "mixed_or_stable"
+
+
 def test_apply_console_settings_update_maps_public_fields_to_model_columns() -> None:
     settings = SimpleNamespace(
         reminder_timeout_1=30,
@@ -332,6 +373,160 @@ async def test_publish_knowledge_allows_skip_preflight_override(monkeypatch):
     assert branch.knowledge_safe_mode is False
     assert branch.knowledge_safe_mode_reason is None
     assert db.commit.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_apply_owner_mode_operation_persists_server_snapshot(monkeypatch):
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=uuid4(), company_id=uuid4(), name="demo_salon", config={}),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        effective_branch_id=None,
+        branch_restricted=False,
+        branches=[],
+        companies=[],
+    )
+    settings = SimpleNamespace(reminder_timeout_1=10, reminder_timeout_2=45, auto_close_timeout=120)
+    db = Mock()
+    audit_calls: list[dict] = []
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_ensure_client_settings_row", lambda *_args, **_kwargs: settings)
+    monkeypatch.setattr(
+        console_router,
+        "_collect_owner_operation_metrics",
+        lambda *_args, **_kwargs: (
+            ConsoleOwnerOperationMetricSnapshot(
+                outbox_backlog=120,
+                unresolved_older_than_60m=4,
+                manager_median_response_seconds=210.0,
+            ),
+            {
+                "outbox_backlog": ConsoleMetricFactMeta(
+                    kind="fact",
+                    source="outbox_messages",
+                    as_of=datetime.now(timezone.utc).isoformat(),
+                    scope="client",
+                    sample_size=120,
+                ),
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "record_audit_event",
+        lambda *_args, **kwargs: audit_calls.append(kwargs),
+    )
+
+    response = await console_router.apply_owner_mode_operation(
+        body=ConsoleOwnerOperationApplyRequest(mode="capture_leads"),
+        request=SimpleNamespace(),
+        db=db,
+    )
+
+    assert response.success is True
+    assert response.mode == "capture_leads"
+    assert response.applied_settings.reminder_1_minutes == 5
+    assert response.applied_settings.reminder_2_minutes == 30
+    assert response.applied_settings.escalation_timeout_minutes == 60
+    assert response.previous_settings.reminder_1_minutes == 10
+    assert settings.reminder_timeout_1 == 5
+    assert settings.reminder_timeout_2 == 30
+    assert settings.auto_close_timeout == 60
+    assert db.commit.call_count == 1
+    assert audit_calls
+
+
+@pytest.mark.asyncio
+async def test_rollback_owner_mode_operation_requires_existing_operation(monkeypatch):
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=uuid4(), company_id=uuid4(), name="demo_salon", config={}),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        effective_branch_id=None,
+        branch_restricted=False,
+        branches=[],
+        companies=[],
+    )
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_load_owner_mode_apply_event", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.rollback_owner_mode_operation(
+            body=ConsoleOwnerOperationRollbackRequest(),
+            request=SimpleNamespace(),
+            db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.code == "OWNER_OPERATION_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_get_owner_mode_operation_impact_returns_improved(monkeypatch):
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=uuid4(), company_id=uuid4(), name="demo_salon", config={}),
+        agent=SimpleNamespace(id=uuid4(), name="Owner"),
+        effective_branch_id=None,
+        branch_restricted=False,
+        branches=[],
+        companies=[],
+    )
+    operation_id = uuid4()
+    event = SimpleNamespace(
+        id=operation_id,
+        created_at=datetime.now(timezone.utc),
+        payload={
+            "mode": "capture_leads",
+            "impact_check_due_at": datetime.now(timezone.utc).isoformat(),
+            "baseline": {
+                "outbox_backlog": 100,
+                "unresolved_older_than_60m": 10,
+                "manager_median_response_seconds": 600.0,
+            },
+        },
+    )
+    db = Mock()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_load_owner_mode_apply_event", lambda *_args, **_kwargs: event)
+    monkeypatch.setattr(
+        console_router,
+        "_collect_owner_operation_metrics",
+        lambda *_args, **_kwargs: (
+            ConsoleOwnerOperationMetricSnapshot(
+                outbox_backlog=80,
+                unresolved_older_than_60m=3,
+                manager_median_response_seconds=400.0,
+            ),
+            {
+                "outbox_backlog": ConsoleMetricFactMeta(
+                    kind="fact",
+                    source="outbox_messages",
+                    as_of=datetime.now(timezone.utc).isoformat(),
+                    scope="client",
+                    sample_size=80,
+                ),
+            },
+        ),
+    )
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
+
+    response = await console_router.get_owner_mode_operation_impact(
+        operation_id=operation_id,
+        request=SimpleNamespace(),
+        db=db,
+    )
+
+    assert response.summary == "improved"
+    assert response.metrics["outbox_backlog"].trend == "down"
+    assert response.metrics["unresolved_older_than_60m"].trend == "down"
+    assert response.metrics["manager_median_response_seconds"].trend == "down"
+    assert db.commit.call_count == 1
 
 
 @pytest.mark.asyncio
