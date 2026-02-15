@@ -1050,6 +1050,9 @@ class ConsoleProviderOpsQueueItem(BaseModel):
 
 class ConsoleIntegrationsListResponse(BaseModel):
     stale_after_minutes: int
+    cursor: Optional[str] = None
+    has_more: bool = False
+    total_in_scope: int = 0
     items: list[ConsoleBranchIntegrationStatus]
     provider_ops_queue: list[ConsoleProviderOpsQueueItem] = []
 

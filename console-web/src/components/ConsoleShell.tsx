@@ -95,6 +95,9 @@ function NavIcon({ children, className }: { children: ReactNode; className?: str
     return (
         <svg
             className={className ?? "h-5 w-5"}
+            width={20}
+            height={20}
+            style={{ width: 20, height: 20, maxWidth: 20, maxHeight: 20 }}
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -813,15 +816,36 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                 </span>
                             </div>
                             {data && (
-                                <ContextBar
-                                    me={data}
-                                    companyId={companyId}
-                                    clients={visibleClients}
-                                    onSelectCompany={handleContextCompanyChange}
-                                    onSelectClient={handleContextClientChange}
-                                    onSelectBranch={handleContextBranchChange}
-                                    isBusy={contextBusy}
-                                />
+                                <>
+                                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground md:hidden">
+                                        Контекст:{" "}
+                                        <span className="font-semibold text-foreground">
+                                            {data.client?.company_name ?? "Компания"}
+                                        </span>
+                                        {" "}·{" "}
+                                        <span className="font-semibold text-foreground">
+                                            {data.client?.name ?? "Клиент"}
+                                        </span>
+                                        {" "}·{" "}
+                                        <span className="font-semibold text-foreground">
+                                            {findBranchName(data.branches, data.selected_branch_id)}
+                                        </span>
+                                        <Link href="/company-workspace" className="ml-2 underline">
+                                            изменить
+                                        </Link>
+                                    </div>
+                                    <div className="hidden md:block">
+                                        <ContextBar
+                                            me={data}
+                                            companyId={companyId}
+                                            clients={visibleClients}
+                                            onSelectCompany={handleContextCompanyChange}
+                                            onSelectClient={handleContextClientChange}
+                                            onSelectBranch={handleContextBranchChange}
+                                            isBusy={contextBusy}
+                                        />
+                                    </div>
+                                </>
                             )}
                             <div className="flex items-center justify-between gap-4">
                                 {contextBusy && (
@@ -843,7 +867,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                 <LoginButton />
                             </div>
                         </div>
-                        <nav className="flex flex-wrap gap-2 px-4 pb-3 text-xs font-medium md:hidden">
+                        <nav className="flex gap-2 overflow-x-auto px-4 pb-3 text-xs font-medium md:hidden">
                             {navItems.map((item) => {
                                 const isActive = item.href === "/"
                                     ? pathname === "/"
@@ -852,7 +876,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                     <Link
                                         key={item.href}
                                         href={item.href}
-                                        className={`rounded-full px-4 py-2 transition ${
+                                        className={`shrink-0 rounded-full px-4 py-2 transition ${
                                             isActive ? "bg-primary text-primary-foreground" : "bg-muted"
                                         }`}
                                         data-testid={`mobile-${item.testId}`}

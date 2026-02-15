@@ -2163,6 +2163,9 @@ export interface components {
         };
         IntegrationsListResponse: {
             stale_after_minutes: number;
+            cursor?: string | null;
+            has_more: boolean;
+            total_in_scope: number;
             items: components["schemas"]["BranchIntegrationStatus"][];
             provider_ops_queue: components["schemas"]["ProviderOpsQueueItem"][];
         };
@@ -5742,6 +5745,10 @@ export interface operations {
             query?: {
                 /** @description Mark branch as stale when no inbound for this many minutes. */
                 stale_after_minutes?: number;
+                /** @description ISO timestamp cursor for pagination. */
+                cursor?: string;
+                /** @description Maximum number of branches in response page. */
+                limit?: number;
                 /** @description Optional company scope filter. */
                 company_id?: string;
                 /** @description Optional client scope filter. */

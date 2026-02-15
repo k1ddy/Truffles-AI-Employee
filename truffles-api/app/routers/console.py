@@ -7738,6 +7738,8 @@ async def list_integrations(
         ge=_INTEGRATION_MIN_STALE_MINUTES,
         le=_INTEGRATION_MAX_STALE_MINUTES,
     ),
+    cursor: Optional[str] = None,
+    limit: int = 50,
     company_id: Optional[str] = None,
     client_id: Optional[str] = None,
     branch_id: Optional[str] = None,
@@ -7745,11 +7747,16 @@ async def list_integrations(
 ) -> ConsoleIntegrationsListResponse:
     context = get_console_context(request, db, require_selection=False, include_inactive_tenants=False)
     _require_platform_admin(context)
-    _reject_unknown_query_params(request, {"stale_after_minutes", "company_id", "client_id", "branch_id"})
+    _reject_unknown_query_params(
+        request,
+        {"stale_after_minutes", "cursor", "limit", "company_id", "client_id", "branch_id"},
+    )
+    _validate_limit(limit)
 
     company_uuid = _parse_uuid_param("company_id", company_id)
     client_uuid = _parse_uuid_param("client_id", client_id)
     branch_uuid = _parse_uuid_param("branch_id", branch_id)
+    cursor_date = _parse_cursor_param(cursor)
 
     active_clients = [
         client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
@@ -7787,6 +7794,9 @@ async def list_integrations(
     if not active_clients:
         return ConsoleIntegrationsListResponse(
             stale_after_minutes=stale_after_minutes,
+            cursor=None,
+            has_more=False,
+            total_in_scope=0,
             items=[],
             provider_ops_queue=[],
         )
@@ -7794,20 +7804,41 @@ async def list_integrations(
     client_ids = [client.id for client in active_clients]
     client_slug_map = {client.id: client.name for client in active_clients}
 
-    branches_query = db.query(Branch).filter(Branch.client_id.in_(client_ids))
+    branches_scope_query = db.query(Branch).filter(Branch.client_id.in_(client_ids))
     if branch_uuid:
-        branches_query = branches_query.filter(Branch.id == branch_uuid)
+        branches_scope_query = branches_scope_query.filter(Branch.id == branch_uuid)
+
+    total_in_scope = branches_scope_query.count()
+
+    branches_query = branches_scope_query
+    if cursor_date is not None:
+        branches_query = branches_query.filter(Branch.created_at < cursor_date)
     branches = (
-        branches_query
-        .order_by(Branch.client_id.asc(), Branch.name.asc(), Branch.created_at.asc())
+        branches_query.order_by(Branch.created_at.desc(), Branch.id.desc())
+        .limit(limit + 1)
         .all()
     )
+    has_more = len(branches) > limit
+    if has_more:
+        branches = branches[:limit]
+    next_cursor = branches[-1].created_at.isoformat() if has_more and branches and branches[-1].created_at else None
+
+    branch_client_ids = sorted({branch.client_id for branch in branches})
+    if not branch_client_ids:
+        return ConsoleIntegrationsListResponse(
+            stale_after_minutes=stale_after_minutes,
+            cursor=None,
+            has_more=False,
+            total_in_scope=total_in_scope,
+            items=[],
+            provider_ops_queue=[],
+        )
     token_rows = (
         db.query(
             ClientSettings.client_id,
             ClientSettings.telegram_bot_token,
         )
-        .filter(ClientSettings.client_id.in_(client_ids))
+        .filter(ClientSettings.client_id.in_(branch_client_ids))
         .all()
     )
     telegram_token_map: dict[UUID, bool] = {}
@@ -7816,12 +7847,12 @@ async def list_integrations(
 
     inbound_observations = _load_latest_branch_inbound_observations_for_clients(
         db,
-        client_ids=client_ids,
+        client_ids=branch_client_ids,
     )
     now = datetime.now(timezone.utc)
     provider_binding_by_branch = _build_provider_binding_lifecycle_map(
         db,
-        client_ids=client_ids,
+        client_ids=branch_client_ids,
         branches=branches,
         now=now,
     )
@@ -7854,6 +7885,9 @@ async def list_integrations(
     )
     return ConsoleIntegrationsListResponse(
         stale_after_minutes=stale_after_minutes,
+        cursor=next_cursor,
+        has_more=has_more,
+        total_in_scope=total_in_scope,
         items=items,
         provider_ops_queue=provider_ops_queue,
     )
