@@ -12,17 +12,26 @@ import LoginButton from "@/components/LoginButton";
 import {
     authApi,
     canAccessConsole,
+    opsApi,
     parseApiError,
     type ConsoleAction,
     type ConsoleRole,
     type ConsoleSection,
+    type HealthResponse,
 } from "@/lib/api-client";
+import {
+    clearConsoleContextScope,
+    readConsoleContextScopeFromStorage,
+    setConsoleBranchContext,
+    setConsoleClientContext,
+    setConsoleCompanyContext,
+    writeConsoleContextScopeToStorage,
+} from "@/lib/console-context-storage";
 
-const CLIENT_ID_STORAGE_KEY = "console:client_id";
-const BRANCH_ID_STORAGE_KEY = "console:branch_id";
-const COMPANY_ID_STORAGE_KEY = "console:company_id";
 const NAV_COLLAPSED_STORAGE_KEY = "console:nav_collapsed";
 const AUTH_ERROR_CODES = new Set(["AUTH_REQUIRED", "TOKEN_EXPIRED", "TOKEN_INVALID"]);
+const HEALTH_INCIDENT_CRITICAL_BACKLOG = 1000;
+const HEALTH_INCIDENT_WARN_BACKLOG = 500;
 
 type SessionAuth = {
     accessToken?: string;
@@ -180,30 +189,6 @@ const NAV_ICONS: Partial<Record<ConsoleSection, ReactNode>> = {
     ),
 };
 
-function readLocalStorage(key: string): string | null {
-    if (typeof window === "undefined") {
-        return null;
-    }
-    return window.localStorage.getItem(key);
-}
-
-function writeLocalStorage(key: string, value: string | null) {
-    if (typeof window === "undefined") {
-        return;
-    }
-    if (!value) {
-        window.localStorage.removeItem(key);
-        return;
-    }
-    window.localStorage.setItem(key, value);
-}
-
-function clearConsoleContext() {
-    writeLocalStorage(COMPANY_ID_STORAGE_KEY, null);
-    writeLocalStorage(CLIENT_ID_STORAGE_KEY, null);
-    writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
-}
-
 function formatCompanyLabel(companyName?: string | null, companyId?: string | null): string {
     if (companyName) {
         return companyName;
@@ -220,6 +205,57 @@ function findBranchName(branches: BranchSummary[] | undefined, branchId: string 
     }
     const match = branches.find((branch) => branch.id === branchId);
     return match?.name ?? "—";
+}
+
+function readBrowserStorage(key: string): string | null {
+    if (typeof window === "undefined") {
+        return null;
+    }
+    return window.localStorage.getItem(key);
+}
+
+function writeBrowserStorage(key: string, value?: string | null) {
+    if (typeof window === "undefined") {
+        return;
+    }
+    if (!value) {
+        window.localStorage.removeItem(key);
+        return;
+    }
+    window.localStorage.setItem(key, value);
+}
+
+type HealthIncident = {
+    severity: "critical" | "warn";
+    title: string;
+    details: string;
+};
+
+function deriveHealthIncident(health?: HealthResponse | null): HealthIncident | null {
+    if (!health) {
+        return null;
+    }
+
+    const status = health.status ?? "healthy";
+    const backlog = health.outbox_backlog ?? 0;
+
+    if (status === "unhealthy" || backlog >= HEALTH_INCIDENT_CRITICAL_BACKLOG) {
+        return {
+            severity: "critical",
+            title: "Критичный инцидент платформы",
+            details: `status=${status}, outbox_backlog=${backlog}`,
+        };
+    }
+
+    if (status === "degraded" || backlog >= HEALTH_INCIDENT_WARN_BACKLOG) {
+        return {
+            severity: "warn",
+            title: "Риск деградации платформы",
+            details: `status=${status}, outbox_backlog=${backlog}`,
+        };
+    }
+
+    return null;
 }
 
 function SelectionGate({
@@ -517,7 +553,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
 
         if (sessionError || !accessToken) {
             signOutTriggered.current = true;
-            clearConsoleContext();
+            clearConsoleContextScope();
             toast.error("Сессия истекла. Войдите снова.");
             signOut({ callbackUrl: "/" });
             return;
@@ -527,7 +563,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             const parsed = parseApiError(error);
             if (AUTH_ERROR_CODES.has(parsed.code)) {
                 signOutTriggered.current = true;
-                clearConsoleContext();
+                clearConsoleContextScope();
                 toast.error("Сессия истекла. Войдите снова.");
                 signOut({ callbackUrl: "/" });
             }
@@ -535,6 +571,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     }, [accessToken, error, sessionError, status]);
 
     const role = data?.agent?.role ?? "manager";
+    const canReadOps = canAccessConsole(role, "ops", "read");
     const navItems = useMemo(
         () =>
             NAV_ITEMS.filter((item) => {
@@ -548,12 +585,26 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             }),
         [role]
     );
+    const { data: healthData } = useQuery({
+        queryKey: ["console-health-banner"],
+        queryFn: async () => {
+            const response = await opsApi.getHealth();
+            return response.data;
+        },
+        enabled: hasSession && canReadOps,
+        refetchInterval: 30000,
+        staleTime: 10000,
+    });
+    const healthIncident = useMemo(() => deriveHealthIncident(healthData ?? null), [healthData]);
+    const healthIncidentClass = healthIncident?.severity === "critical"
+        ? "border-red-300/80 bg-red-50 text-red-900"
+        : "border-amber-300/80 bg-amber-50 text-amber-900";
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [contextNotice, setContextNotice] = useState<string | null>(null);
     const contextBusy = isSubmitting || isFetching;
     const [navCollapsed, setNavCollapsed] = useState(
-        () => readLocalStorage(NAV_COLLAPSED_STORAGE_KEY) === "1"
+        () => readBrowserStorage(NAV_COLLAPSED_STORAGE_KEY) === "1"
     );
     const navToggleLabel = navCollapsed ? "Развернуть меню" : "Свернуть меню";
 
@@ -566,7 +617,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     }, [contextNotice]);
 
     useEffect(() => {
-        writeLocalStorage(NAV_COLLAPSED_STORAGE_KEY, navCollapsed ? "1" : null);
+        writeBrowserStorage(NAV_COLLAPSED_STORAGE_KEY, navCollapsed ? "1" : null);
     }, [navCollapsed]);
 
     const companies = data?.companies ?? [];
@@ -575,7 +626,8 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const branchSelectionRequired = !!data?.branch_selection_required;
     const showGate = companySelectionRequired || selectionRequired || branchSelectionRequired;
 
-    const storedCompanyId = readLocalStorage(COMPANY_ID_STORAGE_KEY);
+    const storedScope = readConsoleContextScopeFromStorage();
+    const storedCompanyId = storedScope.companyId;
     const fallbackCompanyId = !companySelectionRequired ? (data?.client?.company_id ?? "") : "";
     const resolvedCompanyId = data?.selected_company_id ?? storedCompanyId ?? fallbackCompanyId;
     const companyId = companies.some((company) => company.id === resolvedCompanyId)
@@ -591,9 +643,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         }
         setIsSubmitting(true);
         try {
-            writeLocalStorage(COMPANY_ID_STORAGE_KEY, companyId);
-            writeLocalStorage(CLIENT_ID_STORAGE_KEY, null);
-            writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
+            setConsoleCompanyContext(companyId);
             await refetch();
             queryClient.invalidateQueries();
             setContextNotice("Контекст применён");
@@ -610,8 +660,8 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         }
         setIsSubmitting(true);
         try {
-            writeLocalStorage(CLIENT_ID_STORAGE_KEY, clientId);
-            writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
+            const selectedClientCompanyId = visibleClients.find((client) => client.id === clientId)?.company_id;
+            setConsoleClientContext(clientId, selectedClientCompanyId ?? companyId ?? null);
             await refetch();
             queryClient.invalidateQueries();
             setContextNotice("Контекст применён");
@@ -628,7 +678,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         }
         setIsSubmitting(true);
         try {
-            writeLocalStorage(BRANCH_ID_STORAGE_KEY, branchId);
+            setConsoleBranchContext(branchId);
             await refetch();
             queryClient.invalidateQueries();
             setContextNotice("Контекст применён");
@@ -640,27 +690,27 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     };
 
     const handleContextClientChange = async (clientId: string) => {
-        if (!clientId || clientId === readLocalStorage(CLIENT_ID_STORAGE_KEY)) {
+        if (!clientId || clientId === readConsoleContextScopeFromStorage().clientId) {
             return;
         }
         await handleSelectClient(clientId);
     };
 
     const handleContextCompanyChange = async (companyId: string) => {
-        if (!companyId || companyId === readLocalStorage(COMPANY_ID_STORAGE_KEY)) {
+        if (!companyId || companyId === readConsoleContextScopeFromStorage().companyId) {
             return;
         }
         await handleSelectCompany(companyId);
     };
 
     const handleContextBranchChange = async (branchId: string | null) => {
-        const stored = readLocalStorage(BRANCH_ID_STORAGE_KEY);
-        if (branchId === stored) {
+        const nextBranchId = branchId ?? "";
+        if (nextBranchId === readConsoleContextScopeFromStorage().branchId) {
             return;
         }
         setIsSubmitting(true);
         try {
-            writeLocalStorage(BRANCH_ID_STORAGE_KEY, branchId);
+            setConsoleBranchContext(nextBranchId);
             await refetch();
             queryClient.invalidateQueries();
             setContextNotice("Контекст применён");
@@ -676,34 +726,22 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             return;
         }
 
-        const storedCompanyId = readLocalStorage(COMPANY_ID_STORAGE_KEY);
-        const resolvedCompanyId = data.selected_company_id ?? data.client?.company_id ?? null;
-        if (data.company_selection_required) {
-            if (storedCompanyId) {
-                writeLocalStorage(COMPANY_ID_STORAGE_KEY, null);
-            }
-        } else if (resolvedCompanyId && storedCompanyId !== resolvedCompanyId) {
-            writeLocalStorage(COMPANY_ID_STORAGE_KEY, resolvedCompanyId);
-        }
-
-        const storedClientId = readLocalStorage(CLIENT_ID_STORAGE_KEY);
-        if (data.selection_required) {
-            if (storedClientId) {
-                writeLocalStorage(CLIENT_ID_STORAGE_KEY, null);
-            }
-        } else if (data.client?.id && storedClientId !== data.client.id) {
-            writeLocalStorage(CLIENT_ID_STORAGE_KEY, data.client.id);
-        }
-
-        const storedBranchId = readLocalStorage(BRANCH_ID_STORAGE_KEY);
-        if (data.branch_selection_required) {
-            if (storedBranchId) {
-                writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
-            }
-        } else if (data.selected_branch_id && storedBranchId !== data.selected_branch_id) {
-            writeLocalStorage(BRANCH_ID_STORAGE_KEY, data.selected_branch_id);
-        } else if (!data.selected_branch_id && storedBranchId) {
-            writeLocalStorage(BRANCH_ID_STORAGE_KEY, null);
+        const stored = readConsoleContextScopeFromStorage();
+        const nextCompanyId = data.company_selection_required
+            ? ""
+            : data.selected_company_id ?? data.client?.company_id ?? stored.companyId;
+        const nextClientId = data.selection_required ? "" : data.client?.id ?? stored.clientId;
+        const nextBranchId = data.branch_selection_required ? "" : data.selected_branch_id ?? "";
+        if (
+            nextCompanyId !== stored.companyId
+            || nextClientId !== stored.clientId
+            || nextBranchId !== stored.branchId
+        ) {
+            writeConsoleContextScopeToStorage({
+                companyId: nextCompanyId,
+                clientId: nextClientId,
+                branchId: nextBranchId,
+            });
         }
     }, [data]);
 
@@ -867,6 +905,25 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                 <LoginButton />
                             </div>
                         </div>
+                        {healthIncident && (
+                            <div
+                                className={`mx-6 mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border px-4 py-3 text-xs ${healthIncidentClass}`}
+                                data-testid="global-health-incident-banner"
+                            >
+                                <div>
+                                    <p className="text-sm font-semibold">{healthIncident.title}</p>
+                                    <p className="mt-1 font-mono">{healthIncident.details}</p>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <Link href="/ops" className="btn-ghost">
+                                        Открыть OPS
+                                    </Link>
+                                    <Link href="/company-workspace" className="btn-ghost">
+                                        Открыть Workspace
+                                    </Link>
+                                </div>
+                            </div>
+                        )}
                         <nav className="flex gap-2 overflow-x-auto px-4 pb-3 text-xs font-medium md:hidden">
                             {navItems.map((item) => {
                                 const isActive = item.href === "/"

@@ -18,11 +18,10 @@ import {
     type ProviderOpsQueueItem,
 } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
+import { useConsoleContextScope } from "@/lib/use-console-context-scope";
 import type { components } from "@/types/api.generated";
 
-const COMPANY_ID_STORAGE_KEY = "console:company_id";
-const CLIENT_ID_STORAGE_KEY = "console:client_id";
-const BRANCH_ID_STORAGE_KEY = "console:branch_id";
+const WORKSPACE_RECOMMENDED_ACTION_KEY = "console:workspace_recommended_action";
 
 const STALE_AFTER_OPTIONS = [15, 30, 60, 180] as const;
 const API_LIST_LIMIT = 100;
@@ -34,12 +33,23 @@ type ScopeTarget = {
     branchId?: string | null;
 };
 
+type WorkspaceRecommendedActionContext = {
+    branch_id: string;
+    action: ProviderOpsQueueItem["recommended_action"];
+    reasons: string[];
+    source: "queue" | "matrix";
+    captured_at: string;
+};
+
 type StatusFilter = "all" | "error" | "warn" | "ok";
 type ExpiryFilter = "all" | "expired" | "expiring" | "ok" | "unknown";
 type TeamFilter = "all" | "gap" | "no_manager" | "no_specialist" | "understaffed";
+type ViewMode = "overview" | "today";
+type SlaFilter = "all" | "overdue" | "due_soon";
 
 type AgentMembership = components["schemas"]["AgentMembership"];
 type Company = components["schemas"]["Company"];
+type ProviderLifecycleItem = components["schemas"]["ProviderLifecycleItem"];
 
 type MembershipStats = {
     total: number;
@@ -95,13 +105,6 @@ function mergeMembershipStats(...items: Array<MembershipStats | undefined>): Mem
     return merged;
 }
 
-function readLocalStorageValue(key: string): string | null {
-    if (typeof window === "undefined") {
-        return null;
-    }
-    return window.localStorage.getItem(key);
-}
-
 function setLocalStorageValue(key: string, value?: string | null) {
     if (typeof window === "undefined") {
         return;
@@ -111,6 +114,14 @@ function setLocalStorageValue(key: string, value?: string | null) {
         return;
     }
     window.localStorage.setItem(key, value);
+}
+
+function setWorkspaceRecommendedActionContext(value: WorkspaceRecommendedActionContext | null) {
+    if (value === null) {
+        setLocalStorageValue(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
+        return;
+    }
+    setLocalStorageValue(WORKSPACE_RECOMMENDED_ACTION_KEY, JSON.stringify(value));
 }
 
 function normalizeText(value?: string | null): string {
@@ -147,6 +158,7 @@ function statusLabel(status: string): string {
         provider_binding_expiring_soon: "Скоро истекает подписка",
         provider_binding_alert_critical: "Критичный alert provider",
         provider_binding_alert_warn: "Alert provider (warn)",
+        integration_degraded: "Интеграция degraded",
     };
     return labels[status] ?? status;
 }
@@ -227,6 +239,77 @@ function providerOpsActionLabel(action: ProviderOpsQueueItem["recommended_action
         return "Отправить напоминание";
     }
     return "Сверка";
+}
+
+function providerSlaBadgeClass(value?: string | null): string {
+    if (value === "overdue") {
+        return "bg-red-100 text-red-800";
+    }
+    if (value === "due_soon") {
+        return "bg-amber-100 text-amber-800";
+    }
+    if (value === "on_track") {
+        return "bg-green-100 text-green-800";
+    }
+    return "bg-muted text-muted-foreground";
+}
+
+function providerSlaLabel(value?: string | null): string {
+    if (value === "overdue") {
+        return "Просрочено";
+    }
+    if (value === "due_soon") {
+        return "Скоро дедлайн";
+    }
+    if (value === "on_track") {
+        return "В срок";
+    }
+    return "Нет SLA";
+}
+
+function providerPriorityBadgeClass(priority?: string | null): string {
+    if (priority === "p0") {
+        return "bg-red-100 text-red-800";
+    }
+    if (priority === "p1") {
+        return "bg-amber-100 text-amber-800";
+    }
+    if (priority === "p2") {
+        return "bg-blue-100 text-blue-800";
+    }
+    return "bg-muted text-muted-foreground";
+}
+
+function providerPriorityLabel(priority?: string | null): string {
+    if (!priority) {
+        return "без приоритета";
+    }
+    return priority.toUpperCase();
+}
+
+function providerLifecycleNextActionLabel(action?: string | null): string {
+    if (!action) {
+        return "Нет действия";
+    }
+    if (action === "provider_start_rebind") {
+        return "Старт перепривязки";
+    }
+    if (action === "provider_complete_rebind") {
+        return "Завершить перепривязку";
+    }
+    if (action === "provider_renewal_confirmed") {
+        return "Подтвердить продление";
+    }
+    if (action === "provider_webhook_updated") {
+        return "Webhook обновлен";
+    }
+    if (action === "provider_send_reminder") {
+        return "Отправить напоминание";
+    }
+    if (action === "integration_reconcile") {
+        return "Сверка интеграции";
+    }
+    return action;
 }
 
 function goLiveStateLabel(value?: string | null): string {
@@ -364,15 +447,13 @@ export default function IntegrationsPage() {
     const { handleError } = useErrorHandler();
 
     const [staleAfterMinutes, setStaleAfterMinutes] = useState(60);
-    const [scopeCompanyId, setScopeCompanyId] = useState("");
-    const [scopeClientId, setScopeClientId] = useState("");
-    const [scopeBranchId, setScopeBranchId] = useState("");
-    const [scopeInitialized, setScopeInitialized] = useState(false);
 
     const [searchText, setSearchText] = useState("");
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
     const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>("all");
     const [teamFilter, setTeamFilter] = useState<TeamFilter>("all");
+    const [slaFilter, setSlaFilter] = useState<SlaFilter>("all");
+    const [viewMode, setViewMode] = useState<ViewMode>("overview");
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
     const [integrationsItems, setIntegrationsItems] = useState<BranchIntegrationStatus[]>([]);
     const [providerOpsQueue, setProviderOpsQueue] = useState<ProviderOpsQueueItem[]>([]);
@@ -380,6 +461,11 @@ export default function IntegrationsPage() {
     const [integrationsHasMore, setIntegrationsHasMore] = useState(false);
     const [integrationsTotalInScope, setIntegrationsTotalInScope] = useState(0);
     const [loadingMoreIntegrations, setLoadingMoreIntegrations] = useState(false);
+    const [todayItems, setTodayItems] = useState<ProviderLifecycleItem[]>([]);
+    const [todayCursor, setTodayCursor] = useState<string | null>(null);
+    const [todayHasMore, setTodayHasMore] = useState(false);
+    const [todayTotalInScope, setTodayTotalInScope] = useState(0);
+    const [loadingMoreToday, setLoadingMoreToday] = useState(false);
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -389,22 +475,21 @@ export default function IntegrationsPage() {
         },
         enabled: !!session,
     });
+    const {
+        scope,
+        setCompanyId: setScopeCompanyId,
+        setClientId: setScopeClientId,
+        setBranchId: setScopeBranchId,
+        syncFromRuntime,
+        updateScope,
+        persistScopeToStorage,
+    } = useConsoleContextScope(meData);
+    const scopeCompanyId = scope.companyId;
+    const scopeClientId = scope.clientId;
+    const scopeBranchId = scope.branchId;
 
     const role = meData?.agent?.role ?? "manager";
     const canReadIntegrations = canAccessConsole(role, "integrations", "read");
-
-    useEffect(() => {
-        if (!meData || scopeInitialized) {
-            return;
-        }
-        const storedCompanyId = readLocalStorageValue(COMPANY_ID_STORAGE_KEY);
-        const storedClientId = readLocalStorageValue(CLIENT_ID_STORAGE_KEY);
-        const storedBranchId = readLocalStorageValue(BRANCH_ID_STORAGE_KEY);
-        setScopeCompanyId(meData.selected_company_id ?? meData.client?.company_id ?? storedCompanyId ?? "");
-        setScopeClientId(meData.client?.id ?? storedClientId ?? "");
-        setScopeBranchId(meData.selected_branch_id ?? storedBranchId ?? "");
-        setScopeInitialized(true);
-    }, [meData, scopeInitialized]);
 
     const {
         data: companiesData,
@@ -489,6 +574,38 @@ export default function IntegrationsPage() {
     }, [integrationsData]);
 
     const {
+        data: providerLifecycleData,
+        isLoading: providerLifecycleLoading,
+        error: providerLifecycleError,
+        refetch: refetchProviderLifecycle,
+    } = useQuery({
+        queryKey: ["provider-lifecycle", staleAfterMinutes, scopeCompanyId, scopeClientId, scopeBranchId],
+        queryFn: async () => {
+            const response = await adminApi.listProviderLifecycle({
+                stale_after_minutes: staleAfterMinutes,
+                limit: INTEGRATIONS_PAGE_LIMIT,
+                only_problematic: true,
+                company_id: scopeCompanyId || undefined,
+                client_id: scopeClientId || undefined,
+                branch_id: scopeBranchId || undefined,
+            });
+            return response.data;
+        },
+        enabled: !!session && canReadIntegrations,
+        refetchInterval: 60000,
+    });
+
+    useEffect(() => {
+        if (!providerLifecycleData) {
+            return;
+        }
+        setTodayItems(providerLifecycleData.items ?? []);
+        setTodayCursor(providerLifecycleData.cursor ?? null);
+        setTodayHasMore(Boolean(providerLifecycleData.has_more));
+        setTodayTotalInScope(providerLifecycleData.total_in_scope ?? (providerLifecycleData.items?.length ?? 0));
+    }, [providerLifecycleData]);
+
+    const {
         data: membershipsData,
         error: membershipsError,
     } = useQuery({
@@ -559,6 +676,12 @@ export default function IntegrationsPage() {
     }, [fleetAttentionError, handleError]);
 
     useEffect(() => {
+        if (providerLifecycleError) {
+            handleError(providerLifecycleError);
+        }
+    }, [providerLifecycleError, handleError]);
+
+    useEffect(() => {
         if (!scopeClientId) {
             return;
         }
@@ -567,7 +690,7 @@ export default function IntegrationsPage() {
         }
         setScopeClientId("");
         setScopeBranchId("");
-    }, [clientOptions, scopeClientId]);
+    }, [clientOptions, scopeClientId, setScopeBranchId, setScopeClientId]);
 
     useEffect(() => {
         if (!scopeBranchId) {
@@ -577,7 +700,7 @@ export default function IntegrationsPage() {
             return;
         }
         setScopeBranchId("");
-    }, [branchOptions, scopeBranchId]);
+    }, [branchOptions, scopeBranchId, setScopeBranchId]);
 
     const companyOptions = useMemo<Company[]>(() => {
         const fromMe = meData?.companies ?? [];
@@ -775,6 +898,40 @@ export default function IntegrationsPage() {
         });
     }, [expiryFilter, rows, searchText, statusFilter, teamFilter]);
 
+    const filteredTodayItems = useMemo(() => {
+        const q = normalizeText(searchText);
+        return todayItems.filter((item) => {
+            if (statusFilter !== "all" && item.status !== statusFilter) {
+                return false;
+            }
+            if (slaFilter === "overdue" && item.sla_state !== "overdue") {
+                return false;
+            }
+            if (slaFilter === "due_soon" && item.sla_state !== "due_soon") {
+                return false;
+            }
+            if (!q) {
+                return true;
+            }
+
+            const haystack = [
+                item.company_name ?? "",
+                item.client_slug,
+                item.branch_name,
+                item.branch_slug,
+                item.instance_id ?? "",
+                item.provider_binding_instance_id ?? "",
+                item.provider_binding_owner ?? "",
+                item.next_action ?? "",
+                item.blockers.join(" "),
+            ]
+                .join(" ")
+                .toLowerCase();
+
+            return haystack.includes(q);
+        });
+    }, [searchText, slaFilter, statusFilter, todayItems]);
+
     const kpi = useMemo(() => {
         const allRows = rows;
         const companySet = new Set<string>();
@@ -812,36 +969,44 @@ export default function IntegrationsPage() {
         };
     }, [filteredRows.length, integrationsTotalInScope, rows]);
 
+    const providerOpsByBranchId = useMemo(() => {
+        const map = new Map<string, ProviderOpsQueueItem>();
+        for (const item of providerOpsQueue) {
+            if (!map.has(item.branch_id)) {
+                map.set(item.branch_id, item);
+            }
+        }
+        return map;
+    }, [providerOpsQueue]);
+
     const fleetAttentionSummary = fleetAttentionData?.summary;
     const scopeDataTruncated = Boolean(companiesData?.has_more || clientsData?.has_more || branchesData?.has_more);
 
     const syncScopeFromContext = () => {
-        const storedCompanyId = readLocalStorageValue(COMPANY_ID_STORAGE_KEY);
-        const storedClientId = readLocalStorageValue(CLIENT_ID_STORAGE_KEY);
-        const storedBranchId = readLocalStorageValue(BRANCH_ID_STORAGE_KEY);
-        setScopeCompanyId(meData?.selected_company_id ?? meData?.client?.company_id ?? storedCompanyId ?? "");
-        setScopeClientId(meData?.client?.id ?? storedClientId ?? "");
-        setScopeBranchId(meData?.selected_branch_id ?? storedBranchId ?? "");
+        syncFromRuntime();
     };
 
     const persistScopeAsContext = () => {
-        setLocalStorageValue(COMPANY_ID_STORAGE_KEY, scopeCompanyId || null);
-        setLocalStorageValue(CLIENT_ID_STORAGE_KEY, scopeClientId || null);
-        setLocalStorageValue(BRANCH_ID_STORAGE_KEY, scopeBranchId || null);
+        persistScopeToStorage();
         toast.success("Контекст сохранен");
     };
 
     const persistScopeAndOpenWorkspace = (target: ScopeTarget, note?: string) => {
         const normalizedClient = target.clientId ? String(target.clientId) : "";
         const normalizedBranch = target.branchId ? String(target.branchId) : "";
-        const fallbackCompany = readLocalStorageValue(COMPANY_ID_STORAGE_KEY) ?? "";
         const normalizedCompany = target.companyId
             ? String(target.companyId)
-            : (normalizedClient ? clientCompanyMap.get(normalizedClient) : undefined) ?? scopeCompanyId ?? fallbackCompany;
-
-        setLocalStorageValue(COMPANY_ID_STORAGE_KEY, normalizedCompany || null);
-        setLocalStorageValue(CLIENT_ID_STORAGE_KEY, normalizedClient || null);
-        setLocalStorageValue(BRANCH_ID_STORAGE_KEY, normalizedBranch || null);
+            : (normalizedClient ? clientCompanyMap.get(normalizedClient) : undefined) ?? scopeCompanyId;
+        updateScope({
+            companyId: normalizedCompany,
+            clientId: normalizedClient,
+            branchId: normalizedBranch,
+        });
+        persistScopeToStorage({
+            companyId: normalizedCompany,
+            clientId: normalizedClient,
+            branchId: normalizedBranch,
+        });
 
         if (note) {
             toast.success(note);
@@ -850,6 +1015,18 @@ export default function IntegrationsPage() {
     };
 
     const openWorkspaceForRow = (row: EnrichedRow) => {
+        const recommendation = providerOpsByBranchId.get(row.branch_id);
+        if (recommendation) {
+            setWorkspaceRecommendedActionContext({
+                branch_id: recommendation.branch_id,
+                action: recommendation.recommended_action,
+                reasons: recommendation.reasons ?? [],
+                source: "matrix",
+                captured_at: new Date().toISOString(),
+            });
+        } else {
+            setWorkspaceRecommendedActionContext(null);
+        }
         persistScopeAndOpenWorkspace(
             {
                 companyId: row.company_id,
@@ -861,12 +1038,30 @@ export default function IntegrationsPage() {
     };
 
     const openWorkspaceForQueueItem = (queueItem: ProviderOpsQueueItem) => {
+        setWorkspaceRecommendedActionContext({
+            branch_id: queueItem.branch_id,
+            action: queueItem.recommended_action,
+            reasons: queueItem.reasons ?? [],
+            source: "queue",
+            captured_at: new Date().toISOString(),
+        });
         persistScopeAndOpenWorkspace(
             {
                 clientId: queueItem.client_id,
                 branchId: queueItem.branch_id,
             },
             `Queue -> ${providerOpsActionLabel(queueItem.recommended_action)}`,
+        );
+    };
+
+    const openWorkspaceForLifecycleItem = (item: ProviderLifecycleItem) => {
+        persistScopeAndOpenWorkspace(
+            {
+                companyId: item.company_id,
+                clientId: item.client_id,
+                branchId: item.branch_id,
+            },
+            "Today -> Workspace",
         );
     };
 
@@ -912,6 +1107,42 @@ export default function IntegrationsPage() {
             handleError(error);
         } finally {
             setLoadingMoreIntegrations(false);
+        }
+    };
+
+    const loadMoreToday = async () => {
+        if (!todayCursor || loadingMoreToday) {
+            return;
+        }
+        setLoadingMoreToday(true);
+        try {
+            const response = await adminApi.listProviderLifecycle({
+                stale_after_minutes: staleAfterMinutes,
+                limit: INTEGRATIONS_PAGE_LIMIT,
+                cursor: todayCursor,
+                only_problematic: true,
+                company_id: scopeCompanyId || undefined,
+                client_id: scopeClientId || undefined,
+                branch_id: scopeBranchId || undefined,
+            });
+            const page = response.data;
+            setTodayItems((previous) => {
+                const byKey = new Map<string, ProviderLifecycleItem>();
+                for (const item of previous) {
+                    byKey.set(`${item.branch_id}:${item.next_action ?? "-"}`, item);
+                }
+                for (const item of page.items ?? []) {
+                    byKey.set(`${item.branch_id}:${item.next_action ?? "-"}`, item);
+                }
+                return [...byKey.values()];
+            });
+            setTodayCursor(page.cursor ?? null);
+            setTodayHasMore(Boolean(page.has_more));
+            setTodayTotalInScope((current) => Math.max(current, page.total_in_scope ?? current));
+        } catch (error) {
+            handleError(error);
+        } finally {
+            setLoadingMoreToday(false);
         }
     };
 
@@ -971,7 +1202,9 @@ export default function IntegrationsPage() {
                     <button
                         type="button"
                         className="btn-ghost"
-                        onClick={() => refetchIntegrations()}
+                        onClick={() => {
+                            void Promise.all([refetchIntegrations(), refetchProviderLifecycle()]);
+                        }}
                     >
                         Обновить
                     </button>
@@ -982,6 +1215,32 @@ export default function IntegrationsPage() {
                     <Link href="/ops" className="btn-ghost">Операции</Link>
                 </div>
             </div>
+
+            <section className="mb-4 rounded-xl border border-border/60 bg-card p-3" data-testid="integrations-view-mode">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs text-muted-foreground">
+                        Режим экрана: {viewMode === "overview" ? "обзор по всем филиалам" : "today: только проблемные филиалы с next action"}
+                    </div>
+                    <div className="inline-flex rounded-full border border-border/60 bg-muted/20 p-1">
+                        <button
+                            type="button"
+                            className={`rounded-full px-3 py-1 text-xs font-medium transition ${viewMode === "overview" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+                            onClick={() => setViewMode("overview")}
+                            data-testid="integrations-view-overview"
+                        >
+                            Обзор
+                        </button>
+                        <button
+                            type="button"
+                            className={`rounded-full px-3 py-1 text-xs font-medium transition ${viewMode === "today" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+                            onClick={() => setViewMode("today")}
+                            data-testid="integrations-view-today"
+                        >
+                            Today ({todayTotalInScope})
+                        </button>
+                    </div>
+                </div>
+            </section>
 
             <section className="mb-4 rounded-xl border border-blue-300/50 bg-blue-50/60 p-4" data-testid="integrations-workspace-cta">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1112,6 +1371,7 @@ export default function IntegrationsPage() {
                                 setStatusFilter("all");
                                 setExpiryFilter("all");
                                 setTeamFilter("all");
+                                setSlaFilter("all");
                             }}
                             data-testid="integrations-scope-reset"
                         >
@@ -1140,8 +1400,9 @@ export default function IntegrationsPage() {
                     </div>
 
                     <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                        показано <span className="font-semibold text-foreground">{kpi.filteredBranches}</span> из {kpi.totalBranchesInScope} филиалов
-                        {" "}· загружено {kpi.totalBranchesLoaded}
+                        показано <span className="font-semibold text-foreground">{viewMode === "today" ? filteredTodayItems.length : kpi.filteredBranches}</span>
+                        {" "}из {viewMode === "today" ? todayTotalInScope : kpi.totalBranchesInScope} филиалов
+                        {" "}· загружено {viewMode === "today" ? todayItems.length : kpi.totalBranchesLoaded}
                         <div className="mt-1">
                             компания <span className="font-mono">{scopeCompanyId || "все"}</span> · клиент <span className="font-mono">{scopeClientId || "все"}</span> · филиал <span className="font-mono">{scopeBranchId || "все"}</span>
                         </div>
@@ -1159,7 +1420,7 @@ export default function IntegrationsPage() {
                 </div>
 
                 {showAdvancedFilters ? (
-                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <div className="mt-3 grid gap-3 md:grid-cols-3">
                         <label className="text-xs text-muted-foreground">
                             подписка provider
                             <select
@@ -1187,6 +1448,19 @@ export default function IntegrationsPage() {
                                 <option value="no_manager">нет менеджера</option>
                                 <option value="no_specialist">нет специалиста</option>
                                 <option value="understaffed">недоукомплектовано</option>
+                            </select>
+                        </label>
+
+                        <label className="text-xs text-muted-foreground">
+                            SLA (Today)
+                            <select
+                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                                value={slaFilter}
+                                onChange={(event) => setSlaFilter(event.target.value as SlaFilter)}
+                            >
+                                <option value="all">все</option>
+                                <option value="overdue">просрочено</option>
+                                <option value="due_soon">скоро дедлайн</option>
                             </select>
                         </label>
                     </div>
@@ -1270,161 +1544,258 @@ export default function IntegrationsPage() {
                 </section>
             ) : null}
 
-            {providerOpsQueue.length > 0 && (
-                <section className="mt-4 rounded-xl border border-amber-300/60 bg-amber-50/60 p-4" data-testid="provider-ops-queue">
-                    <div className="mb-2 text-sm font-semibold text-amber-900">
-                        Очередь provider-операций ({providerOpsQueue.length})
-                    </div>
-                    <div className="space-y-2">
-                        {providerOpsQueue.map((queueItem) => (
-                            <div
-                                key={`queue-${queueItem.branch_id}`}
-                                className="flex flex-wrap items-center justify-between gap-3 rounded border border-amber-300/50 bg-background/80 p-2 text-xs"
-                            >
-                                <div>
-                                    <div className="font-medium text-foreground">
-                                        {queueItem.client_slug} / {queueItem.branch_name}
+            {viewMode === "overview" ? (
+                <>
+                    {providerOpsQueue.length > 0 && (
+                        <section className="mt-4 rounded-xl border border-amber-300/60 bg-amber-50/60 p-4" data-testid="provider-ops-queue">
+                            <div className="mb-2 text-sm font-semibold text-amber-900">
+                                Очередь provider-операций ({providerOpsQueue.length})
+                            </div>
+                            <div className="space-y-2">
+                                {providerOpsQueue.map((queueItem) => (
+                                    <div
+                                        key={`queue-${queueItem.branch_id}`}
+                                        className="flex flex-wrap items-center justify-between gap-3 rounded border border-amber-300/50 bg-background/80 p-2 text-xs"
+                                    >
+                                        <div>
+                                            <div className="font-medium text-foreground">
+                                                {queueItem.client_slug} / {queueItem.branch_name}
+                                            </div>
+                                            <div className="text-muted-foreground">
+                                                приоритет {queueItem.priority.toUpperCase()} · действие {providerOpsActionLabel(queueItem.recommended_action)}
+                                            </div>
+                                            <div className="text-muted-foreground">
+                                                причины: {queueItem.reasons.map((reason) => statusLabel(reason)).join(", ")}
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            className="rounded-full border border-border/60 px-3 py-1 font-medium hover:bg-muted"
+                                            onClick={() => openWorkspaceForQueueItem(queueItem)}
+                                            data-testid="integrations-queue-open-workspace"
+                                        >
+                                            Открыть в Workspace
+                                        </button>
                                     </div>
-                                    <div className="text-muted-foreground">
-                                        приоритет {queueItem.priority.toUpperCase()} · действие {providerOpsActionLabel(queueItem.recommended_action)}
+                                ))}
+                            </div>
+                        </section>
+                    )}
+
+                    <section className="mt-4 rounded-xl border border-border/60 bg-card p-3 sm:p-4" data-testid="integrations-branch-matrix">
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-sm font-semibold">Матрица филиалов</div>
+                            <div className="text-xs text-muted-foreground">
+                                Карточный режим: факты по филиалу без горизонтального скролла.
+                            </div>
+                        </div>
+
+                        <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3">
+                            {filteredRows.map((row) => (
+                                <article key={row.branch_id} className="rounded-xl border border-border/70 bg-background p-3 text-xs sm:p-4" data-testid="integrations-row">
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                        <div className="min-w-0">
+                                            <div className="truncate font-semibold">{row.company_name}</div>
+                                            <div className="truncate text-muted-foreground">{row.client_name} ({row.client_slug})</div>
+                                            <div className="mt-1 truncate font-medium">{row.branch_name}</div>
+                                            <div className="truncate text-muted-foreground">{row.branch_slug}</div>
+                                        </div>
+                                        <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${statusBadgeClass(row.status)}`}>
+                                            {statusLabel(row.status)}
+                                        </span>
                                     </div>
-                                    <div className="text-muted-foreground">
-                                        причины: {queueItem.reasons.map((reason) => statusLabel(reason)).join(", ")}
+
+                                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                        <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+                                            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Каналы</div>
+                                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                                                <span className="rounded bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">WA: {statusLabel(row.whatsapp_status)}</span>
+                                                <span className="rounded bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">TG: {statusLabel(row.telegram_status)}</span>
+                                            </div>
+                                        </div>
+
+                                        <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+                                            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Провайдер</div>
+                                            <div className="mt-1 text-muted-foreground">owner: {row.provider_binding_owner ?? "-"}</div>
+                                            <div className="text-muted-foreground">paid_until: {row.provider_binding_paid_until ?? "-"}</div>
+                                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                                                <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerBindingExpiryBadgeClass(row.provider_binding_expiry_status)}`}>
+                                                    {providerBindingExpiryLabel(row.provider_binding_expiry_status)}
+                                                </span>
+                                                <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerBindingAlertBadgeClass(row.provider_binding_alert_state)}`}>
+                                                    {providerBindingAlertLabel(row.provider_binding_alert_state)}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+                                            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Команда</div>
+                                            <div className="mt-1 text-muted-foreground">
+                                                всего {row.team_stats.total} · manager {row.team_stats.managers} · specialist {row.team_stats.specialists}
+                                            </div>
+                                            <div className="mt-1">
+                                                <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${teamBadgeClass(row.team_issue)}`}>
+                                                    {row.team_issue ?? "Команда OK"}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+                                            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Онбординг</div>
+                                            <div className="mt-1 text-muted-foreground">state: {onboardingStateLabel(row.onboarding_state)}</div>
+                                            <div className="mt-1">
+                                                <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${goLiveBadgeClass(row.go_live_allowed, row.go_live_state)}`}>
+                                                    go-live: {goLiveStateLabel(row.go_live_state)}{row.go_live_allowed ? " (разрешен)" : ""}
+                                                </span>
+                                            </div>
+                                        </div>
                                     </div>
-                                </div>
+
+                                    <div className="mt-2 text-muted-foreground">
+                                        последний inbound: {formatTimestamp(row.last_inbound_at)}
+                                    </div>
+
+                                    <details className="mt-2 rounded-lg border border-border/60 bg-muted/10 p-2">
+                                        <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">Больше фактов</summary>
+                                        <div className="mt-2 space-y-1 text-muted-foreground">
+                                            <div>instance: <span className="font-mono break-all">{row.instance_id ?? "-"}</span></div>
+                                            <div>binding instance: <span className="font-mono break-all">{row.provider_binding_instance_id ?? "-"}</span></div>
+                                            <div>next_renewal: <span className="font-mono break-all">{row.provider_binding_next_renewal_at ?? "-"}</span></div>
+                                            <div>days left: {row.provider_binding_days_until_expiry ?? "-"} · rebind_required: {row.provider_binding_rebind_required ? "yes" : "no"}</div>
+                                            <div>last inbound instance: <span className="font-mono break-all">{row.last_inbound_instance_id ?? "-"}</span></div>
+                                            <div className="pt-1"><DriftIssues item={row} /></div>
+                                        </div>
+                                    </details>
+
+                                    <div className="mt-3 flex items-center justify-end">
+                                        <button
+                                            type="button"
+                                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted"
+                                            onClick={() => openWorkspaceForRow(row)}
+                                            data-testid="integrations-row-open-workspace"
+                                        >
+                                            Открыть в Workspace
+                                        </button>
+                                    </div>
+                                </article>
+                            ))}
+                        </div>
+
+                        {integrationsHasMore ? (
+                            <div className="mt-4 flex justify-center">
                                 <button
                                     type="button"
-                                    className="rounded-full border border-border/60 px-3 py-1 font-medium hover:bg-muted"
-                                    onClick={() => openWorkspaceForQueueItem(queueItem)}
-                                    data-testid="integrations-queue-open-workspace"
+                                    className="btn-ghost"
+                                    onClick={() => void loadMoreIntegrations()}
+                                    disabled={loadingMoreIntegrations}
+                                    data-testid="integrations-load-more"
                                 >
-                                    Открыть в Workspace
+                                    {loadingMoreIntegrations ? "Загружаю еще..." : `Показать еще ${INTEGRATIONS_PAGE_LIMIT}`}
                                 </button>
                             </div>
+                        ) : null}
+
+                        {filteredRows.length === 0 ? (
+                            <div className="mt-2 p-6 text-center text-muted-foreground" data-testid="integrations-empty">
+                                Нет филиалов по текущему контексту и фильтрам.
+                            </div>
+                        ) : null}
+                    </section>
+                </>
+            ) : (
+                <section className="mt-4 rounded-xl border border-border/60 bg-card p-3 sm:p-4" data-testid="integrations-today-mode">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <div className="text-sm font-semibold">Today mode: проблемные филиалы</div>
+                            <div className="text-xs text-muted-foreground">
+                                Только actionable-факты: next action, SLA, блокеры и переход в Workspace.
+                            </div>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                            показано <span className="font-semibold text-foreground">{filteredTodayItems.length}</span> из {todayTotalInScope}
+                        </div>
+                    </div>
+
+                    {providerLifecycleLoading && todayItems.length === 0 ? (
+                        <div className="space-y-2 animate-pulse">
+                            {[...Array(5)].map((_, index) => (
+                                <div key={index} className="h-24 rounded bg-muted/60" />
+                            ))}
+                        </div>
+                    ) : null}
+
+                    <div className="space-y-3">
+                        {filteredTodayItems.map((item) => (
+                            <article key={`${item.branch_id}:${item.next_action ?? "-"}`} className="rounded-lg border border-border/70 bg-background p-3 text-xs">
+                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                        <div className="truncate text-sm font-semibold">{item.company_name ?? "-"} / {item.client_slug}</div>
+                                        <div className="truncate text-muted-foreground">{item.branch_name} ({item.branch_slug})</div>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-1">
+                                        <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${statusBadgeClass(item.status)}`}>{statusLabel(item.status)}</span>
+                                        <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerPriorityBadgeClass(item.priority)}`}>{providerPriorityLabel(item.priority)}</span>
+                                        <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerSlaBadgeClass(item.sla_state)}`}>{providerSlaLabel(item.sla_state)}</span>
+                                    </div>
+                                </div>
+
+                                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                                    <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+                                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Next action</div>
+                                        <div className="mt-1 font-medium text-foreground">{providerLifecycleNextActionLabel(item.next_action)}</div>
+                                        <div className="mt-1 text-muted-foreground">
+                                            дедлайн: {formatTimestamp(item.sla_deadline_at)} · inbound: {formatTimestamp(item.last_inbound_at)}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+                                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Provider facts</div>
+                                        <div className="mt-1 text-muted-foreground">owner: {item.provider_binding_owner ?? "-"}</div>
+                                        <div className="text-muted-foreground">paid_until: {item.provider_binding_paid_until ?? "-"}</div>
+                                        <div className="text-muted-foreground break-all">
+                                            instance: {item.instance_id ?? "-"} · binding: {item.provider_binding_instance_id ?? "-"}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="mt-2 text-muted-foreground">
+                                    блокеры: {item.blockers.length ? item.blockers.map((blocker) => statusLabel(blocker)).join(", ") : "нет"}
+                                </div>
+
+                                <div className="mt-3 flex items-center justify-end">
+                                    <button
+                                        type="button"
+                                        className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted"
+                                        onClick={() => openWorkspaceForLifecycleItem(item)}
+                                        data-testid="integrations-today-open-workspace"
+                                    >
+                                        Открыть в Workspace
+                                    </button>
+                                </div>
+                            </article>
                         ))}
                     </div>
+
+                    {todayHasMore ? (
+                        <div className="mt-4 flex justify-center">
+                            <button
+                                type="button"
+                                className="btn-ghost"
+                                onClick={() => void loadMoreToday()}
+                                disabled={loadingMoreToday}
+                                data-testid="integrations-today-load-more"
+                            >
+                                {loadingMoreToday ? "Загружаю еще..." : `Показать еще ${INTEGRATIONS_PAGE_LIMIT}`}
+                            </button>
+                        </div>
+                    ) : null}
+
+                    {filteredTodayItems.length === 0 && !providerLifecycleLoading ? (
+                        <div className="mt-2 p-6 text-center text-muted-foreground" data-testid="integrations-today-empty">
+                            Нет проблемных филиалов по текущему контексту и фильтрам.
+                        </div>
+                    ) : null}
                 </section>
             )}
-
-            <section className="mt-4 rounded-xl border border-border/60 bg-card p-3 sm:p-4" data-testid="integrations-branch-matrix">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-sm font-semibold">Матрица филиалов</div>
-                    <div className="text-xs text-muted-foreground">
-                        Карточный режим: факты по филиалу без горизонтального скролла.
-                    </div>
-                </div>
-
-                <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3">
-                    {filteredRows.map((row) => (
-                        <article key={row.branch_id} className="rounded-xl border border-border/70 bg-background p-3 text-xs sm:p-4" data-testid="integrations-row">
-                            <div className="flex flex-wrap items-start justify-between gap-2">
-                                <div className="min-w-0">
-                                    <div className="truncate font-semibold">{row.company_name}</div>
-                                    <div className="truncate text-muted-foreground">{row.client_name} ({row.client_slug})</div>
-                                    <div className="mt-1 truncate font-medium">{row.branch_name}</div>
-                                    <div className="truncate text-muted-foreground">{row.branch_slug}</div>
-                                </div>
-                                <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${statusBadgeClass(row.status)}`}>
-                                    {statusLabel(row.status)}
-                                </span>
-                            </div>
-
-                            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                                <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Каналы</div>
-                                    <div className="mt-1 flex flex-wrap items-center gap-1">
-                                        <span className="rounded bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">WA: {statusLabel(row.whatsapp_status)}</span>
-                                        <span className="rounded bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">TG: {statusLabel(row.telegram_status)}</span>
-                                    </div>
-                                </div>
-
-                                <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Провайдер</div>
-                                    <div className="mt-1 text-muted-foreground">owner: {row.provider_binding_owner ?? "-"}</div>
-                                    <div className="text-muted-foreground">paid_until: {row.provider_binding_paid_until ?? "-"}</div>
-                                    <div className="mt-1 flex flex-wrap items-center gap-1">
-                                        <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerBindingExpiryBadgeClass(row.provider_binding_expiry_status)}`}>
-                                            {providerBindingExpiryLabel(row.provider_binding_expiry_status)}
-                                        </span>
-                                        <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${providerBindingAlertBadgeClass(row.provider_binding_alert_state)}`}>
-                                            {providerBindingAlertLabel(row.provider_binding_alert_state)}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Команда</div>
-                                    <div className="mt-1 text-muted-foreground">
-                                        всего {row.team_stats.total} · manager {row.team_stats.managers} · specialist {row.team_stats.specialists}
-                                    </div>
-                                    <div className="mt-1">
-                                        <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${teamBadgeClass(row.team_issue)}`}>
-                                            {row.team_issue ?? "Команда OK"}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-                                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Онбординг</div>
-                                    <div className="mt-1 text-muted-foreground">state: {onboardingStateLabel(row.onboarding_state)}</div>
-                                    <div className="mt-1">
-                                        <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${goLiveBadgeClass(row.go_live_allowed, row.go_live_state)}`}>
-                                            go-live: {goLiveStateLabel(row.go_live_state)}{row.go_live_allowed ? " (разрешен)" : ""}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="mt-2 text-muted-foreground">
-                                последний inbound: {formatTimestamp(row.last_inbound_at)}
-                            </div>
-
-                            <details className="mt-2 rounded-lg border border-border/60 bg-muted/10 p-2">
-                                <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">Больше фактов</summary>
-                                <div className="mt-2 space-y-1 text-muted-foreground">
-                                    <div>instance: <span className="font-mono break-all">{row.instance_id ?? "-"}</span></div>
-                                    <div>binding instance: <span className="font-mono break-all">{row.provider_binding_instance_id ?? "-"}</span></div>
-                                    <div>next_renewal: <span className="font-mono break-all">{row.provider_binding_next_renewal_at ?? "-"}</span></div>
-                                    <div>days left: {row.provider_binding_days_until_expiry ?? "-"} · rebind_required: {row.provider_binding_rebind_required ? "yes" : "no"}</div>
-                                    <div>last inbound instance: <span className="font-mono break-all">{row.last_inbound_instance_id ?? "-"}</span></div>
-                                    <div className="pt-1"><DriftIssues item={row} /></div>
-                                </div>
-                            </details>
-
-                            <div className="mt-3 flex items-center justify-end">
-                                <button
-                                    type="button"
-                                    className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted"
-                                    onClick={() => openWorkspaceForRow(row)}
-                                    data-testid="integrations-row-open-workspace"
-                                >
-                                    Открыть в Workspace
-                                </button>
-                            </div>
-                        </article>
-                    ))}
-                </div>
-
-                {integrationsHasMore ? (
-                    <div className="mt-4 flex justify-center">
-                        <button
-                            type="button"
-                            className="btn-ghost"
-                            onClick={() => void loadMoreIntegrations()}
-                            disabled={loadingMoreIntegrations}
-                            data-testid="integrations-load-more"
-                        >
-                            {loadingMoreIntegrations ? "Загружаю еще..." : `Показать еще ${INTEGRATIONS_PAGE_LIMIT}`}
-                        </button>
-                    </div>
-                ) : null}
-
-                {filteredRows.length === 0 ? (
-                    <div className="mt-2 p-6 text-center text-muted-foreground" data-testid="integrations-empty">
-                        Нет филиалов по текущему контексту и фильтрам.
-                    </div>
-                ) : null}
-            </section>
         </div>
     );
 }

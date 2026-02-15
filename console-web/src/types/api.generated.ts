@@ -1418,6 +1418,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/provider-lifecycle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List provider lifecycle facts for branch WhatsApp operations */
+        get: operations["listAdminProviderLifecycle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/integrations/{branch_id}/reconcile": {
         parameters: {
             query?: never;
@@ -2160,6 +2177,64 @@ export interface components {
             provider_binding_rebind_required?: boolean | null;
             /** Format: date-time */
             generated_at?: string | null;
+        };
+        /** @enum {string} */
+        ProviderLifecycleSlaState: "none" | "on_track" | "due_soon" | "overdue";
+        ProviderLifecycleItem: {
+            /** Format: uuid */
+            client_id: string;
+            client_slug: string;
+            /** Format: uuid */
+            branch_id: string;
+            branch_slug: string;
+            branch_name: string;
+            /** Format: uuid */
+            company_id?: string | null;
+            company_name?: string | null;
+            branch_phone?: string | null;
+            /** @enum {string} */
+            status: "ok" | "warn" | "error";
+            /** @enum {string} */
+            whatsapp_status: "ok" | "inactive" | "missing_instance_id" | "instance_id_mismatch" | "invalid_webhook_url" | "no_recent_inbound";
+            /** @enum {string} */
+            integration_state: "ok" | "degraded";
+            /** Format: date-time */
+            last_inbound_at?: string | null;
+            instance_id?: string | null;
+            provider_binding_provider?: string | null;
+            provider_binding_instance_id?: string | null;
+            /** @enum {string|null} */
+            provider_binding_webhook_status?: "configured" | "pending" | "rebind_required" | null;
+            /** Format: date */
+            provider_binding_paid_until?: string | null;
+            provider_binding_owner?: string | null;
+            /** Format: date */
+            provider_binding_next_renewal_at?: string | null;
+            /** Format: date */
+            provider_binding_last_rebind_at?: string | null;
+            provider_binding_rebind_required?: boolean | null;
+            /** @enum {string} */
+            provider_binding_alert_state?: "ok" | "warn" | "critical" | "unknown";
+            /** @enum {string} */
+            provider_binding_expiry_status?: "ok" | "expiring_soon" | "expired" | "unknown";
+            provider_binding_days_until_expiry?: number | null;
+            /** @enum {string|null} */
+            next_action?: "integration_reconcile" | "provider_start_rebind" | "provider_complete_rebind" | "provider_renewal_confirmed" | "provider_webhook_updated" | "provider_send_reminder" | null;
+            /** @enum {string|null} */
+            priority?: "p0" | "p1" | "p2" | null;
+            blockers: string[];
+            /** Format: date-time */
+            sla_deadline_at?: string | null;
+            sla_state: components["schemas"]["ProviderLifecycleSlaState"];
+            /** Format: date-time */
+            generated_at?: string | null;
+        };
+        ProviderLifecycleListResponse: {
+            stale_after_minutes: number;
+            cursor?: string | null;
+            has_more: boolean;
+            total_in_scope: number;
+            items: components["schemas"]["ProviderLifecycleItem"][];
         };
         IntegrationsListResponse: {
             stale_after_minutes: number;
@@ -5774,6 +5849,46 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listAdminProviderLifecycle: {
+        parameters: {
+            query?: {
+                /** @description Mark branch as stale when no inbound for this many minutes. */
+                stale_after_minutes?: number;
+                /** @description ISO timestamp cursor for pagination. */
+                cursor?: string;
+                /** @description Maximum number of branches in response page. */
+                limit?: number;
+                /** @description Return only branches that require an operation. */
+                only_problematic?: boolean;
+                /** @description Optional company scope filter. */
+                company_id?: string;
+                /** @description Optional client scope filter. */
+                client_id?: string;
+                /** @description Optional branch scope filter. */
+                branch_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Provider lifecycle registry */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderLifecycleListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             422: components["responses"]["ValidationError"];
         };
     };
