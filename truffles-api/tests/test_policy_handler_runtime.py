@@ -54,3 +54,61 @@ def test_get_policy_handler_prefers_exact_mapping_over_default(monkeypatch):
 
     assert handler is not None
     assert handler.get("truth_gate") is exact_truth_gate
+
+
+def test_matches_policy_keywords_avoids_inner_substring_false_positive():
+    normalized = legacy._normalize_text("А как насчет парковки?")
+
+    assert not policy._matches_policy_keywords(normalized, ["счет", "счёт"])
+
+
+def test_matches_policy_keywords_keeps_word_prefix_match_for_payment_terms():
+    normalized = legacy._normalize_text("Можно выставить счет на оплату?")
+
+    assert policy._matches_policy_keywords(normalized, ["счет"])
+
+
+def test_detect_hard_law_match_does_not_use_hint_only_false_positive():
+    policy_pack = {
+        "hard_law": {"sections": ["payment_info"]},
+        "payment_info": {"intent": "payment", "keywords": ["счет"]},
+    }
+
+    match = policy._detect_hard_law_match(
+        "А как насчет парковки?",
+        policy_pack=policy_pack,
+        intent_hints=["payment"],
+    )
+
+    assert match is None
+
+
+def test_detect_hard_law_match_uses_hint_when_keywords_confirmed():
+    policy_pack = {
+        "hard_law": {"sections": ["payment_info"]},
+        "payment_info": {"intent": "payment", "keywords": ["счет"]},
+    }
+
+    match = policy._detect_hard_law_match(
+        "Нужен счет на оплату.",
+        policy_pack=policy_pack,
+        intent_hints=["payment"],
+    )
+
+    assert match is not None
+    assert match[0] == "payment_info"
+
+
+def test_resolve_hard_law_sections_fallback_excludes_payment_info():
+    policy_pack = {
+        "hard_law": {},
+        "payment_info": {"risk_level": "medium"},
+        "medical": {"risk_level": "high"},
+        "legal": {"risk_level": "high"},
+    }
+
+    sections = policy._resolve_hard_law_sections(policy_pack)
+
+    assert "payment_info" not in sections
+    assert "medical" in sections
+    assert "legal" in sections

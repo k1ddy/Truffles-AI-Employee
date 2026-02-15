@@ -59,6 +59,15 @@ _SECTION_DEFAULT_INTENT = {
     "refund": "refund",
 }
 
+_DEFAULT_HARD_LAW_SECTIONS = (
+    "reschedule",
+    "cancel",
+    "medical",
+    "legal",
+    "complaint",
+    "refund",
+)
+
 
 def _looks_like_policy_pack(value: object) -> bool:
     if not isinstance(value, dict):
@@ -174,7 +183,13 @@ def _matches_policy_keywords(normalized: str, keywords: list[str]) -> bool:
         if not keyword:
             continue
         if len(keyword) <= 3:
-            if re.search(rf"\\b{re.escape(keyword)}\\b", normalized):
+            if re.search(rf"\b{re.escape(keyword)}\b", normalized):
+                return True
+            continue
+        # Use word-boundary prefix matching for word-like stems to avoid
+        # false positives from inner-substring hits (e.g. "счет" in "насчет").
+        if re.fullmatch(r"[0-9A-Za-zА-Яа-яЁёҚқҒғҢңҮүҰұҺһІі]+", keyword):
+            if re.search(rf"\b{re.escape(keyword)}\w*", normalized):
                 return True
             continue
         if keyword in normalized:
@@ -221,7 +236,24 @@ def _resolve_hard_law_sections(policy_pack: dict | None) -> list[str]:
             resolved.append(mapped)
     if resolved:
         return resolved
-    return list(dict.fromkeys(_HARD_LAW_INTENT_MAP.values()))
+
+    # Fallback for partially configured policy packs:
+    # treat only explicitly high/critical sections as hard-law.
+    inferred: list[str] = []
+    for section_key in _POLICY_SECTIONS:
+        section = _get_policy_section(policy_pack, section_key)
+        if not isinstance(section, dict):
+            continue
+        if bool(section.get("hard_law")):
+            inferred.append(section_key)
+            continue
+        risk_level = section.get("risk_level")
+        if isinstance(risk_level, str) and risk_level.strip().casefold() in {"high", "critical"}:
+            inferred.append(section_key)
+    if inferred:
+        return list(dict.fromkeys(inferred))
+
+    return list(_DEFAULT_HARD_LAW_SECTIONS)
 
 
 def _detect_policy_section(
@@ -257,6 +289,7 @@ def _detect_hard_law_match(
 ) -> tuple[str, dict | None] | None:
     from . import _legacy as legacy
 
+    normalized = legacy._normalize_text(message_text)
     hard_law_sections = _resolve_hard_law_sections(policy_pack)
     match = _detect_policy_section(
         message_text,
@@ -316,7 +349,21 @@ def _detect_hard_law_match(
     for intent in intent_set:
         mapped = _HARD_LAW_INTENT_MAP.get(intent)
         if mapped and mapped in hard_law_sections:
-            return mapped, _get_policy_section(policy_pack, mapped)
+            section = _get_policy_section(policy_pack, mapped)
+            if normalized:
+                section_keywords = _policy_str_list(
+                    section.get("keywords") if isinstance(section, dict) else None
+                )
+                guard_topic = _SECTION_GUARD_TOPIC.get(mapped)
+                guard_keywords = _get_guard_topics(policy_pack).get(guard_topic) if guard_topic else None
+                if section_keywords or guard_keywords:
+                    section_match = bool(
+                        (section_keywords and _matches_policy_keywords(normalized, section_keywords))
+                        or (guard_keywords and _matches_policy_keywords(normalized, guard_keywords))
+                    )
+                    if not section_match:
+                        continue
+            return mapped, section
     return None
 
 
