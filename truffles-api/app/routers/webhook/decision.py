@@ -591,6 +591,13 @@ def _should_block_expected_reply_by_info(
     price_signal = legacy._has_price_signal(normalized_message, message_text)
     duration_signal = legacy._has_duration_signal(normalized_message, message_text)
     style_reference_signal = _is_style_reference_request(message_text, has_media=False)
+    expected_reply_candidate = None
+    if expected_reply_type == legacy.EXPECTED_REPLY_TIME:
+        expected_reply_candidate = _validate_expected_reply_value(
+            expected_reply_type=expected_reply_type,
+            value=message_text,
+            client_slug=client_slug,
+        )
     blocked = bool(
         info_query
         or price_signal
@@ -610,8 +617,20 @@ def _should_block_expected_reply_by_info(
     if (
         blocked
         and expected_reply_type == legacy.EXPECTED_REPLY_TIME
-        and legacy._extract_datetime(message_text)
     ):
+        booking_signal = _is_booking_request(message_text, client_slug=client_slug)
+        if (
+            isinstance(expected_reply_candidate, str)
+            and expected_reply_candidate.strip()
+            and not price_signal
+            and not style_reference_signal
+            and (booking_signal or not info_query)
+        ):
+            # Accept grounded booking-time replies like "на 3 часа" even when
+            # duration markers are present in wording.
+            return False
+        if not legacy._extract_datetime(message_text):
+            return blocked
         # Keep info interrupts (address/hours/price/duration) in the info path
         # even when the message also contains a time-like token.
         return bool(info_query or price_signal or duration_signal)
@@ -1073,6 +1092,13 @@ def _apply_expected_reply_contract(
                         reason="active_goal",
                     )
                 current_goal = "booking"
+        if matched and expected_reply_blocked_by_info:
+            # The message contained info-like signals but still produced a valid
+            # expected-reply slot match; treat it as a successful answer to avoid
+            # false "expected_reply_deferred" observability noise.
+            expected_reply_blocked_by_info = False
+            if answer_meta.get("answer_error") == "blocked_by_info":
+                answer_meta["answer_error"] = "none"
         trace_payload = {
             "stage": "question_contract",
             "decision": "matched" if matched else "missed",
@@ -7134,7 +7160,21 @@ async def _handle_webhook_payload(
         )
         info_blocked_by_intents = bool(info_reply_intents)
         if info_blocked_by_intents and expected_reply_type == EXPECTED_REPLY_TIME and message_text:
-            if _extract_datetime(message_text):
+            validated_expected_time = _validate_expected_reply_value(
+                expected_reply_type=expected_reply_type,
+                value=message_text,
+                client_slug=payload.client_slug,
+            )
+            if (
+                isinstance(validated_expected_time, str)
+                and validated_expected_time.strip()
+                and (
+                    _is_booking_request(message_text, client_slug=payload.client_slug)
+                    or not _looks_like_info_query(message_text, client_slug=payload.client_slug)
+                )
+            ):
+                info_blocked_by_intents = False
+            elif _extract_datetime(message_text):
                 info_blocked_by_intents = False
         if info_blocked_by_intents:
             expected_reply_blocked_by_info = True
