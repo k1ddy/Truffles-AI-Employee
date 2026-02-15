@@ -184,6 +184,8 @@ test.describe('Owner/Admin Business Control', () => {
         const quickProfile = page.getByTestId('team-performance-quick-profile');
         if (await quickProfile.isVisible().catch(() => false)) {
             await expect(page.getByTestId('team-performance-quick-profile-apply')).toBeVisible();
+            await expect(page.getByTestId('team-performance-remediation-guide')).toBeVisible();
+            await expect(page.getByTestId('team-performance-quick-profile-rollback-card')).toBeVisible();
         }
         const teamTable = page.getByTestId('team-performance-table');
         const teamEmpty = page.getByText('Нет открытых заявок в текущем scope.');

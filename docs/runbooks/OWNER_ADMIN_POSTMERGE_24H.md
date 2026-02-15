@@ -1,18 +1,22 @@
-# Owner/Admin Post-Merge 24H Control Loop
+# Owner/Admin Post-Merge 24H Control Loop (v2)
 
 Purpose
-- Проверить, что owner/admin изменения после merge не ухудшили бизнес-контур (SLA, эскалация, подписка, trace/meta).
+- Проверить, что owner/admin улучшения после merge стабилизируют бизнес-контур, а не только UI.
+- Вести сравнение `T+0` (сразу после merge) vs `T+24` (через ~24 часа) в одинаковом формате.
 
 When
-- Сразу после merge.
-- Повторно через ~24 часа.
+- `T+0`: в течение 30 минут после merge.
+- `T+24`: через 24 +/- 2 часа после `T+0`.
 
 Required evidence
-- `livecheck-auto` summary + explain trace.
-- KPI snapshot (`outbox pending/failed`).
-- KPI sample по клиенту: `outbox_backlog`, `unresolved_cases`, `first_response_p90_seconds`.
+- `livecheck-auto` summary + `explain` trace/meta.
+- KPI snapshot JSON (`ops/console_owner_admin_kpi_snapshot.py`) на `T+0` и `T+24`.
+- Impact compare against baseline (`--baseline`).
+- Session/report запись с абсолютными timestamp.
 
-## 1) Live-check + explain
+## 1) T+0: runtime signal + baseline KPI
+
+### 1.1 Live-check + explain
 
 ```bash
 TEST_MODE=1 python3 ops/diagnose.py livecheck-auto \
@@ -42,55 +46,70 @@ python3 ops/diagnose.py explain \
 ```
 
 Success criteria
-- `decision_meta` exists and contains `action/intent/source`.
-- `decision_trace` contains expected stage (`policy_gate:*` or relevant flow stage).
+- `decision_meta` exists and includes `action/intent/source`.
+- `decision_trace` has expected decision stage (`policy_gate:*` or flow stage).
 - `outbox_latest.status` is not `FAILED`.
 
-## 2) Runtime KPI snapshot
+### 1.2 KPI baseline snapshot
 
 ```bash
-python3 ops/console_platform_admin_kpi_snapshot.py --pretty \
-  --output /tmp/owner_admin_postmerge_kpi_$(date +%Y%m%d-%H%M%S).json
+python3 ops/console_owner_admin_kpi_snapshot.py \
+  --client-slug demo_salon \
+  --pretty \
+  --output /tmp/owner_admin_wave5_t0.json
 ```
 
-Stop-the-line rule
-- If outbox guard status is `critical`, do not declare post-merge stable.
-
-## 3) Business KPI sample (client-level)
+Optional hard-gate
 
 ```bash
-DB_USER=$(docker exec -i truffles_postgres_1 /bin/sh -lc 'printf %s "${POSTGRES_USER:-postgres}"')
-docker exec -i truffles_postgres_1 psql -U "$DB_USER" -d chatbot -Atc "
-WITH target AS (
-  SELECT id FROM clients WHERE name='demo_salon' LIMIT 1
-),
-outbox AS (
-  SELECT COUNT(*) AS outbox_backlog
-  FROM outbox_messages o JOIN target t ON o.client_id=t.id
-  WHERE o.status IN ('PENDING','PROCESSING')
-),
-hand AS (
-  SELECT COUNT(*) AS unresolved_cases
-  FROM handovers h JOIN target t ON h.client_id=t.id
-  WHERE h.status IN ('pending','active')
-),
-p90 AS (
-  SELECT first_response_p90_seconds
-  FROM metrics_analytics_daily m JOIN target t ON m.client_id=t.id
-  ORDER BY metric_date DESC LIMIT 1
-)
-SELECT
-  (SELECT outbox_backlog FROM outbox),
-  (SELECT unresolved_cases FROM hand),
-  (SELECT first_response_p90_seconds FROM p90);
-"
+python3 ops/console_owner_admin_kpi_snapshot.py \
+  --client-slug demo_salon \
+  --fail-on-breach \
+  --fail-level critical \
+  --output /tmp/owner_admin_wave5_t0_gate.json
 ```
 
 Interpretation
-- Track deltas vs previous run, not single value in isolation.
-- Record exact timestamp and values in `docs/SESSIONS/SESSION-*.md`.
+- `kpi.guard.status=critical` => stop-the-line для owner/admin rollout решений.
+- Baseline path `/tmp/owner_admin_wave5_t0.json` обязателен для шага `T+24`.
 
-## 4) Handoff checklist
-- Add command outputs/log paths to session evidence.
-- Mention regressions explicitly (if any).
-- If degraded/critical, attach remediation owner + ETA.
+## 2) T+24: replay + impact compare
+
+### 2.1 Replay snapshot with baseline compare
+
+```bash
+python3 ops/console_owner_admin_kpi_snapshot.py \
+  --client-slug demo_salon \
+  --baseline /tmp/owner_admin_wave5_t0.json \
+  --pretty \
+  --output /tmp/owner_admin_wave5_t24.json
+```
+
+Expected output fields
+- `impact.summary` (`improved|regressed|mixed_or_stable`).
+- `impact.metrics.*.trend` and `delta` for:
+  - `outbox_backlog`
+  - `unresolved_cases`
+  - `unresolved_older_than_60m`
+  - `first_response_p90_seconds`
+
+### 2.2 T+24 stop-the-line
+- If `kpi.guard.status=critical` at `T+24` => incident owner + ETA обязательны.
+- If `impact.summary=regressed` => rollback/remediation plan required before next UX wave.
+
+## 3) Evidence checklist
+- Log paths:
+  - `livecheck-auto` output
+  - `explain` output
+  - `/tmp/owner_admin_wave5_t0.json`
+  - `/tmp/owner_admin_wave5_t24.json`
+- In session/report include:
+  - absolute timestamps for `T+0` and `T+24`,
+  - guard status both runs,
+  - impact summary and top regressions/improvements,
+  - decision owner if degraded/critical.
+
+## 4) No-go
+- Не сравнивать `T+24` с другим baseline (только `T+0` этого же merge).
+- Не закрывать wave без `T+0` snapshot.
+- Не интерпретировать один KPI вне guard+impact контекста.

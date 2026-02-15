@@ -439,3 +439,4 @@
 | 2026-02-15-platform-admin-wave14-a1 | active | feat/2026-02-15-platform-admin-wave14-a1 | /home/zhan/worktrees/2026-02-15-platform-admin-wave14-a1 | docs/TASK_PACKAGES/TP-2026-02-15-platform-admin-wave14-a1.md | 2026-02-15 |
 | 2026-02-15-platform-admin-wave12345-a1 | active | feat/2026-02-15-platform-admin-wave12345-a1 | /home/zhan/worktrees/2026-02-15-platform-admin-wave12345-a1 | docs/TASK_PACKAGES/TP-2026-02-15-platform-admin-wave12345-a1.md | 2026-02-15 |
 | 2026-02-15-owner-admin-business-deep-audit-a1 | active | feat/2026-02-15-owner-admin-business-audit-a1 | /home/zhan/worktrees/2026-02-15-owner-admin-business-audit-a1 | docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave3-simple-settings-a1.md | 2026-02-15 |
+| 2026-02-15-owner-admin-wave5-controls-a1 | active | feat/2026-02-15-owner-admin-wave5-controls-a1 | /home/zhan/worktrees/2026-02-15-owner-admin-wave5-controls-a1 | docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave5-controls-a1.md | 2026-02-15 |

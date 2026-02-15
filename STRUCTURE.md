@@ -69,6 +69,7 @@
 | `ops/reset.sql` | **Emergency:** закрыть все open handovers + вернуть `bot_active` | Кодер/OPS |
 | `ops/diagnose.py` | Диагностика диалогов/trace/outbox + `dialog-report` (one-command) | QA/OPS/Brain |
 | `ops/console_platform_admin_kpi_snapshot.py` | Weekly KPI snapshot для Platform Admin (runtime + LOC + UX/e2e signals) | Brain/OPS/QA |
+| `ops/console_owner_admin_kpi_snapshot.py` | KPI snapshot для Owner/Admin (`T+0/T+24`, impact baseline/replay, fail-fast guard) | Brain/OPS/QA |
 | `ops/shadow_replay.py` | Shadow replay report (decision_meta/trace comparison) | QA/OPS/Brain |
 | `ops/backfill_branch_rag.py` | Backfill Qdrant branch metadata from published knowledge | OPS/Brain |
 | `ops/keycloak-theme/` | Тема Keycloak (CSS + лого) для брендинга auth | OPS/Frontend |
@@ -77,6 +78,7 @@
 | `truffles-api/scripts/apply_sql_migrations.py` | SQL migration runner (`schema_migrations` + checksum guard) | Backend/OPS |
 | `truffles-api/app/services/onboarding_state.py` | Server-side onboarding state machine (Console) | Backend |
 | `truffles-api/app/services/console_confirmations.py` | Confirmation safeguards for destructive Console actions | Backend |
+| `truffles-api/app/services/console_owner_admin.py` | Owner/Admin business helpers extracted from `console.py` | Backend |
 | `truffles-api/app/services/capabilities_runtime.py` | Runtime capabilities context (client_capabilities → decision/booking) | Backend |
 | `truffles-api/app/services/knowledge_runtime.py` | Runtime published pack truth (knowledge_versions → demo_salon resolver) | Backend |
 | `truffles-api/app/services/reasoning_core.py` | Unified Reasoning Core API (signals -> gates -> actions -> compose -> trace) | Backend/Architect |
@@ -122,6 +124,7 @@
 | `docs/runbooks/DIALOG_REPORT.md` | Dialog-report runbook (one-command анализ диалогов) | QA/OPS/Brain |
 | `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` | Booking confirm verification runbook | QA/OPS/Brain |
 | `docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md` | Weekly control-loop runbook для Platform Admin (snapshot -> backlog -> checks) | Brain/Architect |
+| `docs/runbooks/OWNER_ADMIN_POSTMERGE_24H.md` | Post-merge control-loop runbook для Owner/Admin (`T+0/T+24`) | Brain/Architect |
 | `SPECS/CONTROL_PLANE.md` | Канон: Console как Control Plane (роли, IA, онбординг, capabilities) | Архитектор/Frontend |
 | `docs/CONSULTANT_CODEMAP.md` | Код‑карта консультанта (decision pipeline, блоки, влияние на поведение) | Backend/Architect |
 | `docs/REPORTS/` | Отчёты по прогонам/изменениям | Brain/Architect |
@@ -136,6 +139,7 @@
 | `docs/REPORTS/2026-02-08-enterprise-fleet-program.md` | Report: Enterprise fleet operating model + 5-PR execution plan | Brain/Architect |
 | `docs/REPORTS/2026-02-15-platform-admin-baseline-v2.md` | Report: Platform Admin runtime/code baseline + control-loop wave results | Brain/Architect |
 | `docs/REPORTS/2026-02-15-platform-admin-baseline-v3.md` | Report: Platform Admin wave 1+2 follow-up (outbox guard + inline validation recovery) | Brain/Architect |
+| `docs/REPORTS/2026-02-15-owner-admin-wave5-control-hardening-v1.md` | Report: Owner/Admin wave-5 (control hardening + rollback + decomposition start) | Brain/Architect |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 

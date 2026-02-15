@@ -1,0 +1,27 @@
+# SESSION 2026-02-15-owner-admin-wave5-controls-a1 — Session 2026-02-15-owner-admin-wave5-controls-a1
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave5-controls-a1.md
+- branch: feat/2026-02-15-owner-admin-wave5-controls-a1
+- worktree: /home/zhan/worktrees/2026-02-15-owner-admin-wave5-controls-a1
+- base_ref: origin/main
+- scope: Wave-5 owner/admin control hardening (runbook T+0/T+24 + KPI snapshot + remediation rollback + console.py decomposition start).
+- done:
+  - Session created.
+  - Added owner/admin KPI snapshot tool (`ops/console_owner_admin_kpi_snapshot.py`) with baseline/replay impact and fail-fast gate.
+  - Updated runbook `docs/runbooks/OWNER_ADMIN_POSTMERGE_24H.md` to strict `T+0/T+24` protocol.
+  - Added Team KPI guided remediation + rollback UI (`team-performance-quick-profile-rollback`).
+  - Started owner/admin decomposition by extracting helpers into `truffles-api/app/services/console_owner_admin.py`.
+  - Updated governance docs (`STRUCTURE.md`, `STATE.md`, `docs/CONSOLE_AUDIT/UX_BACKLOG.md`) and created wave report.
+- next:
+  - Run `scripts/session_check.sh`, commit, push, and open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave5-controls-a1.md
+  - /tmp/owner_admin_wave5_t0.json
+  - /tmp/owner_admin_wave5_t0_gate.json
+  - `pytest -q truffles-api/tests/test_console_owner_business.py truffles-api/tests/test_console_rbac.py` -> `54 passed`
+  - `npm --prefix console-web run lint` -> OK
+  - `npm --prefix console-web run build` -> OK
+  - `npm --prefix console-web run test:e2e:smoke -- --list` -> OK
+- last_updated: 2026-02-15
