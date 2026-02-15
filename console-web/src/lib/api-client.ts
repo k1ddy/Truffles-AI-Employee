@@ -65,6 +65,7 @@ export const ErrorCodes = {
     IDEMPOTENCY_CONFLICT: "IDEMPOTENCY_CONFLICT",
     OIDC_NOT_CONFIGURED: "OIDC_NOT_CONFIGURED",
     IDENTITY_NOT_LINKED: "IDENTITY_NOT_LINKED",
+    KNOWLEDGE_PREFLIGHT_REQUIRED: "KNOWLEDGE_PREFLIGHT_REQUIRED",
 } as const;
 
 export type ErrorCode = keyof typeof ErrorCodes;
@@ -335,6 +336,11 @@ const errorConfigs: Record<ErrorCode, ErrorConfig> = {
     IDENTITY_NOT_LINKED: {
         http_status: 403,
         ui_behavior: { action: "error_page", toast: false },
+        retryable: false,
+    },
+    KNOWLEDGE_PREFLIGHT_REQUIRED: {
+        http_status: 409,
+        ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
         retryable: false,
     },
 };
@@ -875,8 +881,11 @@ export const knowledgeApi = {
         apiClient.get<KnowledgeCurrentResponse>("/knowledge/current"),
     validate: (draftText: string) =>
         apiClient.post<KnowledgeValidationResponse>("/knowledge/validate", { draft_text: draftText }),
-    publish: (draftText: string) =>
-        apiClient.post<KnowledgePublishResponse>("/knowledge/publish", { draft_text: draftText }),
+    publish: (draftText: string, options?: { skipPreflightCheck?: boolean }) =>
+        apiClient.post<KnowledgePublishResponse>("/knowledge/publish", {
+            draft_text: draftText,
+            skip_preflight_check: options?.skipPreflightCheck ?? false,
+        }),
     history: () =>
         apiClient.get<KnowledgeHistoryResponse>("/knowledge/history"),
     rollback: (versionId: string, confirmationId?: string) =>

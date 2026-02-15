@@ -205,6 +205,8 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page.getByTestId('settings-after-save')).toBeVisible();
         await expect(page.getByTestId('settings-telegram-connector')).toBeVisible();
         await expect(page.getByTestId('settings-subscription-snapshot')).toBeVisible();
+        await expect(page.getByTestId('settings-goal-mode')).toBeVisible();
+        await expect(page.getByTestId('settings-goal-capture_leads')).toBeVisible();
         await expect(page.getByTestId('settings-input-reminder1')).toBeVisible();
         await expect(page.getByTestId('settings-input-reminder2')).toBeVisible();
         await expect(page.getByTestId('settings-input-escalation')).toBeVisible();

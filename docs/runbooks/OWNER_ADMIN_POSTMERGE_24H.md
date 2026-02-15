@@ -4,6 +4,12 @@ Purpose
 - Проверить, что owner/admin улучшения после merge стабилизируют бизнес-контур, а не только UI.
 - Вести сравнение `T+0` (сразу после merge) vs `T+24` (через ~24 часа) в одинаковом формате.
 
+Fast path (automation wrapper)
+- Вместо ручных шагов можно запускать orchestration:
+  - `python3 ops/owner_admin_control_loop.py --mode t0 --client-slug demo_salon`
+  - `python3 ops/owner_admin_control_loop.py --mode t24 --client-slug demo_salon --baseline /tmp/owner_admin_wave5_t0.json`
+- Скрипт создаёт snapshot + gate + brief + log в `/tmp/owner_admin_control_loop/<run_id>/`.
+
 When
 - `T+0`: в течение 30 минут после merge.
 - `T+24`: через 24 +/- 2 часа после `T+0`.

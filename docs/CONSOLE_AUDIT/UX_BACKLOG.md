@@ -13,6 +13,7 @@ Evidence sources
 - `docs/REPORTS/2026-02-15-owner-admin-wave3-simple-settings-v1.md`
 - `docs/REPORTS/2026-02-15-owner-admin-wave4-action-loop-v1.md`
 - `docs/REPORTS/2026-02-15-owner-admin-wave5-control-hardening-v1.md`
+- `docs/REPORTS/2026-02-15-owner-admin-wave6-automation-v1.md`
 - `Business/Sales/BILLING_COUNTING.md`
 - `docs/CONSOLE_AUDIT/roles/owner.md`
 - `docs/CONSOLE_AUDIT/roles/admin.md`
@@ -43,6 +44,9 @@ Evidence sources
 | UX-18 | P0 | Action loop closure | Team KPI had diagnosis but no direct remediation action; settings default still overloaded by technical blocks; subscription lacked next-charge + alert semantics. | Owner/Admin saw issues but could not act quickly, causing slower recovery and billing ambiguity. | `console-web/src/app/business/team-performance/page.tsx`, `console-web/src/app/settings/page.tsx`, `console-web/src/app/subscription/page.tsx`, `truffles-api/app/schemas/console.py`, `truffles-api/app/routers/console.py`, `docs/REPORTS/2026-02-15-owner-admin-wave4-action-loop-v1.md`. | Fixed |
 | UX-19 | P1 | Remediation rollback + impact loop | Quick profile applied instantly but had no guided rollback and no standard impact baseline/replay snapshots for owner/admin. | Operators could not safely revert configuration and could not prove post-merge effect after 24h. | `console-web/src/app/business/team-performance/page.tsx` (`team-performance-quick-profile-rollback*`), `ops/console_owner_admin_kpi_snapshot.py`, `docs/runbooks/OWNER_ADMIN_POSTMERGE_24H.md`, `docs/REPORTS/2026-02-15-owner-admin-wave5-control-hardening-v1.md`. | Fixed |
 | UX-20 | P1 | API maintainability (owner/admin slice) | Owner/admin business helpers were still embedded in `console.py` and slowed safe iteration. | Higher regression risk and slower onboarding for owner/admin API changes. | `truffles-api/app/services/console_owner_admin.py`, `truffles-api/app/routers/console.py`, `truffles-api/tests/test_console_owner_business.py`. | Mitigated (wave-5 start), Open |
+| UX-21 | P1 | Manual control-loop overhead | Post-merge owner/admin loop still required manual command choreography and inconsistent artifact naming. | Hard to scale governance across many clients and releases. | `ops/owner_admin_control_loop.py`, `docs/runbooks/OWNER_ADMIN_POSTMERGE_24H.md`. | Fixed |
+| UX-22 | P1 | Goal-to-action gap in settings | Owners still had to interpret technical presets instead of choosing business outcomes directly. | Slower decisions and higher configuration mistakes for non-technical operators. | `console-web/src/app/settings/page.tsx` (`settings-goal-mode`). | Fixed |
+| UX-23 | P1 | Publish safety enforcement gap | Knowledge publish could bypass explicit preflight discipline at backend level. | Higher risk of accidental publish without recent validation of the same draft. | `truffles-api/app/services/console_knowledge_preflight.py`, `truffles-api/app/routers/console.py`, `console-web/src/app/knowledge/page.tsx`, `truffles-api/tests/test_console_knowledge_preflight.py`. | Fixed |
 
 ## 30-day execution waves
 
@@ -73,5 +77,9 @@ Evidence sources
   - owner/admin KPI snapshot tool (`ops/console_owner_admin_kpi_snapshot.py`) with impact delta and fail-fast gate,
   - Team KPI guided remediation with one-click rollback to previous SLA values,
   - owner/admin helper extraction start (`console.py` -> `app/services/console_owner_admin.py`).
+- Added Wave-6 owner/admin automation and safety layer:
+  - orchestration script for control-loop phases (`ops/owner_admin_control_loop.py`),
+  - business goal-mode actions in settings (`settings-goal-*`),
+  - backend knowledge publish preflight gate (`KNOWLEDGE_PREFLIGHT_REQUIRED`) with draft hash validation.
 - Added outbox guard thresholds and fail-fast gate (`--fail-on-breach`, `--fail-level`).
 - Replaced toast-only validation flows with `reportValidationError` (toast + inline summary) for `tenants` and `company-workspace`.

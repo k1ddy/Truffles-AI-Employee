@@ -59,6 +59,13 @@ interface SettingsPreset {
     description: string;
 }
 
+interface BusinessGoal {
+    id: string;
+    label: string;
+    outcome: string;
+    presetId: SettingsPreset["id"];
+}
+
 async function fetchSettings(): Promise<SettingsData> {
     const response = await api.get("/settings");
     return response.data;
@@ -91,6 +98,27 @@ const SETTINGS_PRESETS: SettingsPreset[] = [
     },
 ];
 
+const BUSINESS_GOALS: BusinessGoal[] = [
+    {
+        id: "capture_leads",
+        label: "Больше закрытых лидов",
+        outcome: "Максимально быстрый цикл ответа и эскалации.",
+        presetId: "fast",
+    },
+    {
+        id: "stable_quality",
+        label: "Стабильное качество сервиса",
+        outcome: "Сбалансированная нагрузка без перегрева команды.",
+        presetId: "balanced",
+    },
+    {
+        id: "team_protection",
+        label: "Беречь команду в пик",
+        outcome: "Меньше давления на менеджеров при высокой нагрузке.",
+        presetId: "careful",
+    },
+];
+
 function parsePositiveInt(value: string): number | null {
     const parsed = Number(value.trim());
     if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -104,6 +132,11 @@ function formatNumber(value?: number | null): string {
         return "—";
     }
     return value.toLocaleString("ru-RU");
+}
+
+function goalIdFromPresetId(presetId: string): string {
+    const matched = BUSINESS_GOALS.find((goal) => goal.presetId === presetId);
+    return matched?.id ?? "stable_quality";
 }
 
 
@@ -178,6 +211,7 @@ export default function SettingsPage() {
         escalation: "",
     });
     const [selectedPresetId, setSelectedPresetId] = useState<string>("balanced");
+    const [activeGoalId, setActiveGoalId] = useState<string>("stable_quality");
 
     useEffect(() => {
         if (!config) {
@@ -190,22 +224,30 @@ export default function SettingsPage() {
         });
         if (config.reminder_timeout_1 === 5 && config.reminder_timeout_2 === 30 && config.auto_close_timeout === 60) {
             setSelectedPresetId("fast");
+            setActiveGoalId(goalIdFromPresetId("fast"));
             return;
         }
         if (config.reminder_timeout_1 === 15 && config.reminder_timeout_2 === 60 && config.auto_close_timeout === 180) {
             setSelectedPresetId("careful");
+            setActiveGoalId(goalIdFromPresetId("careful"));
             return;
         }
         setSelectedPresetId("balanced");
+        setActiveGoalId(goalIdFromPresetId("balanced"));
     }, [config]);
 
     const updateSettingsMutation = useMutation({
-        mutationFn: async (payload: { reminder_1_minutes: number; reminder_2_minutes: number; escalation_timeout_minutes: number }) => {
+        mutationFn: async (payload: {
+            reminder_1_minutes: number;
+            reminder_2_minutes: number;
+            escalation_timeout_minutes: number;
+            successMessage?: string;
+        }) => {
             const { data } = await settingsApi.update(payload);
             return data;
         },
-        onSuccess: () => {
-            toast.success("Простые настройки сохранены");
+        onSuccess: (_data, variables) => {
+            toast.success(variables.successMessage || "Простые настройки сохранены");
             refetch();
         },
         onError: (updateError) => {
@@ -215,10 +257,35 @@ export default function SettingsPage() {
 
     function applyPreset(preset: SettingsPreset): void {
         setSelectedPresetId(preset.id);
+        setActiveGoalId(goalIdFromPresetId(preset.id));
         setSimpleSettings({
             reminder1: String(preset.reminder1),
             reminder2: String(preset.reminder2),
             escalation: String(preset.escalation),
+        });
+    }
+
+    function applyBusinessGoal(goal: BusinessGoal): void {
+        if (!canWriteSettings || updateSettingsMutation.isPending) {
+            return;
+        }
+        const preset = SETTINGS_PRESETS.find((item) => item.id === goal.presetId);
+        if (!preset) {
+            toast.error("Не удалось применить цель: профиль не найден");
+            return;
+        }
+        setActiveGoalId(goal.id);
+        setSelectedPresetId(preset.id);
+        setSimpleSettings({
+            reminder1: String(preset.reminder1),
+            reminder2: String(preset.reminder2),
+            escalation: String(preset.escalation),
+        });
+        updateSettingsMutation.mutate({
+            reminder_1_minutes: preset.reminder1,
+            reminder_2_minutes: preset.reminder2,
+            escalation_timeout_minutes: preset.escalation,
+            successMessage: `Цель применена: ${goal.label}`,
         });
     }
 
@@ -259,6 +326,7 @@ export default function SettingsPage() {
             reminder_1_minutes: reminder1,
             reminder_2_minutes: reminder2,
             escalation_timeout_minutes: escalation,
+            successMessage: "Простые настройки сохранены",
         });
     }
 
@@ -395,6 +463,32 @@ export default function SettingsPage() {
                                         Только owner/admin
                                     </span>
                                 )}
+                            </div>
+                            <div className="mb-4 rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="settings-goal-mode">
+                                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                                    Цель бизнеса (быстрое действие)
+                                </p>
+                                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                    {BUSINESS_GOALS.map((goal) => (
+                                        <button
+                                            key={goal.id}
+                                            type="button"
+                                            className={`rounded-lg border px-3 py-2 text-left text-xs transition ${
+                                                activeGoalId === goal.id
+                                                    ? "border-primary bg-primary/5 text-primary"
+                                                    : "border-border/60 hover:bg-muted"
+                                            }`}
+                                            onClick={() => {
+                                                applyBusinessGoal(goal);
+                                            }}
+                                            disabled={!canWriteSettings || updateSettingsMutation.isPending}
+                                            data-testid={`settings-goal-${goal.id}`}
+                                        >
+                                            <p className="font-semibold">{goal.label}</p>
+                                            <p className="mt-1 text-muted-foreground">{goal.outcome}</p>
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
                             <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3" data-testid="settings-simple-presets">
                                 {SETTINGS_PRESETS.map((preset) => (

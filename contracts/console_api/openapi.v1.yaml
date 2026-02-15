@@ -5892,6 +5892,10 @@ components:
       properties:
         draft_text:
           type: string
+        skip_preflight_check:
+          type: boolean
+          default: false
+          description: Allow publish without recent validate preflight for the same draft hash.
 
     KnowledgePublishResponse:
       type: object
