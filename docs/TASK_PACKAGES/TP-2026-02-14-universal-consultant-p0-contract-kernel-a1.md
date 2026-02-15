@@ -1,86 +1,105 @@
 # TP-2026-02-14-universal-consultant-p0-contract-kernel-a1
 
-- Название/цель: стабилизировать core-поведение до контрактного уровня `99%` для ответов и использования инструментов через fail-closed контуры (`policy_core -> tool -> verify`), убрать системные причины ложных booking-prompt, и ввести tenant/branch-aware tool permission policy без нишевых хардкодов.
-- Canon refs: `STATE.md` (NOW/GAP: degraded fallback и нестабильный strict pass), `AGENTS.md` (P0/P1 fitness, Anti Test-Fitting Gate, Demo-Neutral Gate, Lexicon/Regex Delta Gate), `SPECS/SYSTEM_REFERENCE.md` (decision_meta/trace/tool evidence contracts), `STRUCTURE.md` (размещение артефактов).
+- Название/цель: единый master Task Package для доведения платформы до практического уровня `99%+` по контракту поведения (`правильный ответ` или `безопасный handoff`) и корректного tool-use с LLM в runtime, без словарных костылей и подгонки под нишу.
+- Canon refs: `STATE.md` (NOW/GAP), `AGENTS.md` (Canon gates, Local-first, Anti Test-Fitting), `SPECS/SYSTEM_REFERENCE.md` (trace/meta/tool contract), `TECH.md` (quality runner), `STRUCTURE.md`.
+- Статус на момент обновления: frozen replay `offline-replay-20260214-p0-template-r11-local` имеет `strict_pass_rate=1.0`, `tool_evidence.valid=true`, `infra_valid=true`; открытый GAP: `semantic_valid=false` только из-за `degraded_fallback_rate`.
 
 ## Invariant
-- FACT/COLLECT/HANDOFF продуктовый контракт не ломается.
-- Safety-контур (LAW/policy/pending/manager_active) остается приоритетом выше pass-rate.
-- Никаких расширений словарей/лексиконов/regex как основного способа исправления.
-- Никакой подгонки под `demo_salon` или любую конкретную нишу.
-- На каждом user-turn сохраняются валидные `decision_meta` и `decision_trace`.
+- FACT/COLLECT/HANDOFF не ломается.
+- Любой рискованный action выполняется только через проверяемый контракт (trace/meta/tool outcome).
+- Safety приоритетнее pass-rate (LAW/policy/pending/manager_active).
+- Runtime-core остается pack-agnostic и tenant-agnostic.
+- Никаких расширений лексиконов/regex как primary fix.
+- Никакой подгонки под конкретный pack/нишу.
 
 ## Scope
-- Ввести детальную таксономию причин LLM деградации вместо агрегированного `error`.
-- Переписать degraded path в `policy_core_guard` на intent-aware rescue matrix:
-- если вопрос info-класса, отвечать по truth/tool path, а не автоматически `booking_prompt`.
-- Ввести capability policy для инструментов (`allow/deny` на client/branch scope) и enforce перед execution.
-- Усилить schema/args validation для tool-вызовов до исполнения side effects.
-- Добавить контрактные тесты и replay-гейты под новые инварианты.
+- P0: контрактная надежность и управляемая деградация.
+- P1: semantic устойчивость и long-dialog memory.
+- P2: cross-business масштабирование и verifier-ensemble.
+- В одном пакете, по фазам, в рамках 1-2 PR на одной ветке реализации.
 
 ## Out of scope
-- DEC-level переписывание всей архитектуры.
-- Замена LLM-провайдера или миграция на новый стек моделей.
-- Массовая перепаковка knowledge packs.
+- Переписывание всей платформы через новый DEC.
+- Замена provider stack целиком в рамках этого пакета.
+- Обновление baseline по невалидным (`infra_valid=false` или `semantic_valid=false`) run.
 
 ## Touch-list (files/tables)
 - `truffles-api/app/services/intent_service.py`
+- `truffles-api/app/services/ai_service.py`
 - `truffles-api/app/routers/webhook/decision.py`
+- `truffles-api/app/routers/webhook/session_memory.py`
 - `truffles-api/app/services/tool_registry_service.py`
 - `truffles-api/app/schemas/capabilities.py`
 - `truffles-api/app/services/capabilities_runtime.py`
 - `truffles-api/app/schemas/intent.py`
-- `truffles-api/tests/test_llm_policy_core.py`
+- `ops/diagnose.py`
 - `truffles-api/tests/test_message_endpoint.py`
+- `truffles-api/tests/test_booking_appointments.py`
+- `truffles-api/tests/test_booking_quality_tool_evidence_gate.py`
 - `truffles-api/tests/test_booking_quality_response_guard.py`
-- `truffles-api/tests/test_demo_salon_eval.py`
+- `truffles-api/tests/test_booking_quality_progress_gate.py`
+- `truffles-api/tests/test_booking_chaos_dialogs.py`
 
 ## Plan (1..N)
-1. Добавить error taxonomy в `intent_service` и прокинуть детальные причины в `decision_meta.policy_core_degrade_reason`.
-2. Реализовать intent-aware degraded rescue matrix в `decision.py` с приоритетом info truth/tool контрактов.
-3. Расширить capability schema полем инструментальных разрешений (client + branch override).
-4. Добавить runtime enforcement: блок неразрешенного `tool_action` до `execute_tool_action`.
-5. Усилить precondition/postcondition валидацию tool args/outcomes и trace-stage при каждом отказе.
-6. Добавить regression tests (no lexicon changes) и replay checks по frozen scenarios.
+1. P0: error taxonomy + propagation (`intent_service -> decision_meta/trace`), убрать агрегированный `error`.
+2. P0: intent-aware rescue matrix в `policy_core_guard` (info-first/handoff-safe/booking-safe), fail-closed.
+3. P0: tool governance per tenant/branch (`allow/deny`) + runtime enforcement перед execute.
+4. P0: strict tool-args/tool-outcome contracts + evidence hooks в quality runner.
+5. P0: rollback flags (runtime kill-switch): `TOOL_POLICY_ENFORCEMENT`, `POLICY_CORE_RESCUE_MATRIX`.
+6. P1: semantic parser contract (LLM structured JSON), снижение `degraded_fallback_rate` через budget/timing tuning и retry policy.
+7. P1: memory layering для 30-80 turn диалогов (working memory + retrieval summary) без потери safety.
+8. P1: stage-wise KPI в replay (`intent_parse`, `tool_select`, `args_valid`, `state_transition`, `reply_contract`).
+9. P2: cross-business replay matrix + failure-ledger (root cause classes, priority fix order).
+10. P2: verifier ensemble для low-confidence сложных кейсов (без side-effects до verification).
 
 ## DoD
-- `policy_core_degrade_reason` больше не агрегируется в общий `error` для типовых причин.
-- В деградации info-вопросы не уходят в ложный `booking_prompt` (контрактно подтверждено trace/meta).
-- Неразрешенный по capabilities инструмент не вызывается и дает контролируемый ответ + trace evidence.
-- `contract_success_rate >= 0.99` на frozen replay по контрактным метрикам.
+- `contract_success_rate >= 0.99` на frozen replay (LLM runtime, не synthetic shortcuts).
+- `tool_selection_accuracy >= 0.99`.
+- `tool_args_valid_rate >= 0.995`.
 - `missing_bot_reply = 0`.
+- `tool_evidence.valid = true` и `infra_valid = true`.
+- `degraded_fallback_rate <= 0.2` (или согласованный порог после review) с подтверждением root-cause trace.
+- Для длинных диалогов (>=30 turns): без регресса `state_transition` и `reply_contract`.
 
 ## Checks
-- `pytest -q truffles-api/tests/test_llm_policy_core.py`
-- `pytest -q truffles-api/tests/test_message_endpoint.py -k "policy_core or degraded or capabilities"`
+- Deterministic:
+- `pytest -q truffles-api/tests/test_message_endpoint.py`
+- `pytest -q truffles-api/tests/test_booking_appointments.py`
+- `pytest -q truffles-api/tests/test_booking_quality_tool_evidence_gate.py`
 - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py`
-- `pytest -q truffles-api/tests/test_demo_salon_eval.py`
-- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression`
+- `pytest -q truffles-api/tests/test_booking_quality_progress_gate.py`
+- `pytest -q truffles-api/tests/test_booking_chaos_dialogs.py`
+- Realism + replay:
+- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode all --fail-on-thresholds --run-id universal-lock-a1`
+- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/universal-lock-a1/scenarios.json --baseline-summary /tmp/booking_quality/universal-lock-a1/summary.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression`
 
 ## Evidence
-- `summary.json` + `brief.md` replay-run с frozen scenarios.
-- фрагменты `decision_trace`/`decision_meta` для info-vs-booking conflict cases.
-- evidence по blocked tool policy (`tool_not_allowed`) с trace stage.
-- логи pytest для таргетных suites.
+- `summary.json`, `brief.md`, `responses.jsonl`, `trace_bundle.jsonl` для lock/replay.
+- top-failures и failure-ledger по root cause классам.
+- примеры `decision_meta/decision_trace` для критичных turn-типов (booking/info/handoff/tools).
+- pytest outputs по таргетным suites.
 
 ## Rollback
-- `git revert SHA_FROM_THIS_BRANCH` в ветке реализации.
-- Feature-flag rollback:
-- отключение tool policy enforcement в runtime config.
-- отключение нового degraded rescue matrix в runtime config.
+- `git revert COMMIT_SHA` по фазам.
+- Runtime flags:
+- `TOOL_POLICY_ENFORCEMENT=0` (отключает policy block без отката кода).
+- `POLICY_CORE_RESCUE_MATRIX=0` (отключает новый rescue path).
+- При regression-breach: stop-the-line и возврат на последний valid lock-run.
 
 ## No-go
-- Запрещено расширять словари/regex для прохождения quality как основной фикс.
-- Запрещено использовать текстовые `must_include` как основной oracle вместо trace/meta/tool contracts.
-- Запрещено изменять runtime-поведение под конкретный pack/клиента.
+- Нельзя фиксить через расширение словарей/regex как primary approach.
+- Нельзя подгонять под `demo_salon`/конкретный pack.
+- Нельзя принимать DoD без trace/meta/tool-evidence.
+- Нельзя обновлять baseline на INVALID run.
 
 ## Риски/блокеры
-- Возможен временный рост escalation при fail-closed policy до стабилизации capability профилей.
-- Ужесточение validation может вскрыть скрытые дефекты tool args в текущих сценариях.
+- Рост latency при verifier/memory/retrieval.
+- Временный рост handoff при fail-closed policy.
+- Нужна стабильная доступность LLM/judge ключей для валидных semantic-run.
 
 ## Branch / Worktree
-- Branch: `feat/2026-02-14-universal-consultant-p0-contract-kernel-a1`
-- Worktree: `/home/zhan/worktrees/2026-02-14-universal-consultant-p0-contract-kernel-a1`
+- Branch: `feat/2026-02-14-universal-consultant-p0-impl-a1`
+- Worktree: `/home/zhan/worktrees/2026-02-14-universal-consultant-p0-impl-a1`
 - Base ref: `origin/main`
 - Merge policy: PR -> `main`, no rebase
 - Cleanup: `scripts/session_end.sh --status done` + cleanup worktree/branch после merge

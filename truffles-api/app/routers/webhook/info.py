@@ -155,6 +155,12 @@ def _detect_info_class_intents(
         location_signal = True
     hours_phrases = _signal_phrase_list(client_slug, "hours_keywords")
     hours_signal = bool(hours_phrases) and any(phrase in normalized for phrase in hours_phrases)
+    if not hours_signal and question_like:
+        has_work_schedule_signal = any(stem in normalized for stem in ("работ", "рабоч")) and any(
+            marker in normalized for marker in ("врем", "час")
+        )
+        if has_work_schedule_signal:
+            hours_signal = True
     pricing_signal = _has_price_signal(normalized, message_text, client_slug=client_slug)
     duration_signal = _has_duration_signal(normalized, message_text, client_slug=client_slug)
     if not duration_signal:
@@ -162,6 +168,13 @@ def _detect_info_class_intents(
             ("займет" in normalized or "занимает" in normalized)
             and ("врем" in normalized or "сколько" in normalized)
         )
+    service_duration_context = any(
+        marker in normalized
+        for marker in ("процедур", "услуг", "сеанс", "маникюр", "педикюр", "стриж", "окраш", "массаж")
+    )
+    if duration_signal and any(stem in normalized for stem in ("работ", "рабоч")) and not service_duration_context:
+        duration_signal = False
+        hours_signal = True
     master_signal = False
     if normalized and any(
         keyword in normalized
@@ -231,6 +244,12 @@ def _detect_info_class_intents(
         intents.add(question_type.kind)
         meta["question_type"] = question_type.kind
         meta["question_type_score"] = question_type.score
+    work_schedule_phrase = any(stem in normalized for stem in ("работ", "рабоч")) and not service_duration_context
+    if work_schedule_phrase and "duration" in intents:
+        intents.discard("duration")
+        intents.add("hours")
+        duration_signal = False
+        hours_signal = True
     anchor_boost = question_like or short_query or bool(intent_decomp_set) or bool(question_type)
     if anchor_intents and anchor_boost:
         intents.update(anchor_intents)

@@ -878,6 +878,16 @@ def _apply_expected_reply_contract(
                 or not answer_interpreter_attempted
                 or not answer_result_ok
             )
+            if (
+                expected_reply_type == legacy.EXPECTED_REPLY_TIME
+                and isinstance(deterministic_value, str)
+            ):
+                deterministic_has_time = bool(
+                    legacy.TIME_PATTERN.search(deterministic_value)
+                    or legacy.TIME_HOUR_PATTERN.search(deterministic_value)
+                )
+                if not deterministic_has_time:
+                    should_use_deterministic = True
             if should_use_deterministic:
                 deterministic_matched = True
                 if expected_slot_key:
@@ -3078,7 +3088,31 @@ def _has_explicit_service_signal(
 
 
 def _is_booking_request(text: str, *, client_slug: str | None) -> bool:
-    return _matches_booking_request_lexicon(text, client_slug=client_slug)
+    if _matches_booking_request_lexicon(text, client_slug=client_slug):
+        return True
+    normalized = normalize_for_matching(text)
+    if not normalized:
+        return False
+    if "запис" in normalized:
+        return True
+    need_or_desire_signal = any(marker in normalized for marker in ("хочу", "нужн", "надо"))
+    if not need_or_desire_signal or not client_slug:
+        return False
+    cleaned_text = re.sub(r"\[[^\]]+\]", " ", text)
+    normalized_service = _normalize_service_text(cleaned_text)
+    if not normalized_service:
+        return False
+    if not (
+        _match_service(normalized_service, client_slug)
+        or _matches_service_request_lexicon(normalized_service, client_slug)
+    ):
+        return False
+    info_intents, _ = _detect_info_class_intents(
+        cleaned_text,
+        intent_decomp_set=set(),
+        client_slug=client_slug,
+    )
+    return not bool({"location", "hours", "parking"} & info_intents)
 
 
 def _is_booking_cancel(text: str, *, policy_pack: dict | None) -> bool:
@@ -3268,6 +3302,9 @@ LLM_POLICY_CORE_LOW_CONFIDENCE_TOOL_ALLOWLIST = {
 }
 LLM_POLICY_CORE_ENABLED = _is_env_enabled(
     os.environ.get("LLM_POLICY_CORE_ENABLED"), default=True
+)
+POLICY_CORE_RESCUE_MATRIX_ENABLED = _is_env_enabled(
+    os.environ.get("POLICY_CORE_RESCUE_MATRIX"), default=True
 )
 CONSULT_INTERRUPT_INTENTS = {"booking", "pricing", "duration", "location", "hours"}
 INFO_INTENT_PRIORITY_SERVICE = ("pricing", "duration", "location", "hours", "master")
@@ -7197,6 +7234,54 @@ async def _handle_webhook_payload(
                 ):
                     policy_validation_error = "action_tool_mismatch"
                 if policy_validation_error is None and policy_tool_action == "info" and not policy_pack_refs:
+                    # Rescue common policy-core drift: style-reference asks and booking slot replies
+                    # sometimes arrive as "info" without refs.
+                    style_reference_signal = bool(
+                        message_text and _is_style_reference_request(message_text, has_media=has_media)
+                    )
+                    if style_reference_signal and not has_media:
+                        policy_action = "fact"
+                        policy_tool_action = "catalog.portfolio"
+                    elif message_text and _has_lateness_signal(
+                        message_text,
+                        client_slug=payload.client_slug,
+                    ):
+                        policy_pack_refs = ["hours"]
+                    elif (
+                        conversation.state == ConversationState.BOT_ACTIVE.value
+                        and policy_slot_state_validated
+                        and (
+                            expected_reply_type
+                            in {
+                                EXPECTED_REPLY_SERVICE,
+                                EXPECTED_REPLY_TIME,
+                                EXPECTED_REPLY_NAME,
+                            }
+                            or booking_active
+                            or booking_wants_flow
+                        )
+                        and not info_class_intents
+                    ):
+                        policy_action = "collect"
+                        policy_tool_action = "collect"
+                if policy_validation_error is None and policy_tool_action == "info" and not policy_pack_refs:
+                    info_refs_from_tool_args = _normalize_plan_refs(policy_tool_args.get("info_refs"))
+                    if info_refs_from_tool_args:
+                        policy_pack_refs = info_refs_from_tool_args
+                    elif info_class_intents:
+                        policy_pack_refs = [
+                            ref
+                            for ref in _normalize_plan_refs(list(info_class_intents))
+                            if ref in INFO_INTENTS
+                        ]
+                if policy_validation_error is None and policy_tool_action == "consult" and not policy_pack_refs:
+                    consult_ref = policy_tool_args.get("consult_ref")
+                    consult_refs = policy_tool_args.get("consult_refs")
+                    if isinstance(consult_ref, str) and consult_ref.strip():
+                        policy_pack_refs = _normalize_plan_refs([consult_ref])
+                    elif isinstance(consult_refs, list):
+                        policy_pack_refs = _normalize_plan_refs(consult_refs)
+                if policy_validation_error is None and policy_tool_action == "info" and not policy_pack_refs:
                     policy_pack_refs = _derive_policy_info_refs(
                         policy_intent=policy_intent,
                         message_text=message_text,
@@ -7251,6 +7336,10 @@ async def _handle_webhook_payload(
                     policy_validation_error = "handoff_not_allowed"
 
             if policy_validation_error is None and policy_action == "collect":
+                merged_policy_slots = _merge_booking_plan_slots(
+                    booking_state=booking if isinstance(booking, dict) else None,
+                    plan_slots=policy_slot_state_validated,
+                )
                 if policy_next_question:
                     policy_collect_slot = policy_next_question
                 else:
@@ -7263,10 +7352,25 @@ async def _handle_webhook_payload(
                             goal=policy_goal,
                         )
                 if not policy_collect_slot:
-                    merged_policy_slots = _merge_booking_plan_slots(
-                        booking_state=booking if isinstance(booking, dict) else None,
-                        plan_slots=policy_slot_state_validated,
-                    )
+                    if (
+                        conversation.state == ConversationState.BOT_ACTIVE.value
+                        and policy_tool_action
+                        in {
+                            "collect",
+                            "booking",
+                            "catalog.service_query",
+                            "calendar.list_slots",
+                            "calendar.book_slot",
+                            "calendar.reschedule",
+                            "calendar.cancel",
+                        }
+                    ):
+                        for slot_key in BOOKING_SLOT_ORDER:
+                            slot_value = merged_policy_slots.get(slot_key)
+                            if not (isinstance(slot_value, str) and slot_value.strip()):
+                                policy_collect_slot = slot_key
+                                break
+                if not policy_collect_slot:
                     if (
                         policy_tool_action in {"collect", "booking", "calendar.book_slot"}
                         and _plan_has_complete_booking_slots(merged_policy_slots)
@@ -7469,6 +7573,8 @@ async def _handle_webhook_payload(
     pending_info_signal = bool(info_class_intents)
     degraded_guard_info_hints: list[str] = []
     if (
+        POLICY_CORE_RESCUE_MATRIX_ENABLED
+        and
         policy_core_runtime_active
         and policy_core_mode == "degraded_fallback"
         and not pending_info_signal
@@ -7505,6 +7611,8 @@ async def _handle_webhook_payload(
                 )
     booking_verification_request = bool(message_text and _looks_like_booking_verification_request(message_text))
     degraded_policy_core_critical = bool(
+        POLICY_CORE_RESCUE_MATRIX_ENABLED
+        and
         policy_core_runtime_active
         and policy_core_mode == "degraded_fallback"
         and policy_core_attempted
