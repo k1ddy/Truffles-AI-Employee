@@ -4,6 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-02-15-platform-admin-audit-pages-a1 | active | feat/2026-02-15-platform-admin-audit-pages-a1 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-15-platform-admin-wave12345-a1.md | 2026-02-15 |
 | 2026-02-12-tenants-action-queue-a32 | active | feat/2026-02-12-tenants-action-queue-a32 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-12-tenants-action-queue-a32.md | 2026-02-12 |
 | 2026-02-12-stress-quality-copy-a1 | active | feat/2026-02-10-stress-quality-a1-copy | /home/zhan/worktrees/2026-02-10-stress-quality-a1-copy | docs/TASK_PACKAGES/TP-2026-02-10-stress-quality-hardening.md | 2026-02-13T06:10:19Z |
 | 2026-02-12-mdc-v2-scorecard-ui-a32 | done | fix/2026-02-12-mdc-v2-scorecard-ui-a32 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-12-mdc-v2-scorecard-ui-a32.md | 2026-02-12T14:20:00Z |

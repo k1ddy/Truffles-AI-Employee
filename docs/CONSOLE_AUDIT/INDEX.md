@@ -23,6 +23,7 @@ Comparison
 
 Reports
 - `docs/REPORTS/2026-02-01-console-web-fact-audit.md`
+- `docs/REPORTS/2026-02-15-platform-admin-baseline-v1.md`
 
 Backlog
 - `docs/CONSOLE_AUDIT/UX_BACKLOG.md`
@@ -46,6 +47,8 @@ Pages
 - `docs/CONSOLE_AUDIT/pages/ops.md`
 - `docs/CONSOLE_AUDIT/pages/insights.md`
 - `docs/CONSOLE_AUDIT/pages/tenants.md`
+- `docs/CONSOLE_AUDIT/pages/integrations.md`
+- `docs/CONSOLE_AUDIT/pages/company-workspace.md`
 
 System
 - `docs/CONSOLE_AUDIT/system/auth-and-proxy.md`
