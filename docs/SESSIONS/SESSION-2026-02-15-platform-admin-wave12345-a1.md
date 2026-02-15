@@ -1,0 +1,32 @@
+# SESSION 2026-02-15-platform-admin-wave12345-a1 — Platform Admin Control Loop (1-5)
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-15-platform-admin-wave12345-a1.md
+- branch: feat/2026-02-15-platform-admin-wave12345-a1
+- worktree: /home/zhan/worktrees/2026-02-15-platform-admin-wave12345-a1
+- base_ref: origin/main
+- scope: fact-first audit, prioritized roadmap, reliability implementation, complexity reduction, KPI anti-drift tooling.
+- done:
+  - Runtime baseline refreshed: `health/full` and `admin/version` snapshots captured (`2026-02-15T07:33Z`).
+  - Platform Admin e2e split implemented: `console-web/e2e/platform-admin.spec.ts` added; `console-web/e2e/smoke.spec.ts` reduced from 1451 to 1146 lines.
+  - KPI tooling added: `ops/console_platform_admin_kpi_snapshot.py` + artifact `/tmp/platform_admin_kpi_20260215_0734.json`.
+  - Audit artifacts refreshed: `docs/REPORTS/2026-02-15-platform-admin-baseline-v2.md`, `docs/CONSOLE_AUDIT/UX_BACKLOG.md`, `docs/CONSOLE_AUDIT/CANON_VS_IMPLEMENTED.md`.
+  - Runbook added: `docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md`.
+  - Canon maps updated: `STRUCTURE.md`, `STATE.md`.
+- checks:
+  - `python3 ops/console_platform_admin_kpi_snapshot.py --help` (pass)
+  - `python3 ops/console_platform_admin_kpi_snapshot.py --pretty --output /tmp/platform_admin_kpi_20260215_0734.json` (pass)
+  - `npm --prefix console-web run lint` (pass)
+  - `npm --prefix console-web exec -- playwright test --list` (pass)
+  - `npm --prefix console-web run build` (pass)
+  - `scripts/session_check.sh` (pass)
+- notes:
+  - One accidental command (`npm --prefix console-web exec playwright test --list` without `--`) executed tests; result `20 passed / 2 failed / 5 skipped` in current environment and not used as acceptance signal for this wave.
+- next:
+  - Commit, push branch, open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-15-platform-admin-wave12345-a1.md
+  - docs/REPORTS/2026-02-15-platform-admin-baseline-v2.md
+  - /tmp/platform_admin_kpi_20260215_0734.json
+- last_updated: 2026-02-15
