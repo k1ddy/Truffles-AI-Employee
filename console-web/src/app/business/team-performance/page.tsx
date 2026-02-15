@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
+import { useState } from "react";
 import toast from "react-hot-toast";
 
 import AccessDenied from "@/components/AccessDenied";
@@ -58,8 +59,25 @@ function actionChipClass(severity: "critical" | "warn" | "info"): string {
     return "bg-slate-100 text-slate-700";
 }
 
+type QuickProfileRollbackSnapshot = {
+    reminder1Minutes: number;
+    reminder2Minutes: number;
+    escalationTimeoutMinutes: number;
+    appliedAt: string;
+    baselineUnresolvedOlderThan60m: number;
+    baselineMedianResponseSeconds: number | null;
+};
+
+function toNumberOrNull(value: unknown): number | null {
+    if (typeof value !== "number" || Number.isNaN(value)) {
+        return null;
+    }
+    return value;
+}
+
 export default function BusinessTeamPerformancePage() {
     const { data: session } = useSession();
+    const [rollbackSnapshot, setRollbackSnapshot] = useState<QuickProfileRollbackSnapshot | null>(null);
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -86,19 +104,67 @@ export default function BusinessTeamPerformancePage() {
 
     const quickProfileMutation = useMutation({
         mutationFn: async () => {
-            const { data: response } = await settingsApi.update({
+            const { data: settingsResponse } = await settingsApi.get();
+            const botConfig = settingsResponse.bot_config;
+            const reminder1Minutes = toNumberOrNull(botConfig?.reminder_timeout_1);
+            const reminder2Minutes = toNumberOrNull(botConfig?.reminder_timeout_2);
+            const escalationTimeoutMinutes = toNumberOrNull(botConfig?.auto_close_timeout);
+
+            await settingsApi.update({
                 reminder_1_minutes: 5,
                 reminder_2_minutes: 30,
                 escalation_timeout_minutes: 60,
             });
-            return response;
+
+            if (
+                reminder1Minutes === null
+                || reminder2Minutes === null
+                || escalationTimeoutMinutes === null
+            ) {
+                return null;
+            }
+
+            return {
+                reminder1Minutes,
+                reminder2Minutes,
+                escalationTimeoutMinutes,
+                appliedAt: new Date().toISOString(),
+                baselineUnresolvedOlderThan60m: data?.unresolved_older_than_60m ?? 0,
+                baselineMedianResponseSeconds: data?.manager_median_response_seconds ?? null,
+            };
         },
-        onSuccess: () => {
-            toast.success("Быстрый профиль применён: 5/30/60");
+        onSuccess: (snapshot) => {
+            setRollbackSnapshot(snapshot);
+            if (snapshot) {
+                toast.success("Быстрый профиль применён: 5/30/60");
+            } else {
+                toast.success("Профиль 5/30/60 применён (откат недоступен: нет исходных данных)");
+            }
             refetch();
         },
         onError: () => {
             toast.error("Не удалось применить быстрый профиль");
+        },
+    });
+
+    const rollbackQuickProfileMutation = useMutation({
+        mutationFn: async () => {
+            if (!rollbackSnapshot) {
+                throw new Error("rollback_snapshot_missing");
+            }
+            await settingsApi.update({
+                reminder_1_minutes: rollbackSnapshot.reminder1Minutes,
+                reminder_2_minutes: rollbackSnapshot.reminder2Minutes,
+                escalation_timeout_minutes: rollbackSnapshot.escalationTimeoutMinutes,
+            });
+        },
+        onSuccess: () => {
+            setRollbackSnapshot(null);
+            toast.success("Откат выполнен: восстановлены предыдущие SLA настройки");
+            refetch();
+        },
+        onError: () => {
+            toast.error("Не удалось откатить настройки");
         },
     });
 
@@ -114,6 +180,24 @@ export default function BusinessTeamPerformancePage() {
             return;
         }
         quickProfileMutation.mutate();
+    }
+
+    function rollbackQuickProfile(): void {
+        if (!canWriteSettings) {
+            toast.error("Недостаточно прав для изменения настроек");
+            return;
+        }
+        if (!rollbackSnapshot) {
+            toast.error("Нет сохранённого состояния для отката");
+            return;
+        }
+        const confirmed = window.confirm(
+            "Откатить быстрый профиль и вернуть предыдущие SLA/эскалацию?",
+        );
+        if (!confirmed) {
+            return;
+        }
+        rollbackQuickProfileMutation.mutate();
     }
 
     if (!session) {
@@ -238,12 +322,49 @@ export default function BusinessTeamPerformancePage() {
                             onClick={() => {
                                 applyQuickProfile();
                             }}
-                            disabled={!canWriteSettings || quickProfileMutation.isPending}
+                            disabled={!canWriteSettings || quickProfileMutation.isPending || rollbackQuickProfileMutation.isPending}
                             className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                             data-testid="team-performance-quick-profile-apply"
                         >
                             {quickProfileMutation.isPending ? "Применяю..." : "Применить быстрый профиль"}
                         </button>
+                    </div>
+                    <div className="mt-3 rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="team-performance-remediation-guide">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Guided remediation</p>
+                        <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
+                            <li>Примените профиль 5/30/60 для ускорения первого ответа.</li>
+                            <li>Через 10-15 минут нажмите «Обновить» и сравните stale cases + медиану ответа.</li>
+                            <li>Если динамики нет или стало хуже, выполните откат одним действием.</li>
+                        </ol>
+                    </div>
+                    <div className="mt-3 rounded-lg border border-border/60 bg-background/80 p-3" data-testid="team-performance-quick-profile-rollback-card">
+                        {rollbackSnapshot ? (
+                            <div className="space-y-2">
+                                <p className="text-xs text-muted-foreground">
+                                    Базовая точка до применения: stale {formatNumber(rollbackSnapshot.baselineUnresolvedOlderThan60m)}, медиана ответа {formatSeconds(rollbackSnapshot.baselineMedianResponseSeconds)}.
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                    Применён в {new Date(rollbackSnapshot.appliedAt).toLocaleString("ru-RU")}. Можно откатить к значениям:
+                                    {" "}
+                                    {rollbackSnapshot.reminder1Minutes}/{rollbackSnapshot.reminder2Minutes}/{rollbackSnapshot.escalationTimeoutMinutes}.
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        rollbackQuickProfile();
+                                    }}
+                                    disabled={!canWriteSettings || rollbackQuickProfileMutation.isPending}
+                                    className="rounded-full border border-border px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                                    data-testid="team-performance-quick-profile-rollback"
+                                >
+                                    {rollbackQuickProfileMutation.isPending ? "Откатываю..." : "Откатить к предыдущим настройкам"}
+                                </button>
+                            </div>
+                        ) : (
+                            <p className="text-xs text-muted-foreground" data-testid="team-performance-quick-profile-rollback-empty">
+                                Состояние для rollback появится после применения быстрого профиля.
+                            </p>
+                        )}
                     </div>
                 </section>
             ) : null}
