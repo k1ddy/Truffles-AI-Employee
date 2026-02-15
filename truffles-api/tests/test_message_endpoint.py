@@ -24,6 +24,7 @@ from app.models import Branch, Client, ClientSettings, Conversation, User
 from app.routers import webhook as webhook_router
 from app.routers.webhook import response as webhook_response
 from app.routers.webhook.decision import (
+    _classify_policy_core_degrade_reason,
     _policy_core_reason_supports_info_rescue,
     _policy_has_style_reference_hint,
 )
@@ -935,8 +936,16 @@ class TestBookingSlotGuards:
         booking = {"service": "маникюр", "datetime": "завтра"}
         refusal_flags = {"name": {"value": True, "source": "explicit_refusal", "last_set_at": "2025-12-29T00:00:00Z"}}
         updated, prompt = webhook_router._next_booking_prompt(booking, refusal_flags=refusal_flags)
-        assert prompt is None
-        assert updated.get("last_question") is None
+        assert isinstance(prompt, str)
+        assert "точное время" in prompt.casefold()
+        assert updated.get("last_question") == "datetime"
+
+    def test_booking_prompt_accepts_weekday_daypart_as_grounded_datetime(self):
+        booking = {"service": "маникюр", "datetime": "в субботу вечером"}
+        updated, prompt = webhook_router._next_booking_prompt(booking, client_slug="demo_salon")
+        assert updated.get("last_question") == "name"
+        assert isinstance(prompt, str)
+        assert webhook_router.MSG_BOOKING_ASK_NAME in prompt
 
 
 class TestDatetimeExtraction:
@@ -5523,6 +5532,15 @@ def test_multi_intent_long_message_prioritizes_booking():
         "app.routers.webhook._legacy.detect_multi_intent",
         return_value=multi_payload,
     ), patch(
+        "app.routers.webhook.decision.get_instance_id",
+        return_value="instance-123",
+    ), patch(
+        "app.routers.webhook.decision.ChatFlowAdapter.send_text",
+        return_value=SimpleNamespace(is_ok=lambda: True, error=None),
+    ), patch(
+        "app.routers.webhook.decision.enqueue_outbox_message",
+        return_value=True,
+    ), patch(
         "app.routers.webhook._legacy.send_bot_response",
         return_value=True,
     ), patch(
@@ -5542,15 +5560,16 @@ def test_multi_intent_long_message_prioritizes_booking():
         )
 
     assert response.success is True
-    assert any(
-        prompt in response.bot_response
-        for prompt in (
-            webhook_router.MSG_BOOKING_ASK_SERVICE,
-            webhook_router.MSG_BOOKING_ASK_DATETIME,
-            webhook_router.MSG_BOOKING_ASK_NAME,
-        )
+    assert isinstance(response.bot_response, str) and response.bot_response.strip()
+    normalized_response = response.bot_response.casefold()
+    assert "минут" in normalized_response
+    assert (
+        "точное время" in normalized_response
+        or webhook_router.MSG_BOOKING_ASK_DATETIME.casefold() in normalized_response
     )
-    assert "минут" in response.bot_response.casefold()
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("booking_info_interrupt") is True
+    assert meta.get("expected_reply_type") == webhook_router.EXPECTED_REPLY_TIME
 
 
 def test_intent_queue_sets_context_and_prompt():
@@ -11994,6 +12013,11 @@ def test_llm_policy_core_degraded_booking_guard_uses_safe_collect(monkeypatch):
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("policy_core_mode") == "degraded_fallback"
     assert meta.get("policy_core_degrade_reason") == "policy_error:invalid_schema"
+    failure = meta.get("policy_core_failure", {})
+    assert failure.get("category") == "policy_error"
+    assert failure.get("code") == "invalid_schema"
+    assert failure.get("retryable") is False
+    assert failure.get("info_rescue_eligible") is True
     assert meta.get("action") == "booking_prompt"
 
 
@@ -12003,6 +12027,28 @@ def test_policy_core_reason_supports_info_rescue_prefixes():
     assert _policy_core_reason_supports_info_rescue("llm_degraded:llm_timeout") is True
     assert _policy_core_reason_supports_info_rescue("guard_not_eligible") is False
     assert _policy_core_reason_supports_info_rescue(None) is False
+
+
+def test_classify_policy_core_degrade_reason_taxonomy():
+    retryable_error = _classify_policy_core_degrade_reason("policy_error:timeout")
+    assert retryable_error["category"] == "policy_error"
+    assert retryable_error["code"] == "timeout"
+    assert retryable_error["retryable"] is True
+    assert retryable_error["info_rescue_eligible"] is True
+    assert retryable_error["severity"] == "medium"
+
+    hard_validation = _classify_policy_core_degrade_reason("policy_validation:invalid_schema")
+    assert hard_validation["category"] == "policy_validation"
+    assert hard_validation["code"] == "invalid_schema"
+    assert hard_validation["retryable"] is False
+    assert hard_validation["severity"] == "high"
+
+    guard = _classify_policy_core_degrade_reason("guard_not_eligible")
+    assert guard["category"] == "guard"
+    assert guard["code"] == "guard_not_eligible"
+    assert guard["retryable"] is False
+    assert guard["info_rescue_eligible"] is False
+    assert guard["severity"] == "low"
 
 
 def test_policy_has_style_reference_hint_from_intent_or_reason():
