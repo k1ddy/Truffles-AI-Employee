@@ -15,15 +15,34 @@ Run:
 ```bash
 python3 ops/console_platform_admin_kpi_snapshot.py \
   --pretty \
+  --outbox-pending-warning 500 \
+  --outbox-pending-critical 1000 \
+  --outbox-failed-warning 100 \
+  --outbox-failed-critical 300 \
   --output /tmp/platform_admin_kpi_$(date +%Y%m%d_%H%M%S).json
 ```
 
 Expected output
 - `runtime.console_health` and `runtime.admin_version` payloads.
 - Derived outbox hints (`outbox_pending_hint`, `outbox_failed_hint`).
+- Outbox guard severity (`runtime.guards.outbox.status`: `ok|warning|critical|unknown`).
 - LOC heatmap for Platform Admin-critical files.
 - `toast.error` surface counts.
 - e2e concentration metrics (`smoke_lines`, `platform_admin_lines`, share).
+
+Fail-fast mode (for CI/manual gate):
+
+```bash
+python3 ops/console_platform_admin_kpi_snapshot.py \
+  --fail-on-breach \
+  --fail-level critical \
+  --pretty \
+  --output /tmp/platform_admin_kpi_gate.json
+```
+
+Exit codes
+- `0`: snapshot generated, guard below fail level.
+- `2`: guard reached configured fail level (`warning` or `critical`).
 
 ## 2) Update audit artifacts
 
@@ -43,7 +62,7 @@ Run minimally:
 
 ```bash
 npm --prefix console-web run lint
-npm --prefix console-web exec playwright test --list
+npm --prefix console-web exec -- playwright test --list
 python3 ops/console_platform_admin_kpi_snapshot.py --pretty
 scripts/session_check.sh
 ```

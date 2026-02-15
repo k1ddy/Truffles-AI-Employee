@@ -124,11 +124,13 @@ Legend
 - Integrations page реализована, но RBAC уже канона (owner/admin без доступа).
 - Team Users не поддерживает invite/disable; Specialists без управления working_hours/availability.
 - `Business`/`Subscription` уже в реализации, но не отражены в `SPECS/CONTROL_PLANE.md` как отдельные owner/admin разделы.
+- `Company Workspace` реализован, но не отражён как отдельная страница в канонической IA (`SPECS/CONTROL_PLANE.md`).
 
 ---
 
 ## 7) Platform Admin operating loop readiness
 
 - [match] Platform Admin critical UI regressions вынесены в отдельный e2e suite (`console-web/e2e/platform-admin.spec.ts`) вместо концентрации в `smoke.spec.ts`.
-- [partial] KPI snapshot для weekly контроля добавлен (`ops/console_platform_admin_kpi_snapshot.py`), но CI threshold gate для этих метрик пока не внедрен.
+- [match] KPI snapshot для weekly контроля добавлен (`ops/console_platform_admin_kpi_snapshot.py`) с outbox threshold/fail-fast guard (`--fail-on-breach`, `--fail-level`).
+- [match] Validation/операторские ошибки на `tenants` и `company-workspace` больше не toast-only: ошибки фиксируются в inline summary с recovery hints.
 - [partial] Runbook регулярного контроля добавлен (`docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md`), но remediation jobs остаются частично manual.

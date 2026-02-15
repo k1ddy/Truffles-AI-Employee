@@ -135,6 +135,7 @@
 | `docs/REPORTS/2026-02-01-pack-compiler-implementation.md` | Report: Pack compiler implementation evidence + chaos-sim summary | Brain/Architect |
 | `docs/REPORTS/2026-02-08-enterprise-fleet-program.md` | Report: Enterprise fleet operating model + 5-PR execution plan | Brain/Architect |
 | `docs/REPORTS/2026-02-15-platform-admin-baseline-v2.md` | Report: Platform Admin runtime/code baseline + control-loop wave results | Brain/Architect |
+| `docs/REPORTS/2026-02-15-platform-admin-baseline-v3.md` | Report: Platform Admin wave 1+2 follow-up (outbox guard + inline validation recovery) | Brain/Architect |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 

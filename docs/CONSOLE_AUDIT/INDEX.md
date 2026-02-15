@@ -23,7 +23,9 @@ Comparison
 
 Reports
 - `docs/REPORTS/2026-02-01-console-web-fact-audit.md`
+- `docs/REPORTS/2026-02-15-platform-admin-baseline-v1.md`
 - `docs/REPORTS/2026-02-15-platform-admin-baseline-v2.md`
+- `docs/REPORTS/2026-02-15-platform-admin-baseline-v3.md`
 - `docs/REPORTS/2026-02-15-owner-admin-business-control-plane-v1.md`
 - `docs/REPORTS/2026-02-15-owner-admin-wave1-implementation-v1.md`
 
@@ -51,6 +53,8 @@ Pages
 - `docs/CONSOLE_AUDIT/pages/business.md`
 - `docs/CONSOLE_AUDIT/pages/subscription.md`
 - `docs/CONSOLE_AUDIT/pages/tenants.md`
+- `docs/CONSOLE_AUDIT/pages/integrations.md`
+- `docs/CONSOLE_AUDIT/pages/company-workspace.md`
 
 System
 - `docs/CONSOLE_AUDIT/system/auth-and-proxy.md`
