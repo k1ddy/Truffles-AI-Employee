@@ -3398,6 +3398,16 @@ TOOL_VERIFIER_APPOINTMENT_ID_ACTIONS = {
     "calendar.reschedule",
     "calendar.cancel",
 }
+TOOL_VERIFIER_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    "calendar.book_slot": ("service_query", "start_at"),
+    "calendar.reschedule": ("appointment_id", "start_at"),
+    "calendar.cancel": ("appointment_id",),
+}
+TOOL_VERIFIER_SLOT_BY_FIELD: dict[str, str] = {
+    "service_query": "service",
+    "start_at": "datetime",
+    "customer_name": "name",
+}
 
 
 def _is_booking_verification_handoff_intent(policy_intent: str | None, policy_tool_action: str | None) -> bool:
@@ -3436,6 +3446,26 @@ def _detect_tool_contract_error(
         if not (isinstance(appointment_id, str) and appointment_id.strip()):
             return "appointment_id_missing"
     return None
+
+
+def _verify_policy_tool_args_contract(
+    *,
+    tool_action: str,
+    tool_args: dict[str, Any],
+    validate_tool_args_contract: Callable[..., tuple[str | None, str | None]],
+) -> tuple[str | None, str | None]:
+    contract_error, error_field = validate_tool_args_contract(
+        tool_action=tool_action,
+        tool_args=tool_args,
+    )
+    if contract_error:
+        return contract_error, error_field
+    required_fields = TOOL_VERIFIER_REQUIRED_FIELDS.get(tool_action, ())
+    for field_name in required_fields:
+        value = tool_args.get(field_name)
+        if not (isinstance(value, str) and value.strip()):
+            return "tool_args_required_missing", field_name
+    return None, None
 
 
 def _normalize_plan_refs(refs: list[str] | None) -> list[str]:
@@ -7367,7 +7397,11 @@ async def _handle_webhook_payload(
                 summary_text = compact_summary.get("text")
                 if isinstance(summary_text, str) and summary_text.strip():
                     policy_memory_summary = summary_text.strip()
-        policy_memory_profile = policy_memory_profile_seed
+        policy_memory_profile = (
+            dict(policy_memory_profile_seed)
+            if isinstance(policy_memory_profile_seed, dict)
+            else None
+        )
         if not policy_memory_profile:
             memory_profile, _ = _get_memory_profile(context, now=now)
             if isinstance(memory_profile, dict):
@@ -7394,6 +7428,26 @@ async def _handle_webhook_payload(
                         policy_memory_profile["stored_keys"] = stored_keys
                     if memory_active_goal:
                         policy_memory_profile["active_goal"] = memory_active_goal
+        if expected_reply_type in {
+            EXPECTED_REPLY_SERVICE,
+            EXPECTED_REPLY_TIME,
+            EXPECTED_REPLY_NAME,
+        }:
+            if not isinstance(policy_memory_profile, dict):
+                policy_memory_profile = {}
+            policy_memory_profile["expected_reply_type"] = expected_reply_type
+        active_slots: list[str] = []
+        for slot_key in BOOKING_SLOT_ORDER:
+            value = policy_slot_state.get(slot_key)
+            if not (isinstance(value, str) and value.strip()):
+                if isinstance(booking, dict):
+                    value = booking.get(slot_key)
+            if isinstance(value, str) and value.strip():
+                active_slots.append(slot_key)
+        if active_slots:
+            if not isinstance(policy_memory_profile, dict):
+                policy_memory_profile = {}
+            policy_memory_profile["active_slots"] = active_slots
         info_refs = sorted(INFO_INTENTS)
         consult_refs, consult_refs_error = _collect_plan_consult_refs(payload.client_slug)
         policy_result = route_llm_policy_core(
@@ -7751,6 +7805,16 @@ async def _handle_webhook_payload(
                 if isinstance(policy_memory_profile, dict)
                 else []
             ),
+            "memory_expected_reply_type": (
+                policy_memory_profile.get("expected_reply_type")
+                if isinstance(policy_memory_profile, dict)
+                else None
+            ),
+            "memory_active_slots": (
+                policy_memory_profile.get("active_slots")
+                if isinstance(policy_memory_profile, dict)
+                else []
+            ),
         }
         if saved_message:
             _update_message_decision_metadata(
@@ -7772,6 +7836,16 @@ async def _handle_webhook_payload(
                 "action_normalized": policy_action_normalized,
                 "memory_summary_used": bool(policy_memory_summary),
                 "memory_profile_used": bool(policy_memory_profile),
+                "memory_expected_reply_type": (
+                    policy_memory_profile.get("expected_reply_type")
+                    if isinstance(policy_memory_profile, dict)
+                    else None
+                ),
+                "memory_active_slots": (
+                    policy_memory_profile.get("active_slots")
+                    if isinstance(policy_memory_profile, dict)
+                    else []
+                ),
                 "confidence": policy_confidence,
                 "tool_action": policy_tool_action,
                 "pack_refs": policy_pack_refs or resolved_policy_refs,
@@ -8987,7 +9061,11 @@ async def _handle_webhook_payload(
                     client_slug=payload.client_slug,
                 )
 
-        from app.services.tool_registry_service import execute_tool_action, is_tool_action
+        from app.services.tool_registry_service import (
+            execute_tool_action,
+            is_tool_action,
+            validate_tool_args_contract,
+        )
 
         if is_tool_action(policy_tool_action):
             info_sections_hint: list[str] = []
@@ -9138,6 +9216,109 @@ async def _handle_webhook_payload(
                     and merged_slots_for_tool.get("service").strip()
                 ):
                     policy_tool_args["service_query"] = merged_slots_for_tool["service"].strip()
+            verifier_error, verifier_error_field = _verify_policy_tool_args_contract(
+                tool_action=policy_tool_action,
+                tool_args=policy_tool_args,
+                validate_tool_args_contract=validate_tool_args_contract,
+            )
+            if verifier_error:
+                verifier_slot = TOOL_VERIFIER_SLOT_BY_FIELD.get(verifier_error_field or "")
+                verifier_prompt = MSG_FACT_GUARD_CLARIFY
+                verifier_action = "reply"
+                verifier_intent = "policy_verifier"
+                if verifier_slot == "service":
+                    verifier_prompt = MSG_BOOKING_ASK_SERVICE
+                    verifier_action = "booking_prompt"
+                    verifier_intent = "booking"
+                elif verifier_slot == "datetime":
+                    verifier_prompt = MSG_BOOKING_ASK_DATETIME
+                    verifier_action = "booking_prompt"
+                    verifier_intent = "booking"
+                elif verifier_slot == "name":
+                    verifier_prompt = MSG_BOOKING_ASK_NAME
+                    verifier_action = "booking_prompt"
+                    verifier_intent = "booking"
+                if verifier_slot:
+                    context = _get_conversation_context(conversation)
+                    booking_state = dict(booking) if isinstance(booking, dict) else {}
+                    if not booking_state.get("active"):
+                        booking_state["active"] = True
+                        booking_state["started_at"] = now.isoformat()
+                    booking_state["last_question"] = verifier_slot
+                    context = _set_booking_context(context, booking_state)
+                    expected_reply_slot = _expected_reply_for_booking_question(verifier_slot)
+                    if expected_reply_slot:
+                        context = _set_expected_reply_context(
+                            conversation=conversation,
+                            saved_message=saved_message,
+                            context=context,
+                            expected_reply_type=expected_reply_slot,
+                            reason="policy_verifier_collect",
+                            now=now,
+                        )
+                    _set_conversation_context(conversation, context)
+                verifier_meta = {
+                    "tool_action": policy_tool_action,
+                    "tool_decision": "verifier_blocked",
+                    "tool_args_checked": True,
+                    "tool_args_contract": "invalid",
+                    "tool_args_error": verifier_error,
+                    "tool_args_error_field": verifier_error_field,
+                    "tool_verifier": "pre_execute",
+                    "tool_verifier_slot": verifier_slot,
+                }
+                if saved_message:
+                    _update_message_decision_metadata(saved_message, verifier_meta)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "policy_verifier",
+                        "decision": "invalid",
+                        "tool_action": policy_tool_action,
+                        "tool_args_error": verifier_error,
+                        "tool_args_error_field": verifier_error_field,
+                        "missing_slot": verifier_slot,
+                    },
+                )
+                _record_message_decision_meta(
+                    saved_message,
+                    action=verifier_action,
+                    intent=verifier_intent,
+                    source="llm_policy_core",
+                    fast_intent=False,
+                )
+                bot_response, sent = _send_and_save(verifier_prompt)
+                result_message = (
+                    "Policy verifier blocked unsafe tool execution"
+                    if sent
+                    else "Policy verifier blocked tool execution; response_send=failed"
+                )
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_verifier",
+                    "decision": "ok",
+                    "tool_action": policy_tool_action,
+                    "tool_args_checked": True,
+                    "tool_args_contract": "valid",
+                },
+            )
+            if saved_message:
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "tool_verifier": "pre_execute",
+                        "tool_args_checked": True,
+                        "tool_args_contract": "valid",
+                    },
+                )
             tool_result = execute_tool_action(
                 db,
                 tool_action=policy_tool_action,

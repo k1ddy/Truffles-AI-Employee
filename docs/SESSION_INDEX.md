@@ -4,6 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-02-16-llm-reliability-kernel-a88 | active | feat/2026-02-16-llm-reliability-kernel-a88 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-16-llm-reliability-kernel-a88.md | 2026-02-16 |
 | 2026-02-15-owner-admin-wave4-action-loop-a1 | active | feat/2026-02-15-owner-admin-wave4-action-loop-a1 | /home/zhan/worktrees/2026-02-15-owner-admin-business-audit-a1 | docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave4-action-loop-a1.md | 2026-02-15 |
 | 2026-02-15-health-incident-banner-a1 | active | fix/2026-02-15-health-incident-banner-a1 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-15-platform-admin-wave12345-a1.md | 2026-02-15 |
 | 2026-02-15-platform-admin-audit-pages-a1 | active | feat/2026-02-15-platform-admin-audit-pages-a1 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-15-platform-admin-wave12345-a1.md | 2026-02-15 |

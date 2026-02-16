@@ -168,6 +168,7 @@ POLICY_CORE_RETRY_TIMEOUT_SECONDS = max(
     0.1,
 )
 POLICY_CORE_RETRY_ON_TIMEOUT = os.environ.get("LLM_POLICY_CORE_RETRY_ON_TIMEOUT")
+POLICY_CORE_RETRY_ON_TRANSIENT = os.environ.get("LLM_POLICY_CORE_RETRY_ON_TRANSIENT")
 POLICY_CORE_MAX_TOKENS = int(os.environ.get("LLM_POLICY_CORE_MAX_TOKENS", "240"))
 POLICY_CORE_MODEL = os.environ.get("LLM_POLICY_CORE_MODEL", PLAN_MODEL).strip()
 _DEFAULT_POLICY_CORE_TIMEOUT_FALLBACK_MODEL = (
@@ -236,6 +237,29 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
     active_goal = profile.get("active_goal")
     if isinstance(active_goal, str) and active_goal.strip():
         normalized["active_goal"] = active_goal.strip().casefold()
+    expected_reply_type = profile.get("expected_reply_type")
+    if isinstance(expected_reply_type, str) and expected_reply_type.strip():
+        expected_reply_type = expected_reply_type.strip().casefold()
+        if expected_reply_type in {"service_choice", "time", "name"}:
+            normalized["expected_reply_type"] = expected_reply_type
+    active_slots = profile.get("active_slots")
+    if isinstance(active_slots, list):
+        cleaned_slots: list[str] = []
+        seen_slots: set[str] = set()
+        for raw_slot in active_slots:
+            if len(cleaned_slots) >= POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS:
+                break
+            if not isinstance(raw_slot, str):
+                continue
+            slot = raw_slot.strip().casefold()
+            if slot not in {"service", "datetime", "name"}:
+                continue
+            if slot in seen_slots:
+                continue
+            cleaned_slots.append(slot)
+            seen_slots.add(slot)
+        if cleaned_slots:
+            normalized["active_slots"] = cleaned_slots
     stored_keys = profile.get("stored_keys")
     if isinstance(stored_keys, list):
         cleaned_keys: list[str] = []
@@ -1250,11 +1274,14 @@ def route_llm_policy_core(
         {"role": "user", "content": json.dumps(policy_input, ensure_ascii=False)},
     ]
     retry_on_timeout = _is_env_enabled(POLICY_CORE_RETRY_ON_TIMEOUT, default=True)
+    retry_on_transient = _is_env_enabled(POLICY_CORE_RETRY_ON_TRANSIENT, default=True)
     timeout_attempts = [policy_timeout_seconds]
     if retry_on_timeout:
         retry_timeout = min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds)
         if retry_timeout > 0 and retry_timeout not in timeout_attempts:
             timeout_attempts.append(retry_timeout)
+    if retry_on_transient and len(timeout_attempts) == 1:
+        timeout_attempts.append(timeout_attempts[0])
     fallback_model = POLICY_CORE_TIMEOUT_FALLBACK_MODEL.strip()
     if fallback_model.casefold() == POLICY_CORE_MODEL.strip().casefold():
         fallback_model = ""
@@ -1267,6 +1294,7 @@ def route_llm_policy_core(
     fallback_model_attempted = False
     timeout_seconds_used = policy_timeout_seconds
     max_tokens_used = _resolve_policy_core_max_tokens(policy_timeout_seconds)
+    transient_retry_used = False
     for attempt_idx, timeout_seconds in enumerate(timeout_attempts):
         attempt_count = attempt_idx + 1
         timeout_seconds_used = timeout_seconds
@@ -1291,6 +1319,8 @@ def route_llm_policy_core(
             break
         except httpx.TimeoutException:
             error = "timeout"
+            if not retry_on_timeout:
+                break
             if attempt_idx + 1 < len(timeout_attempts):
                 logger.warning(
                     "LLM policy core timeout; retrying",
@@ -1303,8 +1333,26 @@ def route_llm_policy_core(
                 )
             continue
         except Exception as exc:
+            classified_error = _classify_llm_error(exc)
             logger.warning(f"LLM policy core failed: {exc}")
-            error = _classify_llm_error(exc)
+            error = classified_error
+            if (
+                retry_on_transient
+                and not transient_retry_used
+                and classified_error in {"connection_error", "provider_unavailable", "service_unavailable"}
+                and attempt_idx + 1 < len(timeout_attempts)
+            ):
+                transient_retry_used = True
+                logger.warning(
+                    "LLM policy core transient error; retrying",
+                    extra={
+                        "context": {
+                            "attempt": attempt_count,
+                            "error": classified_error,
+                        }
+                    },
+                )
+                continue
             break
 
     if error == "timeout" and fallback_model:
@@ -1350,6 +1398,8 @@ def route_llm_policy_core(
             "timeout_seconds": timeout_seconds_used,
             "attempt_count": attempt_count,
             "retry_on_timeout": retry_on_timeout,
+            "retry_on_transient": retry_on_transient,
+            "transient_retry_used": transient_retry_used,
             "fallback_model_attempted": fallback_model_attempted,
             "fallback_model": fallback_model or None,
             "max_tokens": max_tokens_used,

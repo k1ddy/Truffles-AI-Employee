@@ -357,6 +357,19 @@ def _validate_tool_args_contract(
     return None, None
 
 
+def validate_tool_args_contract(
+    *,
+    tool_action: str,
+    tool_args: Any,
+    fallback_tz: str | None = None,
+) -> tuple[str | None, str | None]:
+    return _validate_tool_args_contract(
+        tool_action=tool_action,
+        tool_args=tool_args,
+        fallback_tz=fallback_tz,
+    )
+
+
 def _is_photo_offer_message(text: str | None) -> bool:
     if not isinstance(text, str) or not text.strip():
         return False

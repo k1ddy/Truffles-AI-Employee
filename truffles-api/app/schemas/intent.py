@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 
 def _summarize_validation_error(exc: ValidationError, *, limit: int = 3) -> str:
@@ -29,6 +29,79 @@ ANSWER_INTERPRETER_SLOT_ALIASES = {
     "date": "datetime",
     "name": "name",
 }
+
+_TOOL_ARGS_ALLOWED_FIELDS: dict[str, set[str]] = {
+    "calendar.list_slots": {
+        "service_query",
+        "date",
+        "start_at",
+        "duration_min",
+        "specialist_id",
+        "specialist_name",
+    },
+    "calendar.book_slot": {
+        "service_query",
+        "start_at",
+        "end_at",
+        "specialist_id",
+        "specialist_name",
+        "customer_name",
+        "customer_phone",
+    },
+    "calendar.get_booking": {"appointment_id"},
+    "calendar.reschedule": {"appointment_id", "start_at", "end_at"},
+    "calendar.cancel": {"appointment_id", "reason"},
+    "catalog.service_query": {"service_query"},
+    "catalog.location": {"info_ref", "info_refs"},
+    "catalog.portfolio": {"service_query"},
+}
+
+_TOOL_ARGS_LIST_FIELDS = {"info_refs"}
+_TOOL_ARGS_NUMBER_FIELDS = {"duration_min"}
+
+
+def validate_tool_args_shape(
+    *,
+    tool_action: str | None,
+    tool_args: Any,
+) -> tuple[dict[str, Any] | None, str | None]:
+    if tool_args is None:
+        return {}, None
+    if not isinstance(tool_args, dict):
+        return None, "tool_args_invalid"
+    normalized_action = (
+        tool_action.strip().casefold()
+        if isinstance(tool_action, str) and tool_action.strip()
+        else None
+    )
+    if not normalized_action:
+        return dict(tool_args), None
+
+    allowed_fields = _TOOL_ARGS_ALLOWED_FIELDS.get(normalized_action)
+    if allowed_fields is not None:
+        for key in tool_args:
+            if not isinstance(key, str):
+                return None, "tool_args_key_invalid"
+            if key not in allowed_fields:
+                return None, f"tool_args_unknown_field:{key}"
+
+    normalized_args = dict(tool_args)
+    for key, value in normalized_args.items():
+        if value is None:
+            continue
+        if key in _TOOL_ARGS_LIST_FIELDS:
+            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                return None, f"tool_args_type_invalid:{key}"
+            continue
+        if key in _TOOL_ARGS_NUMBER_FIELDS:
+            if isinstance(value, bool):
+                return None, f"tool_args_type_invalid:{key}"
+            if not isinstance(value, (int, float, str)):
+                return None, f"tool_args_type_invalid:{key}"
+            continue
+        if not isinstance(value, str):
+            return None, f"tool_args_type_invalid:{key}"
+    return normalized_args, None
 
 
 def _normalize_required_string(value: Any, *, field: str) -> str:
@@ -231,11 +304,10 @@ class LlmPolicyCoreOutput(BaseModel):
     @field_validator("tool_args", mode="before")
     @classmethod
     def _validate_tool_args(cls, value: Any) -> dict[str, Any]:
-        if value is None:
-            return {}
-        if not isinstance(value, dict):
-            raise ValueError("tool_args_invalid")
-        return dict(value)
+        normalized, error = validate_tool_args_shape(tool_action=None, tool_args=value)
+        if error:
+            raise ValueError(error)
+        return normalized or {}
 
     @field_validator("pack_refs", "open_questions", "risk_signals", mode="before")
     @classmethod
@@ -255,6 +327,17 @@ class LlmPolicyCoreOutput(BaseModel):
         if isinstance(value, bool):
             return value
         raise ValueError("needs_manager_invalid")
+
+    @model_validator(mode="after")
+    def _validate_tool_args_for_action(self):
+        normalized, error = validate_tool_args_shape(
+            tool_action=self.tool_action,
+            tool_args=self.tool_args,
+        )
+        if error:
+            raise ValueError(error)
+        self.tool_args = normalized or {}
+        return self
 
 
 def validate_dialogue_controller_output(
