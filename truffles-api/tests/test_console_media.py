@@ -33,7 +33,12 @@ async def test_console_media_upload_outbox_payload(monkeypatch, tmp_path):
         branch_id=uuid4(),
         user_id=uuid4(),
     )
-    handover = SimpleNamespace(channel_ref=None)
+    handover = SimpleNamespace(
+        channel_ref=None,
+        first_response_at=None,
+        manager_response=None,
+        assigned_to_name=None,
+    )
     agent = SimpleNamespace(id=uuid4(), name="Agent")
     upload = UploadFile(
         filename="photo.jpg",
@@ -84,5 +89,8 @@ async def test_console_media_upload_outbox_payload(monkeypatch, tmp_path):
     assert message.role == "manager"
     assert status == "queued"
     assert error is None
+    assert handover.first_response_at is not None
+    assert handover.manager_response == "caption"
+    assert handover.assigned_to_name == "Agent"
     assert captured["payload"]["event_type"] == "whatsapp.send_media"
     assert captured["payload"]["payload"]["media_type"] == "photo"

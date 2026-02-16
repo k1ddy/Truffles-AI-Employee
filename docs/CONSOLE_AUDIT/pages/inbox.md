@@ -29,6 +29,7 @@ Queue (CaseList)
   - Advanced (expandable): Branch, date from/to, "Есть ошибки", "В очереди".
 - Refresh button: re-fetches cases.
 - Load more button when `has_more` (fetches next cursor page and appends to the list).
+- Queue counter uses backend total (`CaseListResponse.total`) and shows loaded vs total.
 - Auto refresh: every 10s (foreground only), toggle "Автообновление: Вкл/Выкл".
 
 Case rows (compact view)
@@ -38,18 +39,24 @@ Case rows (compact view)
 
 Conversation (CaseConversation)
 - Component: `console-web/src/components/CaseConversation.tsx`.
-- Header:
-  - Case ID, SLA badge, status, assigned manager, needs_reply tag.
-  - "Детали" / "Скрыть детали" toggle button (opens/closes Details panel).
-  - Actions:
-    - "Взять заявку" (when status pending + write access).
-    - "Закрыть заявку" (when status active + write access).
+  - Header:
+    - Case ID, SLA badge, status, assigned manager, needs_reply tag.
+    - "Детали" / "Скрыть детали" toggle button (opens/closes Details panel).
+    - Actions:
+      - "Взять заявку" (when status pending + write access).
+      - "Закрыть заявку" (when status active + write access).
+      - "Вернуть боту" (when status active + write access).
     - Read-only roles see "Только просмотр".
 - Context strip: "Суть запроса" or "Последнее сообщение" + last inbound time.
+- Inline risk hint is shown when `has_delivery_error` or `has_pending_outbox` is true.
 
 Chat (ChatInterface)
 - Component: `console-web/src/components/ChatInterface.tsx`.
 - Messages list (oldest first); roles: Клиент / Менеджер / Бот.
+- History pagination:
+  - "Загрузить старые" button when `has_more` from message endpoint.
+  - Scroll anchor is preserved when older messages are loaded.
+  - Auto-scroll to bottom triggers only while manager stays near the latest messages.
 - Media rendering:
   - photo: inline image + open link.
   - audio: audio player + open link.
@@ -88,7 +95,7 @@ API endpoints used (Console API)
 - List cases: `GET /console/v1/cases`.
 - Case detail: `GET /console/v1/cases/{id}`.
 - Case messages: `GET /console/v1/cases/{id}/messages`.
-- Take/resolve: `POST /console/v1/cases/{id}/take|resolve`.
+- Take/resolve/return: `POST /console/v1/cases/{id}/take|resolve|return`.
 - Send text: `POST /console/v1/conversations/{conversation_id}/messages`.
 - Send media: `POST /console/v1/conversations/{conversation_id}/messages/media`.
 - Macros: `GET/POST/PATCH /console/v1/inbox/macros`.

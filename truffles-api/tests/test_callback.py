@@ -46,7 +46,8 @@ class MockDB:
 class TestHandleTake:
     def test_take_from_pending(self):
         conv = MockConversation(state="pending")
-        db = MockDB(handover=MockHandover())
+        handover = MockHandover()
+        db = MockDB(handover=handover)
 
         old, new = handle_take(db, conv, "manager123", "John")
 
@@ -54,6 +55,7 @@ class TestHandleTake:
         assert new == "manager_active"
         assert conv.state == "manager_active"
         assert conv.human_operator_id == "manager123"
+        assert handover.first_response_at is None
 
     def test_take_from_wrong_state_fails(self):
         conv = MockConversation(state="bot_active")

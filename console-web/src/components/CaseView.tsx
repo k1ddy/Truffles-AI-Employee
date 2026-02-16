@@ -40,6 +40,9 @@ export default function CaseView({ caseId }: CaseViewProps) {
         refetchCase,
         messages,
         messagesLoading,
+        messagesHasMore,
+        messagesLoadingMore,
+        loadMoreMessages,
     } = useCaseData(caseId);
 
     const { data: meData } = useQuery({
@@ -116,6 +119,9 @@ export default function CaseView({ caseId }: CaseViewProps) {
                     caseId={caseId}
                     messages={messages}
                     messagesLoading={messagesLoading}
+                    messagesHasMore={messagesHasMore}
+                    messagesLoadingMore={messagesLoadingMore}
+                    onLoadMoreMessages={loadMoreMessages}
                     canSend={canReply}
                     canWrite={canWriteInbox}
                     draft={draft}

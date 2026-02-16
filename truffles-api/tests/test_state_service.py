@@ -176,6 +176,7 @@ class TestManagerTake:
 
         handover = Mock()
         handover.status = "pending"
+        handover.first_response_at = None
 
         result = manager_take(db, conversation, handover, "mgr-123", "Manager Name")
 
@@ -183,6 +184,7 @@ class TestManagerTake:
         assert conversation.state == ConversationState.MANAGER_ACTIVE.value
         assert handover.status == "active"
         assert handover.assigned_to_name == "Manager Name"
+        assert handover.first_response_at is None
 
     def test_fails_from_wrong_state(self):
         db = Mock()

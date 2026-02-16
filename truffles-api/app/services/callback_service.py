@@ -39,7 +39,6 @@ def handle_take(db: Session, conversation: Conversation, manager_id: str, manage
         handover.status = "active"
         handover.assigned_to = manager_id
         handover.assigned_to_name = manager_name
-        handover.first_response_at = datetime.now(timezone.utc)
 
     return old_state, new_state.value
 

@@ -2612,6 +2612,7 @@ export interface components {
             items?: components["schemas"]["Case"][];
             cursor?: string | null;
             has_more?: boolean;
+            total?: number | null;
         };
         CaseActionResponse: {
             success?: boolean;

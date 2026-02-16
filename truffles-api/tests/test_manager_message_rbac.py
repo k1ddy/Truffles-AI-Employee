@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
 from uuid import uuid4
@@ -89,3 +90,50 @@ def test_prepare_handover_auto_take_records_audit_and_notify(monkeypatch):
     take_mock.assert_called_once()
     assert audit_mock.call_count == 2
     notify_mock.assert_called_once()
+
+
+def test_process_manager_message_sets_first_response_on_real_reply(monkeypatch):
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        branch_id=uuid4(),
+        user_id=uuid4(),
+        context={},
+    )
+    handover = SimpleNamespace(
+        id=uuid4(),
+        status="active",
+        assigned_to=None,
+        assigned_to_name=None,
+        first_response_at=None,
+        manager_response=None,
+        channel_ref="777@s.whatsapp.net",
+    )
+    linked_agent = SimpleNamespace(id=uuid4(), name="Agent")
+
+    monkeypatch.setattr(
+        service,
+        "_prepare_handover_for_manager",
+        lambda *args, **kwargs: (conversation, handover, linked_agent, False, ""),
+    )
+    monkeypatch.setattr(service, "save_message", lambda **kwargs: None)
+    monkeypatch.setattr(service, "is_simulation_context", lambda *_args, **_kwargs: True)
+
+    before = datetime.now(timezone.utc)
+    message_text = "Hello, I am here to help"
+    ok, message, took_handover, returned_handover = service.process_manager_message(
+        Mock(),
+        chat_id=1,
+        message_text=message_text,
+        manager_telegram_id=123,
+        manager_name="Agent",
+    )
+
+    assert ok is True
+    assert "Simulation" in message
+    assert took_handover is False
+    assert returned_handover is handover
+    assert handover.manager_response == message_text
+    assert handover.assigned_to_name == "Agent"
+    assert handover.first_response_at is not None
+    assert handover.first_response_at >= before
