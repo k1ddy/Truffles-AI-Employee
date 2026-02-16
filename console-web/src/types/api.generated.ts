@@ -2828,7 +2828,7 @@ export interface components {
             title: string;
             summary: string;
             /** @enum {string} */
-            reason_code: "outbox_backlog" | "provider_unavailable" | "provider_auth" | "provider_rate_limited" | "integration_degraded" | "handover_backlog" | "unknown";
+            reason_code: "outbox_backlog" | "provider_billing_blocked" | "provider_unavailable" | "provider_auth" | "provider_rate_limited" | "integration_degraded" | "handover_backlog" | "unknown";
             reason_label: string;
             source: string;
             detected_at: string;

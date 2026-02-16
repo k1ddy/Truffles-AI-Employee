@@ -51,6 +51,7 @@ from app.services.state_machine import ConversationState
 from app.services.state_service import is_simulation_context
 from app.services.telegram_service import TelegramService
 from app.services.tenant_context_contract import validate_tenant_context_contract
+from app.services.provider_error_policy import is_permanent_provider_error
 
 logger = get_logger("webhook")
 
@@ -129,6 +130,10 @@ def _merge_nested_dict(base: dict, updates: dict) -> dict:
         else:
             base[key] = value
     return base
+
+
+def _is_permanent_delivery_error(error_text: str) -> bool:
+    return is_permanent_provider_error(error_text)
 
 
 async def _prepare_skip_persist(
@@ -1233,6 +1238,24 @@ async def _process_outbox_rows(
             _log_outbox_done(outbox_id_str, error=str(exc), total_ms=outbox_total_ms)
             now = datetime.now(timezone.utc)
             attempts = int(row.get("attempts") or 0)
+            if _is_permanent_delivery_error(str(exc)):
+                mark_outbox_status(
+                    db,
+                    outbox_id=outbox_id,
+                    status="FAILED",
+                    last_error=str(exc)[:500],
+                    next_attempt_at=None,
+                )
+                provider_name = payload_json.get("provider") or "chatflow"
+                _notify_outbox_failure(
+                    outbox_id=outbox_id_str,
+                    reason="permanent_provider_error",
+                    error=str(exc),
+                    provider=provider_name,
+                    attempts=attempts,
+                )
+                results["failed"] += 1
+                return
             if attempts >= max_attempts:
                 mark_outbox_status(
                     db,

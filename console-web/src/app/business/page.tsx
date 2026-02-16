@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
+import { useMemo } from "react";
 
 import AccessDenied from "@/components/AccessDenied";
-import { authApi, businessApi, canAccessConsole, type MetricFactMeta } from "@/lib/api-client";
+import { authApi, businessApi, canAccessConsole, type IncidentItem, type MetricFactMeta } from "@/lib/api-client";
 
 function formatMinutes(value?: number | null): string {
     if (value === null || value === undefined || Number.isNaN(value)) {
@@ -73,6 +74,13 @@ function formatMetricMeta(meta?: MetricFactMeta): string {
     return `${meta.kind} · source: ${meta.source}${asOf}`;
 }
 
+function findBillingBlockedIncident(items: IncidentItem[] | undefined): IncidentItem | null {
+    if (!items?.length) {
+        return null;
+    }
+    return items.find((item) => item.reason_code === "provider_billing_blocked") ?? null;
+}
+
 export default function BusinessPage() {
     const { data: session } = useSession();
 
@@ -107,6 +115,19 @@ export default function BusinessPage() {
         enabled: !!session && canReadBusiness,
         refetchInterval: 30000,
     });
+    const billingBlockedIncident = useMemo(
+        () => findBillingBlockedIncident(incidentsData?.items),
+        [incidentsData?.items],
+    );
+    const billingIncidentLinks = useMemo(
+        () => (
+            billingBlockedIncident?.actions
+                ?.filter((action) => Boolean(action.href))
+                .slice(0, 3)
+                ?? []
+        ),
+        [billingBlockedIncident?.actions],
+    );
 
     if (!session) {
         return (
@@ -196,6 +217,42 @@ export default function BusinessPage() {
                     </span>
                 </div>
             </section>
+
+            {billingBlockedIncident && (
+                <section
+                    className="mb-4 rounded-xl border border-red-300/80 bg-red-50 p-4 text-red-900"
+                    data-testid="business-billing-incident-banner"
+                >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold">Отправка клиентам заблокирована у провайдера</p>
+                        <span className="rounded-full bg-red-200/80 px-2 py-0.5 text-[10px] font-semibold uppercase">
+                            p0
+                        </span>
+                    </div>
+                    <p className="mt-1 text-xs">{billingBlockedIncident.reason_label}</p>
+                    <p className="mt-1 text-xs">{billingBlockedIncident.summary}</p>
+                    <ol className="mt-2 space-y-1 text-[11px]" data-testid="business-billing-incident-runbook">
+                        <li>1. Откройте Подписку и проверьте оплату/лимиты провайдера.</li>
+                        <li>2. Откройте Интеграции и проверьте `paid_until`, `next_renewal_at`, `webhook_status`.</li>
+                        <li>3. После исправления запустите dry-run outbox и проверьте, что `failed` не растёт.</li>
+                    </ol>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        {billingIncidentLinks.length > 0 ? (
+                            billingIncidentLinks.map((action) => (
+                                <Link key={action.id} href={action.href ?? "/subscription"} className="btn-ghost text-xs">
+                                    {action.title}
+                                </Link>
+                            ))
+                        ) : (
+                            <>
+                                <Link href="/subscription" className="btn-ghost text-xs">Открыть подписку</Link>
+                                <Link href="/integrations" className="btn-ghost text-xs">Открыть интеграции</Link>
+                                <Link href="/ops" className="btn-ghost text-xs">Открыть статус</Link>
+                            </>
+                        )}
+                    </div>
+                </section>
+            )}
 
             <section className="mb-4 rounded-xl border border-border/60 bg-card p-4" data-testid="business-incidents-card">
                 <div className="mb-3 flex items-center justify-between">

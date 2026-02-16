@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.contracts import Ok
+from app.contracts import Err, ErrorCodes, IntegrationError, Ok
 from app.models import Conversation, OutboxMessage
 from app.ports.messaging import MessageSent
 from app.routers.webhook import _legacy as legacy
@@ -425,3 +425,76 @@ async def test_outbox_rows_reject_invalid_tenant_context_contract(monkeypatch):
     assert results["failed"] == 1
     assert statuses == ["FAILED"]
     assert outbox_row.meta["contract_error"] == "event:invalid_tenant_context_contract"
+
+
+@pytest.mark.asyncio
+async def test_outbox_rows_fail_fast_on_chatflow_billing_blocked(monkeypatch):
+    monkeypatch.delenv("PROVIDER_GATEWAY_OUTBOUND_ENABLED", raising=False)
+
+    client_id = uuid4()
+    outbox_id = uuid4()
+    outbox_row = OutboxMessage(
+        id=outbox_id,
+        client_id=client_id,
+        branch_id=None,
+        inbound_message_id="msg-billing-blocked",
+        payload_json={},
+        status="PENDING",
+        meta={},
+    )
+    db = _make_db(outbox=outbox_row)
+
+    payload_json = {
+        "schema_version": "outbox.v1",
+        "event_type": "whatsapp.send_text",
+        "client_slug": "demo_salon",
+        "provider": "chatflow",
+        "channel": "whatsapp",
+        "tenant_context": {
+            "client_id": str(client_id),
+            "client_slug": "demo_salon",
+            "instance_id": "demo-instance",
+        },
+        "payload": {
+            "remote_jid": "77770000000@s.whatsapp.net",
+            "instance_id": "demo-instance",
+            "text": "Hello",
+            "idempotency_key": "idem-billing-blocked",
+        },
+    }
+    row = {
+        "id": outbox_id,
+        "payload_json": payload_json,
+        "conversation_id": None,
+        "client_id": client_id,
+        "branch_id": None,
+        "inbound_message_id": "msg-billing-blocked",
+        "created_at": datetime.now(timezone.utc),
+        "attempts": 1,
+    }
+
+    statuses: list[str] = []
+    def _billing_blocked_send_text(self, to, text, options):
+        return Err(
+            IntegrationError(
+                code=ErrorCodes.CHATFLOW_BILLING_BLOCKED,
+                message="ChatFlow billing blocked: plan renewal required",
+                service="chatflow",
+                context={"reason": "billing_blocked", "retryable": False},
+            )
+        )
+
+    monkeypatch.setattr(outbox_router.ChatFlowAdapter, "send_text", _billing_blocked_send_text)
+    monkeypatch.setattr(outbox_router, "mark_outbox_status", lambda *_args, **kwargs: statuses.append(kwargs["status"]))
+    monkeypatch.setattr(outbox_router, "record_outbox_latency", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_router, "record_delivery_failure", lambda *args, **kwargs: None)
+    monkeypatch.setattr(outbox_router, "alert_error", lambda *args, **kwargs: None)
+    monkeypatch.setattr(legacy, "_find_message_by_message_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr(legacy, "_find_message_by_conversation_created_at", lambda *args, **kwargs: None)
+
+    results = await outbox_router._process_outbox_rows(db, [row], max_attempts=5, retry_backoff_seconds=1.0)
+
+    assert results["sent"] == 0
+    assert results["failed"] == 1
+    assert results["retry_scheduled"] == 0
+    assert statuses == ["FAILED"]

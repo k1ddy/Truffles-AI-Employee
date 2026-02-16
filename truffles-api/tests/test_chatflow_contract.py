@@ -95,6 +95,32 @@ class TestSendMessageSafeContract:
         assert result.error.code == ErrorCodes.CHATFLOW_ERROR
         assert result.error.context.get("reason") == "payload_failure"
 
+    @respx.mock
+    def test_chatflow_billing_blocked_returns_non_retryable_error(self):
+        """When ChatFlow returns billing block payload, should classify as permanent billing error."""
+        import os
+
+        os.environ["CHATFLOW_TOKEN"] = "test-token"
+        os.environ["TEST_MODE"] = "0"
+
+        from app.services.chatflow_service import send_message_safe
+
+        respx.get("https://app.chatflow.kz/api/v1/send-text").mock(
+            return_value=Response(200, json={"msg": "Your plan has been expired please renew."})
+        )
+
+        result = send_message_safe(
+            instance_id="test-instance",
+            remote_jid="77001234567@s.whatsapp.net",
+            message="Test message",
+        )
+
+        assert result.is_err()
+        assert isinstance(result.error, IntegrationError)
+        assert result.error.code == ErrorCodes.CHATFLOW_BILLING_BLOCKED
+        assert result.error.context.get("reason") == "billing_blocked"
+        assert result.error.context.get("retryable") is False
+
     def test_test_mode_skip_returns_error(self, monkeypatch):
         """When TEST_MODE guard blocks outbound, send_message_safe must return error."""
         import importlib

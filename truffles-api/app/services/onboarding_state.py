@@ -470,6 +470,10 @@ def missing_prerequisites(step: OnboardingStep, inputs: OnboardingInputs) -> lis
                     missing.append("provider_binding.whatsapp.webhook_status")
                 if whatsapp_binding.rebind_required is True or whatsapp_binding.webhook_status == "rebind_required":
                     missing.append("provider_binding.whatsapp.rebind_required")
+                if not whatsapp_binding.alert_state:
+                    missing.append("provider_binding.whatsapp.alert_state")
+                elif whatsapp_binding.alert_state == "critical":
+                    missing.append("provider_binding.whatsapp.capability_check_failed")
 
                 renewal_anchor = whatsapp_binding.next_renewal_at or whatsapp_binding.paid_until
                 renewal_until = _parse_iso_date(renewal_anchor)

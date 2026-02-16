@@ -3536,6 +3536,26 @@ def _build_incident_actions(
         )
     )
 
+    if reason_code == "provider_billing_blocked":
+        actions.append(
+            ConsoleIncidentAction(
+                id="open_subscription",
+                title="Проверить оплату и тариф",
+                description="Откройте Подписку и подтвердите, что оплата у провайдера и лимиты активны.",
+                href="/subscription",
+                dry_run_first=True,
+            )
+        )
+        actions.append(
+            ConsoleIncidentAction(
+                id="open_integrations",
+                title="Проверить provider binding",
+                description="Проверьте paid_until/next_renewal_at и статус интеграции WhatsApp.",
+                href="/integrations",
+                dry_run_first=True,
+            )
+        )
+
     if reason_code == "integration_degraded" or integration_degraded_branches > 0:
         reconcile_params: dict[str, object] = {
             "limit": max(1, min(200, integration_degraded_branches or 25))
