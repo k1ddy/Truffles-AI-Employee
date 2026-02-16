@@ -112,6 +112,95 @@ def test_resolve_subscription_alert_levels() -> None:
     assert limit_level == "limit_100"
 
 
+def test_resolve_subscription_channel_limit_prefers_company_billing_info() -> None:
+    context = _build_context(
+        role="owner",
+        company_billing={
+            "subscription": {
+                "whatsapp_channels": 3,
+            }
+        },
+        client_config={
+            "billing": {
+                "whatsapp_channels": 1,
+            }
+        },
+    )
+
+    included, source = console_router._resolve_subscription_channel_limit(
+        context=context,
+        channel="whatsapp",
+        onboarding_enabled=True,
+    )
+
+    assert included == 3
+    assert source == "company_billing_info"
+
+
+def test_resolve_subscription_channel_limit_uses_onboarding_contract_when_missing_billing() -> None:
+    context = _build_context(role="owner", company_billing={}, client_config={})
+
+    included_enabled, source_enabled = console_router._resolve_subscription_channel_limit(
+        context=context,
+        channel="telegram",
+        onboarding_enabled=True,
+    )
+    included_disabled, source_disabled = console_router._resolve_subscription_channel_limit(
+        context=context,
+        channel="telegram",
+        onboarding_enabled=False,
+    )
+
+    assert included_enabled == 1
+    assert source_enabled == "onboarding_contract"
+    assert included_disabled == 0
+    assert source_disabled == "onboarding_contract"
+
+
+def test_resolve_subscription_count_meter_status_thresholds() -> None:
+    over_limit_status, over_limit_remaining = console_router._resolve_subscription_count_meter_status(
+        included=2,
+        used=5,
+    )
+    limit_status, limit_remaining = console_router._resolve_subscription_count_meter_status(
+        included=2,
+        used=2,
+    )
+    warning_status, warning_remaining = console_router._resolve_subscription_count_meter_status(
+        included=10,
+        used=8,
+    )
+    ok_status, ok_remaining = console_router._resolve_subscription_count_meter_status(
+        included=10,
+        used=3,
+    )
+    unknown_status, unknown_remaining = console_router._resolve_subscription_count_meter_status(
+        included=None,
+        used=3,
+    )
+
+    assert over_limit_status == "over_limit"
+    assert over_limit_remaining == 0
+    assert limit_status == "limit_reached"
+    assert limit_remaining == 0
+    assert warning_status == "warning"
+    assert warning_remaining == 2
+    assert ok_status == "ok"
+    assert ok_remaining == 7
+    assert unknown_status == "unknown"
+    assert unknown_remaining is None
+
+
+def test_resolve_subscription_toggle_meter_status() -> None:
+    assert console_router._resolve_subscription_toggle_meter_status(included=1, used=1) == "ok"
+    assert (
+        console_router._resolve_subscription_toggle_meter_status(included=1, used=0)
+        == "included_not_configured"
+    )
+    assert console_router._resolve_subscription_toggle_meter_status(included=0, used=0) == "not_included"
+    assert console_router._resolve_subscription_toggle_meter_status(included=0, used=1) == "over_limit"
+
+
 def test_derive_business_status_thresholds() -> None:
     unhealthy_status, _ = console_router._derive_business_status(
         outbox_backlog=1200,

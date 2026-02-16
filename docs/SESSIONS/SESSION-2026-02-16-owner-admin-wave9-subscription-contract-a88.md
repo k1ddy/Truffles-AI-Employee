@@ -1,0 +1,23 @@
+# SESSION 2026-02-16-owner-admin-wave9-subscription-contract-a88 — Session 2026-02-16-owner-admin-wave9-subscription-contract-a88
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-16-owner-admin-wave9-subscription-contract-a88.md
+- branch: feat/2026-02-16-owner-admin-wave9-subscription-contract-a88
+- worktree: /home/zhan/worktrees/2026-02-16-owner-admin-wave9-subscription-contract-a88
+- base_ref: origin/main
+- scope: owner/admin subscription contract clarity (plan + usage + payment + actionable steps)
+- done:
+  - Wave-9 subscription contract+usage+actions delivered and verified.
+  - Extended `/subscription/summary` with payment status, default plan baseline, per-meter contract usage, and recommended actions.
+  - Updated `/subscription` page with `Контракт и статус оплаты`, `Лимиты по направлениям`, `Что делать сейчас`.
+  - Added backend unit tests for new subscription resolvers and status helpers.
+  - Extended owner/admin smoke assertions for new subscription sections.
+  - Captured report and STATE evidence for wave-9.
+- next:
+  - Open PR and hand off for review/merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-16-owner-admin-wave9-subscription-contract-a88.md
+  - docs/REPORTS/2026-02-16-owner-admin-wave9-subscription-contract-v1.md
+  - STATE.md
+- last_updated: 2026-02-16

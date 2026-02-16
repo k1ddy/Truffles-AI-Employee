@@ -76,6 +76,7 @@ from app.schemas.console import (
     ConsoleBranchIntegrationStatus,
     ConsoleBranchListResponse,
     ConsoleBranchUpdateRequest,
+    ConsoleBusinessActionItem,
     ConsoleBusinessSummaryResponse,
     ConsoleCapabilitiesPatchRequest,
     ConsoleCapabilitiesRecord,
@@ -179,6 +180,8 @@ from app.schemas.console import (
     ConsoleSettingsUpdateRequest,
     ConsoleSettingsUpdateResponse,
     ConsoleSubscriptionEvidenceItem,
+    ConsoleSubscriptionMeterItem,
+    ConsoleSubscriptionPlanDefaults,
     ConsoleSubscriptionSummaryResponse,
     ConsoleSyncStatus,
     ConsoleTeamManagerPerformanceItem,
@@ -6616,6 +6619,151 @@ async def list_business_incidents(
     )
 
 
+_DEFAULT_STARTER_INCLUDED_MESSAGES = 1000
+_DEFAULT_STARTER_INCLUDED_WHATSAPP_CHANNELS = 1
+
+
+def _parse_subscription_meter_limit(value: object) -> Optional[int]:
+    if isinstance(value, bool):
+        return 1 if value else 0
+    parsed = _safe_int(value)
+    if parsed is None or parsed < 0:
+        return None
+    return parsed
+
+
+def _extract_subscription_channel_limit(payload: dict, *, channel: str) -> Optional[int]:
+    if not isinstance(payload, dict):
+        return None
+    direct_keys = (
+        f"{channel}_numbers",
+        f"{channel}_number_limit",
+        f"{channel}_channels",
+        f"{channel}_channel_limit",
+        f"{channel}_limit",
+    )
+    for key in direct_keys:
+        parsed = _parse_subscription_meter_limit(payload.get(key))
+        if parsed is not None:
+            return parsed
+    channels_map = payload.get("channels")
+    if isinstance(channels_map, dict):
+        parsed = _parse_subscription_meter_limit(channels_map.get(channel))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _resolve_subscription_channel_limit(
+    *,
+    context: ConsoleAuthContext,
+    channel: Literal["whatsapp", "telegram", "instagram"],
+    onboarding_enabled: Optional[bool],
+) -> tuple[Optional[int], str]:
+    company = next(
+        (item for item in context.companies if item.id == context.client.company_id),
+        None,
+    )
+    company_billing = company.billing_info if company and isinstance(company.billing_info, dict) else {}
+    client_config = context.client.config if isinstance(context.client.config, dict) else {}
+    client_billing = client_config.get("billing") if isinstance(client_config.get("billing"), dict) else {}
+    sources: list[tuple[str, dict]] = [
+        ("company_billing_info", company_billing),
+        ("client_config", client_billing),
+    ]
+    for source_name, source_payload in sources:
+        if not isinstance(source_payload, dict):
+            continue
+        nested_subscription = source_payload.get("subscription")
+        candidate_maps = [source_payload]
+        if isinstance(nested_subscription, dict):
+            candidate_maps.insert(0, nested_subscription)
+        for payload in candidate_maps:
+            parsed = _extract_subscription_channel_limit(payload, channel=channel)
+            if parsed is not None:
+                return parsed, source_name
+    if onboarding_enabled is True:
+        return 1, "onboarding_contract"
+    if onboarding_enabled is False:
+        return 0, "onboarding_contract"
+    return None, "unknown"
+
+
+def _resolve_subscription_count_meter_status(
+    *,
+    included: Optional[int],
+    used: int,
+    warn_ratio: float = 0.8,
+) -> tuple[Literal["ok", "warning", "limit_reached", "over_limit", "not_included", "unknown"], Optional[int]]:
+    if included is None:
+        return "unknown", None
+    if included <= 0:
+        if used > 0:
+            return "over_limit", 0
+        return "not_included", 0
+    if used > included:
+        return "over_limit", 0
+    remaining = max(0, included - used)
+    if used == included:
+        return "limit_reached", remaining
+    threshold = included * warn_ratio
+    if used >= threshold:
+        return "warning", remaining
+    return "ok", remaining
+
+
+def _resolve_subscription_toggle_meter_status(
+    *,
+    included: int,
+    used: int,
+) -> Literal["ok", "over_limit", "not_included", "included_not_configured"]:
+    if included <= 0:
+        if used > 0:
+            return "over_limit"
+        return "not_included"
+    if used <= 0:
+        return "included_not_configured"
+    return "ok"
+
+
+def _resolve_subscription_payment_status_message(
+    *,
+    payment_status: str,
+    payment_confirmed_at: Optional[str],
+) -> str:
+    if payment_status == "confirmed":
+        if payment_confirmed_at:
+            return f"Оплата подтверждена: {payment_confirmed_at}."
+        return "Оплата подтверждена."
+    if payment_status == "pending":
+        return "Оплата в ожидании подтверждения. Проверьте реквизиты и статус у платформы."
+    if payment_status == "rejected":
+        return "Оплата отклонена. Нужна повторная проверка и подтверждение."
+    return "Статус оплаты не заполнен в онбординге."
+
+
+def _append_subscription_action(
+    actions: list[ConsoleBusinessActionItem],
+    *,
+    action_id: str,
+    title: str,
+    description: str,
+    href: str,
+    severity: Literal["critical", "warn", "info"],
+) -> None:
+    if any(item.id == action_id for item in actions):
+        return
+    actions.append(
+        ConsoleBusinessActionItem(
+            id=action_id,
+            title=title,
+            description=description,
+            href=href,
+            severity=severity,
+        )
+    )
+
+
 @router.get(
     "/subscription/summary",
     response_model=ConsoleSubscriptionSummaryResponse,
@@ -6660,6 +6808,117 @@ async def get_subscription_summary(
         .all()
     )
 
+    branch_query = db.query(Branch).filter(Branch.client_id == context.client.id)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            scoped_branches: list[Branch] = []
+        else:
+            scoped_branches = branch_query.filter(Branch.id.in_(list(allowed_branch_ids))).all()
+    else:
+        scoped_branches = branch_query.all()
+
+    client_contract_record = _get_latest_onboarding_contract(
+        db,
+        client_id=context.client.id,
+        scope="client",
+        branch_id=None,
+    )
+    branch_contract_record = None
+    if context.effective_branch_id:
+        branch_contract_record = _get_latest_onboarding_contract(
+            db,
+            client_id=context.client.id,
+            scope="branch",
+            branch_id=context.effective_branch_id,
+        )
+    elif allowed_branch_ids is not None and len(allowed_branch_ids) == 1:
+        only_branch_id = next(iter(allowed_branch_ids))
+        branch_contract_record = _get_latest_onboarding_contract(
+            db,
+            client_id=context.client.id,
+            scope="branch",
+            branch_id=only_branch_id,
+        )
+
+    active_client_contract = (
+        client_contract_record
+        if client_contract_record and client_contract_record.status == "active"
+        else None
+    )
+    active_branch_contract = (
+        branch_contract_record
+        if branch_contract_record and branch_contract_record.status == "active"
+        else None
+    )
+    client_contract_payload = active_client_contract.payload_json if active_client_contract else None
+    branch_contract_payload = active_branch_contract.payload_json if active_branch_contract else None
+    effective_onboarding_payload: Optional[OnboardingContractPayload] = None
+    if isinstance(client_contract_payload, dict) or isinstance(branch_contract_payload, dict):
+        try:
+            effective_onboarding_payload = OnboardingContractPayload.model_validate(
+                merge_onboarding_contract(client_contract_payload, branch_contract_payload)
+            )
+        except ValidationError:
+            effective_onboarding_payload = None
+
+    payment_source = _resolve_onboarding_payment_source(
+        client_record=active_client_contract,
+        branch_record=active_branch_contract,
+    )
+    payment_status = payment_source.payment_status if payment_source else "unknown"
+    payment_confirmed_at = (
+        payment_source.payment_confirmed_at.isoformat()
+        if payment_source and payment_source.payment_confirmed_at
+        else None
+    )
+    payment_status_source: Literal["onboarding_contract", "unknown"] = (
+        "onboarding_contract" if payment_source else "unknown"
+    )
+
+    client_capability_record = _get_latest_capability(
+        db,
+        client_id=context.client.id,
+        scope="client",
+        branch_id=None,
+    )
+    branch_capability_record = None
+    if context.effective_branch_id:
+        branch_capability_record = _get_latest_capability(
+            db,
+            client_id=context.client.id,
+            scope="branch",
+            branch_id=context.effective_branch_id,
+        )
+    elif allowed_branch_ids is not None and len(allowed_branch_ids) == 1:
+        only_branch_id = next(iter(allowed_branch_ids))
+        branch_capability_record = _get_latest_capability(
+            db,
+            client_id=context.client.id,
+            scope="branch",
+            branch_id=only_branch_id,
+        )
+    client_capability_payload = (
+        client_capability_record.payload_json
+        if client_capability_record and client_capability_record.status == "active"
+        else None
+    )
+    branch_capability_payload = (
+        branch_capability_record.payload_json
+        if branch_capability_record and branch_capability_record.status == "active"
+        else None
+    )
+    effective_capabilities = CapabilitiesPayload()
+    if isinstance(client_capability_payload, dict) or isinstance(branch_capability_payload, dict):
+        try:
+            effective_capabilities = CapabilitiesPayload.model_validate(
+                merge_capabilities(client_capability_payload, branch_capability_payload)
+            )
+        except ValidationError:
+            effective_capabilities = CapabilitiesPayload()
+
+    purchased_capabilities = (
+        effective_onboarding_payload.purchased if effective_onboarding_payload else CapabilitiesPayload()
+    )
     plan_name, contract_label, currency, monthly_quota, quota_source = _resolve_subscription_contract_info(context)
 
     elapsed_days = max(1, (now.date() - period_start.date()).days + 1)
@@ -6688,6 +6947,295 @@ async def get_subscription_summary(
         over_quota=over_quota,
         projected_over_quota=projected_over_quota,
     )
+    default_plan = ConsoleSubscriptionPlanDefaults(
+        plan_name="Starter",
+        included_messages=_DEFAULT_STARTER_INCLUDED_MESSAGES,
+        included_whatsapp_channels=_DEFAULT_STARTER_INCLUDED_WHATSAPP_CHANNELS,
+        source="STRATEGY/PRODUCT.md",
+    )
+    active_branches = [branch for branch in scoped_branches if branch.is_active]
+    whatsapp_used = sum(1 for branch in active_branches if _normalize_optional_text(branch.instance_id))
+    telegram_used = sum(1 for branch in active_branches if _normalize_optional_text(branch.telegram_chat_id))
+    instagram_used = 0
+
+    whatsapp_included, whatsapp_source = _resolve_subscription_channel_limit(
+        context=context,
+        channel="whatsapp",
+        onboarding_enabled=purchased_capabilities.channels.whatsapp,
+    )
+    whatsapp_note = None
+    if whatsapp_included is None:
+        whatsapp_included = default_plan.included_whatsapp_channels
+        whatsapp_source = "default_starter"
+        whatsapp_note = "Лимит взят из стандартного плана. Зафиксируйте договор в онбординге."
+    whatsapp_status, whatsapp_remaining = _resolve_subscription_count_meter_status(
+        included=whatsapp_included,
+        used=whatsapp_used,
+    )
+
+    telegram_included, telegram_source = _resolve_subscription_channel_limit(
+        context=context,
+        channel="telegram",
+        onboarding_enabled=purchased_capabilities.channels.telegram,
+    )
+    telegram_status, telegram_remaining = _resolve_subscription_count_meter_status(
+        included=telegram_included,
+        used=telegram_used,
+    )
+
+    instagram_included, instagram_source = _resolve_subscription_channel_limit(
+        context=context,
+        channel="instagram",
+        onboarding_enabled=purchased_capabilities.channels.instagram,
+    )
+    instagram_status, instagram_remaining = _resolve_subscription_count_meter_status(
+        included=instagram_included,
+        used=instagram_used,
+    )
+
+    messages_meter_included = monthly_quota if monthly_quota is not None and monthly_quota > 0 else default_plan.included_messages
+    messages_meter_source = f"subscription_contract:{quota_source}" if monthly_quota is not None else "default_starter"
+    messages_meter_note = None
+    if monthly_quota is None:
+        messages_meter_note = "Лимит взят из стандартного плана. Зафиксируйте договор в онбординге."
+    messages_meter_status, messages_meter_remaining = _resolve_subscription_count_meter_status(
+        included=messages_meter_included,
+        used=billable_messages,
+    )
+
+    calendar_included = 1 if purchased_capabilities.providers.calendar_provider not in (None, "none") else 0
+    calendar_used = 1 if effective_capabilities.providers.calendar_provider not in (None, "none") else 0
+    calendar_status = _resolve_subscription_toggle_meter_status(included=calendar_included, used=calendar_used)
+
+    crm_included = 1 if purchased_capabilities.providers.crm_provider not in (None, "none") else 0
+    crm_used = 1 if effective_capabilities.providers.crm_provider not in (None, "none") else 0
+    crm_status = _resolve_subscription_toggle_meter_status(included=crm_included, used=crm_used)
+
+    knowledge_included = 1 if purchased_capabilities.features.knowledge_upload is True else 0
+    knowledge_used = 1 if effective_capabilities.features.knowledge_upload is True else 0
+    knowledge_status = _resolve_subscription_toggle_meter_status(included=knowledge_included, used=knowledge_used)
+
+    analytics_included = 1 if purchased_capabilities.features.analytics is True else 0
+    analytics_used = 1 if effective_capabilities.features.analytics is True else 0
+    analytics_status = _resolve_subscription_toggle_meter_status(included=analytics_included, used=analytics_used)
+
+    auto_learn_included = 1 if purchased_capabilities.features.auto_learn is True else 0
+    auto_learn_used = 1 if effective_capabilities.features.auto_learn is True else 0
+    auto_learn_status = _resolve_subscription_toggle_meter_status(
+        included=auto_learn_included,
+        used=auto_learn_used,
+    )
+
+    provider_binding_lifecycle = _build_provider_binding_lifecycle_map(
+        db,
+        client_ids=[context.client.id],
+        branches=scoped_branches,
+        now=now,
+    )
+    binding_critical_total = sum(
+        1 for lifecycle in provider_binding_lifecycle.values() if lifecycle.alert_state == "critical"
+    )
+    binding_warn_total = sum(
+        1 for lifecycle in provider_binding_lifecycle.values() if lifecycle.alert_state == "warn"
+    )
+    if binding_critical_total > 0:
+        critical_note = f"{binding_critical_total} канал(ов) WhatsApp требует срочного внимания."
+        whatsapp_note = f"{whatsapp_note} {critical_note}".strip() if whatsapp_note else critical_note
+    elif binding_warn_total > 0:
+        warn_note = f"{binding_warn_total} канал(ов) WhatsApp требуют плановой проверки."
+        whatsapp_note = f"{whatsapp_note} {warn_note}".strip() if whatsapp_note else warn_note
+
+    meters = [
+        ConsoleSubscriptionMeterItem(
+            key="bot_messages",
+            label="Сообщения бота",
+            meter_type="messages",
+            included=messages_meter_included,
+            used=billable_messages,
+            remaining=messages_meter_remaining,
+            status=messages_meter_status,
+            source=messages_meter_source,
+            note=messages_meter_note,
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="whatsapp_channels",
+            label="WhatsApp каналы",
+            meter_type="channels",
+            included=whatsapp_included,
+            used=whatsapp_used,
+            remaining=whatsapp_remaining,
+            status=whatsapp_status,
+            source=whatsapp_source,
+            note=whatsapp_note,
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="telegram_channels",
+            label="Telegram каналы",
+            meter_type="channels",
+            included=telegram_included,
+            used=telegram_used,
+            remaining=telegram_remaining,
+            status=telegram_status,
+            source=telegram_source,
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="instagram_channels",
+            label="Instagram каналы",
+            meter_type="channels",
+            included=instagram_included,
+            used=instagram_used,
+            remaining=instagram_remaining,
+            status=instagram_status,
+            source=instagram_source,
+            note="Канал поддерживается контрактно, но runtime подключение проверяется отдельно.",
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="calendar_integration",
+            label="Календарная интеграция",
+            meter_type="addon",
+            included=calendar_included,
+            used=calendar_used,
+            remaining=max(0, calendar_included - calendar_used),
+            status=calendar_status,
+            source="onboarding_contract.purchased.providers.calendar_provider",
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="crm_integration",
+            label="CRM интеграция",
+            meter_type="addon",
+            included=crm_included,
+            used=crm_used,
+            remaining=max(0, crm_included - crm_used),
+            status=crm_status,
+            source="onboarding_contract.purchased.providers.crm_provider",
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="knowledge_upload",
+            label="Загрузка знаний",
+            meter_type="addon",
+            included=knowledge_included,
+            used=knowledge_used,
+            remaining=max(0, knowledge_included - knowledge_used),
+            status=knowledge_status,
+            source="onboarding_contract.purchased.features.knowledge_upload",
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="analytics",
+            label="Бизнес-аналитика",
+            meter_type="addon",
+            included=analytics_included,
+            used=analytics_used,
+            remaining=max(0, analytics_included - analytics_used),
+            status=analytics_status,
+            source="onboarding_contract.purchased.features.analytics",
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="auto_learn",
+            label="Автообучение",
+            meter_type="addon",
+            included=auto_learn_included,
+            used=auto_learn_used,
+            remaining=max(0, auto_learn_included - auto_learn_used),
+            status=auto_learn_status,
+            source="onboarding_contract.purchased.features.auto_learn",
+        ),
+    ]
+
+    recommended_actions: list[ConsoleBusinessActionItem] = []
+    if effective_onboarding_payload is None:
+        _append_subscription_action(
+            recommended_actions,
+            action_id="fill_onboarding_contract",
+            title="Заполните договор онбординга",
+            description="Без договора часть лимитов считается по стандартному плану. Зафиксируйте условия клиента.",
+            href="/settings",
+            severity="warn",
+        )
+    if over_quota or quota_alert_level == "limit_100":
+        _append_subscription_action(
+            recommended_actions,
+            action_id="review_plan_overage",
+            title="Лимит сообщений превышен",
+            description="Проверьте тариф или снизьте поток нецелевых ответов бота, чтобы остановить перерасход.",
+            href="/business",
+            severity="critical",
+        )
+    elif quota_alert_level == "warning_80":
+        _append_subscription_action(
+            recommended_actions,
+            action_id="review_quota_risk",
+            title="Риск перерасхода в этом периоде",
+            description="Текущая динамика близка к лимиту. Проверьте прогноз и подготовьте изменение плана заранее.",
+            href="/subscription",
+            severity="warn",
+        )
+
+    if payment_status in {"pending", "rejected"}:
+        _append_subscription_action(
+            recommended_actions,
+            action_id="verify_payment_status",
+            title="Проверьте статус оплаты подписки",
+            description=_resolve_subscription_payment_status_message(
+                payment_status=payment_status,
+                payment_confirmed_at=payment_confirmed_at,
+            ),
+            href="/settings",
+            severity="critical" if payment_status == "rejected" else "warn",
+        )
+
+    if whatsapp_status in {"over_limit", "not_included"}:
+        _append_subscription_action(
+            recommended_actions,
+            action_id="whatsapp_limit_mismatch",
+            title="Проверьте лимит WhatsApp каналов",
+            description="Фактическое число подключений не совпадает с планом. Уточните договор и конфигурацию филиалов.",
+            href="/settings",
+            severity="critical",
+        )
+    elif whatsapp_included is not None and whatsapp_included > 0 and whatsapp_used == 0:
+        _append_subscription_action(
+            recommended_actions,
+            action_id="whatsapp_setup_required",
+            title="Подключите WhatsApp канал",
+            description="Канал включён в план, но не настроен в текущем клиенте.",
+            href="/settings",
+            severity="warn",
+        )
+
+    if binding_critical_total > 0 or binding_warn_total > 0:
+        _append_subscription_action(
+            recommended_actions,
+            action_id="review_whatsapp_binding_health",
+            title="Проверьте состояние WhatsApp подключения",
+            description="Есть риски по webhook/rebind/renewal. Проверьте параметры канала и продлите доступ при необходимости.",
+            href="/settings",
+            severity="critical" if binding_critical_total > 0 else "warn",
+        )
+
+    if any(
+        meter.status == "included_not_configured"
+        for meter in meters
+        if meter.meter_type == "addon"
+    ):
+        _append_subscription_action(
+            recommended_actions,
+            action_id="configure_purchased_addons",
+            title="Настройте купленные интеграции",
+            description="Часть оплаченных интеграций включена в договоре, но ещё не активирована в рабочем контуре.",
+            href="/settings",
+            severity="info",
+        )
+
+    if not recommended_actions:
+        _append_subscription_action(
+            recommended_actions,
+            action_id="subscription_monitor_daily",
+            title="Подписка в норме",
+            description="Проверяйте лимиты и статус подключения по расписанию, чтобы избежать сюрпризов в конце периода.",
+            href="/subscription",
+            severity="info",
+        )
+
     scope: Literal["system", "client", "branch"] = "branch" if allowed_branch_ids is not None else "client"
     metric_meta = {
         "billable_messages": _build_metric_meta(
@@ -6742,6 +7290,28 @@ async def get_subscription_summary(
             sample_size=elapsed_days if projected_overage_messages is not None else None,
             note="projection, not observed fact" if projected_overage_messages is not None else None,
         ),
+        "whatsapp_channels_used": _build_metric_meta(
+            kind="fact",
+            source="branches.instance_id",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=whatsapp_used,
+        ),
+        "whatsapp_channels_included": _build_metric_meta(
+            kind="estimate" if whatsapp_source == "default_starter" else "fact",
+            source=f"subscription_contract:{whatsapp_source}",
+            as_of=now.isoformat(),
+            scope="client",
+            sample_size=1,
+            note=whatsapp_note if whatsapp_source == "default_starter" else None,
+        ),
+        "payment_status": _build_metric_meta(
+            kind="fact" if payment_status != "unknown" else "missing",
+            source=f"onboarding_contract:{payment_status_source}",
+            as_of=now.isoformat(),
+            scope="client",
+            sample_size=1 if payment_status != "unknown" else None,
+        ),
     }
 
     evidence_items = []
@@ -6781,6 +7351,16 @@ async def get_subscription_summary(
         quota_alert_message=quota_alert_message,
         overage_policy_message="Перерасход считается по формуле overage = max(0, billable - quota).",
         over_quota=over_quota,
+        payment_status=payment_status,
+        payment_confirmed_at=payment_confirmed_at,
+        payment_status_source=payment_status_source,
+        payment_status_message=_resolve_subscription_payment_status_message(
+            payment_status=payment_status,
+            payment_confirmed_at=payment_confirmed_at,
+        ),
+        plan_defaults=default_plan,
+        meters=meters,
+        recommended_actions=recommended_actions,
         evidence=evidence_items,
         metric_meta=metric_meta,
     )
