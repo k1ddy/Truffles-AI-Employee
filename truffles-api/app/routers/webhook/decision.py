@@ -1112,8 +1112,8 @@ def _apply_expected_reply_contract(
             trace_payload.update(
                 legacy._set_router_observability(
                     saved_message,
-                    eligible=False,
-                    reason="expected_reply_deferred",
+                    eligible=True,
+                    reason="none",
                 )
             )
         trace_payload.update(answer_meta)
@@ -1825,6 +1825,7 @@ def _build_router_state(
     message_text: str | None,
     booking_wants_flow: bool,
     expected_reply_shortcircuit: bool,
+    expected_reply_blocked_by_info: bool,
     expected_reply_type: str | None,
     class_carryover: dict | None,
     client_slug: str | None,
@@ -1852,11 +1853,14 @@ def _build_router_state(
         "attempted": False,
         "sla": None,
     }
+    booking_interrupt_controller_eligible = bool(
+        booking_wants_flow and expected_reply_blocked_by_info
+    )
     controller_should_attempt = bool(
         routing["allow_bot_reply"]
         and not bypass_domain_flows
         and message_text
-        and not booking_wants_flow
+        and (not booking_wants_flow or booking_interrupt_controller_eligible)
         and not expected_reply_shortcircuit
         and _current_openai_api_key()
     )
@@ -4225,6 +4229,38 @@ def _controller_meta_updates_from_class_router(class_router_result: dict | None)
         "controller_error": controller_meta.get("error"),
         "controller_goal": controller_meta.get("goal"),
         "controller_fallback_reason": class_router_result.get("controller_fallback_reason"),
+    }
+
+
+def _controller_meta_updates_from_router_state(router_state: dict | None) -> dict[str, Any]:
+    if not isinstance(router_state, dict):
+        return {}
+    controller_output = router_state.get("output")
+    controller_goal = controller_output.get("goal") if isinstance(controller_output, dict) else None
+    controller_confidence = router_state.get("confidence")
+    controller_used = bool(router_state.get("used"))
+    controller_low_confidence = bool(
+        controller_used
+        and isinstance(controller_confidence, (int, float))
+        and controller_confidence < CONTROLLER_CONFIDENCE_THRESHOLD
+    )
+    controller_fallback_reason = router_state.get("fallback_reason")
+    if isinstance(controller_fallback_reason, str):
+        normalized = controller_fallback_reason.strip().casefold()
+        if not normalized or normalized == "skipped":
+            controller_fallback_reason = None
+    else:
+        controller_fallback_reason = None
+    return {
+        "controller_used": controller_used,
+        "controller_attempted": bool(router_state.get("attempted")),
+        "controller_fallback": bool(router_state.get("fallback")),
+        "controller_low_confidence": controller_low_confidence,
+        "controller_used_reason": router_state.get("used_reason"),
+        "controller_confidence": controller_confidence,
+        "controller_error": router_state.get("error"),
+        "controller_goal": controller_goal,
+        "controller_fallback_reason": controller_fallback_reason,
     }
 
 
@@ -7178,6 +7214,11 @@ async def _handle_webhook_payload(
                 info_blocked_by_intents = False
         if info_blocked_by_intents:
             expected_reply_blocked_by_info = True
+            router_meta = _set_router_observability(
+                saved_message,
+                eligible=True,
+                reason="none",
+            )
             _record_decision_trace(
                 conversation,
                 {
@@ -7187,17 +7228,17 @@ async def _handle_webhook_payload(
                     "source": "info_class",
                     "expected_reply_type": expected_reply_type,
                     "info_intents": info_reply_intents,
+                    **router_meta,
                 },
             )
             if saved_message:
-                _update_message_decision_metadata(
-                    saved_message,
-                    {
-                        "expected_reply_blocked_by_info": True,
-                        "expected_reply_blocked_by_info_source": "info_class",
-                        "expected_reply_info_intents": info_reply_intents,
-                    },
-                )
+                updates = {
+                    "expected_reply_blocked_by_info": True,
+                    "expected_reply_blocked_by_info_source": "info_class",
+                    "expected_reply_info_intents": info_reply_intents,
+                }
+                updates.update(router_meta)
+                _update_message_decision_metadata(saved_message, updates)
     intent_queue_followup = None
     intent_queue_intents: list[str] = []
 
@@ -8139,6 +8180,7 @@ async def _handle_webhook_payload(
         message_text=message_text,
         booking_wants_flow=booking_wants_flow,
         expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
+        expected_reply_blocked_by_info=expected_reply_blocked_by_info,
         expected_reply_type=expected_reply_type,
         class_carryover=class_carryover,
         client_slug=payload.client_slug,
@@ -8148,6 +8190,10 @@ async def _handle_webhook_payload(
         booking_signal=booking_signal,
         record_llm_budget_trace=_record_llm_budget_trace,
     )
+    if saved_message:
+        controller_updates = _controller_meta_updates_from_router_state(router_state)
+        if controller_updates:
+            _update_message_decision_metadata(saved_message, controller_updates)
 
     explicit_service_signal = _has_explicit_service_signal(
         message_text,
