@@ -149,6 +149,17 @@ test.describe('Owner/Admin Business Control', () => {
     });
 
     test('should expose owner/admin control navigation and business summary @smoke', async ({ page }) => {
+        const navModeToggle = page.getByTestId('nav-owner-admin-toggle');
+        if (!(await navModeToggle.isVisible().catch(() => false))) {
+            await page.getByTestId('nav-toggle').click();
+        }
+        await expect(navModeToggle).toBeVisible();
+        await expect(navModeToggle).toContainText('Показать расширенное меню');
+        await navModeToggle.click();
+        await expect(navModeToggle).toContainText('Скрыть расширенное меню');
+        await navModeToggle.click();
+        await expect(navModeToggle).toContainText('Показать расширенное меню');
+
         await expect(page.getByTestId('nav-business')).toBeVisible();
         await expect(page.getByTestId('nav-data-trust')).toBeVisible();
         await expect(page.getByTestId('nav-team-performance')).toBeVisible();
@@ -158,11 +169,12 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page).toHaveURL(urlPathPattern('/business'));
         await expect(page.getByTestId('business-title')).toBeVisible();
         await expect(page.getByTestId('business-status-card')).toBeVisible();
+        await expect(page.getByTestId('business-today-plan')).toBeVisible();
         await expect(page.getByTestId('business-kpi-grid')).toBeVisible();
         await expect(page.getByTestId('business-actions')).toBeVisible();
 
         await expect(page.getByTestId('business-wave2-shortcuts')).toBeVisible();
-        await page.getByRole('link', { name: 'Открыть Data Trust' }).click();
+        await page.getByRole('link', { name: 'Проверить качество данных' }).click();
         await expect(page).toHaveURL(urlPathPattern('/business/data-trust'));
         await expect(page.getByTestId('data-trust-title')).toBeVisible();
     });
