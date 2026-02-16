@@ -249,6 +249,50 @@ class TestPolicyCoreTimeoutRetry:
         assert result["error"] is None
         assert mock_llm.return_value.generate.call_count == 2
 
+    def test_timeout_retry_uses_fallback_model_when_primary_times_out(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_RETRY_ON_TIMEOUT",
+            "1",
+        )
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_MODEL",
+            "gpt-primary",
+        )
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_TIMEOUT_FALLBACK_MODEL",
+            "gpt-fallback",
+        )
+
+        payload = {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "calendar.list_slots",
+            "tool_args": {},
+            "pack_refs": [],
+            "language": "ru",
+            "confidence": 0.8,
+            "reason": "ask_time",
+            "goal": "booking",
+            "slots": {},
+            "open_questions": ["datetime"],
+            "expected_reply_type": "time",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                httpx.TimeoutException("timeout-1"),
+                httpx.TimeoutException("timeout-2"),
+                DummyResponse(json.dumps(payload)),
+            ]
+            result = route_llm_policy_core("Нужно время", expected_reply_type="time")
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert mock_llm.return_value.generate.call_count == 3
+        models = [call.kwargs.get("model") for call in mock_llm.return_value.generate.call_args_list]
+        assert models[:2] == ["gpt-primary", "gpt-primary"]
+        assert models[2] == "gpt-fallback"
+
     def test_uses_adaptive_timeout_when_pipeline_budget_is_tight(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         monkeypatch.setattr(

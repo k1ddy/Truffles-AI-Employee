@@ -3392,6 +3392,12 @@ BOOKING_VERIFICATION_HANDOFF_INTENTS = {
     "verify_booking",
     "booking_confirmation",
 }
+TOOL_VERIFIER_APPOINTMENT_ID_ACTIONS = {
+    "calendar.book_slot",
+    "calendar.get_booking",
+    "calendar.reschedule",
+    "calendar.cancel",
+}
 
 
 def _is_booking_verification_handoff_intent(policy_intent: str | None, policy_tool_action: str | None) -> bool:
@@ -3413,6 +3419,23 @@ def _looks_like_booking_verification_request(message_text: str | None) -> bool:
     if not normalized:
         return False
     return any(pattern.search(normalized) for pattern in BOOKING_VERIFICATION_PATTERNS)
+
+
+def _detect_tool_contract_error(
+    *,
+    tool_action: str | None,
+    decision_meta: dict[str, Any] | None,
+) -> str | None:
+    if not tool_action or tool_action not in TOOL_VERIFIER_APPOINTMENT_ID_ACTIONS:
+        return None
+    if not isinstance(decision_meta, dict):
+        return "decision_meta_missing"
+    tool_decision = str(decision_meta.get("tool_decision") or "").strip().casefold()
+    if tool_decision == "ok":
+        appointment_id = decision_meta.get("appointment_id")
+        if not (isinstance(appointment_id, str) and appointment_id.strip()):
+            return "appointment_id_missing"
+    return None
 
 
 def _normalize_plan_refs(refs: list[str] | None) -> list[str]:
@@ -9052,6 +9075,8 @@ async def _handle_webhook_payload(
                 user_phone=getattr(user, "phone", None) if user else None,
             )
             if tool_result.handled:
+                tool_response_text = tool_result.response_text
+                tool_expected_reply_type = tool_result.expected_reply_type
                 if isinstance(tool_result.decision_meta, dict):
                     tool_result.decision_meta.setdefault("tool_args_checked", True)
                     if tool_result.decision_meta.get("tool_args_contract") not in {"valid", "invalid"}:
@@ -9060,6 +9085,33 @@ async def _handle_webhook_payload(
                     tool_result.trace.setdefault("tool_args_checked", True)
                     if tool_result.trace.get("tool_args_contract") not in {"valid", "invalid"}:
                         tool_result.trace["tool_args_contract"] = "valid"
+                tool_contract_error = _detect_tool_contract_error(
+                    tool_action=policy_tool_action,
+                    decision_meta=tool_result.decision_meta
+                    if isinstance(tool_result.decision_meta, dict)
+                    else None,
+                )
+                if tool_contract_error:
+                    tool_response_text = (
+                        "Не удалось подтвердить действие автоматически. "
+                        "Передам менеджеру, чтобы проверить вручную."
+                    )
+                    if isinstance(tool_result.decision_meta, dict):
+                        tool_result.decision_meta.update(
+                            {
+                                "tool_decision": "contract_invalid",
+                                "tool_contract": "post_condition",
+                                "tool_contract_error": tool_contract_error,
+                            }
+                        )
+                    if isinstance(tool_result.trace, dict):
+                        tool_result.trace.update(
+                            {
+                                "decision": "contract_invalid",
+                                "tool_contract": "post_condition",
+                                "tool_contract_error": tool_contract_error,
+                            }
+                        )
                 if (
                     policy_tool_action == "catalog.service_query"
                     and isinstance(policy_service_query, str)
@@ -9185,13 +9237,13 @@ async def _handle_webhook_payload(
                 if merged_slots and "slots" not in trace_payload:
                     trace_payload["slots"] = merged_slots
                 _record_decision_trace(conversation, trace_payload)
-                if tool_result.expected_reply_type:
+                if tool_expected_reply_type:
                     context = _get_conversation_context(conversation)
                     context = _set_expected_reply_context(
                         conversation=conversation,
                         saved_message=saved_message,
                         context=context,
-                        expected_reply_type=tool_result.expected_reply_type,
+                        expected_reply_type=tool_expected_reply_type,
                         reason="llm_policy_core_tool",
                         now=now,
                     )
@@ -9339,7 +9391,7 @@ async def _handle_webhook_payload(
                     and booking_followup_expected
                     in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
                     and booking_followup_allowed
-                    and not tool_result.expected_reply_type
+                    and not tool_expected_reply_type
                     and not suppress_booking_lookup_followup
                 ):
                     if booking_followup_expected == EXPECTED_REPLY_SERVICE:
@@ -9387,6 +9439,10 @@ async def _handle_webhook_payload(
                         policy_tool_action == "calendar.list_slots"
                         and tool_decision == "missing_slot"
                         and _looks_like_booking_reschedule_request(message_text)
+                    )
+                    or (
+                        policy_tool_action.startswith("calendar.")
+                        and tool_decision == "contract_invalid"
                     )
                 )
                 if booking_verification_handoff:
@@ -9512,7 +9568,7 @@ async def _handle_webhook_payload(
                             conversation_id=conversation.id,
                             bot_response=bot_response,
                         )
-                bot_response = tool_result.response_text or MSG_FACT_GUARD_CLARIFY
+                bot_response = tool_response_text or MSG_FACT_GUARD_CLARIFY
                 if style_reference_text_signal and not has_media:
                     if policy_tool_action == "catalog.portfolio":
                         bot_response = MSG_STYLE_REFERENCE_NEED_MEDIA

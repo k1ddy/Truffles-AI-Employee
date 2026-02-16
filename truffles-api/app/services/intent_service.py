@@ -164,12 +164,19 @@ POLICY_CORE_BUDGET_GUARD_MS = max(
     0.0,
 )
 POLICY_CORE_RETRY_TIMEOUT_SECONDS = max(
-    float(os.environ.get("LLM_POLICY_CORE_TIMEOUT_RETRY_SECONDS", "8.0")),
-    POLICY_CORE_TIMEOUT_SECONDS,
+    float(os.environ.get("LLM_POLICY_CORE_TIMEOUT_RETRY_SECONDS", "2.5")),
+    0.1,
 )
 POLICY_CORE_RETRY_ON_TIMEOUT = os.environ.get("LLM_POLICY_CORE_RETRY_ON_TIMEOUT")
 POLICY_CORE_MAX_TOKENS = int(os.environ.get("LLM_POLICY_CORE_MAX_TOKENS", "240"))
 POLICY_CORE_MODEL = os.environ.get("LLM_POLICY_CORE_MODEL", PLAN_MODEL).strip()
+_DEFAULT_POLICY_CORE_TIMEOUT_FALLBACK_MODEL = (
+    _DEFAULT_CONTROLLER_MODEL if _DEFAULT_CONTROLLER_MODEL.strip() else FAST_MODEL
+)
+POLICY_CORE_TIMEOUT_FALLBACK_MODEL = os.environ.get(
+    "LLM_POLICY_CORE_TIMEOUT_FALLBACK_MODEL",
+    _DEFAULT_POLICY_CORE_TIMEOUT_FALLBACK_MODEL,
+).strip()
 POLICY_CORE_CONFIDENCE_THRESHOLD = float(
     os.environ.get("LLM_POLICY_CORE_CONFIDENCE_THRESHOLD", "0.3")
 )
@@ -1187,12 +1194,19 @@ def route_llm_policy_core(
     retry_on_timeout = _is_env_enabled(POLICY_CORE_RETRY_ON_TIMEOUT, default=True)
     timeout_attempts = [policy_timeout_seconds]
     if retry_on_timeout:
-        timeout_attempts.append(min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds))
+        retry_timeout = min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds)
+        if retry_timeout > 0 and retry_timeout not in timeout_attempts:
+            timeout_attempts.append(retry_timeout)
+    fallback_model = POLICY_CORE_TIMEOUT_FALLBACK_MODEL.strip()
+    if fallback_model.casefold() == POLICY_CORE_MODEL.strip().casefold():
+        fallback_model = ""
 
     llm_start = time.monotonic()
     response = None
     error = None
     attempt_count = 0
+    model_name_used = POLICY_CORE_MODEL
+    fallback_model_attempted = False
     timeout_seconds_used = policy_timeout_seconds
     max_tokens_used = _resolve_policy_core_max_tokens(policy_timeout_seconds)
     for attempt_idx, timeout_seconds in enumerate(timeout_attempts):
@@ -1214,6 +1228,7 @@ def route_llm_policy_core(
                 timeout_seconds=timeout_seconds,
                 temperature=temperature,
             )
+            model_name_used = POLICY_CORE_MODEL
             error = None
             break
         except httpx.TimeoutException:
@@ -1234,6 +1249,35 @@ def route_llm_policy_core(
             error = _classify_llm_error(exc)
             break
 
+    if error == "timeout" and fallback_model:
+        fallback_timeout_seconds = min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds)
+        if _should_attempt_llm(
+            timing_context,
+            timeout_seconds=fallback_timeout_seconds,
+            stage="policy_core_llm_fallback",
+        ):
+            attempt_count += 1
+            timeout_seconds_used = fallback_timeout_seconds
+            max_tokens_used = _resolve_policy_core_max_tokens(fallback_timeout_seconds)
+            fallback_model_attempted = True
+            try:
+                response = llm.generate(
+                    messages=messages,
+                    max_tokens=max_tokens_used,
+                    model=fallback_model,
+                    timeout_seconds=fallback_timeout_seconds,
+                    temperature=temperature,
+                )
+                model_name_used = fallback_model
+                error = None
+            except httpx.TimeoutException:
+                error = "timeout"
+            except Exception as exc:
+                logger.warning(f"LLM policy core fallback model failed: {exc}")
+                error = _classify_llm_error(exc)
+        else:
+            error = "deadline_exceeded"
+
     elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
     result["attempted"] = True
     result["elapsed_ms"] = elapsed_ms
@@ -1242,12 +1286,14 @@ def route_llm_policy_core(
         elapsed_ms,
         timing_context=timing_context,
         extra={
-            "model_name": POLICY_CORE_MODEL,
+            "model_name": model_name_used,
             "model_tier": "fast",
             "timeout": error == "timeout",
             "timeout_seconds": timeout_seconds_used,
             "attempt_count": attempt_count,
             "retry_on_timeout": retry_on_timeout,
+            "fallback_model_attempted": fallback_model_attempted,
+            "fallback_model": fallback_model or None,
             "max_tokens": max_tokens_used,
             "timeout_budgeted": policy_timeout_seconds,
             "temperature": temperature,
