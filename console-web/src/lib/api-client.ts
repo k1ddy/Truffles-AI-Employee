@@ -483,6 +483,52 @@ export type BusinessSummaryAction = {
     href: string;
     severity: "critical" | "warn" | "info";
 };
+export type IncidentAction = {
+    id: string;
+    title: string;
+    description: string;
+    href?: string | null;
+    job_type?: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | null;
+    mode?: "dry_run" | "execute" | null;
+    params?: Record<string, unknown> | null;
+    dry_run_first: boolean;
+    requires_confirmation: boolean;
+};
+export type IncidentItem = {
+    id: string;
+    scope: "fleet" | "client" | "branch";
+    severity: "critical" | "warn" | "info";
+    title: string;
+    summary: string;
+    reason_code:
+        | "outbox_backlog"
+        | "provider_unavailable"
+        | "provider_auth"
+        | "provider_rate_limited"
+        | "integration_degraded"
+        | "handover_backlog"
+        | "unknown";
+    reason_label: string;
+    source: string;
+    detected_at: string;
+    client_id?: string | null;
+    client_slug?: string | null;
+    branch_id?: string | null;
+    metrics: Record<string, string | number | boolean | null>;
+    actions: IncidentAction[];
+};
+export type IncidentSummary = {
+    total: number;
+    critical: number;
+    warn: number;
+    info: number;
+};
+export type IncidentListResponse = {
+    generated_at: string;
+    scope: "fleet" | "client" | "branch";
+    summary: IncidentSummary;
+    items: IncidentItem[];
+};
 export type MetricFactMeta = {
     kind: "fact" | "estimate" | "missing";
     source: string;
@@ -514,6 +560,23 @@ export type SubscriptionEvidenceItem = {
     provider_status?: string | null;
     provider_message_id?: string | null;
 };
+export type SubscriptionPlanDefaults = {
+    plan_name: string;
+    included_messages: number;
+    included_whatsapp_channels: number;
+    source: string;
+};
+export type SubscriptionMeterItem = {
+    key: string;
+    label: string;
+    meter_type: "messages" | "channels" | "addon";
+    included?: number | null;
+    used?: number | null;
+    remaining?: number | null;
+    status: "ok" | "warning" | "limit_reached" | "over_limit" | "not_included" | "included_not_configured" | "unknown";
+    source: string;
+    note?: string | null;
+};
 export type SubscriptionSummaryResponse = {
     generated_at: string;
     period_start: string;
@@ -535,6 +598,13 @@ export type SubscriptionSummaryResponse = {
     quota_alert_message: string;
     overage_policy_message: string;
     over_quota: boolean;
+    payment_status: "pending" | "confirmed" | "rejected" | "unknown";
+    payment_confirmed_at?: string | null;
+    payment_status_source: "onboarding_contract" | "unknown";
+    payment_status_message?: string | null;
+    plan_defaults: SubscriptionPlanDefaults;
+    meters: SubscriptionMeterItem[];
+    recommended_actions: BusinessSummaryAction[];
     evidence: SubscriptionEvidenceItem[];
     metric_meta: Record<string, MetricFactMeta>;
 };
@@ -781,6 +851,7 @@ export const opsApi = {
 /** Owner/Admin business control endpoints */
 export const businessApi = {
     getSummary: () => apiClient.get<BusinessSummaryResponse>("/business/summary"),
+    getIncidents: () => apiClient.get<IncidentListResponse>("/business/incidents"),
     getSubscriptionSummary: () => apiClient.get<SubscriptionSummaryResponse>("/subscription/summary"),
     getDataTrustSummary: () => apiClient.get<DataTrustSummaryResponse>("/business/data-trust"),
     getTeamPerformanceSummary: () => apiClient.get<TeamPerformanceSummaryResponse>("/business/team-performance"),
@@ -833,6 +904,8 @@ export const adminApi = {
         apiClient.get<components["schemas"]["BranchListResponse"]>("/admin/branches", { params }),
     listFleetAttention: (params?: ListFleetAttentionParams) =>
         apiClient.get<components["schemas"]["FleetAttentionResponse"]>("/admin/fleet/attention", { params }),
+    listIncidents: (params?: { limit?: number }) =>
+        apiClient.get<IncidentListResponse>("/admin/incidents", { params }),
     listIntegrations: (params?: ListIntegrationsParams) =>
         apiClient.get<components["schemas"]["IntegrationsListResponse"]>("/admin/integrations", { params }),
     listProviderLifecycle: (params?: ListProviderLifecycleParams) =>

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date as dt_date
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from sqlalchemy import text
@@ -426,3 +426,63 @@ def build_team_performance_actions(
             )
         )
     return actions
+
+
+_PROVIDER_UNAVAILABLE_MARKERS = (
+    "timeout",
+    "timed out",
+    "connection",
+    "unreachable",
+    "bad gateway",
+    "service unavailable",
+    "502",
+    "503",
+    "gateway",
+)
+_PROVIDER_AUTH_MARKERS = (
+    "unauthorized",
+    "forbidden",
+    "not paid",
+    "payment required",
+    "invalid token",
+    "expired token",
+    "401",
+    "403",
+)
+_PROVIDER_RATE_LIMIT_MARKERS = (
+    "rate limit",
+    "too many requests",
+    "throttle",
+    "429",
+)
+
+
+def classify_outbox_incident_reason(
+    *,
+    last_error: Optional[str],
+    integration_degraded: bool,
+) -> tuple[
+    Literal[
+        "outbox_backlog",
+        "provider_unavailable",
+        "provider_auth",
+        "provider_rate_limited",
+        "integration_degraded",
+        "unknown",
+    ],
+    str,
+]:
+    if integration_degraded:
+        return "integration_degraded", "Требуется восстановление интеграции"
+
+    normalized = (last_error or "").strip().lower()
+    if not normalized:
+        return "outbox_backlog", "Очередь сообщений растёт"
+
+    if any(marker in normalized for marker in _PROVIDER_AUTH_MARKERS):
+        return "provider_auth", "Ошибка авторизации у провайдера"
+    if any(marker in normalized for marker in _PROVIDER_RATE_LIMIT_MARKERS):
+        return "provider_rate_limited", "Провайдер ограничил частоту отправки"
+    if any(marker in normalized for marker in _PROVIDER_UNAVAILABLE_MARKERS):
+        return "provider_unavailable", "Провайдер временно недоступен"
+    return "unknown", "Требуется ручная диагностика причины"

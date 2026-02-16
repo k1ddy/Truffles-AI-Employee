@@ -392,6 +392,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/business/incidents": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        /** Owner/Admin incident feed for current scope */
+        get: operations["listBusinessIncidents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/business/data-trust": {
         parameters: {
             query?: never;
@@ -450,6 +472,96 @@ export interface paths {
         };
         /** Owner/Admin subscription summary */
         get: operations["getSubscriptionSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/business/operations/owner-mode/preview": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview owner operation mode before apply */
+        post: operations["previewOwnerModeOperation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/business/operations/owner-mode/apply": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply owner operation mode */
+        post: operations["applyOwnerModeOperation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/business/operations/owner-mode/rollback": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback owner mode operation */
+        post: operations["rollbackOwnerModeOperation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/business/operations/{operation_id}/impact": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        /** Get impact for a previously applied owner mode operation */
+        get: operations["getOwnerModeOperationImpact"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1557,6 +1669,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/incidents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List fleet incidents for platform admin */
+        get: operations["listAdminIncidents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/agents": {
         parameters: {
             query?: never;
@@ -2654,8 +2783,257 @@ export interface components {
             /** @enum {string} */
             database?: "ok" | "error" | "connected";
             /** @enum {string} */
-            redis?: "ok" | "error" | "connected";
+            redis?: "ok" | "error" | "connected" | "unknown";
             outbox_backlog?: number;
+        };
+        MetricFactMeta: {
+            /** @enum {string} */
+            kind: "fact" | "estimate" | "missing";
+            source: string;
+            as_of?: string | null;
+            /** @enum {string} */
+            scope: "system" | "client" | "branch";
+            sample_size?: number | null;
+            note?: string | null;
+        };
+        BusinessSummaryAction: {
+            id: string;
+            title: string;
+            description: string;
+            href: string;
+            /** @enum {string} */
+            severity: "critical" | "warn" | "info";
+        };
+        IncidentAction: {
+            id: string;
+            title: string;
+            description: string;
+            href?: string | null;
+            /** @enum {string|null} */
+            job_type?: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | null;
+            /** @enum {string|null} */
+            mode?: "dry_run" | "execute" | null;
+            params?: {
+                [key: string]: unknown;
+            } | null;
+            dry_run_first: boolean;
+            requires_confirmation: boolean;
+        };
+        IncidentItem: {
+            id: string;
+            /** @enum {string} */
+            scope: "fleet" | "client" | "branch";
+            /** @enum {string} */
+            severity: "critical" | "warn" | "info";
+            title: string;
+            summary: string;
+            /** @enum {string} */
+            reason_code: "outbox_backlog" | "provider_unavailable" | "provider_auth" | "provider_rate_limited" | "integration_degraded" | "handover_backlog" | "unknown";
+            reason_label: string;
+            source: string;
+            detected_at: string;
+            /** Format: uuid */
+            client_id?: string | null;
+            client_slug?: string | null;
+            /** Format: uuid */
+            branch_id?: string | null;
+            metrics: {
+                [key: string]: unknown;
+            };
+            actions: components["schemas"]["IncidentAction"][];
+        };
+        IncidentSummary: {
+            total: number;
+            critical: number;
+            warn: number;
+            info: number;
+        };
+        IncidentListResponse: {
+            generated_at: string;
+            /** @enum {string} */
+            scope: "fleet" | "client" | "branch";
+            summary: components["schemas"]["IncidentSummary"];
+            items: components["schemas"]["IncidentItem"][];
+        };
+        BusinessSummaryResponse: {
+            generated_at: string;
+            /** @enum {string} */
+            status: "healthy" | "degraded" | "unhealthy";
+            status_label: string;
+            outbox_backlog: number;
+            outbox_failed_24h: number;
+            pending_cases: number;
+            active_cases: number;
+            unresolved_cases: number;
+            oldest_unresolved_minutes?: number | null;
+            first_response_p90_seconds?: number | null;
+            actions: components["schemas"]["BusinessSummaryAction"][];
+            metric_meta: {
+                [key: string]: components["schemas"]["MetricFactMeta"];
+            };
+        };
+        SubscriptionEvidenceItem: {
+            /** Format: uuid */
+            outbox_id: string;
+            /** Format: uuid */
+            conversation_id?: string | null;
+            inbound_message_id: string;
+            created_at: string;
+            status: string;
+            provider_status?: string | null;
+            provider_message_id?: string | null;
+        };
+        SubscriptionSummaryResponse: {
+            generated_at: string;
+            period_start: string;
+            period_end: string;
+            next_billing_date: string;
+            plan_name?: string | null;
+            contract_label?: string | null;
+            currency?: string | null;
+            monthly_quota?: number | null;
+            /** @enum {string} */
+            quota_source: "company_billing_info" | "client_config" | "unknown";
+            billable_messages: number;
+            remaining_quota?: number | null;
+            projected_month_total?: number | null;
+            usage_percent?: number | null;
+            projected_remaining_quota?: number | null;
+            projected_over_quota: boolean;
+            projected_overage_messages?: number | null;
+            /** @enum {string} */
+            quota_alert_level: "normal" | "warning_80" | "limit_100";
+            quota_alert_message: string;
+            overage_policy_message: string;
+            over_quota: boolean;
+            evidence: components["schemas"]["SubscriptionEvidenceItem"][];
+            metric_meta: {
+                [key: string]: components["schemas"]["MetricFactMeta"];
+            };
+        };
+        DataTrustSummaryResponse: {
+            generated_at: string;
+            /** @enum {string} */
+            status: "healthy" | "degraded" | "unhealthy";
+            status_label: string;
+            metric_date?: string | null;
+            analytics_scope_limited: boolean;
+            first_response_missing_total?: number | null;
+            escalation_meta_missing_total?: number | null;
+            intent_missing_total?: number | null;
+            knowledge_last_published_at?: string | null;
+            knowledge_stale_hours?: number | null;
+            audit_events_24h: number;
+            critical_audit_events_24h: number;
+            actions: components["schemas"]["BusinessSummaryAction"][];
+            metric_meta: {
+                [key: string]: components["schemas"]["MetricFactMeta"];
+            };
+        };
+        TeamManagerPerformanceItem: {
+            manager_name: string;
+            unresolved_cases: number;
+            pending_cases: number;
+            active_cases: number;
+            oldest_unresolved_minutes?: number | null;
+            avg_first_response_seconds_30d?: number | null;
+        };
+        TeamPerformanceSummaryResponse: {
+            generated_at: string;
+            /** @enum {string} */
+            status: "healthy" | "degraded" | "unhealthy";
+            status_label: string;
+            metric_date?: string | null;
+            analytics_scope_limited: boolean;
+            manager_median_response_seconds?: number | null;
+            first_response_p90_seconds?: number | null;
+            unresolved_cases: number;
+            unresolved_older_than_60m: number;
+            managers: components["schemas"]["TeamManagerPerformanceItem"][];
+            actions: components["schemas"]["BusinessSummaryAction"][];
+            metric_meta: {
+                [key: string]: components["schemas"]["MetricFactMeta"];
+            };
+        };
+        OwnerOperationApplyRequest: {
+            /** @enum {string} */
+            mode: "capture_leads" | "stable_quality" | "team_protection";
+        };
+        OwnerOperationSettingsPatch: {
+            reminder_1_minutes: number;
+            reminder_2_minutes: number;
+            escalation_timeout_minutes: number;
+        };
+        OwnerOperationMetricSnapshot: {
+            outbox_backlog: number;
+            unresolved_older_than_60m: number;
+            manager_median_response_seconds?: number | null;
+        };
+        OwnerOperationPreviewResponse: {
+            generated_at: string;
+            /** @enum {string} */
+            mode: "capture_leads" | "stable_quality" | "team_protection";
+            mode_label: string;
+            settings_patch: components["schemas"]["OwnerOperationSettingsPatch"];
+            current_settings: components["schemas"]["OwnerOperationSettingsPatch"];
+            baseline: components["schemas"]["OwnerOperationMetricSnapshot"];
+            warnings: string[];
+            metric_meta: {
+                [key: string]: components["schemas"]["MetricFactMeta"];
+            };
+        };
+        OwnerOperationApplyResponse: {
+            success: boolean;
+            /** Format: uuid */
+            operation_id: string;
+            /** @enum {string} */
+            mode: "capture_leads" | "stable_quality" | "team_protection";
+            mode_label: string;
+            applied_settings: components["schemas"]["OwnerOperationSettingsPatch"];
+            previous_settings: components["schemas"]["OwnerOperationSettingsPatch"];
+            baseline: components["schemas"]["OwnerOperationMetricSnapshot"];
+            applied_at: string;
+            impact_check_due_at: string;
+            metric_meta: {
+                [key: string]: components["schemas"]["MetricFactMeta"];
+            };
+        };
+        OwnerOperationRollbackRequest: {
+            /** Format: uuid */
+            operation_id?: string | null;
+        };
+        OwnerOperationRollbackResponse: {
+            success: boolean;
+            /** Format: uuid */
+            operation_id: string;
+            restored_settings: components["schemas"]["OwnerOperationSettingsPatch"];
+            rolled_back_at: string;
+            message: string;
+        };
+        OwnerOperationMetricDelta: {
+            baseline?: number | null;
+            current?: number | null;
+            delta?: number | null;
+            /** @enum {string} */
+            trend: "up" | "down" | "stable" | "unknown";
+        };
+        OwnerOperationImpactResponse: {
+            /** Format: uuid */
+            operation_id: string;
+            /** @enum {string} */
+            mode: "capture_leads" | "stable_quality" | "team_protection";
+            checked_at: string;
+            due_at: string;
+            /** @enum {string} */
+            summary: "improved" | "regressed" | "mixed_or_stable";
+            baseline: components["schemas"]["OwnerOperationMetricSnapshot"];
+            current: components["schemas"]["OwnerOperationMetricSnapshot"];
+            metrics: {
+                [key: string]: components["schemas"]["OwnerOperationMetricDelta"];
+            };
+            metric_meta: {
+                [key: string]: components["schemas"]["MetricFactMeta"];
+            };
         };
         /** @enum {string} */
         KpiStatus: "fact" | "estimate" | "need";
@@ -2908,6 +3286,11 @@ export interface components {
         };
         KnowledgePublishRequest: {
             draft_text: string;
+            /**
+             * @description Allow publish without recent validate preflight for the same draft hash.
+             * @default false
+             */
+            skip_preflight_check: boolean;
         };
         KnowledgePublishResponse: {
             success?: boolean;
@@ -4167,9 +4550,34 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["BusinessSummaryResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listBusinessIncidents: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Business incident list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentListResponse"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -4196,9 +4604,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["DataTrustSummaryResponse"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -4225,9 +4631,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["TeamPerformanceSummaryResponse"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -4254,13 +4658,135 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SubscriptionSummaryResponse"];
                 };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    previewOwnerModeOperation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OwnerOperationApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Owner mode preview payload */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnerOperationPreviewResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    applyOwnerModeOperation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OwnerOperationApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Owner mode apply result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnerOperationApplyResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    rollbackOwnerModeOperation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["OwnerOperationRollbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Rollback result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnerOperationRollbackResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getOwnerModeOperationImpact: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client selection when identity maps to multiple clients. */
+                "X-Client-Id"?: components["parameters"]["client_id_header"];
+                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
+                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            };
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Owner mode impact snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnerOperationImpactResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     getTelegramHealth: {
@@ -6151,6 +6677,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FleetAttentionResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listAdminIncidents: {
+        parameters: {
+            query?: {
+                /** @description Maximum number of incidents in response. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Fleet incident list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentListResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];

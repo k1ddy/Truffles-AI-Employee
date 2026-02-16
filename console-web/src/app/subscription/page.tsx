@@ -39,6 +39,70 @@ function subscriptionAlertClass(level: "normal" | "warning_80" | "limit_100"): s
     return "border-emerald-300 bg-emerald-50 text-emerald-900";
 }
 
+function meterStatusClass(status: "ok" | "warning" | "limit_reached" | "over_limit" | "not_included" | "included_not_configured" | "unknown"): string {
+    if (status === "over_limit") {
+        return "bg-red-100 text-red-800";
+    }
+    if (status === "warning" || status === "limit_reached" || status === "included_not_configured") {
+        return "bg-amber-100 text-amber-800";
+    }
+    if (status === "ok") {
+        return "bg-emerald-100 text-emerald-800";
+    }
+    if (status === "not_included") {
+        return "bg-slate-200 text-slate-700";
+    }
+    return "bg-muted text-muted-foreground";
+}
+
+function meterStatusLabel(status: "ok" | "warning" | "limit_reached" | "over_limit" | "not_included" | "included_not_configured" | "unknown"): string {
+    if (status === "ok") {
+        return "Норма";
+    }
+    if (status === "warning") {
+        return "Риск";
+    }
+    if (status === "limit_reached") {
+        return "Лимит";
+    }
+    if (status === "over_limit") {
+        return "Превышение";
+    }
+    if (status === "included_not_configured") {
+        return "Нужно включить";
+    }
+    if (status === "not_included") {
+        return "Не входит";
+    }
+    return "Неизвестно";
+}
+
+function paymentStatusClass(status: "pending" | "confirmed" | "rejected" | "unknown"): string {
+    if (status === "confirmed") {
+        return "bg-emerald-100 text-emerald-800";
+    }
+    if (status === "pending") {
+        return "bg-amber-100 text-amber-800";
+    }
+    if (status === "rejected") {
+        return "bg-red-100 text-red-800";
+    }
+    return "bg-muted text-muted-foreground";
+}
+
+function paymentStatusLabel(status: "pending" | "confirmed" | "rejected" | "unknown"): string {
+    if (status === "confirmed") {
+        return "Оплата подтверждена";
+    }
+    if (status === "pending") {
+        return "Ожидает подтверждения";
+    }
+    if (status === "rejected") {
+        return "Оплата отклонена";
+    }
+    return "Статус не заполнен";
+}
+
 function formatMetricMeta(meta?: MetricFactMeta): string {
     if (!meta) {
         return "missing · source: n/a";
@@ -196,6 +260,75 @@ export default function SubscriptionPage() {
                 </p>
             </section>
 
+            <section className="mt-4 rounded-xl border border-border/60 bg-card p-4" data-testid="subscription-contract">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-foreground">Контракт и статус оплаты</p>
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${paymentStatusClass(data.payment_status)}`}>
+                        {paymentStatusLabel(data.payment_status)}
+                    </span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">Текущий план клиента</p>
+                        <p className="mt-1 text-lg font-semibold text-foreground">{data.plan_name || data.contract_label || "Не указан"}</p>
+                        <p className="text-xs text-muted-foreground">Источник лимита: {data.quota_source}</p>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">Стандартный план по умолчанию</p>
+                        <p className="mt-1 text-lg font-semibold text-foreground">{data.plan_defaults.plan_name}</p>
+                        <p className="text-xs text-muted-foreground">
+                            {formatNumber(data.plan_defaults.included_messages)} сообщений · {formatNumber(data.plan_defaults.included_whatsapp_channels)} WhatsApp
+                        </p>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">Оплата</p>
+                        <p className="mt-1 text-sm font-semibold text-foreground">{data.payment_status_message || "Статус оплаты не задан"}</p>
+                        <p className="text-xs text-muted-foreground">Источник: {data.payment_status_source}</p>
+                    </div>
+                </div>
+            </section>
+
+            <section className="mt-4 rounded-xl border border-border/60 bg-card p-4" data-testid="subscription-meters">
+                <div className="mb-3 flex items-center justify-between">
+                    <h2 className="text-lg font-semibold">Лимиты по направлениям</h2>
+                    <span className="text-xs text-muted-foreground">{data.meters.length} показателей</span>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="min-w-full text-left text-sm">
+                        <thead className="border-b border-border/60 text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                            <tr>
+                                <th className="py-2 pr-4">Показатель</th>
+                                <th className="py-2 pr-4">Включено</th>
+                                <th className="py-2 pr-4">Использовано</th>
+                                <th className="py-2 pr-4">Остаток</th>
+                                <th className="py-2 pr-4">Статус</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {data.meters.map((meter) => (
+                                <tr key={meter.key} className="border-b border-border/40 align-top">
+                                    <td className="py-2 pr-4">
+                                        <p className="font-medium text-foreground">{meter.label}</p>
+                                        <p className="text-xs text-muted-foreground">source: {meter.source}</p>
+                                        {meter.note ? (
+                                            <p className="mt-1 text-xs text-muted-foreground">{meter.note}</p>
+                                        ) : null}
+                                    </td>
+                                    <td className="py-2 pr-4">{formatNumber(meter.included)}</td>
+                                    <td className="py-2 pr-4">{formatNumber(meter.used)}</td>
+                                    <td className="py-2 pr-4">{formatNumber(meter.remaining)}</td>
+                                    <td className="py-2 pr-4">
+                                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${meterStatusClass(meter.status)}`}>
+                                            {meterStatusLabel(meter.status)}
+                                        </span>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
             <section className="mt-4 rounded-xl border border-border/60 bg-card p-4" data-testid="subscription-usage">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-foreground">Использование квоты</p>
@@ -239,6 +372,29 @@ export default function SubscriptionPage() {
                         <p className="text-xs text-muted-foreground">Следующее списание</p>
                         <p className="mt-1 text-lg font-semibold text-foreground">{data.next_billing_date}</p>
                     </div>
+                </div>
+            </section>
+
+            <section className="mt-4 rounded-xl border border-border/60 bg-card p-4" data-testid="subscription-actions">
+                <div className="mb-3 flex items-center justify-between">
+                    <h2 className="text-lg font-semibold">Что делать сейчас</h2>
+                    <span className="text-xs text-muted-foreground">{data.recommended_actions.length} действий</span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    {data.recommended_actions.map((action) => (
+                        <div key={action.id} className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-sm font-semibold text-foreground">{action.title}</p>
+                                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${action.severity === "critical" ? "bg-red-100 text-red-800" : action.severity === "warn" ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
+                                    {action.severity}
+                                </span>
+                            </div>
+                            <p className="mt-2 text-xs text-muted-foreground">{action.description}</p>
+                            <Link href={action.href} className="mt-3 inline-block text-xs font-semibold text-primary hover:underline">
+                                Перейти к действию
+                            </Link>
+                        </div>
+                    ))}
                 </div>
             </section>
 

@@ -602,6 +602,26 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /business/incidents:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    get:
+      operationId: listBusinessIncidents
+      tags: [ops]
+      summary: Owner/Admin incident feed for current scope
+      responses:
+        "200":
+          description: Business incident list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /business/data-trust:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
@@ -2818,6 +2838,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FleetAttentionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /admin/incidents:
+    get:
+      operationId: listAdminIncidents
+      tags: [admin]
+      summary: List fleet incidents for platform admin
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          description: Maximum number of incidents in response.
+      responses:
+        "200":
+          description: Fleet incident list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentListResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -5440,6 +5491,129 @@ components:
         severity:
           type: string
           enum: [critical, warn, info]
+
+    IncidentAction:
+      type: object
+      required: [id, title, description, dry_run_first, requires_confirmation]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        href:
+          type: string
+          nullable: true
+        job_type:
+          type: string
+          nullable: true
+          enum: [outbox_process, integration_reconcile, heal, metrics_snapshot]
+        mode:
+          type: string
+          nullable: true
+          enum: [dry_run, execute]
+        params:
+          type: object
+          nullable: true
+          additionalProperties: true
+        dry_run_first:
+          type: boolean
+        requires_confirmation:
+          type: boolean
+
+    IncidentItem:
+      type: object
+      required:
+        - id
+        - scope
+        - severity
+        - title
+        - summary
+        - reason_code
+        - reason_label
+        - source
+        - detected_at
+        - metrics
+        - actions
+      properties:
+        id:
+          type: string
+        scope:
+          type: string
+          enum: [fleet, client, branch]
+        severity:
+          type: string
+          enum: [critical, warn, info]
+        title:
+          type: string
+        summary:
+          type: string
+        reason_code:
+          type: string
+          enum:
+            [
+              outbox_backlog,
+              provider_unavailable,
+              provider_auth,
+              provider_rate_limited,
+              integration_degraded,
+              handover_backlog,
+              unknown,
+            ]
+        reason_label:
+          type: string
+        source:
+          type: string
+        detected_at:
+          type: string
+        client_id:
+          type: string
+          format: uuid
+          nullable: true
+        client_slug:
+          type: string
+          nullable: true
+        branch_id:
+          type: string
+          format: uuid
+          nullable: true
+        metrics:
+          type: object
+          additionalProperties: true
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/IncidentAction"
+
+    IncidentSummary:
+      type: object
+      required: [total, critical, warn, info]
+      properties:
+        total:
+          type: integer
+        critical:
+          type: integer
+        warn:
+          type: integer
+        info:
+          type: integer
+
+    IncidentListResponse:
+      type: object
+      required: [generated_at, scope, summary, items]
+      properties:
+        generated_at:
+          type: string
+        scope:
+          type: string
+          enum: [fleet, client, branch]
+        summary:
+          $ref: "#/components/schemas/IncidentSummary"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/IncidentItem"
 
     BusinessSummaryResponse:
       type: object

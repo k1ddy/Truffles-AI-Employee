@@ -76,6 +76,7 @@ from app.schemas.console import (
     ConsoleBranchIntegrationStatus,
     ConsoleBranchListResponse,
     ConsoleBranchUpdateRequest,
+    ConsoleBusinessActionItem,
     ConsoleBusinessSummaryResponse,
     ConsoleCapabilitiesPatchRequest,
     ConsoleCapabilitiesRecord,
@@ -104,6 +105,10 @@ from app.schemas.console import (
     ConsoleFleetAttentionSummary,
     ConsoleFleetSummary,
     ConsoleHealthResponse,
+    ConsoleIncidentAction,
+    ConsoleIncidentItem,
+    ConsoleIncidentListResponse,
+    ConsoleIncidentSummary,
     ConsoleIntegrationBranchActionRequest,
     ConsoleIntegrationBranchActionResponse,
     ConsoleIntegrationsListResponse,
@@ -175,6 +180,8 @@ from app.schemas.console import (
     ConsoleSettingsUpdateRequest,
     ConsoleSettingsUpdateResponse,
     ConsoleSubscriptionEvidenceItem,
+    ConsoleSubscriptionMeterItem,
+    ConsoleSubscriptionPlanDefaults,
     ConsoleSubscriptionSummaryResponse,
     ConsoleSyncStatus,
     ConsoleTeamManagerPerformanceItem,
@@ -223,6 +230,9 @@ from app.services.console_owner_admin import (
 )
 from app.services.console_owner_admin import (
     build_team_performance_actions as _build_team_performance_actions,
+)
+from app.services.console_owner_admin import (
+    classify_outbox_incident_reason as _classify_outbox_incident_reason,
 )
 from app.services.console_owner_admin import (
     derive_business_status as _derive_business_status,
@@ -3396,6 +3406,330 @@ def _query_pending_handovers_map(
     return {row[0]: int(row[1] or 0) for row in rows if row[0]}
 
 
+def _query_outbox_backlog_map(
+    db: Session,
+    *,
+    client_ids: list[UUID],
+) -> dict[UUID, int]:
+    if not client_ids:
+        return {}
+    rows = (
+        db.query(
+            OutboxMessage.client_id,
+            func.count(OutboxMessage.id),
+        )
+        .filter(
+            OutboxMessage.client_id.in_(client_ids),
+            OutboxMessage.status.in_(["PENDING", "PROCESSING"]),
+        )
+        .group_by(OutboxMessage.client_id)
+        .all()
+    )
+    return {row[0]: int(row[1] or 0) for row in rows if row[0]}
+
+
+def _query_integration_degraded_branch_count_map(
+    db: Session,
+    *,
+    client_ids: list[UUID],
+) -> dict[UUID, int]:
+    if not client_ids:
+        return {}
+    rows = (
+        db.query(
+            Branch.client_id,
+            func.count(Branch.id),
+        )
+        .filter(
+            Branch.client_id.in_(client_ids),
+            Branch.is_active.is_(True),
+            func.lower(func.coalesce(Branch.integration_state, "ok")) == "degraded",
+        )
+        .group_by(Branch.client_id)
+        .all()
+    )
+    return {row[0]: int(row[1] or 0) for row in rows if row[0]}
+
+
+def _query_latest_failed_error_map(
+    db: Session,
+    *,
+    client_ids: list[UUID],
+    now: datetime,
+) -> dict[UUID, str]:
+    if not client_ids:
+        return {}
+    cutoff = now - timedelta(hours=24)
+    rows = (
+        db.query(
+            OutboxMessage.client_id,
+            OutboxMessage.last_error,
+            OutboxMessage.updated_at,
+            OutboxMessage.created_at,
+        )
+        .filter(
+            OutboxMessage.client_id.in_(client_ids),
+            OutboxMessage.status == "FAILED",
+            OutboxMessage.last_error.isnot(None),
+            OutboxMessage.updated_at >= cutoff,
+        )
+        .order_by(
+            OutboxMessage.client_id.asc(),
+            OutboxMessage.updated_at.desc(),
+            OutboxMessage.created_at.desc(),
+        )
+        .all()
+    )
+    result: dict[UUID, str] = {}
+    for client_id, last_error, _updated_at, _created_at in rows:
+        if client_id in result:
+            continue
+        normalized = _normalize_optional_text(last_error)
+        if normalized:
+            result[client_id] = normalized
+    return result
+
+
+@dataclass
+class _IncidentSignals:
+    outbox_backlog: int
+    outbox_failed_24h: int
+    pending_handovers: int
+    integration_degraded_branches: int
+    last_error: Optional[str]
+
+
+def _build_incident_actions(
+    *,
+    reason_code: str,
+    outbox_backlog: int,
+    integration_degraded_branches: int,
+    branch_ids: Optional[list[UUID]],
+    platform_scope: bool,
+) -> list[ConsoleIncidentAction]:
+    actions: list[ConsoleIncidentAction] = []
+    outbox_limit = max(10, min(200, outbox_backlog if outbox_backlog > 0 else 25))
+    outbox_params: dict[str, object] = {"limit": outbox_limit}
+    if branch_ids:
+        outbox_params["branch_ids"] = [str(branch_id) for branch_id in branch_ids]
+
+    actions.append(
+        ConsoleIncidentAction(
+            id="open_ops",
+            title="Открыть очередь отправки",
+            description="Проверьте failed/pending и тренд ошибок перед действиями.",
+            href="/ops",
+            dry_run_first=True,
+        )
+    )
+    actions.append(
+        ConsoleIncidentAction(
+            id="outbox_dry_run",
+            title="Запустить dry-run outbox_process",
+            description="Безопасная проверка: покажет, сколько сообщений можно обработать сейчас.",
+            job_type="outbox_process",
+            mode="dry_run",
+            params=outbox_params,
+            dry_run_first=True,
+        )
+    )
+
+    if reason_code == "integration_degraded" or integration_degraded_branches > 0:
+        reconcile_params: dict[str, object] = {
+            "limit": max(1, min(200, integration_degraded_branches or 25))
+        }
+        if branch_ids:
+            reconcile_params["branch_ids"] = [str(branch_id) for branch_id in branch_ids]
+        actions.append(
+            ConsoleIncidentAction(
+                id="integration_reconcile_dry_run",
+                title="Запустить dry-run integration_reconcile",
+                description="Проверьте drift/биндинги и оцените эффект до execute.",
+                job_type="integration_reconcile",
+                mode="dry_run",
+                params=reconcile_params,
+                dry_run_first=True,
+            )
+        )
+        actions.append(
+            ConsoleIncidentAction(
+                id="open_integrations",
+                title="Проверить интеграции",
+                description="Откройте реестр интеграций и исправьте проблемные биндинги.",
+                href="/integrations",
+                dry_run_first=True,
+            )
+        )
+
+    if platform_scope:
+        actions.append(
+            ConsoleIncidentAction(
+                id="open_fleet_attention",
+                title="Проверить fleet attention",
+                description="Сверьте соседние компании с высоким риском и приоритизируйте remediation.",
+                href="/tenants",
+                dry_run_first=True,
+            )
+        )
+    return actions
+
+
+def _incident_severity_from_signals(signals: _IncidentSignals) -> Literal["critical", "warn"]:
+    if (
+        signals.outbox_backlog >= 1000
+        or signals.outbox_failed_24h >= 100
+        or signals.integration_degraded_branches >= 3
+        or signals.pending_handovers >= 30
+    ):
+        return "critical"
+    return "warn"
+
+
+def _build_outbox_incident_item(
+    *,
+    scope: Literal["fleet", "client", "branch"],
+    signals: _IncidentSignals,
+    detected_at: datetime,
+    client_id: Optional[UUID],
+    client_slug: Optional[str],
+    branch_id: Optional[UUID],
+    branch_ids: Optional[list[UUID]],
+    platform_scope: bool,
+) -> ConsoleIncidentItem:
+    reason_code, reason_label = _classify_outbox_incident_reason(
+        last_error=signals.last_error,
+        integration_degraded=signals.integration_degraded_branches > 0,
+    )
+    severity = _incident_severity_from_signals(signals)
+    return ConsoleIncidentItem(
+        id=f"outbox-{client_id or 'scope'}",
+        scope=scope,
+        severity=severity,
+        title="Риск доставки сообщений",
+        summary=(
+            f"backlog={signals.outbox_backlog}, failed_24h={signals.outbox_failed_24h}, "
+            f"integration_degraded={signals.integration_degraded_branches}"
+        ),
+        reason_code=reason_code,
+        reason_label=reason_label,
+        source="outbox_messages+branches",
+        detected_at=detected_at.isoformat(),
+        client_id=client_id,
+        client_slug=client_slug,
+        branch_id=branch_id,
+        metrics={
+            "outbox_backlog": signals.outbox_backlog,
+            "outbox_failed_24h": signals.outbox_failed_24h,
+            "integration_degraded_branches": signals.integration_degraded_branches,
+            "pending_handovers": signals.pending_handovers,
+            "last_error": _truncate_preview(signals.last_error, limit=160),
+        },
+        actions=_build_incident_actions(
+            reason_code=reason_code,
+            outbox_backlog=signals.outbox_backlog,
+            integration_degraded_branches=signals.integration_degraded_branches,
+            branch_ids=branch_ids,
+            platform_scope=platform_scope,
+        ),
+    )
+
+
+def _build_handover_incident_item(
+    *,
+    scope: Literal["fleet", "client", "branch"],
+    signals: _IncidentSignals,
+    detected_at: datetime,
+    client_id: Optional[UUID],
+    client_slug: Optional[str],
+    branch_id: Optional[UUID],
+) -> ConsoleIncidentItem:
+    severity: Literal["critical", "warn"] = "critical" if signals.pending_handovers >= 30 else "warn"
+    return ConsoleIncidentItem(
+        id=f"handover-{client_id or 'scope'}",
+        scope=scope,
+        severity=severity,
+        title="Очередь эскалаций перегружена",
+        summary=f"pending_handovers={signals.pending_handovers}",
+        reason_code="handover_backlog",
+        reason_label="Неразобранные эскалации копятся",
+        source="handovers",
+        detected_at=detected_at.isoformat(),
+        client_id=client_id,
+        client_slug=client_slug,
+        branch_id=branch_id,
+        metrics={"pending_handovers": signals.pending_handovers},
+        actions=[
+            ConsoleIncidentAction(
+                id="open_inbox_queue",
+                title="Открыть очередь заявок",
+                description="Назначьте ответственных менеджеров и разгрузите pending.",
+                href="/",
+                dry_run_first=True,
+            ),
+            ConsoleIncidentAction(
+                id="open_team_kpi",
+                title="Проверить Team KPI",
+                description="Проверьте перегрузку по менеджерам и распределите нагрузку.",
+                href="/business/team-performance",
+                dry_run_first=True,
+            ),
+        ],
+    )
+
+
+def _build_scope_incident_items(
+    *,
+    scope: Literal["fleet", "client", "branch"],
+    signals: _IncidentSignals,
+    detected_at: datetime,
+    client_id: Optional[UUID],
+    client_slug: Optional[str],
+    branch_id: Optional[UUID],
+    branch_ids: Optional[list[UUID]],
+    platform_scope: bool,
+) -> list[ConsoleIncidentItem]:
+    items: list[ConsoleIncidentItem] = []
+    has_delivery_risk = (
+        signals.outbox_backlog >= 500
+        or signals.outbox_failed_24h >= 30
+        or signals.integration_degraded_branches > 0
+    )
+    if has_delivery_risk:
+        items.append(
+            _build_outbox_incident_item(
+                scope=scope,
+                signals=signals,
+                detected_at=detected_at,
+                client_id=client_id,
+                client_slug=client_slug,
+                branch_id=branch_id,
+                branch_ids=branch_ids,
+                platform_scope=platform_scope,
+            )
+        )
+    if signals.pending_handovers >= 10:
+        items.append(
+            _build_handover_incident_item(
+                scope=scope,
+                signals=signals,
+                detected_at=detected_at,
+                client_id=client_id,
+                client_slug=client_slug,
+                branch_id=branch_id,
+            )
+        )
+    return items
+
+
+def _build_incident_summary(items: list[ConsoleIncidentItem]) -> ConsoleIncidentSummary:
+    return ConsoleIncidentSummary(
+        total=len(items),
+        critical=sum(1 for item in items if item.severity == "critical"),
+        warn=sum(1 for item in items if item.severity == "warn"),
+        info=sum(1 for item in items if item.severity == "info"),
+    )
+
+
 def _parse_date_param(name: str, value: Optional[str]) -> Optional[dt_date]:
     if value is None:
         return None
@@ -6168,6 +6502,278 @@ async def get_business_summary(
 
 
 @router.get(
+    "/business/incidents",
+    response_model=ConsoleIncidentListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_business_incidents(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleIncidentListResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can access business incidents",
+    )
+
+    now = datetime.now(timezone.utc)
+    outbox_failed_window_start = now - timedelta(hours=24)
+    allowed_branch_ids = _resolve_branch_scope(context)
+    scope: Literal["client", "branch"] = "branch" if allowed_branch_ids is not None else "client"
+
+    outbox_query = db.query(OutboxMessage).filter(OutboxMessage.client_id == context.client.id)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            outbox_backlog = 0
+            outbox_failed_24h = 0
+            latest_failed_error = None
+        else:
+            outbox_query = outbox_query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
+            outbox_backlog = outbox_query.filter(
+                OutboxMessage.status.in_(["PENDING", "PROCESSING"])
+            ).count()
+            outbox_failed_24h = outbox_query.filter(
+                OutboxMessage.status == "FAILED",
+                OutboxMessage.created_at >= outbox_failed_window_start,
+            ).count()
+            latest_failed_row = (
+                outbox_query.filter(
+                    OutboxMessage.status == "FAILED",
+                    OutboxMessage.last_error.isnot(None),
+                )
+                .order_by(OutboxMessage.updated_at.desc(), OutboxMessage.created_at.desc())
+                .first()
+            )
+            latest_failed_error = (
+                _normalize_optional_text(getattr(latest_failed_row, "last_error", None))
+                if latest_failed_row
+                else None
+            )
+    else:
+        outbox_backlog = outbox_query.filter(
+            OutboxMessage.status.in_(["PENDING", "PROCESSING"])
+        ).count()
+        outbox_failed_24h = outbox_query.filter(
+            OutboxMessage.status == "FAILED",
+            OutboxMessage.created_at >= outbox_failed_window_start,
+        ).count()
+        latest_failed_row = (
+            outbox_query.filter(
+                OutboxMessage.status == "FAILED",
+                OutboxMessage.last_error.isnot(None),
+            )
+            .order_by(OutboxMessage.updated_at.desc(), OutboxMessage.created_at.desc())
+            .first()
+        )
+        latest_failed_error = (
+            _normalize_optional_text(getattr(latest_failed_row, "last_error", None))
+            if latest_failed_row
+            else None
+        )
+
+    handover_query = db.query(Handover).filter(
+        Handover.client_id == context.client.id,
+        Handover.status.in_(["pending", "active"]),
+    )
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            pending_handovers = 0
+        else:
+            handover_query = handover_query.join(
+                Conversation,
+                Handover.conversation_id == Conversation.id,
+            ).filter(Conversation.branch_id.in_(allowed_branch_ids))
+            pending_handovers = handover_query.count()
+    else:
+        pending_handovers = handover_query.count()
+
+    degraded_query = db.query(func.count(Branch.id)).filter(
+        Branch.client_id == context.client.id,
+        Branch.is_active.is_(True),
+        func.lower(func.coalesce(Branch.integration_state, "ok")) == "degraded",
+    )
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            integration_degraded_branches = 0
+        else:
+            degraded_query = degraded_query.filter(Branch.id.in_(allowed_branch_ids))
+            integration_degraded_branches = int(degraded_query.scalar() or 0)
+    else:
+        integration_degraded_branches = int(degraded_query.scalar() or 0)
+
+    signals = _IncidentSignals(
+        outbox_backlog=outbox_backlog,
+        outbox_failed_24h=outbox_failed_24h,
+        pending_handovers=pending_handovers,
+        integration_degraded_branches=integration_degraded_branches,
+        last_error=latest_failed_error,
+    )
+    items = _build_scope_incident_items(
+        scope=scope,
+        signals=signals,
+        detected_at=now,
+        client_id=context.client.id,
+        client_slug=context.client.name,
+        branch_id=context.effective_branch_id,
+        branch_ids=allowed_branch_ids,
+        platform_scope=False,
+    )
+    return ConsoleIncidentListResponse(
+        generated_at=now.isoformat(),
+        scope=scope,
+        summary=_build_incident_summary(items),
+        items=items,
+    )
+
+
+_DEFAULT_STARTER_INCLUDED_MESSAGES = 1000
+_DEFAULT_STARTER_INCLUDED_WHATSAPP_CHANNELS = 1
+
+
+def _parse_subscription_meter_limit(value: object) -> Optional[int]:
+    if isinstance(value, bool):
+        return 1 if value else 0
+    parsed = _safe_int(value)
+    if parsed is None or parsed < 0:
+        return None
+    return parsed
+
+
+def _extract_subscription_channel_limit(payload: dict, *, channel: str) -> Optional[int]:
+    if not isinstance(payload, dict):
+        return None
+    direct_keys = (
+        f"{channel}_numbers",
+        f"{channel}_number_limit",
+        f"{channel}_channels",
+        f"{channel}_channel_limit",
+        f"{channel}_limit",
+    )
+    for key in direct_keys:
+        parsed = _parse_subscription_meter_limit(payload.get(key))
+        if parsed is not None:
+            return parsed
+    channels_map = payload.get("channels")
+    if isinstance(channels_map, dict):
+        parsed = _parse_subscription_meter_limit(channels_map.get(channel))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _resolve_subscription_channel_limit(
+    *,
+    context: ConsoleAuthContext,
+    channel: Literal["whatsapp", "telegram", "instagram"],
+    onboarding_enabled: Optional[bool],
+) -> tuple[Optional[int], str]:
+    company = next(
+        (item for item in context.companies if item.id == context.client.company_id),
+        None,
+    )
+    company_billing = company.billing_info if company and isinstance(company.billing_info, dict) else {}
+    client_config = context.client.config if isinstance(context.client.config, dict) else {}
+    client_billing = client_config.get("billing") if isinstance(client_config.get("billing"), dict) else {}
+    sources: list[tuple[str, dict]] = [
+        ("company_billing_info", company_billing),
+        ("client_config", client_billing),
+    ]
+    for source_name, source_payload in sources:
+        if not isinstance(source_payload, dict):
+            continue
+        nested_subscription = source_payload.get("subscription")
+        candidate_maps = [source_payload]
+        if isinstance(nested_subscription, dict):
+            candidate_maps.insert(0, nested_subscription)
+        for payload in candidate_maps:
+            parsed = _extract_subscription_channel_limit(payload, channel=channel)
+            if parsed is not None:
+                return parsed, source_name
+    if onboarding_enabled is True:
+        return 1, "onboarding_contract"
+    if onboarding_enabled is False:
+        return 0, "onboarding_contract"
+    return None, "unknown"
+
+
+def _resolve_subscription_count_meter_status(
+    *,
+    included: Optional[int],
+    used: int,
+    warn_ratio: float = 0.8,
+) -> tuple[Literal["ok", "warning", "limit_reached", "over_limit", "not_included", "unknown"], Optional[int]]:
+    if included is None:
+        return "unknown", None
+    if included <= 0:
+        if used > 0:
+            return "over_limit", 0
+        return "not_included", 0
+    if used > included:
+        return "over_limit", 0
+    remaining = max(0, included - used)
+    if used == included:
+        return "limit_reached", remaining
+    threshold = included * warn_ratio
+    if used >= threshold:
+        return "warning", remaining
+    return "ok", remaining
+
+
+def _resolve_subscription_toggle_meter_status(
+    *,
+    included: int,
+    used: int,
+) -> Literal["ok", "over_limit", "not_included", "included_not_configured"]:
+    if included <= 0:
+        if used > 0:
+            return "over_limit"
+        return "not_included"
+    if used <= 0:
+        return "included_not_configured"
+    return "ok"
+
+
+def _resolve_subscription_payment_status_message(
+    *,
+    payment_status: str,
+    payment_confirmed_at: Optional[str],
+) -> str:
+    if payment_status == "confirmed":
+        if payment_confirmed_at:
+            return f"Оплата подтверждена: {payment_confirmed_at}."
+        return "Оплата подтверждена."
+    if payment_status == "pending":
+        return "Оплата в ожидании подтверждения. Проверьте реквизиты и статус у платформы."
+    if payment_status == "rejected":
+        return "Оплата отклонена. Нужна повторная проверка и подтверждение."
+    return "Статус оплаты не заполнен в онбординге."
+
+
+def _append_subscription_action(
+    actions: list[ConsoleBusinessActionItem],
+    *,
+    action_id: str,
+    title: str,
+    description: str,
+    href: str,
+    severity: Literal["critical", "warn", "info"],
+) -> None:
+    if any(item.id == action_id for item in actions):
+        return
+    actions.append(
+        ConsoleBusinessActionItem(
+            id=action_id,
+            title=title,
+            description=description,
+            href=href,
+            severity=severity,
+        )
+    )
+
+
+@router.get(
     "/subscription/summary",
     response_model=ConsoleSubscriptionSummaryResponse,
     responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
@@ -6211,6 +6817,117 @@ async def get_subscription_summary(
         .all()
     )
 
+    branch_query = db.query(Branch).filter(Branch.client_id == context.client.id)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            scoped_branches: list[Branch] = []
+        else:
+            scoped_branches = branch_query.filter(Branch.id.in_(list(allowed_branch_ids))).all()
+    else:
+        scoped_branches = branch_query.all()
+
+    client_contract_record = _get_latest_onboarding_contract(
+        db,
+        client_id=context.client.id,
+        scope="client",
+        branch_id=None,
+    )
+    branch_contract_record = None
+    if context.effective_branch_id:
+        branch_contract_record = _get_latest_onboarding_contract(
+            db,
+            client_id=context.client.id,
+            scope="branch",
+            branch_id=context.effective_branch_id,
+        )
+    elif allowed_branch_ids is not None and len(allowed_branch_ids) == 1:
+        only_branch_id = next(iter(allowed_branch_ids))
+        branch_contract_record = _get_latest_onboarding_contract(
+            db,
+            client_id=context.client.id,
+            scope="branch",
+            branch_id=only_branch_id,
+        )
+
+    active_client_contract = (
+        client_contract_record
+        if client_contract_record and client_contract_record.status == "active"
+        else None
+    )
+    active_branch_contract = (
+        branch_contract_record
+        if branch_contract_record and branch_contract_record.status == "active"
+        else None
+    )
+    client_contract_payload = active_client_contract.payload_json if active_client_contract else None
+    branch_contract_payload = active_branch_contract.payload_json if active_branch_contract else None
+    effective_onboarding_payload: Optional[OnboardingContractPayload] = None
+    if isinstance(client_contract_payload, dict) or isinstance(branch_contract_payload, dict):
+        try:
+            effective_onboarding_payload = OnboardingContractPayload.model_validate(
+                merge_onboarding_contract(client_contract_payload, branch_contract_payload)
+            )
+        except ValidationError:
+            effective_onboarding_payload = None
+
+    payment_source = _resolve_onboarding_payment_source(
+        client_record=active_client_contract,
+        branch_record=active_branch_contract,
+    )
+    payment_status = payment_source.payment_status if payment_source else "unknown"
+    payment_confirmed_at = (
+        payment_source.payment_confirmed_at.isoformat()
+        if payment_source and payment_source.payment_confirmed_at
+        else None
+    )
+    payment_status_source: Literal["onboarding_contract", "unknown"] = (
+        "onboarding_contract" if payment_source else "unknown"
+    )
+
+    client_capability_record = _get_latest_capability(
+        db,
+        client_id=context.client.id,
+        scope="client",
+        branch_id=None,
+    )
+    branch_capability_record = None
+    if context.effective_branch_id:
+        branch_capability_record = _get_latest_capability(
+            db,
+            client_id=context.client.id,
+            scope="branch",
+            branch_id=context.effective_branch_id,
+        )
+    elif allowed_branch_ids is not None and len(allowed_branch_ids) == 1:
+        only_branch_id = next(iter(allowed_branch_ids))
+        branch_capability_record = _get_latest_capability(
+            db,
+            client_id=context.client.id,
+            scope="branch",
+            branch_id=only_branch_id,
+        )
+    client_capability_payload = (
+        client_capability_record.payload_json
+        if client_capability_record and client_capability_record.status == "active"
+        else None
+    )
+    branch_capability_payload = (
+        branch_capability_record.payload_json
+        if branch_capability_record and branch_capability_record.status == "active"
+        else None
+    )
+    effective_capabilities = CapabilitiesPayload()
+    if isinstance(client_capability_payload, dict) or isinstance(branch_capability_payload, dict):
+        try:
+            effective_capabilities = CapabilitiesPayload.model_validate(
+                merge_capabilities(client_capability_payload, branch_capability_payload)
+            )
+        except ValidationError:
+            effective_capabilities = CapabilitiesPayload()
+
+    purchased_capabilities = (
+        effective_onboarding_payload.purchased if effective_onboarding_payload else CapabilitiesPayload()
+    )
     plan_name, contract_label, currency, monthly_quota, quota_source = _resolve_subscription_contract_info(context)
 
     elapsed_days = max(1, (now.date() - period_start.date()).days + 1)
@@ -6239,6 +6956,295 @@ async def get_subscription_summary(
         over_quota=over_quota,
         projected_over_quota=projected_over_quota,
     )
+    default_plan = ConsoleSubscriptionPlanDefaults(
+        plan_name="Starter",
+        included_messages=_DEFAULT_STARTER_INCLUDED_MESSAGES,
+        included_whatsapp_channels=_DEFAULT_STARTER_INCLUDED_WHATSAPP_CHANNELS,
+        source="STRATEGY/PRODUCT.md",
+    )
+    active_branches = [branch for branch in scoped_branches if branch.is_active]
+    whatsapp_used = sum(1 for branch in active_branches if _normalize_optional_text(branch.instance_id))
+    telegram_used = sum(1 for branch in active_branches if _normalize_optional_text(branch.telegram_chat_id))
+    instagram_used = 0
+
+    whatsapp_included, whatsapp_source = _resolve_subscription_channel_limit(
+        context=context,
+        channel="whatsapp",
+        onboarding_enabled=purchased_capabilities.channels.whatsapp,
+    )
+    whatsapp_note = None
+    if whatsapp_included is None:
+        whatsapp_included = default_plan.included_whatsapp_channels
+        whatsapp_source = "default_starter"
+        whatsapp_note = "Лимит взят из стандартного плана. Зафиксируйте договор в онбординге."
+    whatsapp_status, whatsapp_remaining = _resolve_subscription_count_meter_status(
+        included=whatsapp_included,
+        used=whatsapp_used,
+    )
+
+    telegram_included, telegram_source = _resolve_subscription_channel_limit(
+        context=context,
+        channel="telegram",
+        onboarding_enabled=purchased_capabilities.channels.telegram,
+    )
+    telegram_status, telegram_remaining = _resolve_subscription_count_meter_status(
+        included=telegram_included,
+        used=telegram_used,
+    )
+
+    instagram_included, instagram_source = _resolve_subscription_channel_limit(
+        context=context,
+        channel="instagram",
+        onboarding_enabled=purchased_capabilities.channels.instagram,
+    )
+    instagram_status, instagram_remaining = _resolve_subscription_count_meter_status(
+        included=instagram_included,
+        used=instagram_used,
+    )
+
+    messages_meter_included = monthly_quota if monthly_quota is not None and monthly_quota > 0 else default_plan.included_messages
+    messages_meter_source = f"subscription_contract:{quota_source}" if monthly_quota is not None else "default_starter"
+    messages_meter_note = None
+    if monthly_quota is None:
+        messages_meter_note = "Лимит взят из стандартного плана. Зафиксируйте договор в онбординге."
+    messages_meter_status, messages_meter_remaining = _resolve_subscription_count_meter_status(
+        included=messages_meter_included,
+        used=billable_messages,
+    )
+
+    calendar_included = 1 if purchased_capabilities.providers.calendar_provider not in (None, "none") else 0
+    calendar_used = 1 if effective_capabilities.providers.calendar_provider not in (None, "none") else 0
+    calendar_status = _resolve_subscription_toggle_meter_status(included=calendar_included, used=calendar_used)
+
+    crm_included = 1 if purchased_capabilities.providers.crm_provider not in (None, "none") else 0
+    crm_used = 1 if effective_capabilities.providers.crm_provider not in (None, "none") else 0
+    crm_status = _resolve_subscription_toggle_meter_status(included=crm_included, used=crm_used)
+
+    knowledge_included = 1 if purchased_capabilities.features.knowledge_upload is True else 0
+    knowledge_used = 1 if effective_capabilities.features.knowledge_upload is True else 0
+    knowledge_status = _resolve_subscription_toggle_meter_status(included=knowledge_included, used=knowledge_used)
+
+    analytics_included = 1 if purchased_capabilities.features.analytics is True else 0
+    analytics_used = 1 if effective_capabilities.features.analytics is True else 0
+    analytics_status = _resolve_subscription_toggle_meter_status(included=analytics_included, used=analytics_used)
+
+    auto_learn_included = 1 if purchased_capabilities.features.auto_learn is True else 0
+    auto_learn_used = 1 if effective_capabilities.features.auto_learn is True else 0
+    auto_learn_status = _resolve_subscription_toggle_meter_status(
+        included=auto_learn_included,
+        used=auto_learn_used,
+    )
+
+    provider_binding_lifecycle = _build_provider_binding_lifecycle_map(
+        db,
+        client_ids=[context.client.id],
+        branches=scoped_branches,
+        now=now,
+    )
+    binding_critical_total = sum(
+        1 for lifecycle in provider_binding_lifecycle.values() if lifecycle.alert_state == "critical"
+    )
+    binding_warn_total = sum(
+        1 for lifecycle in provider_binding_lifecycle.values() if lifecycle.alert_state == "warn"
+    )
+    if binding_critical_total > 0:
+        critical_note = f"{binding_critical_total} канал(ов) WhatsApp требует срочного внимания."
+        whatsapp_note = f"{whatsapp_note} {critical_note}".strip() if whatsapp_note else critical_note
+    elif binding_warn_total > 0:
+        warn_note = f"{binding_warn_total} канал(ов) WhatsApp требуют плановой проверки."
+        whatsapp_note = f"{whatsapp_note} {warn_note}".strip() if whatsapp_note else warn_note
+
+    meters = [
+        ConsoleSubscriptionMeterItem(
+            key="bot_messages",
+            label="Сообщения бота",
+            meter_type="messages",
+            included=messages_meter_included,
+            used=billable_messages,
+            remaining=messages_meter_remaining,
+            status=messages_meter_status,
+            source=messages_meter_source,
+            note=messages_meter_note,
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="whatsapp_channels",
+            label="WhatsApp каналы",
+            meter_type="channels",
+            included=whatsapp_included,
+            used=whatsapp_used,
+            remaining=whatsapp_remaining,
+            status=whatsapp_status,
+            source=whatsapp_source,
+            note=whatsapp_note,
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="telegram_channels",
+            label="Telegram каналы",
+            meter_type="channels",
+            included=telegram_included,
+            used=telegram_used,
+            remaining=telegram_remaining,
+            status=telegram_status,
+            source=telegram_source,
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="instagram_channels",
+            label="Instagram каналы",
+            meter_type="channels",
+            included=instagram_included,
+            used=instagram_used,
+            remaining=instagram_remaining,
+            status=instagram_status,
+            source=instagram_source,
+            note="Канал поддерживается контрактно, но runtime подключение проверяется отдельно.",
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="calendar_integration",
+            label="Календарная интеграция",
+            meter_type="addon",
+            included=calendar_included,
+            used=calendar_used,
+            remaining=max(0, calendar_included - calendar_used),
+            status=calendar_status,
+            source="onboarding_contract.purchased.providers.calendar_provider",
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="crm_integration",
+            label="CRM интеграция",
+            meter_type="addon",
+            included=crm_included,
+            used=crm_used,
+            remaining=max(0, crm_included - crm_used),
+            status=crm_status,
+            source="onboarding_contract.purchased.providers.crm_provider",
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="knowledge_upload",
+            label="Загрузка знаний",
+            meter_type="addon",
+            included=knowledge_included,
+            used=knowledge_used,
+            remaining=max(0, knowledge_included - knowledge_used),
+            status=knowledge_status,
+            source="onboarding_contract.purchased.features.knowledge_upload",
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="analytics",
+            label="Бизнес-аналитика",
+            meter_type="addon",
+            included=analytics_included,
+            used=analytics_used,
+            remaining=max(0, analytics_included - analytics_used),
+            status=analytics_status,
+            source="onboarding_contract.purchased.features.analytics",
+        ),
+        ConsoleSubscriptionMeterItem(
+            key="auto_learn",
+            label="Автообучение",
+            meter_type="addon",
+            included=auto_learn_included,
+            used=auto_learn_used,
+            remaining=max(0, auto_learn_included - auto_learn_used),
+            status=auto_learn_status,
+            source="onboarding_contract.purchased.features.auto_learn",
+        ),
+    ]
+
+    recommended_actions: list[ConsoleBusinessActionItem] = []
+    if effective_onboarding_payload is None:
+        _append_subscription_action(
+            recommended_actions,
+            action_id="fill_onboarding_contract",
+            title="Заполните договор онбординга",
+            description="Без договора часть лимитов считается по стандартному плану. Зафиксируйте условия клиента.",
+            href="/settings",
+            severity="warn",
+        )
+    if over_quota or quota_alert_level == "limit_100":
+        _append_subscription_action(
+            recommended_actions,
+            action_id="review_plan_overage",
+            title="Лимит сообщений превышен",
+            description="Проверьте тариф или снизьте поток нецелевых ответов бота, чтобы остановить перерасход.",
+            href="/business",
+            severity="critical",
+        )
+    elif quota_alert_level == "warning_80":
+        _append_subscription_action(
+            recommended_actions,
+            action_id="review_quota_risk",
+            title="Риск перерасхода в этом периоде",
+            description="Текущая динамика близка к лимиту. Проверьте прогноз и подготовьте изменение плана заранее.",
+            href="/subscription",
+            severity="warn",
+        )
+
+    if payment_status in {"pending", "rejected"}:
+        _append_subscription_action(
+            recommended_actions,
+            action_id="verify_payment_status",
+            title="Проверьте статус оплаты подписки",
+            description=_resolve_subscription_payment_status_message(
+                payment_status=payment_status,
+                payment_confirmed_at=payment_confirmed_at,
+            ),
+            href="/settings",
+            severity="critical" if payment_status == "rejected" else "warn",
+        )
+
+    if whatsapp_status in {"over_limit", "not_included"}:
+        _append_subscription_action(
+            recommended_actions,
+            action_id="whatsapp_limit_mismatch",
+            title="Проверьте лимит WhatsApp каналов",
+            description="Фактическое число подключений не совпадает с планом. Уточните договор и конфигурацию филиалов.",
+            href="/settings",
+            severity="critical",
+        )
+    elif whatsapp_included is not None and whatsapp_included > 0 and whatsapp_used == 0:
+        _append_subscription_action(
+            recommended_actions,
+            action_id="whatsapp_setup_required",
+            title="Подключите WhatsApp канал",
+            description="Канал включён в план, но не настроен в текущем клиенте.",
+            href="/settings",
+            severity="warn",
+        )
+
+    if binding_critical_total > 0 or binding_warn_total > 0:
+        _append_subscription_action(
+            recommended_actions,
+            action_id="review_whatsapp_binding_health",
+            title="Проверьте состояние WhatsApp подключения",
+            description="Есть риски по webhook/rebind/renewal. Проверьте параметры канала и продлите доступ при необходимости.",
+            href="/settings",
+            severity="critical" if binding_critical_total > 0 else "warn",
+        )
+
+    if any(
+        meter.status == "included_not_configured"
+        for meter in meters
+        if meter.meter_type == "addon"
+    ):
+        _append_subscription_action(
+            recommended_actions,
+            action_id="configure_purchased_addons",
+            title="Настройте купленные интеграции",
+            description="Часть оплаченных интеграций включена в договоре, но ещё не активирована в рабочем контуре.",
+            href="/settings",
+            severity="info",
+        )
+
+    if not recommended_actions:
+        _append_subscription_action(
+            recommended_actions,
+            action_id="subscription_monitor_daily",
+            title="Подписка в норме",
+            description="Проверяйте лимиты и статус подключения по расписанию, чтобы избежать сюрпризов в конце периода.",
+            href="/subscription",
+            severity="info",
+        )
+
     scope: Literal["system", "client", "branch"] = "branch" if allowed_branch_ids is not None else "client"
     metric_meta = {
         "billable_messages": _build_metric_meta(
@@ -6293,6 +7299,28 @@ async def get_subscription_summary(
             sample_size=elapsed_days if projected_overage_messages is not None else None,
             note="projection, not observed fact" if projected_overage_messages is not None else None,
         ),
+        "whatsapp_channels_used": _build_metric_meta(
+            kind="fact",
+            source="branches.instance_id",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=whatsapp_used,
+        ),
+        "whatsapp_channels_included": _build_metric_meta(
+            kind="estimate" if whatsapp_source == "default_starter" else "fact",
+            source=f"subscription_contract:{whatsapp_source}",
+            as_of=now.isoformat(),
+            scope="client",
+            sample_size=1,
+            note=whatsapp_note if whatsapp_source == "default_starter" else None,
+        ),
+        "payment_status": _build_metric_meta(
+            kind="fact" if payment_status != "unknown" else "missing",
+            source=f"onboarding_contract:{payment_status_source}",
+            as_of=now.isoformat(),
+            scope="client",
+            sample_size=1 if payment_status != "unknown" else None,
+        ),
     }
 
     evidence_items = []
@@ -6332,6 +7360,16 @@ async def get_subscription_summary(
         quota_alert_message=quota_alert_message,
         overage_policy_message="Перерасход считается по формуле overage = max(0, billable - quota).",
         over_quota=over_quota,
+        payment_status=payment_status,
+        payment_confirmed_at=payment_confirmed_at,
+        payment_status_source=payment_status_source,
+        payment_status_message=_resolve_subscription_payment_status_message(
+            payment_status=payment_status,
+            payment_confirmed_at=payment_confirmed_at,
+        ),
+        plan_defaults=default_plan,
+        meters=meters,
+        recommended_actions=recommended_actions,
         evidence=evidence_items,
         metric_meta=metric_meta,
     )
@@ -10219,6 +11257,88 @@ async def list_fleet_attention(
         stale_after_minutes=stale_after_minutes,
         summary=summary,
         items=items[:limit],
+    )
+
+
+@router.get(
+    "/admin/incidents",
+    response_model=ConsoleIncidentListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_admin_incidents(
+    request: Request,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+) -> ConsoleIncidentListResponse:
+    _reject_unknown_query_params(request, {"limit"})
+    _validate_limit(limit)
+
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=False,
+    )
+    _require_platform_admin(context)
+
+    active_clients = [
+        client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
+    ]
+    if not active_clients:
+        return ConsoleIncidentListResponse(
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            scope="fleet",
+            summary=ConsoleIncidentSummary(total=0, critical=0, warn=0, info=0),
+            items=[],
+        )
+
+    now = datetime.now(timezone.utc)
+    client_ids = [client.id for client in active_clients]
+    outbox_backlog_map = _query_outbox_backlog_map(db, client_ids=client_ids)
+    outbox_failed_map = _query_outbox_failed_24h_map(db, client_ids=client_ids, now=now)
+    pending_handovers_map = _query_pending_handovers_map(db, client_ids=client_ids)
+    degraded_map = _query_integration_degraded_branch_count_map(db, client_ids=client_ids)
+    latest_error_map = _query_latest_failed_error_map(db, client_ids=client_ids, now=now)
+
+    items: list[ConsoleIncidentItem] = []
+    for client in active_clients:
+        signals = _IncidentSignals(
+            outbox_backlog=outbox_backlog_map.get(client.id, 0),
+            outbox_failed_24h=outbox_failed_map.get(client.id, 0),
+            pending_handovers=pending_handovers_map.get(client.id, 0),
+            integration_degraded_branches=degraded_map.get(client.id, 0),
+            last_error=latest_error_map.get(client.id),
+        )
+        items.extend(
+            _build_scope_incident_items(
+                scope="fleet",
+                signals=signals,
+                detected_at=now,
+                client_id=client.id,
+                client_slug=client.name,
+                branch_id=None,
+                branch_ids=None,
+                platform_scope=True,
+            )
+        )
+
+    severity_rank = {"critical": 2, "warn": 1, "info": 0}
+    items.sort(
+        key=lambda item: (
+            severity_rank.get(item.severity, 0),
+            int(item.metrics.get("outbox_backlog") or 0),
+            int(item.metrics.get("outbox_failed_24h") or 0),
+            int(item.metrics.get("integration_degraded_branches") or 0),
+            int(item.metrics.get("pending_handovers") or 0),
+        ),
+        reverse=True,
+    )
+    limited_items = items[:limit]
+    return ConsoleIncidentListResponse(
+        generated_at=now.isoformat(),
+        scope="fleet",
+        summary=_build_incident_summary(limited_items),
+        items=limited_items,
     )
 
 

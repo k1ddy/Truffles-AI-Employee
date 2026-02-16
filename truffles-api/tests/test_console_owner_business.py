@@ -112,6 +112,95 @@ def test_resolve_subscription_alert_levels() -> None:
     assert limit_level == "limit_100"
 
 
+def test_resolve_subscription_channel_limit_prefers_company_billing_info() -> None:
+    context = _build_context(
+        role="owner",
+        company_billing={
+            "subscription": {
+                "whatsapp_channels": 3,
+            }
+        },
+        client_config={
+            "billing": {
+                "whatsapp_channels": 1,
+            }
+        },
+    )
+
+    included, source = console_router._resolve_subscription_channel_limit(
+        context=context,
+        channel="whatsapp",
+        onboarding_enabled=True,
+    )
+
+    assert included == 3
+    assert source == "company_billing_info"
+
+
+def test_resolve_subscription_channel_limit_uses_onboarding_contract_when_missing_billing() -> None:
+    context = _build_context(role="owner", company_billing={}, client_config={})
+
+    included_enabled, source_enabled = console_router._resolve_subscription_channel_limit(
+        context=context,
+        channel="telegram",
+        onboarding_enabled=True,
+    )
+    included_disabled, source_disabled = console_router._resolve_subscription_channel_limit(
+        context=context,
+        channel="telegram",
+        onboarding_enabled=False,
+    )
+
+    assert included_enabled == 1
+    assert source_enabled == "onboarding_contract"
+    assert included_disabled == 0
+    assert source_disabled == "onboarding_contract"
+
+
+def test_resolve_subscription_count_meter_status_thresholds() -> None:
+    over_limit_status, over_limit_remaining = console_router._resolve_subscription_count_meter_status(
+        included=2,
+        used=5,
+    )
+    limit_status, limit_remaining = console_router._resolve_subscription_count_meter_status(
+        included=2,
+        used=2,
+    )
+    warning_status, warning_remaining = console_router._resolve_subscription_count_meter_status(
+        included=10,
+        used=8,
+    )
+    ok_status, ok_remaining = console_router._resolve_subscription_count_meter_status(
+        included=10,
+        used=3,
+    )
+    unknown_status, unknown_remaining = console_router._resolve_subscription_count_meter_status(
+        included=None,
+        used=3,
+    )
+
+    assert over_limit_status == "over_limit"
+    assert over_limit_remaining == 0
+    assert limit_status == "limit_reached"
+    assert limit_remaining == 0
+    assert warning_status == "warning"
+    assert warning_remaining == 2
+    assert ok_status == "ok"
+    assert ok_remaining == 7
+    assert unknown_status == "unknown"
+    assert unknown_remaining is None
+
+
+def test_resolve_subscription_toggle_meter_status() -> None:
+    assert console_router._resolve_subscription_toggle_meter_status(included=1, used=1) == "ok"
+    assert (
+        console_router._resolve_subscription_toggle_meter_status(included=1, used=0)
+        == "included_not_configured"
+    )
+    assert console_router._resolve_subscription_toggle_meter_status(included=0, used=0) == "not_included"
+    assert console_router._resolve_subscription_toggle_meter_status(included=0, used=1) == "over_limit"
+
+
 def test_derive_business_status_thresholds() -> None:
     unhealthy_status, _ = console_router._derive_business_status(
         outbox_backlog=1200,
@@ -195,6 +284,76 @@ def test_resolve_owner_mode_profile_capture_leads() -> None:
     assert settings.reminder_2_minutes == 30
     assert settings.escalation_timeout_minutes == 60
     assert warnings
+
+
+def test_classify_outbox_incident_reason_markers() -> None:
+    reason_unavailable, _ = console_router._classify_outbox_incident_reason(
+        last_error="provider timeout while sending message",
+        integration_degraded=False,
+    )
+    reason_auth, _ = console_router._classify_outbox_incident_reason(
+        last_error="401 unauthorized token expired",
+        integration_degraded=False,
+    )
+    reason_rate, _ = console_router._classify_outbox_incident_reason(
+        last_error="429 too many requests",
+        integration_degraded=False,
+    )
+    reason_drift, _ = console_router._classify_outbox_incident_reason(
+        last_error=None,
+        integration_degraded=True,
+    )
+
+    assert reason_unavailable == "provider_unavailable"
+    assert reason_auth == "provider_auth"
+    assert reason_rate == "provider_rate_limited"
+    assert reason_drift == "integration_degraded"
+
+
+def test_build_scope_incident_items_empty_for_healthy_signals() -> None:
+    items = console_router._build_scope_incident_items(
+        scope="client",
+        signals=console_router._IncidentSignals(
+            outbox_backlog=10,
+            outbox_failed_24h=0,
+            pending_handovers=0,
+            integration_degraded_branches=0,
+            last_error=None,
+        ),
+        detected_at=datetime.now(timezone.utc),
+        client_id=uuid4(),
+        client_slug="demo",
+        branch_id=None,
+        branch_ids=None,
+        platform_scope=False,
+    )
+
+    assert items == []
+
+
+def test_build_scope_incident_items_includes_delivery_and_handover_risks() -> None:
+    items = console_router._build_scope_incident_items(
+        scope="client",
+        signals=console_router._IncidentSignals(
+            outbox_backlog=1200,
+            outbox_failed_24h=140,
+            pending_handovers=35,
+            integration_degraded_branches=2,
+            last_error="service unavailable",
+        ),
+        detected_at=datetime.now(timezone.utc),
+        client_id=uuid4(),
+        client_slug="demo",
+        branch_id=None,
+        branch_ids=None,
+        platform_scope=False,
+    )
+
+    assert len(items) == 2
+    assert items[0].reason_code in {"provider_unavailable", "integration_degraded"}
+    assert items[0].severity == "critical"
+    assert items[1].reason_code == "handover_backlog"
+    assert items[1].severity == "critical"
 
 
 def test_summarize_owner_operation_delta_states() -> None:
@@ -539,6 +698,58 @@ async def test_business_summary_requires_business_permission(monkeypatch):
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_business_incidents_requires_business_permission(monkeypatch):
+    context = _build_context(role="manager")
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_business_incidents(request=SimpleNamespace(), db=SimpleNamespace())
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_admin_incidents_requires_platform_admin(monkeypatch):
+    context = _build_context(role="owner")
+    context.accessible_clients = []
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: context,
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_admin_incidents(
+            request=SimpleNamespace(query_params={}),
+            db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_admin_incidents_returns_empty_summary_without_active_clients(monkeypatch):
+    context = _build_context(role="platform_admin")
+    context.accessible_clients = []
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: context,
+    )
+
+    response = await console_router.list_admin_incidents(
+        request=SimpleNamespace(query_params={}),
+        db=SimpleNamespace(),
+    )
+
+    assert response.scope == "fleet"
+    assert response.summary.total == 0
+    assert response.items == []
 
 
 @pytest.mark.asyncio

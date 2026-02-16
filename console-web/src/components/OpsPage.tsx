@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
 import {
+    adminApi,
     authApi,
     canAccessConsole,
     opsApi,
@@ -171,6 +172,26 @@ function MetricCard({ label, value, subtext }: { label: string; value: string | 
     );
 }
 
+function incidentChipClass(severity: "critical" | "warn" | "info"): string {
+    if (severity === "critical") {
+        return "bg-red-100 text-red-800";
+    }
+    if (severity === "warn") {
+        return "bg-amber-100 text-amber-800";
+    }
+    return "bg-slate-100 text-slate-700";
+}
+
+function incidentSeverityLabel(severity: "critical" | "warn" | "info"): string {
+    if (severity === "critical") {
+        return "critical";
+    }
+    if (severity === "warn") {
+        return "warn";
+    }
+    return "info";
+}
+
 function formatJsonPreview(payload: Record<string, unknown> | null, limit = 160): string {
     if (!payload) {
         return "—";
@@ -260,6 +281,21 @@ export default function OpsPage() {
         refetchInterval: 30000,
     });
 
+    const {
+        data: incidentsData,
+        isLoading: incidentsLoading,
+        error: incidentsError,
+        refetch: refetchIncidents,
+    } = useQuery({
+        queryKey: ["admin-incidents"],
+        queryFn: async () => {
+            const response = await adminApi.listIncidents({ limit: 20 });
+            return response.data;
+        },
+        enabled: !!session && canReadOps && isFullOps,
+        refetchInterval: 30000,
+    });
+
     useEffect(() => {
         if (outboxError) {
             handleError(outboxError);
@@ -271,6 +307,12 @@ export default function OpsPage() {
             handleError(opsJobsError);
         }
     }, [opsJobsError, handleError]);
+
+    useEffect(() => {
+        if (incidentsError) {
+            handleError(incidentsError);
+        }
+    }, [incidentsError, handleError]);
 
     const telegramVerify = useMutation({
         mutationFn: async () => {
@@ -445,13 +487,79 @@ export default function OpsPage() {
                 <div className="flex items-center gap-4">
                     <span className="text-sm text-muted-foreground">Авто-обновление: 30с</span>
                     <button
-                        onClick={() => refetchHealth()}
+                        onClick={() => {
+                            void refetchHealth();
+                            if (isFullOps) {
+                                void refetchIncidents();
+                            }
+                        }}
                         className="text-sm text-primary hover:text-primary/80"
                     >
                         Обновить
                     </button>
                 </div>
             </div>
+
+            {isFullOps && (
+                <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-incidents-card">
+                    <div className="mb-4 flex items-center justify-between">
+                        <div>
+                            <h2 className="text-lg font-semibold">Критичные инциденты</h2>
+                            <p className="text-xs text-muted-foreground">
+                                Только факт-основанные причины и безопасные шаги (`dry-run` сначала).
+                            </p>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                            {incidentsData?.summary.total ?? 0} шт.
+                        </span>
+                    </div>
+                    <div className="mb-4 grid grid-cols-3 gap-3">
+                        <MetricCard label="Critical" value={incidentsData?.summary.critical ?? 0} />
+                        <MetricCard label="Warn" value={incidentsData?.summary.warn ?? 0} />
+                        <MetricCard label="Info" value={incidentsData?.summary.info ?? 0} />
+                    </div>
+                    {incidentsLoading ? (
+                        <p className="text-sm text-muted-foreground">Загрузка инцидентов...</p>
+                    ) : !incidentsData?.items?.length ? (
+                        <p className="text-sm text-muted-foreground">Критичных инцидентов не обнаружено.</p>
+                    ) : (
+                        <div className="space-y-3">
+                            {incidentsData.items.map((item) => (
+                                <article
+                                    key={item.id}
+                                    className="rounded-lg border border-border/60 bg-muted/20 p-3"
+                                    data-testid={`ops-incident-${item.id}`}
+                                >
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <p className="text-sm font-semibold">{item.title}</p>
+                                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${incidentChipClass(item.severity)}`}>
+                                            {incidentSeverityLabel(item.severity)}
+                                        </span>
+                                    </div>
+                                    <p className="mt-1 text-xs text-muted-foreground">{item.reason_label}</p>
+                                    <p className="mt-1 text-xs text-muted-foreground">{item.summary}</p>
+                                    <p className="mt-1 text-[11px] text-muted-foreground">
+                                        client: {item.client_slug || "n/a"} · detected: {new Date(item.detected_at).toLocaleString("ru-RU")}
+                                    </p>
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                        {item.actions.map((action) => (
+                                            action.href ? (
+                                                <Link key={action.id} href={action.href} className="btn-ghost text-xs">
+                                                    {action.title}
+                                                </Link>
+                                            ) : (
+                                                <span key={action.id} className="rounded-full border border-border/60 px-2 py-1 text-[11px] text-muted-foreground">
+                                                    {action.title} {action.job_type ? `(${action.job_type}:${action.mode})` : ""}
+                                                </span>
+                                            )
+                                        ))}
+                                    </div>
+                                </article>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
 
             {!isFullOps && (
                 <div className="mb-6 rounded-lg border border-border/60 bg-muted/40 p-4 text-sm text-muted-foreground" data-testid="ops-short-note">
