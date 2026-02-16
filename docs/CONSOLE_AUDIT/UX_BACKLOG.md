@@ -16,6 +16,7 @@ Evidence sources
 - `docs/REPORTS/2026-02-15-owner-admin-wave5-control-hardening-v1.md`
 - `docs/REPORTS/2026-02-15-owner-admin-wave6-automation-v1.md`
 - `docs/REPORTS/2026-02-15-owner-admin-wave7-fact-os-v1.md`
+- `docs/REPORTS/2026-02-16-owner-admin-ux-simplify-v1.md`
 - `Business/Sales/BILLING_COUNTING.md`
 - `docs/CONSOLE_AUDIT/roles/owner.md`
 - `docs/CONSOLE_AUDIT/roles/admin.md`
@@ -54,6 +55,7 @@ Evidence sources
 | UX-24 | P0 | Owner KPI fact integrity | KPI cards on owner/admin pages lacked machine-readable fact provenance (`source/as_of/scope/sample`). | Users could not distinguish factual vs. estimated/missing numbers, hurting trust in business decisions. | `truffles-api/app/schemas/console.py`, `truffles-api/app/routers/console.py`, `console-web/src/app/business/page.tsx`, `console-web/src/app/subscription/page.tsx`, `console-web/src/app/business/data-trust/page.tsx`, `console-web/src/app/business/team-performance/page.tsx`. | Fixed |
 | UX-25 | P1 | Settings/Team action loop still client-driven | Goal actions and quick profile relied on client-side presets without durable server operation/rollback/impact contract. | Hard to scale changes safely across many owners and impossible to audit/rollback consistently. | `truffles-api/app/routers/console.py` (`/business/operations/owner-mode/*`), `console-web/src/app/settings/page.tsx`, `console-web/src/app/business/team-performance/page.tsx`, `contracts/console_api/openapi.v1.yaml`, `console-web/e2e/owner-admin-business.spec.ts`. | Fixed |
 | UX-26 | P0 | Inbox refresh cost + polling pressure | Queue refresh paid heavy SQL price (`list + total_count`) and Inbox performed high-frequency background polling (`case/messages`) with full cache invalidation on context switch. | Operators perceive lag/freeze while queue/chat updates under degraded runtime. | `docs/REPORTS/2026-02-16-console-plane-perf-baseline-v1.md`, `truffles-api/app/routers/console.py` (`list_cases` count-path + client-scoped subqueries), `console-web/src/hooks/useCaseData.ts`, `console-web/src/components/CaseList.tsx`, `console-web/src/components/ConsoleShell.tsx`. | Mitigated |
+| UX-27 | P0 | Owner/Admin cognitive overload | Owner/Admin saw technical-heavy left menu and unclear first action path despite business role goals. | Slower onboarding, wrong clicks, and lower trust in Console as business tool. | `console-web/src/components/ConsoleShell.tsx` (business-first nav mode + advanced toggle), `console-web/src/app/business/page.tsx` (`business-today-plan`), `console-web/src/app/settings/page.tsx` (business-language copy), `console-web/e2e/owner-admin-business.spec.ts`, `docs/REPORTS/2026-02-16-owner-admin-ux-simplify-v1.md`. | Fixed |
 
 ## 30-day execution waves
 
@@ -96,3 +98,7 @@ Evidence sources
   - health API no longer reports hardcoded Redis connected state; returns fact-based `connected/error/unknown`.
 - Added outbox guard thresholds and fail-fast gate (`--fail-on-breach`, `--fail-level`).
 - Replaced toast-only validation flows with `reportValidationError` (toast + inline summary) for `tenants` and `company-workspace`.
+- Added owner/admin business-first UX simplification:
+  - default reduced left menu for owner/admin with explicit `Показать расширенное меню` toggle,
+  - `/business` now starts with `Что делать сейчас` 3-step action plan,
+  - settings primary surface copy translated to plain business language.
