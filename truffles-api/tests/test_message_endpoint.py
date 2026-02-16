@@ -12946,6 +12946,224 @@ def test_llm_policy_core_consult_tool_normalized_to_info_by_info_signals(monkeyp
     assert llm_policy.get("consult_normalized_to_info") is True
 
 
+def test_llm_policy_core_consult_ref_does_not_shadow_allowed_consult_refs(monkeypatch):
+    monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Здравствуйте, мне нужна консультация по стрижкам.",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-llm-policy-core-consult-ref-only",
+                timestamp=1234567911,
+            ),
+        ),
+    )
+
+    expected_reply_state = ExpectedReplyState(
+        context=conversation.context,
+        context_manager={},
+        expected_reply_type=None,
+        intent_queue=None,
+        expected_reply_matched=None,
+        expected_reply_shortcircuit=False,
+        expected_reply_blocked_by_info=False,
+        memory_expected_reply_type=None,
+        current_goal="consult",
+    )
+    intent_decomp_state = IntentDecompositionState(
+        intent_decomp_payload={"intents": ["duration"], "consult_intent": False},
+        intent_decomp_intents=["duration"],
+        intent_decomp_primary="duration",
+        intent_decomp_secondary=[],
+        intent_decomp_service_query=None,
+        intent_decomp_multi=False,
+        intent_decomp_used=True,
+        intent_decomp_set={"duration"},
+        consult_intent=False,
+        consult_topic=None,
+        consult_question=None,
+        intent_queue_choice=None,
+        pending_intent_queue=None,
+        pending_expected_reply_type=None,
+        intent_queue_expected_next=None,
+        intent_queue_event=None,
+        info_class_intents={"duration"},
+        info_class_meta={"info_signals": {"duration": True}},
+        basic_info_message=False,
+        allow_service_carryover=False,
+        consult_return_pending=False,
+        consult_return_reason=None,
+        consult_return_prompt=None,
+        booking_signal=False,
+        booking_block_meta=None,
+        booking_wants_flow=False,
+        booking_blocked=False,
+        booking_active=False,
+        booking_context={},
+        booking={},
+        class_carryover=None,
+        context=conversation.context,
+        context_manager={},
+        current_goal="consult",
+    )
+    policy_payload = {
+        "intent": "consult",
+        "action": "fact",
+        "tool_action": "consult",
+        "tool_args": {
+            "consult_ref": "general_consult",
+            "consult_question": "Здравствуйте, мне нужна консультация по стрижкам.",
+        },
+        "pack_refs": [],
+        "language": "ru",
+        "confidence": 0.7,
+        "reason": "consult_ref_only",
+        "goal": "consult",
+        "slots": {"service": "", "datetime": "", "name": ""},
+        "next_question": None,
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+    }
+    policy_result = {
+        "ok": True,
+        "payload": policy_payload,
+        "error": None,
+        "raw": json.dumps(policy_payload, ensure_ascii=False),
+        "attempted": True,
+        "elapsed_ms": 12.0,
+    }
+    info_response = WebhookResponse(
+        success=True,
+        message="Info class reply sent",
+        conversation_id=conversation_id,
+        bot_response="По стрижкам обычно это занимает около 1-2 часов.",
+    )
+
+    with patch(
+        "app.routers.webhook.decision._apply_expected_reply_contract",
+        return_value=expected_reply_state,
+    ), patch(
+        "app.routers.webhook.decision._run_intent_decomposition",
+        return_value=intent_decomp_state,
+    ), patch(
+        "app.routers.webhook.decision.route_llm_policy_core",
+        return_value=policy_result,
+    ), patch(
+        "app.routers.webhook.decision._collect_plan_consult_refs",
+        return_value=(["general_consult"], None),
+    ), patch(
+        "app.routers.webhook.decision._handle_info_flow",
+        return_value=SimpleNamespace(response=info_response, force_truth_gate=False),
+    ), patch(
+        "app.routers.webhook.decision._handle_consult_flow",
+        return_value=SimpleNamespace(
+            consult_intent=False,
+            consult_topic=None,
+            consult_question=None,
+            intent_decomp_payload=intent_decomp_state.intent_decomp_payload,
+            response=None,
+        ),
+    ), patch(
+        "app.routers.webhook.decision._handle_policy_escalation_gate",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.decision._handle_knowledge_safe_mode_gate",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.decision._handle_minimum_data_safe_mode_gate",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler",
+        return_value={"truth_gate": Mock(), "service_matcher": Mock()},
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response",
+        return_value=True,
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id",
+        return_value=saved_message,
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message",
+        AsyncMock(return_value=True),
+    ), patch(
+        "app.routers.webhook._legacy.semantic_service_match",
+        return_value=None,
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert "1-2" in (response.bot_response or "")
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("action_source") == "llm_policy_core"
+    assert meta.get("source") != "reasoning_core"
+    assert meta.get("error_source") != "reasoning_core"
+    llm_policy = meta.get("llm_policy_core", {})
+    assert llm_policy.get("validated") is True
+    assert llm_policy.get("consult_normalized_to_info") is True
+
+
 def test_llm_policy_core_degraded_booking_guard_uses_safe_collect(monkeypatch):
     monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
 
