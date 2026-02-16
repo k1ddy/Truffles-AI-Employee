@@ -3,17 +3,19 @@
 - Название/цель: восстановить вход в Console (`console.truffles.kz`) для Platform Admin, убрав неразрешенный scope `offline_access` из дефолтной конфигурации Keycloak и оставив его только как опциональную настройку через env.
 - Canon refs: `AGENTS.md`, `STATE.md` (NOW: manager inbox bundle добавил `offline_access` в default scope), `docs/SESSION_START_PROMPT.txt`.
 - Invariant: логин через Keycloak должен работать для существующих учетных записей без изменения ролей/прав.
-- Scope: только default scope для Keycloak в `console-web`.
+- Scope: default scope для Keycloak в `console-web` + guard, который удаляет `offline_access` без явного разрешения (`KEYCLOAK_ALLOW_OFFLINE_ACCESS=1`).
 - Out of scope: правки Keycloak/infra, любые изменения RBAC, UX-изменения, e2e/Playwright.
 - Touch-list (файлы/таблицы): `console-web/src/lib/auth.ts`, `STATE.md`.
 - Plan:
   1. Обновить default scope в `console-web/src/lib/auth.ts`: убрать `offline_access`, оставить `openid profile email` и поддержку `KEYCLOAK_SCOPE` как override.
-  2. Прогнать целевой lint для файла.
-  3. Обновить `STATE.md` с фактом локальной правки и статусом deploy (если без прод‑evidence).
-  4. Commit + push + PR.
+  2. Добавить guard: `offline_access` пропускается только если `KEYCLOAK_ALLOW_OFFLINE_ACCESS=1`, иначе удаляется и логируется предупреждение.
+  3. Прогнать целевой lint для файла.
+  4. Обновить `STATE.md` с фактом локальной правки и статусом deploy (если без прод‑evidence).
+  5. Commit + push + PR.
 - DoD:
   - `offline_access` отсутствует в default scope и не ломает конфигурацию провайдера.
   - `KEYCLOAK_SCOPE` продолжает работать как override.
+  - Без `KEYCLOAK_ALLOW_OFFLINE_ACCESS=1` `offline_access` всегда отфильтрован.
   - Локальный lint без ошибок.
 - Checks:
   - `npm --prefix console-web run lint -- --file src/lib/auth.ts`

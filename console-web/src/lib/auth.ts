@@ -59,7 +59,27 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
 
 const SESSION_MAX_AGE_SECONDS = Number(process.env.CONSOLE_SESSION_MAX_AGE_SECONDS ?? 24 * 60 * 60);
 const SESSION_UPDATE_AGE_SECONDS = Number(process.env.CONSOLE_SESSION_UPDATE_AGE_SECONDS ?? 5 * 60);
-const KEYCLOAK_SCOPE = process.env.KEYCLOAK_SCOPE ?? "openid profile email";
+const DEFAULT_KEYCLOAK_SCOPE = "openid profile email";
+const RAW_KEYCLOAK_SCOPE = process.env.KEYCLOAK_SCOPE ?? DEFAULT_KEYCLOAK_SCOPE;
+const KEYCLOAK_ALLOW_OFFLINE_ACCESS = process.env.KEYCLOAK_ALLOW_OFFLINE_ACCESS === "1";
+
+const KEYCLOAK_SCOPE = buildKeycloakScope(RAW_KEYCLOAK_SCOPE, KEYCLOAK_ALLOW_OFFLINE_ACCESS);
+
+function buildKeycloakScope(rawScope: string, allowOfflineAccess: boolean): string {
+    const normalized = rawScope.split(/\s+/).filter(Boolean);
+    const deduped = Array.from(new Set(normalized));
+    const filtered = allowOfflineAccess
+        ? deduped
+        : deduped.filter((scope) => scope !== "offline_access");
+
+    if (!allowOfflineAccess && deduped.includes("offline_access")) {
+        console.warn("Keycloak scope includes offline_access but it is disabled; dropping to avoid OAuth errors.");
+    }
+
+    const required = ["openid", "profile", "email"];
+    const extras = filtered.filter((scope) => !required.includes(scope));
+    return required.concat(extras).join(" ");
+}
 
 export const authOptions: NextAuthOptions = {
     providers: [
