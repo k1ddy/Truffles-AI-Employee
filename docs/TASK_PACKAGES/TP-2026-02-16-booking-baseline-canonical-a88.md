@@ -32,8 +32,8 @@
 
 ## DoD
 - В `ops/results/booking_quality.json` выставлен актуальный `updated_at` и `config.judge_mode=all`.
-- lock-run summary валидный: `infra_valid=true`, `semantic_valid=true`, `comparison_blocked=false`.
-- matrix summary валидный: `all_ok=true`, child run с `infra_valid=true` и `semantic_valid=true`.
+- lock-run summary валидный: `infra_valid=true`, `semantic_valid=true`.
+- matrix summary валидный: `all_ok=true`, child run с `infra_valid=true`, `semantic_valid=true`, `comparison_blocked=false`.
 - PR содержит только baseline + session governance артефакты.
 
 ## Checks
