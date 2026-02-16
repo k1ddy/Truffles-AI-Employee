@@ -198,8 +198,11 @@ test.describe('Owner/Admin Business Control', () => {
         await page.getByTestId('nav-subscription').click();
         await expect(page).toHaveURL(urlPathPattern('/subscription'));
         await expect(page.getByTestId('subscription-title')).toBeVisible();
+        await expect(page.getByTestId('subscription-contract')).toBeVisible();
+        await expect(page.getByTestId('subscription-meters')).toBeVisible();
         await expect(page.getByTestId('subscription-alert')).toBeVisible();
         await expect(page.getByTestId('subscription-forecast-v2')).toBeVisible();
+        await expect(page.getByTestId('subscription-actions')).toBeVisible();
     });
 
     test('should render simple owner settings and explainability surface @smoke', async ({ page }) => {

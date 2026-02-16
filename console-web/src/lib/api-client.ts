@@ -560,6 +560,23 @@ export type SubscriptionEvidenceItem = {
     provider_status?: string | null;
     provider_message_id?: string | null;
 };
+export type SubscriptionPlanDefaults = {
+    plan_name: string;
+    included_messages: number;
+    included_whatsapp_channels: number;
+    source: string;
+};
+export type SubscriptionMeterItem = {
+    key: string;
+    label: string;
+    meter_type: "messages" | "channels" | "addon";
+    included?: number | null;
+    used?: number | null;
+    remaining?: number | null;
+    status: "ok" | "warning" | "limit_reached" | "over_limit" | "not_included" | "included_not_configured" | "unknown";
+    source: string;
+    note?: string | null;
+};
 export type SubscriptionSummaryResponse = {
     generated_at: string;
     period_start: string;
@@ -581,6 +598,13 @@ export type SubscriptionSummaryResponse = {
     quota_alert_message: string;
     overage_policy_message: string;
     over_quota: boolean;
+    payment_status: "pending" | "confirmed" | "rejected" | "unknown";
+    payment_confirmed_at?: string | null;
+    payment_status_source: "onboarding_contract" | "unknown";
+    payment_status_message?: string | null;
+    plan_defaults: SubscriptionPlanDefaults;
+    meters: SubscriptionMeterItem[];
+    recommended_actions: BusinessSummaryAction[];
     evidence: SubscriptionEvidenceItem[];
     metric_meta: Record<string, MetricFactMeta>;
 };
