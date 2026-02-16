@@ -3100,12 +3100,14 @@ def test_booking_info_interrupt_with_expected_reply_type_keeps_info_reply():
 
     policy_handler = {"policy_type": "demo_salon", "truth_gate": _truth_gate}
 
-    with patch("app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp), patch(
+    with patch("app.routers.webhook.decision._current_openai_api_key", return_value="test-key"), patch(
+        "app.routers.webhook._legacy.detect_multi_intent", return_value=intent_decomp
+    ), patch(
         "app.routers.webhook._legacy._get_policy_handler", return_value=policy_handler
     ), patch(
         "app.routers.webhook._legacy.route_dialogue_controller",
         return_value={"ok": False, "error": "skipped"},
-    ), patch(
+    ) as route_controller_mock, patch(
         "app.routers.webhook._legacy.send_bot_response", return_value=True
     ), patch(
         "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
@@ -3138,8 +3140,15 @@ def test_booking_info_interrupt_with_expected_reply_type_keeps_info_reply():
     assert meta.get("action") == "reply"
     assert meta.get("action_source") in {"llm_policy_core", "policy_core", "truth_gate"}
     assert meta.get("tool_action") not in {"calendar.list_slots", "calendar.book_slot"}
+    assert meta.get("expected_reply_blocked_by_info") is True
+    assert meta.get("router_eligible") is True
+    assert meta.get("controller_eligible") is True
+    assert meta.get("router_skipped_reason") == "none"
+    assert meta.get("controller_skipped_reason") == "none"
+    assert meta.get("controller_attempted") is True
     trace = conversation.context.get("decision_trace", [])
     assert isinstance(trace, list)
+    assert route_controller_mock.called is True
     mock_llm.assert_not_called()
 
 
