@@ -59,7 +59,7 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
 
 const SESSION_MAX_AGE_SECONDS = Number(process.env.CONSOLE_SESSION_MAX_AGE_SECONDS ?? 24 * 60 * 60);
 const SESSION_UPDATE_AGE_SECONDS = Number(process.env.CONSOLE_SESSION_UPDATE_AGE_SECONDS ?? 5 * 60);
-const KEYCLOAK_SCOPE = process.env.KEYCLOAK_SCOPE ?? "openid profile email offline_access";
+const KEYCLOAK_SCOPE = process.env.KEYCLOAK_SCOPE ?? "openid profile email";
 
 export const authOptions: NextAuthOptions = {
     providers: [
