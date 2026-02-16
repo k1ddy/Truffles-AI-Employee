@@ -30,12 +30,23 @@ import {
 import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
 
 const NAV_COLLAPSED_STORAGE_KEY = "console:nav_collapsed";
+const OWNER_ADMIN_ADVANCED_NAV_STORAGE_KEY = "console:owner_admin_advanced_nav";
 const AUTH_ERROR_CODES = new Set(["AUTH_REQUIRED", "TOKEN_EXPIRED", "TOKEN_INVALID"]);
 const HEALTH_INCIDENT_UI_STORAGE_KEY = "console:health_incident_ui";
 const HEALTH_INCIDENT_CRITICAL_BACKLOG = 1000;
 const HEALTH_INCIDENT_WARN_BACKLOG = 500;
 const HEALTH_INCIDENT_STALE_WARN_MINUTES = 3;
 const HEALTH_INCIDENT_HIDE_MS = 30 * 60 * 1000;
+const OWNER_ADMIN_PRIMARY_NAV_TEST_IDS = new Set<string>([
+    "nav-cases",
+    "nav-calendar",
+    "nav-ops",
+    "nav-business",
+    "nav-data-trust",
+    "nav-team-performance",
+    "nav-subscription",
+    "nav-settings",
+]);
 
 type SessionAuth = {
     accessToken?: string;
@@ -271,6 +282,13 @@ function findBranchName(branches: BranchSummary[] | undefined, branchId: string 
     }
     const match = branches.find((branch) => branch.id === branchId);
     return match?.name ?? "—";
+}
+
+function isNavItemCurrent(pathname: string, href: string): boolean {
+    if (href === "/") {
+        return pathname === "/";
+    }
+    return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 type HealthIncident = {
@@ -777,9 +795,12 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const canReadOps = canAccessConsole(role, "ops", "read");
     const canReadTenants = canAccessConsole(role, "tenants", "read");
     const ownerAdminView = role === "owner" || role === "admin";
+    const [ownerAdminAdvancedNav, setOwnerAdminAdvancedNav] = useState(
+        () => readBrowserStorage(OWNER_ADMIN_ADVANCED_NAV_STORAGE_KEY) === "1"
+    );
     const navItems = useMemo(
-        () =>
-            NAV_ITEMS.filter((item) => {
+        () => {
+            const allowedItems = NAV_ITEMS.filter((item) => {
                 if (item.section === "settings") {
                     return (
                         canAccessConsole(role, "settings", item.action ?? "read")
@@ -787,8 +808,20 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                     );
                 }
                 return canAccessConsole(role, item.section, item.action ?? "read");
-            }),
-        [role]
+            });
+
+            if (!ownerAdminView || ownerAdminAdvancedNav) {
+                return allowedItems;
+            }
+
+            return allowedItems.filter((item) => {
+                if (OWNER_ADMIN_PRIMARY_NAV_TEST_IDS.has(item.testId)) {
+                    return true;
+                }
+                return isNavItemCurrent(pathname, item.href);
+            });
+        },
+        [ownerAdminAdvancedNav, ownerAdminView, pathname, role]
     );
     const { data: healthData, dataUpdatedAt: healthDataUpdatedAt, isFetching: healthFetching, refetch: refetchHealth } = useQuery({
         queryKey: ["console-health-banner"],
@@ -861,6 +894,14 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     useEffect(() => {
         writeBrowserStorage(NAV_COLLAPSED_STORAGE_KEY, navCollapsed ? "1" : null);
     }, [navCollapsed]);
+
+    useEffect(() => {
+        if (!ownerAdminView) {
+            writeBrowserStorage(OWNER_ADMIN_ADVANCED_NAV_STORAGE_KEY, null);
+            return;
+        }
+        writeBrowserStorage(OWNER_ADMIN_ADVANCED_NAV_STORAGE_KEY, ownerAdminAdvancedNav ? "1" : null);
+    }, [ownerAdminAdvancedNav, ownerAdminView]);
 
     useEffect(() => {
         const hasCompact = Object.keys(healthIncidentUiState.compactByFingerprint).length > 0;
@@ -1093,11 +1134,30 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                             {ROLE_LABELS[role]}
                         </div>
                     )}
+                    {ownerAdminView && !navCollapsed && (
+                        <div className="mt-3 px-2">
+                            <button
+                                type="button"
+                                onClick={() => setOwnerAdminAdvancedNav((prev) => !prev)}
+                                className={`w-full rounded-lg border px-3 py-2 text-left text-xs font-semibold transition ${
+                                    ownerAdminAdvancedNav
+                                        ? "border-primary/40 bg-primary/5 text-primary"
+                                        : "border-border/60 text-muted-foreground hover:bg-muted"
+                                }`}
+                                data-testid="nav-owner-admin-toggle"
+                            >
+                                {ownerAdminAdvancedNav ? "Скрыть расширенное меню" : "Показать расширенное меню"}
+                            </button>
+                            <p className="mt-2 text-[11px] text-muted-foreground">
+                                {ownerAdminAdvancedNav
+                                    ? "Видны технические и редкие разделы."
+                                    : "Сейчас показаны только ключевые разделы для бизнеса."}
+                            </p>
+                        </div>
+                    )}
                     <nav className={`mt-6 flex flex-col gap-2 text-sm font-medium ${navCollapsed ? "items-center" : ""}`}>
                         {navItems.map((item) => {
-                            const isActive = item.href === "/"
-                                ? pathname === "/"
-                                : pathname.startsWith(item.href);
+                            const isActive = isNavItemCurrent(pathname, item.href);
                             return (
                                 <a
                                     key={item.href}

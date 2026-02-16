@@ -46,6 +46,16 @@ function statusChipClass(status?: string | null): string {
     return "bg-emerald-100 text-emerald-800";
 }
 
+function statusChipLabel(status?: string | null): string {
+    if (status === "unhealthy") {
+        return "Требует срочного внимания";
+    }
+    if (status === "degraded") {
+        return "Есть риск задержек";
+    }
+    return "Стабильно";
+}
+
 function actionChipClass(severity: "critical" | "warn" | "info"): string {
     if (severity === "critical") {
         return "bg-red-100 text-red-800";
@@ -65,6 +75,24 @@ function incidentChipClass(severity: "critical" | "warn" | "info"): string {
     }
     return "bg-slate-100 text-slate-700";
 }
+
+function severityLabel(severity: "critical" | "warn" | "info"): string {
+    if (severity === "critical") {
+        return "Срочно";
+    }
+    if (severity === "warn") {
+        return "Важно";
+    }
+    return "Планово";
+}
+
+type BusinessNowStep = {
+    id: string;
+    title: string;
+    summary: string;
+    href: string;
+    severity: "critical" | "warn" | "info";
+};
 
 function formatMetricMeta(meta?: MetricFactMeta): string {
     if (!meta) {
@@ -128,6 +156,61 @@ export default function BusinessPage() {
         ),
         [billingBlockedIncident?.actions],
     );
+
+    const todaySteps = useMemo<BusinessNowStep[]>(() => {
+        if (!data) {
+            return [];
+        }
+        const steps: BusinessNowStep[] = [];
+
+        if (data.outbox_backlog >= 500 || data.outbox_failed_24h >= 30) {
+            steps.push({
+                id: "stabilize_delivery",
+                title: "Стабилизируйте доставку ответов",
+                summary: "Откройте Статус и снизьте pending/failed, чтобы клиенты не ждали.",
+                href: "/ops",
+                severity: data.outbox_backlog >= 1000 || data.outbox_failed_24h >= 100 ? "critical" : "warn",
+            });
+        }
+        if (data.unresolved_cases > 0) {
+            steps.push({
+                id: "clear_open_cases",
+                title: "Разберите открытые заявки",
+                summary: "Проверьте очередь заявок и назначение менеджеров.",
+                href: "/",
+                severity: data.unresolved_cases > 20 ? "critical" : "warn",
+            });
+        }
+        if (data.first_response_p90_seconds !== null && data.first_response_p90_seconds !== undefined && data.first_response_p90_seconds > 900) {
+            steps.push({
+                id: "improve_reply_speed",
+                title: "Ускорьте первый ответ менеджеров",
+                summary: "Откройте показатели команды и примените быстрый профиль.",
+                href: "/business/team-performance",
+                severity: "warn",
+            });
+        }
+        if ((incidentsData?.summary.critical ?? 0) > 0) {
+            steps.push({
+                id: "review_incidents",
+                title: "Проверьте критичные инциденты",
+                summary: "Сверьте причины и запустите предложенные действия.",
+                href: "/business",
+                severity: "critical",
+            });
+        }
+        if (!steps.length) {
+            steps.push({
+                id: "daily_control",
+                title: "Ситуация стабильная",
+                summary: "Держите ежедневный контроль: заявки, скорость ответа, лимиты.",
+                href: "/subscription",
+                severity: "info",
+            });
+        }
+
+        return steps.slice(0, 3);
+    }, [data, incidentsData?.summary.critical]);
 
     if (!session) {
         return (
@@ -211,9 +294,10 @@ export default function BusinessPage() {
                     <div>
                         <p className="text-sm text-muted-foreground">Статус бизнеса</p>
                         <p className="mt-1 text-base font-semibold text-foreground">{data.status_label}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Технический статус: {data.status}</p>
                     </div>
                     <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusChipClass(data.status)}`} data-testid="business-status-chip">
-                        {data.status}
+                        {statusChipLabel(data.status)}
                     </span>
                 </div>
             </section>
@@ -253,6 +337,36 @@ export default function BusinessPage() {
                     </div>
                 </section>
             )}
+
+            <section className="mb-4 rounded-xl border border-border/60 bg-card p-4" data-testid="business-today-plan">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h2 className="text-lg font-semibold">Что делать сейчас</h2>
+                        <p className="text-sm text-muted-foreground">Короткий план для владельца: максимум 3 шага.</p>
+                    </div>
+                    <span className="text-xs text-muted-foreground">{todaySteps.length} шага</span>
+                </div>
+                <div className="space-y-2">
+                    {todaySteps.map((step, index) => (
+                        <article
+                            key={step.id}
+                            className="rounded-lg border border-border/60 bg-muted/20 p-3"
+                            data-testid={`business-today-step-${step.id}`}
+                        >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-sm font-semibold text-foreground">{index + 1}. {step.title}</p>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${actionChipClass(step.severity)}`}>
+                                    {severityLabel(step.severity)}
+                                </span>
+                            </div>
+                            <p className="mt-1 text-sm text-muted-foreground">{step.summary}</p>
+                            <div className="mt-2">
+                                <Link href={step.href} className="btn-ghost text-xs">Открыть шаг</Link>
+                            </div>
+                        </article>
+                    ))}
+                </div>
+            </section>
 
             <section className="mb-4 rounded-xl border border-border/60 bg-card p-4" data-testid="business-incidents-card">
                 <div className="mb-3 flex items-center justify-between">
@@ -340,23 +454,23 @@ export default function BusinessPage() {
 
             <section className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2" data-testid="business-wave2-shortcuts">
                 <article className="rounded-xl border border-border/60 bg-card p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Data Trust</p>
-                    <h2 className="mt-1 text-lg font-semibold">Надежность данных</h2>
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Контроль качества</p>
+                    <h2 className="mt-1 text-lg font-semibold">Надежность данных и рисков</h2>
                     <p className="mt-1 text-sm text-muted-foreground">
                         Проверка полноты quality-метрик, свежести знаний и критичных audit-событий.
                     </p>
                     <div className="mt-3">
-                        <Link href="/business/data-trust" className="btn-ghost">Открыть Data Trust</Link>
+                        <Link href="/business/data-trust" className="btn-ghost">Проверить качество данных</Link>
                     </div>
                 </article>
                 <article className="rounded-xl border border-border/60 bg-card p-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Team Performance</p>
-                    <h2 className="mt-1 text-lg font-semibold">Эффективность команды</h2>
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Работа менеджеров</p>
+                    <h2 className="mt-1 text-lg font-semibold">Скорость и нагрузка команды</h2>
                     <p className="mt-1 text-sm text-muted-foreground">
                         Контроль скорости первого ответа, просроченных заявок и баланса нагрузки менеджеров.
                     </p>
                     <div className="mt-3">
-                        <Link href="/business/team-performance" className="btn-ghost">Открыть Team KPI</Link>
+                        <Link href="/business/team-performance" className="btn-ghost">Открыть показатели команды</Link>
                     </div>
                 </article>
             </section>

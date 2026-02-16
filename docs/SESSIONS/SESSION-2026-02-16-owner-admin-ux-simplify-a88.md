@@ -1,0 +1,22 @@
+# SESSION 2026-02-16-owner-admin-ux-simplify-a88 — Session 2026-02-16-owner-admin-ux-simplify-a88
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-16-owner-admin-ux-simplify-a88.md
+- branch: feat/2026-02-16-owner-admin-ux-simplify-a88
+- worktree: /home/zhan/worktrees/2026-02-16-owner-admin-ux-simplify-a88
+- base_ref: origin/main
+- scope: Owner/Admin business-first UX simplification (reduced nav + clear business action plan + plain-language settings copy).
+- done:
+  - Added owner/admin default reduced navigation with explicit advanced toggle in `ConsoleShell`.
+  - Added `/business` block `Что делать сейчас` with top-3 prioritized steps.
+  - Simplified settings business copy on primary settings surface.
+  - Updated owner/admin smoke spec for toggle and updated shortcut labels.
+  - Updated UX backlog + report + STATE facts for this wave.
+- next:
+  - Run session gate and close session.
+  - Commit and open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-16-owner-admin-ux-simplify-a88.md
+  - docs/REPORTS/2026-02-16-owner-admin-ux-simplify-v1.md
+- last_updated: 2026-02-16

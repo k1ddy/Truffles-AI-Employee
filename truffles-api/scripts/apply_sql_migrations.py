@@ -25,6 +25,15 @@ LEGACY_MARKER_TABLES = frozenset(
         "messages",
     }
 )
+AUTOCOMMIT_SQL_MARKERS = (
+    "CREATE INDEX CONCURRENTLY",
+    "DROP INDEX CONCURRENTLY",
+    "REINDEX INDEX CONCURRENTLY",
+    "REINDEX TABLE CONCURRENTLY",
+    "REINDEX SCHEMA CONCURRENTLY",
+    "REINDEX DATABASE CONCURRENTLY",
+    "REFRESH MATERIALIZED VIEW CONCURRENTLY",
+)
 
 
 @dataclass(frozen=True)
@@ -164,9 +173,38 @@ def _bootstrap_legacy(conn, migrations: Sequence[MigrationSpec]) -> None:
     conn.commit()
 
 
+def migration_requires_autocommit(sql: str) -> bool:
+    normalized = " ".join(sql.upper().split())
+    return any(marker in normalized for marker in AUTOCOMMIT_SQL_MARKERS)
+
+
+def _split_sql_statements(sql: str) -> List[str]:
+    statements = [part.strip() for part in sql.split(";")]
+    return [statement for statement in statements if statement]
+
+
+def _execute_migration_sql(conn, sql: str) -> None:
+    if not migration_requires_autocommit(sql):
+        with conn.cursor() as cur:
+            cur.execute(sql)
+        return
+
+    # psycopg2 refuses autocommit toggle while a transaction is open.
+    # apply_migrations does read queries before this point, so clear tx first.
+    conn.rollback()
+    previous_autocommit = conn.autocommit
+    try:
+        conn.autocommit = True
+        for statement in _split_sql_statements(sql):
+            with conn.cursor() as cur:
+                cur.execute(statement)
+    finally:
+        conn.autocommit = previous_autocommit
+
+
 def _apply_migration(conn, migration: MigrationSpec) -> None:
+    _execute_migration_sql(conn, migration.sql)
     with conn.cursor() as cur:
-        cur.execute(migration.sql)
         cur.execute(
             f"INSERT INTO {TRACKING_TABLE} (name, checksum) VALUES (%s, %s)",
             (migration.name, migration.checksum),

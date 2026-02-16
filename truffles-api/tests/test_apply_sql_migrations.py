@@ -16,6 +16,9 @@ MigrationSpec = MODULE.MigrationSpec
 build_migration_plan = MODULE.build_migration_plan
 decide_bootstrap_action = MODULE.decide_bootstrap_action
 discover_migration_files = MODULE.discover_migration_files
+migration_requires_autocommit = MODULE.migration_requires_autocommit
+split_sql_statements = MODULE._split_sql_statements
+apply_migration = MODULE._apply_migration
 TRACKING_TABLE = MODULE.TRACKING_TABLE
 
 
@@ -134,3 +137,108 @@ def test_decide_bootstrap_action_legacy_bootstrap_without_marker_check():
         bootstrap_mode="legacy",
     )
     assert action == "bootstrap"
+
+
+def test_migration_requires_autocommit_for_concurrent_index():
+    sql = "CREATE INDEX CONCURRENTLY idx_test ON messages (created_at);"
+    assert migration_requires_autocommit(sql) is True
+
+
+def test_migration_requires_autocommit_false_for_regular_sql():
+    sql = "CREATE TABLE sample(id INT);"
+    assert migration_requires_autocommit(sql) is False
+
+
+def test_split_sql_statements_ignores_empty_chunks():
+    sql = "SELECT 1;; SELECT 2;  "
+    assert split_sql_statements(sql) == ["SELECT 1", "SELECT 2"]
+
+
+class _FakeCursor:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, sql, params=None):
+        self.conn.executed.append((sql, params, self.conn.autocommit))
+
+
+class _FakeConn:
+    def __init__(self):
+        self.autocommit = False
+        self.executed = []
+        self.commits = 0
+        self.rollbacks = 0
+
+    def cursor(self):
+        return _FakeCursor(self)
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+def test_apply_migration_uses_autocommit_for_concurrent_sql():
+    conn = _FakeConn()
+    migration = MigrationSpec(
+        name="030_idx.sql",
+        path=Path("030_idx.sql"),
+        checksum="abc",
+        sql="CREATE INDEX CONCURRENTLY idx_test ON messages (created_at);",
+    )
+
+    apply_migration(conn, migration)
+
+    assert conn.commits == 1
+    assert conn.rollbacks == 1
+    assert conn.autocommit is False
+    assert conn.executed[0][2] is True
+    assert "CREATE INDEX CONCURRENTLY" in conn.executed[0][0]
+    assert conn.executed[1][2] is False
+    assert conn.executed[1][1] == ("030_idx.sql", "abc")
+
+
+def test_apply_migration_keeps_regular_sql_in_transaction():
+    conn = _FakeConn()
+    migration = MigrationSpec(
+        name="001_create.sql",
+        path=Path("001_create.sql"),
+        checksum="xyz",
+        sql="CREATE TABLE sample(id INT);",
+    )
+
+    apply_migration(conn, migration)
+
+    assert conn.commits == 1
+    assert conn.rollbacks == 0
+    assert conn.autocommit is False
+    assert conn.executed[0][2] is False
+    assert "CREATE TABLE sample" in conn.executed[0][0]
+    assert conn.executed[1][2] is False
+
+
+def test_apply_migration_splits_concurrent_statements():
+    conn = _FakeConn()
+    migration = MigrationSpec(
+        name="030_idx.sql",
+        path=Path("030_idx.sql"),
+        checksum="abc",
+        sql=(
+            "CREATE INDEX CONCURRENTLY idx_one ON messages (created_at);"
+            "CREATE INDEX CONCURRENTLY idx_two ON messages (conversation_id);"
+        ),
+    )
+
+    apply_migration(conn, migration)
+
+    executed_sql = [entry[0] for entry in conn.executed]
+    assert "CREATE INDEX CONCURRENTLY idx_one ON messages (created_at)" in executed_sql
+    assert "CREATE INDEX CONCURRENTLY idx_two ON messages (conversation_id)" in executed_sql
+    assert conn.commits == 1

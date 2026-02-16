@@ -532,9 +532,9 @@ export default function SettingsPage() {
                         <div className="rounded-xl border border-border/60 bg-card p-5" data-testid="settings-simple-card">
                             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                                 <div>
-                                    <h2 className="text-lg font-semibold">SLA и эскалация</h2>
+                                    <h2 className="text-lg font-semibold">Скорость ответа клиенту</h2>
                                     <p className="text-sm text-muted-foreground">
-                                        Базовые бизнес-поля: первое/второе напоминание и таймаут эскалации.
+                                        Простой режим: когда напомнить менеджеру и когда включать эскалацию.
                                     </p>
                                 </div>
                                 {!canWriteSettings && (
@@ -545,7 +545,7 @@ export default function SettingsPage() {
                             </div>
                             <div className="mb-4 rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="settings-goal-mode">
                                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                                    Цель бизнеса (быстрое действие)
+                                    Выберите цель за 1 клик
                                 </p>
                                 <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                                     {BUSINESS_GOALS.map((goal) => (
@@ -613,7 +613,7 @@ export default function SettingsPage() {
                                         </div>
                                     ) : (
                                         <p className="text-xs text-muted-foreground">
-                                            После применения цели здесь появится server operation ID и доступ к impact/rollback.
+                                            После применения цели здесь появится результат и кнопки проверки/отката.
                                         </p>
                                     )}
                                 </div>
@@ -694,7 +694,7 @@ export default function SettingsPage() {
 
                             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                                 <p className="text-xs text-muted-foreground" data-testid="settings-save-hint">
-                                    Сохраняется в `client_settings` и сразу влияет на SLA-процессы.
+                                    Сохраняется сразу и влияет на скорость ответа в новых диалогах.
                                 </p>
                                 <button
                                     type="button"
@@ -711,7 +711,7 @@ export default function SettingsPage() {
                         </div>
 
                         <div className="rounded-xl border border-border/60 bg-card p-5" data-testid="settings-after-save">
-                            <h2 className="text-lg font-semibold">Что будет после сохранения</h2>
+                            <h2 className="text-lg font-semibold">Что изменится после сохранения</h2>
                             <div className="mt-4 space-y-2">
                                 <p className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-sm text-foreground">
                                     1-е напоминание ({simpleSettings.reminder1 || "—"} мин): менеджер быстрее получит сигнал о новой заявке.
