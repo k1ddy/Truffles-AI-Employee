@@ -1,0 +1,22 @@
+# SESSION 2026-02-16-booking-baseline-canonical-a88 — Booking baseline canonical refresh
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-16-booking-baseline-canonical-a88.md
+- branch: chore/2026-02-16-booking-baseline-canonical-a88
+- worktree: /home/zhan/truffles-main
+- base_ref: origin/main
+- scope: Обновить canonical booking baseline по валидному lock-run и подтвердить его matrix replay на тех же сценариях.
+- done:
+  - Выполнен lock-run `booking-lock-20260216-a88-fast5` с `infra_valid=true` и `semantic_valid=true`.
+  - Обновлен canonical baseline `ops/results/booking_quality.json`.
+  - Выполнен matrix run `booking-matrix-20260216-a88`; `all_ok=true`.
+- next:
+  - Закоммитить baseline+session артефакты.
+  - Открыть PR в `main`.
+- evidence:
+  - /tmp/booking_quality/booking-lock-20260216-a88-fast5/summary.json
+  - /tmp/booking_quality/booking-matrix-20260216-a88/matrix_summary.json
+  - /tmp/booking_quality/booking-matrix-20260216-a88/booking-matrix-20260216-a88-01-demo_salon/summary.json
+  - ops/results/booking_quality.json
+- last_updated: 2026-02-16
