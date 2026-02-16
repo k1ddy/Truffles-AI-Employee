@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
 import type { Case, Message } from "@/types";
@@ -22,18 +23,41 @@ async function fetchMessagesPage(
     return response.data;
 }
 
+function useDocumentVisible(): boolean {
+    const [visible, setVisible] = useState(true);
+
+    useEffect(() => {
+        if (typeof document === "undefined") {
+            return;
+        }
+        const update = () => {
+            setVisible(!document.hidden);
+        };
+        update();
+        document.addEventListener("visibilitychange", update);
+        return () => {
+            document.removeEventListener("visibilitychange", update);
+        };
+    }, []);
+
+    return visible;
+}
+
 export function useCaseData(caseId?: string | null) {
     const enabled = Boolean(caseId);
+    const documentVisible = useDocumentVisible();
+    const casePollMs = 30000;
 
     const caseQuery = useQuery({
         queryKey: ["case", caseId],
         queryFn: () => fetchCase(caseId as string),
         enabled,
-        refetchInterval: 10000,
-        refetchIntervalInBackground: true,
+        refetchInterval: documentVisible ? casePollMs : false,
+        refetchIntervalInBackground: false,
         refetchOnWindowFocus: true,
     });
 
+    const messagesPollMs = caseQuery.data?.status === "active" ? 8000 : 15000;
     const messagesQuery = useInfiniteQuery({
         queryKey: ["messages", caseId],
         queryFn: ({ pageParam }) =>
@@ -45,8 +69,8 @@ export function useCaseData(caseId?: string | null) {
         initialPageParam: undefined as string | undefined,
         getNextPageParam: (lastPage) =>
             lastPage.has_more ? (lastPage.cursor ?? undefined) : undefined,
-        refetchInterval: 5000,
-        refetchIntervalInBackground: true,
+        refetchInterval: documentVisible ? messagesPollMs : false,
+        refetchIntervalInBackground: false,
         refetchOnWindowFocus: true,
     });
     const messages = (() => {

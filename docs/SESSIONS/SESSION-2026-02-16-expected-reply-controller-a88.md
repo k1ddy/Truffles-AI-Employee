@@ -1,6 +1,6 @@
 # SESSION 2026-02-16-expected-reply-controller-a88 — expected_reply + controller taxonomy
 
-- status: done
+- status: active
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-16-expected-reply-controller-a88.md
 - branch: feat/2026-02-16-expected-reply-controller-a88

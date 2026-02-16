@@ -98,6 +98,49 @@ const NAV_ITEMS: NavItem[] = [
     { label: "Настройки", href: "/settings", section: "settings", action: "read", testId: "nav-settings" },
 ];
 
+const CONTEXT_AWARE_QUERY_KEY_PREFIXES = [
+    "admin-",
+    "agents",
+    "audit",
+    "bookings",
+    "business-",
+    "calendar-",
+    "case",
+    "cases",
+    "company-workspace-",
+    "console-health-banner",
+    "console-me",
+    "health",
+    "inbox-macros",
+    "insights-",
+    "integrations-",
+    "knowledge-",
+    "learning-candidates",
+    "membership-",
+    "messages",
+    "metrics-daily",
+    "onboarding-",
+    "ops-",
+    "provider-lifecycle",
+    "settings",
+    "slots",
+    "specialists",
+    "subscription-",
+    "team-",
+    "telegram-health",
+    "tenants-",
+] as const;
+
+function isContextAwareQueryKey(queryKey: readonly unknown[]): boolean {
+    const head = queryKey[0];
+    if (typeof head !== "string") {
+        return false;
+    }
+    return CONTEXT_AWARE_QUERY_KEY_PREFIXES.some((prefix) =>
+        head === prefix || head.startsWith(prefix)
+    );
+}
+
 const ROLE_LABELS: Record<ConsoleRole, string> = {
     platform_admin: "Платформа: админ",
     owner: "Owner",
@@ -782,6 +825,12 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const healthIncidentHiddenUntil = healthIncidentFingerprint
         ? healthIncidentUiState.hiddenUntilByFingerprint[healthIncidentFingerprint] ?? 0
         : 0;
+
+    const invalidateContextAwareQueries = async () => {
+        await queryClient.invalidateQueries({
+            predicate: (query) => isContextAwareQueryKey(query.queryKey),
+        });
+    };
     const healthIncidentHidden = !!healthIncidentFingerprint && healthIncidentHiddenUntil > Date.now();
 
     useEffect(() => {
@@ -870,7 +919,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         try {
             setConsoleCompanyContext(companyId);
             await refetch();
-            queryClient.invalidateQueries();
+            await invalidateContextAwareQueries();
             setContextNotice("Контекст применён");
         } catch {
             toast.error("Не удалось обновить контекст");
@@ -888,7 +937,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             const selectedClientCompanyId = visibleClients.find((client) => client.id === clientId)?.company_id;
             setConsoleClientContext(clientId, selectedClientCompanyId ?? companyId ?? null);
             await refetch();
-            queryClient.invalidateQueries();
+            await invalidateContextAwareQueries();
             setContextNotice("Контекст применён");
         } catch {
             toast.error("Не удалось обновить контекст");
@@ -905,7 +954,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         try {
             setConsoleBranchContext(branchId);
             await refetch();
-            queryClient.invalidateQueries();
+            await invalidateContextAwareQueries();
             setContextNotice("Контекст применён");
         } catch {
             toast.error("Не удалось обновить контекст");
@@ -937,7 +986,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         try {
             setConsoleBranchContext(nextBranchId);
             await refetch();
-            queryClient.invalidateQueries();
+            await invalidateContextAwareQueries();
             setContextNotice("Контекст применён");
         } catch {
             toast.error("Не удалось обновить контекст");
