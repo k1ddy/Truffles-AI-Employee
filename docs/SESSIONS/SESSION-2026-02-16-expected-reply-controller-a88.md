@@ -1,12 +1,12 @@
 # SESSION 2026-02-16-expected-reply-controller-a88 — expected_reply + controller taxonomy
 
-- status: done
+- status: active
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-16-expected-reply-controller-a88.md
 - branch: feat/2026-02-16-expected-reply-controller-a88
 - worktree: /home/zhan/truffles-main
 - base_ref: origin/main
-- scope: TP#2 and TP#3 completion on fixed scenarios (`expected_reply_deferred` compatibility + controller observability in non-gated policy-tool path).
+- scope: TP#2/TP#3 completion on fixed scenarios (`expected_reply_deferred` compatibility + controller observability in non-gated policy-tool path) + follow-up Console Plane P0 latency/remediation package.
 - done:
   - TP#2/TP#3 delivered with replay evidence and decision_meta contracts
   - `ops/diagnose.py`: added compat counters `expected_reply_deferred` + `expected_reply_blocked`; controller stage now trusts `controller_eligible` and records non-eligible reasons without overcount from non-gated tool paths.
@@ -20,11 +20,18 @@
     - `expected_reply_deferred=0` (DoD `<=20` satisfied)
     - `controller_eligible=98`, `controller_non_eligible=8`, `skip_reasons={'policy_core_tool': 29, 'not_run': 8}`
     - `infra_valid=true`; `semantic_valid=false` only because baseline comparison blocked (`baseline_non_canonical:judge_mode_off`), no threshold breaches.
+  - Console Plane P0-2/P0-3 wave delivered in same branch: inbox polling-budget + scoped invalidation + `/cases` count-path optimization, with before/after SQL evidence (`p50 -35.4%`, `p95 -26.4%`).
+  - Console Plane P0-1 follow-up delivered: `/admin/health/check` cache/timeout guard + grouped outbox query, with targeted tests (`test_admin_health_cache.py`) and local replay stats (`p50 3.533ms`, `p95 4.061ms` on cached poll window).
+  - PR opened: https://github.com/k1ddy/Truffles-AI-Employee/pull/706.
 - next:
-  - Build canonical judge-enabled baseline to unblock regression comparison.
+  - Execute dedicated DB index wave for `/cases` hot path from `docs/TASK_PACKAGES/TP-2026-02-16-console-cases-index-wave-a88.md`.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-16-expected-reply-controller-a88.md
+  - docs/TASK_PACKAGES/TP-2026-02-16-console-plane-p0-2-p0-3-a1.md
+  - docs/TASK_PACKAGES/TP-2026-02-16-console-cases-index-wave-a88.md
+  - docs/REPORTS/2026-02-16-console-plane-perf-baseline-v1.md
   - /tmp/booking_quality/a88-replay-local-20260216/summary.json
   - /tmp/booking_quality/a88-replay-local-20260216/brief.md
   - /tmp/booking_quality/a88-replay-local-20260216/responses.jsonl
+  - /tmp/console_perf_baseline_20260216/local_admin_health_after_stats.txt
 - last_updated: 2026-02-16

@@ -123,6 +123,7 @@ export default function CaseList({
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
     const [filtersCollapsed, setFiltersCollapsed] = useState(false);
     const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+    const [documentVisible, setDocumentVisible] = useState(true);
     const isCompact = variant === "compact";
     const filtersCompact = isCompact && !!selectedCaseId;
     const headingLabel = isCompact ? "Очередь" : "Заявки";
@@ -167,6 +168,20 @@ export default function CaseList({
         return () => clearTimeout(handle);
     }, [searchValue]);
 
+    useEffect(() => {
+        if (typeof document === "undefined") {
+            return;
+        }
+        const updateVisibility = () => {
+            setDocumentVisible(!document.hidden);
+        };
+        updateVisibility();
+        document.addEventListener("visibilitychange", updateVisibility);
+        return () => {
+            document.removeEventListener("visibilitychange", updateVisibility);
+        };
+    }, []);
+
     // Check if we have a valid token
     const hasToken = !!(session as { accessToken?: string } | null)?.accessToken;
 
@@ -197,6 +212,7 @@ export default function CaseList({
     const autoRefreshButtonClass = autoRefreshEnabled
         ? "text-emerald-700 hover:text-emerald-900"
         : "text-muted-foreground hover:text-foreground";
+    const refreshIntervalMs = selectedCaseId ? 15000 : 10000;
     const filterContainerClass = `flex flex-col border border-border/60 rounded-lg ${
         isTight ? "gap-2 p-2" : "gap-3 p-3"
     } ${isCompact ? "sticky top-0 z-10 bg-card/95 backdrop-blur" : "bg-muted"}`;
@@ -276,7 +292,7 @@ export default function CaseList({
             }
         },
         enabled: hasToken && stateReady,
-        refetchInterval: autoRefreshEnabled ? 10000 : false, // Auto-refresh every 10 seconds
+        refetchInterval: autoRefreshEnabled && documentVisible ? refreshIntervalMs : false,
         refetchIntervalInBackground: false, // Only refresh when tab is active
     });
     const lastUpdatedTime = dataUpdatedAt
