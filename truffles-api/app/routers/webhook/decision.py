@@ -3453,6 +3453,19 @@ TOOL_VERIFIER_STRICT_DECISION_ACTIONS = {
     "catalog.location",
     "catalog.portfolio",
 }
+TOOL_VERIFIER_SUCCESS_DECISIONS: dict[str, set[str]] = {
+    # catalog.service_query can legitimately return truth/info fallbacks while still being a successful tool outcome.
+    "catalog.service_query": {
+        "ok",
+        "promotions",
+        "duration",
+        "truth_fallback",
+        "presence_fallback",
+        "price_item_fallback",
+        "not_found_fallback",
+        "service_not_found",
+    },
+}
 TOOL_VERIFIER_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "calendar.book_slot": ("service_query", "start_at"),
     "calendar.reschedule": ("appointment_id", "start_at"),
@@ -3500,9 +3513,10 @@ def _detect_tool_contract_error(
         return "tool_decision_missing"
     enforce_decision_match = tool_action in TOOL_VERIFIER_STRICT_DECISION_ACTIONS
     if enforce_decision_match:
-        if tool_ok and tool_decision != "ok":
+        allowed_success_decisions = TOOL_VERIFIER_SUCCESS_DECISIONS.get(tool_action or "", {"ok"})
+        if tool_ok and tool_decision not in allowed_success_decisions:
             return "tool_decision_mismatch"
-        if not tool_ok and tool_decision == "ok":
+        if not tool_ok and tool_decision in allowed_success_decisions:
             return "tool_decision_mismatch"
     if tool_ok and not (isinstance(response_text, str) and response_text.strip()):
         return "tool_response_missing"

@@ -10329,6 +10329,7 @@ def test_llm_policy_core_catalog_service_reply_normalized_to_booking_prompt(monk
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("action") == "booking_prompt"
     assert meta.get("intent") == "booking"
+    assert meta.get("tool_contract_error") != "tool_decision_mismatch"
 
 
 def test_llm_policy_core_catalog_service_reply_normalized_to_booking_prompt_without_existing_booking_context(
@@ -10631,6 +10632,7 @@ def test_llm_policy_core_catalog_service_reply_keeps_info_answer_for_info_query(
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("action") == "reply"
     assert meta.get("intent") == "catalog.service_query"
+    assert meta.get("tool_contract_error") != "tool_decision_mismatch"
 
 
 def test_llm_policy_core_catalog_service_info_followup_uses_time_after_fact_answer(monkeypatch):
