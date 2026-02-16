@@ -478,6 +478,8 @@ jobs:
       KEYCLOAK_CLIENT_SECRET: ${{ secrets.CONSOLE_KEYCLOAK_CLIENT_SECRET }}
       KEYCLOAK_USERNAME: ${{ secrets.CONSOLE_KEYCLOAK_USERNAME }}
       KEYCLOAK_PASSWORD: ${{ secrets.CONSOLE_KEYCLOAK_PASSWORD }}
+      E2E_USERNAME: ${{ secrets.CONSOLE_E2E_USERNAME }}
+      E2E_PASSWORD: ${{ secrets.CONSOLE_E2E_PASSWORD }}
       SCHEMATHESIS_FALLBACK_CLIENT_ID: ${{ secrets.CONSOLE_SCHEMATHESIS_CLIENT_ID }}
       SCHEMATHESIS_FALLBACK_BRANCH_ID: ${{ secrets.CONSOLE_SCHEMATHESIS_BRANCH_ID }}
     steps:
@@ -984,7 +986,7 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [ -n "${KEYCLOAK_USERNAME}" ] && [ -n "${KEYCLOAK_PASSWORD}" ] && [ -n "${KEYCLOAK_CLIENT_SECRET}" ]; then
+          if [ -n "${KEYCLOAK_CLIENT_SECRET}" ] && { { [ -n "${KEYCLOAK_USERNAME}" ] && [ -n "${KEYCLOAK_PASSWORD}" ]; } || { [ -n "${E2E_USERNAME}" ] && [ -n "${E2E_PASSWORD}" ]; }; }; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -1003,7 +1005,9 @@ jobs:
 
       - name: Use pre-provisioned token
         if: steps.guard.outputs.skip != 'true' && env.CONSOLE_API_TOKEN != ''
-        run: echo "SCHEMATHESIS_TOKEN=${CONSOLE_API_TOKEN}" >> $GITHUB_ENV
+        run: |
+          echo "SCHEMATHESIS_TOKEN=${CONSOLE_API_TOKEN}" >> $GITHUB_ENV
+          echo "SCHEMATHESIS_TOKEN_SOURCE=preprovisioned" >> $GITHUB_ENV
 
       - name: Fetch console token
         if: steps.guard.outputs.skip != 'true' && env.CONSOLE_API_TOKEN == ''
@@ -1011,24 +1015,88 @@ jobs:
           python - <<'PY'
           import json
           import os
+          import urllib.error
           import urllib.parse
           import urllib.request
 
-          data = urllib.parse.urlencode({
-              "grant_type": "password",
-              "client_id": os.environ["KEYCLOAK_CLIENT_ID"],
-              "client_secret": os.environ["KEYCLOAK_CLIENT_SECRET"],
-              "username": os.environ["KEYCLOAK_USERNAME"],
-              "password": os.environ["KEYCLOAK_PASSWORD"],
-              "scope": "openid",
-          }).encode()
+          token_url = os.environ["KEYCLOAK_TOKEN_URL"]
+          client_id = os.environ["KEYCLOAK_CLIENT_ID"]
+          client_secret = os.environ["KEYCLOAK_CLIENT_SECRET"]
+          me_url = "https://api.truffles.kz/console/v1/me"
 
-          req = urllib.request.Request(os.environ["KEYCLOAK_TOKEN_URL"], data=data, method="POST")
-          with urllib.request.urlopen(req) as resp:
-              token = json.load(resp)["access_token"]
-          print(f"::add-mask::{token}")
+          def fetch_token(username: str, password: str) -> str:
+              payload = urllib.parse.urlencode(
+                  {
+                      "grant_type": "password",
+                      "client_id": client_id,
+                      "client_secret": client_secret,
+                      "username": username,
+                      "password": password,
+                      "scope": "openid",
+                  }
+              ).encode()
+              req = urllib.request.Request(token_url, data=payload, method="POST")
+              with urllib.request.urlopen(req, timeout=10) as resp:
+                  parsed = json.load(resp)
+              token = parsed.get("access_token")
+              if not token:
+                  raise RuntimeError("token response missing access_token")
+              return token
+
+          def probe_me(token: str) -> int:
+              req = urllib.request.Request(
+                  me_url,
+                  headers={"Authorization": f"Bearer {token}"},
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=10) as resp:
+                      resp.read()
+                  return 200
+              except urllib.error.HTTPError as exc:
+                  return int(exc.code)
+              except Exception:
+                  return 0
+
+          candidates = []
+          primary_username = os.environ.get("KEYCLOAK_USERNAME", "").strip()
+          primary_password = os.environ.get("KEYCLOAK_PASSWORD", "").strip()
+          if primary_username and primary_password:
+              candidates.append(("keycloak_primary", primary_username, primary_password))
+
+          e2e_username = os.environ.get("E2E_USERNAME", "").strip()
+          e2e_password = os.environ.get("E2E_PASSWORD", "").strip()
+          if e2e_username and e2e_password and (
+              e2e_username != primary_username or e2e_password != primary_password
+          ):
+              candidates.append(("e2e_fallback", e2e_username, e2e_password))
+
+          selected = None
+          errors = []
+
+          for source, username, password in candidates:
+              try:
+                  token = fetch_token(username, password)
+              except Exception as exc:
+                  errors.append(f"{source}: token_fetch_failed ({exc})")
+                  continue
+              status = probe_me(token)
+              print(f"token source={source} /me status={status or 'connection_error'}")
+              print(f"::add-mask::{token}")
+              if status == 200:
+                  selected = (token, source)
+                  break
+              if selected is None:
+                  selected = (token, source)
+              errors.append(f"{source}: me_status={status or 'connection_error'}")
+
+          if selected is None:
+              details = "; ".join(errors) if errors else "no credential candidates"
+              raise SystemExit(f"Console contract preflight failed: unable to fetch Keycloak token ({details})")
+
+          token, source = selected
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
               env_file.write(f"SCHEMATHESIS_TOKEN={token}\\n")
+              env_file.write(f"SCHEMATHESIS_TOKEN_SOURCE={source}\\n")
           PY
 
       - name: Resolve console selection headers
@@ -1042,6 +1110,7 @@ jobs:
           token = os.environ["SCHEMATHESIS_TOKEN"]
           fallback_client_id = os.environ.get("SCHEMATHESIS_FALLBACK_CLIENT_ID", "").strip()
           fallback_branch_id = os.environ.get("SCHEMATHESIS_FALLBACK_BRANCH_ID", "").strip()
+          token_source = os.environ.get("SCHEMATHESIS_TOKEN_SOURCE", "unknown").strip()
           req = urllib.request.Request(
               "https://api.truffles.kz/console/v1/me",
               headers={"Authorization": f"Bearer {token}"},
@@ -1062,7 +1131,8 @@ jobs:
               raise SystemExit(
                   "Console contract preflight failed: unable to resolve X-Client-Id and X-Branch-Id. "
                   "Fix /me authorization for SCHEMATHESIS_TOKEN or set "
-                  "CONSOLE_SCHEMATHESIS_CLIENT_ID and CONSOLE_SCHEMATHESIS_BRANCH_ID secrets."
+                  "CONSOLE_SCHEMATHESIS_CLIENT_ID and CONSOLE_SCHEMATHESIS_BRANCH_ID secrets. "
+                  f"token_source={token_source}"
               )
 
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:

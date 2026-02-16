@@ -1,0 +1,25 @@
+# SESSION 2026-02-16-console-contract-live-auth-fallback-a88 — console-contract-live auth fallback
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-16-console-contract-live-auth-fallback-a88.md
+- branch: fix/2026-02-16-console-contract-live-auth-fallback-a88
+- worktree: /tmp/fix-console-contract-live-1771283493
+- base_ref: origin/main
+- scope: Fix main CI `console-contract-live` preflight by selecting a working token source (`KEYCLOAK_*` primary, `CONSOLE_E2E_*` fallback).
+- done:
+  - Added `E2E_USERNAME` / `E2E_PASSWORD` env to `console-contract-live`.
+  - Hardened guard: job runs if either primary keycloak creds or e2e creds exist (with client secret).
+  - `Fetch console token` now tries multiple credential sources and probes `/console/v1/me`.
+  - Added `SCHEMATHESIS_TOKEN_SOURCE` to diagnostics and preflight error context.
+  - Local checks:
+    - YAML parse OK (`yaml.safe_load`)
+    - guard bash truth table OK (expected true/false combinations)
+- next:
+  - Push branch and open PR.
+  - Verify `console-contract-live` green on CI.
+- evidence:
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22078873597
+  - .github/workflows/ci.yml
+  - docs/TASK_PACKAGES/TP-2026-02-16-console-contract-live-auth-fallback-a88.md
+- last_updated: 2026-02-16T22:34:00Z
