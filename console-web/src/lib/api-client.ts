@@ -502,6 +502,7 @@ export type IncidentItem = {
     summary: string;
     reason_code:
         | "outbox_backlog"
+        | "provider_billing_blocked"
         | "provider_unavailable"
         | "provider_auth"
         | "provider_rate_limited"

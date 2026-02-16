@@ -14,6 +14,7 @@ from app.contracts import ConfigError, Err, ErrorCodes, IntegrationError, Ok, Re
 from app.logging_config import get_logger, record_delivery_failure
 from app.models import Branch, Client, Conversation, User
 from app.services.alert_service import alert_critical, alert_error
+from app.services.provider_error_policy import classify_provider_error, provider_error_retryable
 
 logger = get_logger("chatflow_service")
 
@@ -57,6 +58,14 @@ def _get_chatflow_media_base_url() -> str:
     return os.environ.get("CHATFLOW_MEDIA_BASE_URL") or CHATFLOW_MEDIA_BASE_URL
 
 
+def _extract_chatflow_message(payload: dict) -> str:
+    for key in ("msg", "message", "error", "detail"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 def _parse_chatflow_success(response: httpx.Response) -> tuple[bool, str]:
     try:
         payload = response.json()
@@ -64,11 +73,18 @@ def _parse_chatflow_success(response: httpx.Response) -> tuple[bool, str]:
         return False, "invalid_response"
     if not isinstance(payload, dict):
         return False, "invalid_response"
+    provider_message = _extract_chatflow_message(payload)
     success = payload.get("success")
     if success is True:
         return True, "ok"
     if success is False:
+        classified = classify_provider_error(provider_message)
+        if classified.kind != "unknown":
+            return False, classified.kind
         return False, "payload_failure"
+    classified = classify_provider_error(provider_message)
+    if classified.kind != "unknown":
+        return False, classified.kind
     return False, "invalid_response"
 
 
@@ -502,14 +518,21 @@ def send_message_safe(
                         "body": response.text[:200],
                     },
                 )
+            error_code = ErrorCodes.CHATFLOW_ERROR
+            retryable = provider_error_retryable(reason)
+            error_message = f"ChatFlow payload failure: {reason}"
+            if reason == "billing_blocked":
+                error_code = ErrorCodes.CHATFLOW_BILLING_BLOCKED
+                error_message = "ChatFlow billing blocked: plan renewal required"
             return Err(IntegrationError(
-                code=ErrorCodes.CHATFLOW_ERROR,
-                message=f"ChatFlow payload failure: {reason}",
+                code=error_code,
+                message=error_message,
                 service="chatflow",
                 context={
                     "status_code": response.status_code,
                     "body": response.text[:200],
                     "reason": reason,
+                    "retryable": retryable,
                 },
             ))
     except httpx.TimeoutException as e:

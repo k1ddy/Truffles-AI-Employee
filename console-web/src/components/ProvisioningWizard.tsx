@@ -101,6 +101,8 @@ const MISSING_LABELS: Record<string, string> = {
     "provider_binding.whatsapp.paid_until": "Provider binding: paid_until",
     "provider_binding.whatsapp.paid_until_expired": "Provider binding: paid_until истёк",
     "provider_binding.whatsapp.rebind_required": "Provider binding: rebind required",
+    "provider_binding.whatsapp.alert_state": "Provider binding: capability check (alert_state)",
+    "provider_binding.whatsapp.capability_check_failed": "Provider binding: capability check failed (alert_state=critical)",
     "client_pack.business.name": "Профиль бизнеса: название",
     "client_pack.location.city": "Локация: город",
     "client_pack.location.address.full": "Локация: адрес",

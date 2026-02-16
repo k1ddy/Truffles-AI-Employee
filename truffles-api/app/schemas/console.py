@@ -631,6 +631,7 @@ ConsoleIncidentSeverity = Literal["critical", "warn", "info"]
 ConsoleIncidentScope = Literal["fleet", "client", "branch"]
 ConsoleIncidentReasonCode = Literal[
     "outbox_backlog",
+    "provider_billing_blocked",
     "provider_unavailable",
     "provider_auth",
     "provider_rate_limited",

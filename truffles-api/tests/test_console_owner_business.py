@@ -351,6 +351,10 @@ def test_resolve_owner_mode_profile_capture_leads() -> None:
 
 
 def test_classify_outbox_incident_reason_markers() -> None:
+    reason_billing, _ = console_router._classify_outbox_incident_reason(
+        last_error="[CHATFLOW_BILLING_BLOCKED] ChatFlow billing blocked: plan renewal required",
+        integration_degraded=False,
+    )
     reason_unavailable, _ = console_router._classify_outbox_incident_reason(
         last_error="provider timeout while sending message",
         integration_degraded=False,
@@ -368,10 +372,25 @@ def test_classify_outbox_incident_reason_markers() -> None:
         integration_degraded=True,
     )
 
+    assert reason_billing == "provider_billing_blocked"
     assert reason_unavailable == "provider_unavailable"
     assert reason_auth == "provider_auth"
     assert reason_rate == "provider_rate_limited"
     assert reason_drift == "integration_degraded"
+
+
+def test_build_incident_actions_include_subscription_steps_for_billing_block() -> None:
+    actions = console_router._build_incident_actions(
+        reason_code="provider_billing_blocked",
+        outbox_backlog=120,
+        integration_degraded_branches=0,
+        branch_ids=None,
+        platform_scope=False,
+    )
+
+    action_ids = {item.id for item in actions}
+    assert "open_subscription" in action_ids
+    assert "open_integrations" in action_ids
 
 
 def test_build_scope_incident_items_empty_for_healthy_signals() -> None:
