@@ -77,6 +77,11 @@ export interface SlaIndicator {
     minutes: number;
 }
 
+export interface SlaCountdown {
+    label: string;
+    className: string;
+}
+
 const SLA_WARNING_MINUTES = 60;
 const SLA_BREACHED_MINUTES = 120;
 
@@ -94,6 +99,44 @@ export function getSlaIndicator(createdAt: string): SlaIndicator {
         const hours = Math.floor(diffMinutes / 60);
         return { label: `${hours}ч+`, className: "bg-red-100 text-red-800", minutes: diffMinutes };
     }
+}
+
+export function getSlaCountdown(createdAt: string): SlaCountdown {
+    const created = new Date(createdAt);
+    const now = new Date();
+    const diffMs = now.getTime() - created.getTime();
+    const diffMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
+
+    if (diffMinutes < SLA_WARNING_MINUTES) {
+        const minutesLeft = Math.max(0, SLA_WARNING_MINUTES - diffMinutes);
+        return {
+            label: `До внимания: ${minutesLeft}м`,
+            className: "bg-green-100 text-green-800",
+        };
+    }
+
+    if (diffMinutes < SLA_BREACHED_MINUTES) {
+        const minutesLeft = Math.max(0, SLA_BREACHED_MINUTES - diffMinutes);
+        return {
+            label: `До просрочки: ${minutesLeft}м`,
+            className: "bg-yellow-100 text-yellow-800",
+        };
+    }
+
+    const overdueMinutes = diffMinutes - SLA_BREACHED_MINUTES;
+    if (overdueMinutes < 60) {
+        return {
+            label: `Просрочено: ${overdueMinutes}м`,
+            className: "bg-red-100 text-red-800",
+        };
+    }
+
+    const overdueHours = Math.floor(overdueMinutes / 60);
+    const restMinutes = overdueMinutes % 60;
+    return {
+        label: `Просрочено: ${overdueHours}ч ${restMinutes}м`,
+        className: "bg-red-100 text-red-800",
+    };
 }
 
 // Booking status labels (for calendar)

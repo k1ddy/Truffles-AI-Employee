@@ -21,6 +21,7 @@ Layout
 Queue (CaseList)
 - Component: `console-web/src/components/CaseList.tsx`.
 - Default filters: `status=open`, sort=activity, limit=20.
+- Manager workspace (filters/search/auto-refresh) persists in local storage for 24h per scope (role+agent+client+branch).
 - Search input: "Телефон / имя / ID" (debounced 300ms).
 - Filters:
   - Status: Открытые / Все / Ожидает / В работе / Закрыта.
@@ -31,6 +32,7 @@ Queue (CaseList)
 - Load more button when `has_more` (fetches next cursor page and appends to the list).
 - Queue counter uses backend total (`CaseListResponse.total`) and shows loaded vs total.
 - Auto refresh: every 10s (foreground only), toggle "Автообновление: Вкл/Выкл".
+- If a saved/visible case exists, Inbox auto-opens a conversation (no empty center pane on warm start).
 
 Case rows (compact view)
 - Shows customer name/phone, status badge, preview, branch, last activity, SLA.
@@ -40,12 +42,13 @@ Case rows (compact view)
 Conversation (CaseConversation)
 - Component: `console-web/src/components/CaseConversation.tsx`.
   - Header:
-    - Case ID, SLA badge, status, assigned manager, needs_reply tag.
+    - Case ID, SLA badge, SLA countdown (until warning/breach or overdue), status, assigned manager, needs_reply tag.
     - "Детали" / "Скрыть детали" toggle button (opens/closes Details panel).
     - Actions:
       - "Взять заявку" (when status pending + write access).
       - "Закрыть заявку" (when status active + write access).
       - "Вернуть боту" (when status active + write access).
+      - "Следующая заявка" (moves manager to next visible case in current queue).
     - Read-only roles see "Только просмотр".
 - Context strip: "Суть запроса" or "Последнее сообщение" + last inbound time.
 - Inline risk hint is shown when `has_delivery_error` or `has_pending_outbox` is true.
@@ -54,7 +57,7 @@ Chat (ChatInterface)
 - Component: `console-web/src/components/ChatInterface.tsx`.
 - Messages list (oldest first); roles: Клиент / Менеджер / Бот.
 - History pagination:
-  - "Загрузить старые" button when `has_more` from message endpoint.
+  - "Загрузить более ранние" button when `has_more` from message endpoint.
   - Scroll anchor is preserved when older messages are loaded.
   - Auto-scroll to bottom triggers only while manager stays near the latest messages.
 - Media rendering:

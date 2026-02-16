@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import CaseList from "@/components/CaseList";
@@ -11,6 +11,11 @@ import { InboxMacroChips } from "@/components/InboxMacros";
 import AccessDenied from "@/components/AccessDenied";
 import { useCaseData } from "@/hooks/useCaseData";
 import { authApi, canAccessConsole } from "@/lib/api-client";
+import {
+    buildInboxWorkspaceScope,
+    readInboxSelectedCase,
+    writeInboxSelectedCase,
+} from "@/lib/inbox-workspace";
 
 interface InboxViewProps {
     initialCaseId?: string | null;
@@ -18,10 +23,14 @@ interface InboxViewProps {
 
 export default function InboxView({ initialCaseId }: InboxViewProps) {
     const router = useRouter();
+    const pathname = usePathname();
     const { data: session } = useSession();
     const [selectedCaseId, setSelectedCaseId] = useState(initialCaseId ?? "");
     const [draft, setDraft] = useState("");
     const [detailsOpen, setDetailsOpen] = useState(false);
+    const [visibleCaseIds, setVisibleCaseIds] = useState<string[]>([]);
+    const [selectionHydrated, setSelectionHydrated] = useState(Boolean(initialCaseId));
+    const restoredScopeRef = useRef<string | null>(null);
 
     const { data: meData } = useQuery({
         queryKey: ["console-me"],
@@ -39,17 +48,82 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const selectedBranchId = meData?.selected_branch_id ?? "";
     const isPrivileged = role === "owner" || role === "admin" || role === "platform_admin";
     const showBranchFilter = isPrivileged && branches.length > 1 && !selectedBranchId;
+    const workspaceScope = useMemo(
+        () =>
+            buildInboxWorkspaceScope({
+                role,
+                agentId: meData?.agent?.id,
+                clientId: meData?.client?.id,
+                branchId: selectedBranchId || meData?.agent?.branch_id,
+            }),
+        [role, meData?.agent?.id, meData?.agent?.branch_id, meData?.client?.id, selectedBranchId],
+    );
+
+    useEffect(() => {
+        if (workspaceScope && restoredScopeRef.current !== workspaceScope) {
+            setSelectionHydrated(false);
+        }
+    }, [workspaceScope]);
 
     useEffect(() => {
         if (initialCaseId) {
             setSelectedCaseId(initialCaseId);
+            if (workspaceScope) {
+                restoredScopeRef.current = workspaceScope;
+            }
+            setSelectionHydrated(true);
         }
-    }, [initialCaseId]);
+    }, [initialCaseId, workspaceScope]);
+
+    useEffect(() => {
+        if (!workspaceScope || initialCaseId || restoredScopeRef.current === workspaceScope) {
+            return;
+        }
+        const restoredCaseId = readInboxSelectedCase(workspaceScope);
+        if (restoredCaseId) {
+            setSelectedCaseId(restoredCaseId);
+            router.replace(`/cases/${restoredCaseId}`);
+        }
+        restoredScopeRef.current = workspaceScope;
+        setSelectionHydrated(true);
+    }, [workspaceScope, initialCaseId, router]);
+
+    useEffect(() => {
+        if (!workspaceScope || !selectionHydrated) {
+            return;
+        }
+        writeInboxSelectedCase(workspaceScope, selectedCaseId || null);
+    }, [workspaceScope, selectionHydrated, selectedCaseId]);
 
     useEffect(() => {
         setDraft("");
         setDetailsOpen(false);
     }, [selectedCaseId]);
+
+    useEffect(() => {
+        if (!workspaceScope) {
+            return;
+        }
+        if (visibleCaseIds.length === 0) {
+            return;
+        }
+        if (initialCaseId && selectedCaseId === initialCaseId && pathname === `/cases/${initialCaseId}`) {
+            return;
+        }
+        const selectedVisible = selectedCaseId ? visibleCaseIds.includes(selectedCaseId) : false;
+        if (selectedVisible) {
+            return;
+        }
+        const preferred = readInboxSelectedCase(workspaceScope);
+        const nextCaseId = preferred && visibleCaseIds.includes(preferred) ? preferred : visibleCaseIds[0];
+        if (!nextCaseId) {
+            return;
+        }
+        setSelectedCaseId(nextCaseId);
+        if (pathname !== `/cases/${nextCaseId}`) {
+            router.replace(`/cases/${nextCaseId}`);
+        }
+    }, [workspaceScope, visibleCaseIds, initialCaseId, selectedCaseId, pathname, router]);
 
     const {
         caseDetail,
@@ -81,6 +155,28 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const handleSelectCase = (caseId: string) => {
         setSelectedCaseId(caseId);
         router.push(`/cases/${caseId}`);
+    };
+
+    const nextCaseId = useMemo(() => {
+        if (!selectedCaseId || visibleCaseIds.length === 0) {
+            return null;
+        }
+        const currentIndex = visibleCaseIds.indexOf(selectedCaseId);
+        if (currentIndex < 0) {
+            return visibleCaseIds[0] ?? null;
+        }
+        if (currentIndex === visibleCaseIds.length - 1) {
+            return visibleCaseIds[0] ?? null;
+        }
+        return visibleCaseIds[currentIndex + 1] ?? null;
+    }, [selectedCaseId, visibleCaseIds]);
+
+    const handleNextCase = () => {
+        if (!nextCaseId || nextCaseId === selectedCaseId) {
+            return;
+        }
+        setSelectedCaseId(nextCaseId);
+        router.replace(`/cases/${nextCaseId}`);
     };
 
     const handleMacroSelect = (text: string) => {
@@ -140,7 +236,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
             <div>
                 <h1 className="text-2xl font-semibold">Заявки</h1>
                 <p className="text-sm text-muted-foreground">
-                    Очередь слева, чат по центру, детали открываются по кнопке. Ответы и быстрые действия рядом с вводом.
+                    Очередь слева, чат по центру, детали по кнопке. Фильтры и последняя заявка сохраняются на 24 часа.
                 </p>
             </div>
 
@@ -154,6 +250,8 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                         onSelectCase={handleSelectCase}
                         branches={branches}
                         showBranchFilter={showBranchFilter}
+                        workspaceScope={workspaceScope}
+                        onCaseIdsChange={setVisibleCaseIds}
                     />
                 </section>
 
@@ -180,6 +278,8 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                                         composerBefore={composerBefore}
                                         detailsOpen={detailsOpen}
                                         onToggleDetails={handleToggleDetails}
+                                        onNextCase={handleNextCase}
+                                        canGoNextCase={Boolean(nextCaseId && nextCaseId !== selectedCaseId)}
                                         chatFrame="plain"
                                         layout="inbox"
                                     />
