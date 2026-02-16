@@ -1,6 +1,7 @@
 # TP-2026-02-16-console-cases-index-wave-a88
 
 - Название/цель: отдельная DB wave для снижения p95 по `/console/v1/cases` за счёт индексов под текущий query shape (без изменения контрактов API/UX).
+- Canon refs: `STATE.md` (NOW/GAP Console latency + runtime), `docs/REPORTS/2026-02-16-console-plane-perf-baseline-v1.md`, `docs/CONSOLE_AUDIT/UX_BACKLOG.md`, `AGENTS.md`.
 - Canon refs: `STATE.md` (NOW/GAP Console latency + runtime), `docs/REPORTS/2026-02-16-console-plane-perf-baseline-v1.md`, `docs/TASK_PACKAGES/TP-2026-02-16-console-plane-p0-2-p0-3-a1.md`, `AGENTS.md`.
 
 ## Invariant
@@ -60,6 +61,11 @@
 - updated report/STATE entries.
 
 ## Rollback
+- `DROP INDEX CONCURRENTLY IF EXISTS idx_messages_client_conversation_created_desc;`
+- `DROP INDEX CONCURRENTLY IF EXISTS idx_messages_client_role_conversation_created_desc;`
+- `DROP INDEX CONCURRENTLY IF EXISTS idx_outbox_messages_client_conversation_status;`
+- `DROP INDEX CONCURRENTLY IF EXISTS idx_handovers_client_status_created_desc;`
+- `DROP INDEX CONCURRENTLY IF EXISTS idx_conversations_client_branch;`
 - `DROP INDEX CONCURRENTLY IF EXISTS <index_name>` for each added index.
 - Re-run baseline queries to confirm rollback state.
 
@@ -73,6 +79,8 @@
 - Возможна необходимость `ANALYZE`/autovacuum stabilization before measuring.
 
 ## Branch / Worktree / Merge
+- Branch: `feat/2026-02-16-console-cases-index-wave-a88`
+- Worktree: `/home/zhan/worktrees/2026-02-16-console-cases-index-wave-a88`
 - Branch: `feat/2026-02-16-expected-reply-controller-a88` (текущая ветка по решению пользователя)
 - Worktree: `/home/zhan/truffles-main`
 - Base ref: `origin/main`

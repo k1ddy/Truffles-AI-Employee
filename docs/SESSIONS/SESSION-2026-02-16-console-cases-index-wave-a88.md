@@ -1,0 +1,26 @@
+# SESSION 2026-02-16-console-cases-index-wave-a88 — Session 2026-02-16-console-cases-index-wave-a88
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-16-console-cases-index-wave-a88.md
+- branch: feat/2026-02-16-console-cases-index-wave-a88
+- worktree: /home/zhan/worktrees/2026-02-16-console-cases-index-wave-a88
+- base_ref: origin/main
+- scope: DB index wave for `/console/v1/cases` hot-path + migration runner support for `CONCURRENTLY` + perf evidence/report update.
+- done:
+  - Added migration `030_add_console_cases_hotpath_indexes.sql` with 5 composite indexes for cases hot-path.
+  - Applied indexes on target DB and captured migration output/index inventory/timing/explain artifacts.
+  - Added migration runner support for `CONCURRENTLY` (autocommit execution path) with unit tests.
+  - Ran deterministic checks: `pytest test_apply_sql_migrations` + `pytest test_console_cases_helpers test_console_rbac` + `py_compile`.
+  - Registered migration `030` in `schema_migrations` through migration runner (`pending=0` check).
+  - Updated perf report + backlog/state references for index-wave outcome.
+- next:
+  - Run session gate.
+  - Close session and push PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-16-console-cases-index-wave-a88.md
+  - docs/REPORTS/2026-02-16-console-plane-perf-baseline-v1.md
+  - /tmp/console_perf_baseline_20260216/index_wave_delta_summary.txt
+  - /tmp/console_perf_baseline_20260216/cases_list_index_wave_stats.txt
+  - /tmp/console_perf_baseline_20260216/cases_total_count_index_wave_stats.txt
+- last_updated: 2026-02-16

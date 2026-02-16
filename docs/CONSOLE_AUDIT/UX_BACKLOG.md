@@ -8,6 +8,7 @@ Scope
 Evidence sources
 - `docs/REPORTS/2026-02-15-platform-admin-baseline-v2.md`
 - `docs/REPORTS/2026-02-15-platform-admin-baseline-v3.md`
+- `docs/REPORTS/2026-02-16-console-plane-perf-baseline-v1.md`
 - `docs/REPORTS/2026-02-15-owner-admin-business-control-plane-v1.md`
 - `docs/REPORTS/2026-02-15-owner-admin-wave2-data-trust-team-v1.md`
 - `docs/REPORTS/2026-02-15-owner-admin-wave3-simple-settings-v1.md`
@@ -32,6 +33,8 @@ Evidence sources
 
 | ID | Priority | Area | Problem | Impact | Evidence | Status |
 | --- | --- | --- | --- | --- | --- | --- |
+| UX-08 | P0 | Runtime health | Console health stays `unhealthy`; outbox backlog remains high (`pending=1653`, `failed=679`) for Platform Admin observation windows. | Platform Admin sees degradation but recovery remains reactive. | `curl https://console.truffles.kz/api/health/full` (`2026-02-15T08:06:10Z`) + `ops/console_platform_admin_kpi_snapshot.py` guard output in `docs/REPORTS/2026-02-15-platform-admin-baseline-v3.md`. | Mitigated (guard added), Open |
+| UX-26 | P0 | Cases list latency | `/console/v1/cases` DB hot-path relied on weak single-column indexes, producing high p95 and visible slow loading in Inbox. | Managers/owners see delayed case list refresh and perceive UI as hanging even when backend is healthy. | `docs/REPORTS/2026-02-16-console-plane-perf-baseline-v1.md` (`combined p95 305.228ms -> 51.712ms`, `-83.1%`) + migration `truffles-api/migrations/030_add_console_cases_hotpath_indexes.sql`. | Mitigated (DB wave), Open |
 | UX-08 | P0 | Runtime health | Console health stays `unhealthy`; outbox backlog remains high (`pending=1653`, `failed=679`) for Platform Admin observation windows. | Platform Admin sees degradation but recovery remains reactive. | `curl https://console.truffles.kz/api/health/full` (`2026-02-15T08:06:10Z`) + `ops/console_platform_admin_kpi_snapshot.py` guard output in `docs/REPORTS/2026-02-15-platform-admin-baseline-v3.md` + health path cache/timeout mitigation in `truffles-api/app/main.py` (`/admin/health/check`). | Mitigated (guard + health cache), Open |
 | UX-09 | P0 | QA reliability | Platform Admin-critical e2e tests were concentrated inside `smoke.spec.ts`, causing noisy failures and slower triage. | High false triage cost for core admin regressions. | Baseline: `smoke.spec.ts` 1451 lines before split. | Fixed |
 | UX-10 | P1 | Error clarity | Validation and operator-input errors used toast-only on `tenants` and `company-workspace`; context recovery was not persistent on screen. | Slow incident handling and repeated user actions. | `reportValidationError` + inline summary in `console-web/src/app/tenants/page.tsx`, `console-web/src/app/company-workspace/page.tsx`; snapshot `toast.error` entries reduced to helper-only (`1/1`) in `docs/REPORTS/2026-02-15-platform-admin-baseline-v3.md`. | Fixed |
