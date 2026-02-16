@@ -3444,9 +3444,14 @@ TOOL_VERIFIER_APPOINTMENT_ID_ACTIONS = {
     "calendar.cancel",
 }
 TOOL_VERIFIER_STRICT_DECISION_ACTIONS = {
+    "calendar.list_slots",
     "calendar.book_slot",
+    "calendar.get_booking",
     "calendar.reschedule",
     "calendar.cancel",
+    "catalog.service_query",
+    "catalog.location",
+    "catalog.portfolio",
 }
 TOOL_VERIFIER_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "calendar.book_slot": ("service_query", "start_at"),
