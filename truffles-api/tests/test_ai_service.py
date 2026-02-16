@@ -2,6 +2,8 @@ import time
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
+import httpx
+
 import app.services.ai_service as ai_service
 from app.services.ai_service import (
     ACKNOWLEDGEMENT_RESPONSE,
@@ -113,6 +115,101 @@ class TestGenerateAIResponse:
         assert result.value[0] == "AI generated response"
         assert result.value[1] == "high"
         mock_llm.return_value.generate.assert_called_once()
+
+    @patch("app.services.ai_service.get_llm_provider")
+    @patch("app.services.ai_service.search_knowledge")
+    @patch("app.services.ai_service.get_system_prompt")
+    @patch("app.services.ai_service.get_conversation_history")
+    def test_retries_once_after_timeout_and_succeeds(
+        self, mock_history, mock_prompt, mock_search, mock_llm
+    ):
+        mock_db = Mock()
+        mock_prompt.return_value = "You are a helpful assistant"
+        mock_history.return_value = []
+        mock_search.return_value = [{"score": 0.85, "text": "Relevant info"}]
+        success_response = Mock()
+        success_response.content = "Recovered response"
+        mock_llm.return_value.generate.side_effect = [
+            httpx.TimeoutException("timeout-1"),
+            success_response,
+        ]
+
+        result = generate_ai_response(mock_db, uuid4(), "test-client", uuid4(), "What is X?")
+
+        assert result.ok is True
+        assert result.value[0] == "Recovered response"
+        assert result.value[1] == "high"
+        assert mock_llm.return_value.generate.call_count == 2
+
+    @patch("app.services.ai_service.get_llm_provider")
+    @patch("app.services.ai_service.search_knowledge")
+    @patch("app.services.ai_service.get_system_prompt")
+    @patch("app.services.ai_service.get_conversation_history")
+    def test_timeout_retry_uses_fallback_model(
+        self, mock_history, mock_prompt, mock_search, mock_llm
+    ):
+        mock_db = Mock()
+        mock_prompt.return_value = "You are a helpful assistant"
+        mock_history.return_value = []
+        mock_search.return_value = [{"score": 0.85, "text": "Relevant info"}]
+        fallback_response = Mock()
+        fallback_response.content = "Fallback response"
+        mock_llm.return_value.generate.side_effect = [
+            httpx.TimeoutException("timeout-1"),
+            httpx.TimeoutException("timeout-2"),
+            fallback_response,
+        ]
+
+        with patch.dict(
+            "os.environ",
+            {
+                "LLM_RETRY_ON_TIMEOUT": "1",
+                "LLM_RETRY_TIMEOUT_SECONDS": "2",
+                "LLM_TIMEOUT_FALLBACK_MODEL": "gpt-fallback",
+            },
+            clear=False,
+        ), patch.object(ai_service, "LLM_TIMEOUT_FALLBACK_MODEL", "gpt-fallback"), patch.object(
+            ai_service, "LLM_RETRY_TIMEOUT_SECONDS", 2.0
+        ):
+            result = generate_ai_response(mock_db, uuid4(), "test-client", uuid4(), "What is X?")
+
+        assert result.ok is True
+        assert result.value[0] == "Fallback response"
+        models = [call.kwargs.get("model") for call in mock_llm.return_value.generate.call_args_list]
+        assert models[:2] == [ai_service.FAST_MODEL, ai_service.FAST_MODEL]
+        assert models[2] == "gpt-fallback"
+
+    @patch("app.services.ai_service.get_llm_provider")
+    @patch("app.services.ai_service.search_knowledge")
+    @patch("app.services.ai_service.get_system_prompt")
+    @patch("app.services.ai_service.get_conversation_history")
+    def test_transient_error_retries_once_and_degrades_to_low_confidence(
+        self, mock_history, mock_prompt, mock_search, mock_llm
+    ):
+        mock_db = Mock()
+        mock_prompt.return_value = "You are a helpful assistant"
+        mock_history.return_value = []
+        mock_search.return_value = [{"score": 0.85, "text": "Relevant info"}]
+        mock_llm.return_value.generate.side_effect = [
+            httpx.ConnectError("connection reset"),
+            httpx.ConnectError("connection reset again"),
+        ]
+        timing_context = {}
+
+        result = generate_ai_response(
+            mock_db,
+            uuid4(),
+            "test-client",
+            uuid4(),
+            "What is X?",
+            timing_context=timing_context,
+        )
+
+        assert result.ok is True
+        assert result.value[0] is None
+        assert result.value[1] == "low_confidence"
+        assert timing_context.get("llm_degradation_reason") == "provider_unavailable"
+        assert mock_llm.return_value.generate.call_count == 2
 
     @patch("app.services.ai_service.get_llm_provider")
     @patch("app.services.ai_service.search_knowledge")

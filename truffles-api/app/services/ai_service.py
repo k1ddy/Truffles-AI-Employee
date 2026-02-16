@@ -225,6 +225,10 @@ SLOW_MODEL = os.environ.get("SLOW_MODEL", "gpt-5-mini")
 FAST_MODEL_MAX_CHARS = int(os.environ.get("FAST_MODEL_MAX_CHARS", "160"))
 INTENT_TIMEOUT_SECONDS = float(os.environ.get("INTENT_TIMEOUT_SECONDS", "1.5"))
 LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "6"))
+LLM_RETRY_TIMEOUT_SECONDS = float(os.environ.get("LLM_RETRY_TIMEOUT_SECONDS", "3.0"))
+LLM_RETRY_ON_TIMEOUT = os.environ.get("LLM_RETRY_ON_TIMEOUT")
+LLM_RETRY_ON_TRANSIENT = os.environ.get("LLM_RETRY_ON_TRANSIENT")
+LLM_TIMEOUT_FALLBACK_MODEL = os.environ.get("LLM_TIMEOUT_FALLBACK_MODEL", FAST_MODEL)
 SERVICE_REWRITE_TIMEOUT_SECONDS = float(os.environ.get("SERVICE_REWRITE_TIMEOUT_SECONDS", "1.2"))
 SERVICE_REWRITE_MAX_TOKENS = int(os.environ.get("SERVICE_REWRITE_MAX_TOKENS", "80"))
 RAG_REWRITE_TIMEOUT_SECONDS = float(os.environ.get("RAG_REWRITE_TIMEOUT_SECONDS", "1.0"))
@@ -316,6 +320,60 @@ def _is_env_enabled(value: str | None, default: bool = True) -> bool:
     if value is None:
         return default
     return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _classify_generation_error(exc: Exception) -> str:
+    if isinstance(exc, httpx.TimeoutException):
+        return "timeout"
+    if isinstance(
+        exc,
+        (
+            httpx.ConnectError,
+            httpx.ReadError,
+            httpx.RemoteProtocolError,
+            httpx.NetworkError,
+        ),
+    ):
+        return "provider_unavailable"
+    message = str(exc).strip().lower()
+    if any(
+        token in message
+        for token in (
+            "timeout",
+            "timed out",
+            "deadline",
+            "readtimeout",
+            "connecttimeout",
+        )
+    ):
+        return "timeout"
+    if any(
+        token in message
+        for token in (
+            "connection error",
+            "connection reset",
+            "service unavailable",
+            "temporarily unavailable",
+            "bad gateway",
+            "gateway timeout",
+            "rate limit",
+            "429",
+            "502",
+            "503",
+            "504",
+        )
+    ):
+        return "provider_unavailable"
+    return "exception"
+
+
+def _is_transient_generation_error(error_code: str | None) -> bool:
+    return error_code in {"provider_unavailable"}
+
+
+def _resolve_generation_retry_timeout(base_timeout: float) -> float:
+    retry_timeout = max(0.1, LLM_RETRY_TIMEOUT_SECONDS)
+    return min(retry_timeout, max(base_timeout, 0.1))
 
 
 def _log_timing(
@@ -2389,20 +2447,121 @@ def generate_ai_response(
             raise
         logger.debug(f"Calling LLM with {len(messages)} messages")
         llm_start = time.monotonic()
-        try:
-            if timing_context is not None:
-                timing_context["llm_used"] = True
-            response = llm.generate(
-                messages,
-                temperature=1.0,
-                max_tokens=LLM_MAX_TOKENS,
-                timeout_seconds=LLM_TIMEOUT_SECONDS,
-                model=model_name,
+        retry_on_timeout = _is_env_enabled(LLM_RETRY_ON_TIMEOUT, default=True)
+        retry_on_transient = _is_env_enabled(LLM_RETRY_ON_TRANSIENT, default=True)
+        retry_timeout_seconds = _resolve_generation_retry_timeout(LLM_TIMEOUT_SECONDS)
+        timeout_attempts: list[float] = [LLM_TIMEOUT_SECONDS]
+        if retry_on_timeout and retry_timeout_seconds not in timeout_attempts:
+            timeout_attempts.append(retry_timeout_seconds)
+        if retry_on_transient and len(timeout_attempts) == 1:
+            timeout_attempts.append(timeout_attempts[0])
+        fallback_model = (LLM_TIMEOUT_FALLBACK_MODEL or "").strip()
+        if not fallback_model:
+            fallback_model = FAST_MODEL
+        if fallback_model.casefold() == model_name.casefold():
+            fallback_model = ""
+
+        if timing_context is not None:
+            timing_context["llm_used"] = True
+
+        response = None
+        last_error: str | None = None
+        attempt_count = 0
+        transient_retry_used = False
+        fallback_model_attempted = False
+        timeout_seconds_used = LLM_TIMEOUT_SECONDS
+        model_name_used = model_name
+        for attempt_idx, timeout_seconds in enumerate(timeout_attempts):
+            timeout_seconds_used = timeout_seconds
+            if attempt_idx > 0 and not _should_attempt_llm(
+                timing_context,
+                timeout_seconds=timeout_seconds,
+                stage="llm_retry",
+            ):
+                last_error = "deadline_exceeded"
+                break
+            attempt_count = attempt_idx + 1
+            try:
+                response = llm.generate(
+                    messages,
+                    temperature=1.0,
+                    max_tokens=LLM_MAX_TOKENS,
+                    timeout_seconds=timeout_seconds,
+                    model=model_name,
+                )
+                model_name_used = model_name
+                last_error = None
+                break
+            except Exception as exc:
+                error_code = _classify_generation_error(exc)
+                last_error = error_code
+                if (
+                    error_code == "timeout"
+                    and retry_on_timeout
+                    and attempt_idx + 1 < len(timeout_attempts)
+                ):
+                    logger.warning(
+                        "AI generation timeout; retrying",
+                        extra={
+                            "context": {
+                                "attempt": attempt_count,
+                                "retry_timeout_seconds": retry_timeout_seconds,
+                            }
+                        },
+                    )
+                    continue
+                if (
+                    _is_transient_generation_error(error_code)
+                    and retry_on_transient
+                    and not transient_retry_used
+                    and attempt_idx + 1 < len(timeout_attempts)
+                ):
+                    transient_retry_used = True
+                    logger.warning(
+                        "AI generation transient error; retrying",
+                        extra={"context": {"attempt": attempt_count, "error": error_code}},
+                    )
+                    continue
+                if error_code == "exception":
+                    raise
+                break
+
+        if response is None and last_error == "timeout" and fallback_model:
+            if _should_attempt_llm(
+                timing_context,
+                timeout_seconds=retry_timeout_seconds,
+                stage="llm_fallback",
+            ):
+                attempt_count += 1
+                fallback_model_attempted = True
+                timeout_seconds_used = retry_timeout_seconds
+                model_name_used = fallback_model
+                try:
+                    response = llm.generate(
+                        messages,
+                        temperature=1.0,
+                        max_tokens=LLM_MAX_TOKENS,
+                        timeout_seconds=retry_timeout_seconds,
+                        model=fallback_model,
+                    )
+                    last_error = None
+                except Exception as exc:
+                    error_code = _classify_generation_error(exc)
+                    last_error = error_code
+                    if error_code == "exception":
+                        raise
+            else:
+                last_error = "deadline_exceeded"
+
+        if response is None:
+            degrade_reason = (
+                "llm_timeout"
+                if last_error == "timeout"
+                else ("deadline_exceeded" if last_error == "deadline_exceeded" else "provider_unavailable")
             )
-        except httpx.TimeoutException as exc:
             if timing_context is not None:
-                timing_context["llm_timeout"] = True
-                timing_context["llm_degradation_reason"] = "llm_timeout"
+                timing_context["llm_timeout"] = last_error == "timeout"
+                timing_context["llm_degradation_reason"] = degrade_reason
             _log_timing(
                 "llm_ms",
                 (time.monotonic() - llm_start) * 1000,
@@ -2410,13 +2569,20 @@ def generate_ai_response(
                 extra={
                     "phase": "generate",
                     "messages": len(messages),
-                    "model_name": model_name,
+                    "model_name": model_name_used,
                     "model_tier": model_tier,
-                    "timeout": True,
-                    "timeout_seconds": LLM_TIMEOUT_SECONDS,
+                    "timeout": last_error == "timeout",
+                    "timeout_seconds": timeout_seconds_used,
+                    "attempt_count": attempt_count,
+                    "retry_on_timeout": retry_on_timeout,
+                    "retry_on_transient": retry_on_transient,
+                    "transient_retry_used": transient_retry_used,
+                    "fallback_model_attempted": fallback_model_attempted,
+                    "fallback_model": fallback_model or None,
+                    "error": last_error,
                 },
             )
-            logger.warning(f"LLM timeout after {LLM_TIMEOUT_SECONDS}s: {exc}")
+            logger.warning(f"AI generation degraded: {last_error or 'unknown_error'}")
             return Result.success((None, "low_confidence"))
         if timing_context is not None:
             timing_context["llm_timeout"] = False
@@ -2427,9 +2593,16 @@ def generate_ai_response(
             extra={
                 "phase": "generate",
                 "messages": len(messages),
-                "model_name": model_name,
+                "model_name": model_name_used,
                 "model_tier": model_tier,
                 "timeout": False,
+                "timeout_seconds": timeout_seconds_used,
+                "attempt_count": attempt_count,
+                "retry_on_timeout": retry_on_timeout,
+                "retry_on_transient": retry_on_transient,
+                "transient_retry_used": transient_retry_used,
+                "fallback_model_attempted": fallback_model_attempted,
+                "fallback_model": fallback_model or None,
             },
         )
         logger.debug(f"LLM response: {response.content[:100] if response.content else 'EMPTY'}...")
