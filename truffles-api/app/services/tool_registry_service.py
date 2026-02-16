@@ -220,6 +220,38 @@ def _validate_tool_args_contract(
 ) -> tuple[str | None, str | None]:
     if not isinstance(tool_args, dict):
         return "tool_args_not_dict", "tool_args"
+    for key in tool_args:
+        if not isinstance(key, str):
+            return "tool_args_key_invalid", "tool_args"
+
+    # Verifier-lite: reject hallucinated fields before executing critical tool actions.
+    allowed_fields_map: dict[str, set[str]] = {
+        "calendar.list_slots": {
+            "service_query",
+            "date",
+            "start_at",
+            "duration_min",
+            "specialist_id",
+            "specialist_name",
+        },
+        "calendar.book_slot": {
+            "service_query",
+            "start_at",
+            "end_at",
+            "specialist_id",
+            "specialist_name",
+            "customer_name",
+            "customer_phone",
+        },
+        "calendar.get_booking": {"appointment_id"},
+        "calendar.reschedule": {"appointment_id", "start_at", "end_at"},
+        "calendar.cancel": {"appointment_id", "reason"},
+    }
+    allowed_fields = allowed_fields_map.get(tool_action)
+    if allowed_fields is not None:
+        unknown_fields = sorted(key for key in tool_args if key not in allowed_fields)
+        if unknown_fields:
+            return "tool_args_unknown_field", unknown_fields[0]
 
     def _validate_optional_text(field: str) -> tuple[str | None, str | None]:
         value = tool_args.get(field)
@@ -1198,8 +1230,17 @@ def execute_tool_action(
             ok=True,
             response_text=_format_booking_summary(db, appointment),
             error_code=None,
-            decision_meta={"tool_action": tool_action, "tool_decision": "ok"},
-            trace={"stage": "tool_registry", "decision": "ok", "tool_action": tool_action},
+            decision_meta={
+                "tool_action": tool_action,
+                "tool_decision": "ok",
+                "appointment_id": str(appointment.id),
+            },
+            trace={
+                "stage": "tool_registry",
+                "decision": "ok",
+                "tool_action": tool_action,
+                "appointment_id": str(appointment.id),
+            },
         )
 
     if tool_action == "calendar.book_slot":
@@ -1438,6 +1479,7 @@ def execute_tool_action(
             decision_meta={
                 "tool_action": tool_action,
                 "tool_decision": "ok",
+                "appointment_id": str(updated.id),
                 "reminder_jobs_cancelled": len(cancelled_jobs),
                 "reminder_jobs_scheduled": len(scheduled),
             },
@@ -1445,6 +1487,7 @@ def execute_tool_action(
                 "stage": "tool_registry",
                 "decision": "ok",
                 "tool_action": tool_action,
+                "appointment_id": str(updated.id),
                 "reminder_jobs_cancelled": len(cancelled_jobs),
                 "reminder_jobs_scheduled": len(scheduled),
             },
@@ -1508,12 +1551,14 @@ def execute_tool_action(
             decision_meta={
                 "tool_action": tool_action,
                 "tool_decision": "ok",
+                "appointment_id": str(updated.id),
                 "reminder_jobs_cancelled": len(cancelled_jobs),
             },
             trace={
                 "stage": "tool_registry",
                 "decision": "ok",
                 "tool_action": tool_action,
+                "appointment_id": str(updated.id),
                 "reminder_jobs_cancelled": len(cancelled_jobs),
             },
         )

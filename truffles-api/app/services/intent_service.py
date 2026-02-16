@@ -164,14 +164,29 @@ POLICY_CORE_BUDGET_GUARD_MS = max(
     0.0,
 )
 POLICY_CORE_RETRY_TIMEOUT_SECONDS = max(
-    float(os.environ.get("LLM_POLICY_CORE_TIMEOUT_RETRY_SECONDS", "8.0")),
-    POLICY_CORE_TIMEOUT_SECONDS,
+    float(os.environ.get("LLM_POLICY_CORE_TIMEOUT_RETRY_SECONDS", "2.5")),
+    0.1,
 )
 POLICY_CORE_RETRY_ON_TIMEOUT = os.environ.get("LLM_POLICY_CORE_RETRY_ON_TIMEOUT")
 POLICY_CORE_MAX_TOKENS = int(os.environ.get("LLM_POLICY_CORE_MAX_TOKENS", "240"))
 POLICY_CORE_MODEL = os.environ.get("LLM_POLICY_CORE_MODEL", PLAN_MODEL).strip()
+_DEFAULT_POLICY_CORE_TIMEOUT_FALLBACK_MODEL = (
+    _DEFAULT_CONTROLLER_MODEL if _DEFAULT_CONTROLLER_MODEL.strip() else FAST_MODEL
+)
+POLICY_CORE_TIMEOUT_FALLBACK_MODEL = os.environ.get(
+    "LLM_POLICY_CORE_TIMEOUT_FALLBACK_MODEL",
+    _DEFAULT_POLICY_CORE_TIMEOUT_FALLBACK_MODEL,
+).strip()
 POLICY_CORE_CONFIDENCE_THRESHOLD = float(
     os.environ.get("LLM_POLICY_CORE_CONFIDENCE_THRESHOLD", "0.3")
+)
+POLICY_CORE_MEMORY_SUMMARY_MAX_CHARS = max(
+    int(os.environ.get("LLM_POLICY_CORE_MEMORY_SUMMARY_MAX_CHARS", "360")),
+    80,
+)
+POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS = max(
+    int(os.environ.get("LLM_POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS", "8")),
+    1,
 )
 ANSWER_INTERPRETER_TIMEOUT_SECONDS = float(
     os.environ.get("ANSWER_INTERPRETER_TIMEOUT_SECONDS", "2.5")
@@ -200,6 +215,46 @@ def _resolve_policy_core_max_tokens(timeout_seconds: float) -> int:
     if timeout_seconds < 3.0:
         return min(POLICY_CORE_MAX_TOKENS, 200)
     return POLICY_CORE_MAX_TOKENS
+
+
+def _normalize_policy_core_memory_summary(summary: str | None) -> str | None:
+    if not isinstance(summary, str):
+        return None
+    compact = " ".join(summary.split())
+    if not compact:
+        return None
+    return compact[:POLICY_CORE_MEMORY_SUMMARY_MAX_CHARS]
+
+
+def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(profile, dict):
+        return None
+    normalized: dict[str, Any] = {}
+    consent_status = profile.get("consent_status")
+    if isinstance(consent_status, str) and consent_status.strip():
+        normalized["consent_status"] = consent_status.strip().casefold()
+    active_goal = profile.get("active_goal")
+    if isinstance(active_goal, str) and active_goal.strip():
+        normalized["active_goal"] = active_goal.strip().casefold()
+    stored_keys = profile.get("stored_keys")
+    if isinstance(stored_keys, list):
+        cleaned_keys: list[str] = []
+        seen_keys: set[str] = set()
+        for raw_key in stored_keys:
+            if len(cleaned_keys) >= POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS:
+                break
+            if not isinstance(raw_key, str):
+                continue
+            key = raw_key.strip()
+            if not key or key in seen_keys:
+                continue
+            cleaned_keys.append(key[:80])
+            seen_keys.add(key)
+        if cleaned_keys:
+            normalized["stored_keys"] = cleaned_keys
+    return normalized or None
+
+
 ANSWER_INTERPRETER_SLOTS = {"service", "datetime", "name"}
 ANSWER_INTERPRETER_SLOT_ALIASES = {
     "service": "service",
@@ -1085,6 +1140,8 @@ def route_llm_policy_core(
     slot_state: dict | None = None,
     info_refs: list[str] | None = None,
     consult_refs: list[str] | None = None,
+    memory_summary: str | None = None,
+    memory_profile: dict[str, Any] | None = None,
     client_slug: str | None = None,
     client_config: dict | None = None,
     timing_context: dict | None = None,
@@ -1164,6 +1221,14 @@ def route_llm_policy_core(
             "consult_refs": list(consult_refs or []),
         },
     }
+    normalized_memory_summary = _normalize_policy_core_memory_summary(memory_summary)
+    normalized_memory_profile = _normalize_policy_core_memory_profile(memory_profile)
+    if normalized_memory_summary or normalized_memory_profile:
+        policy_input["memory"] = {}
+        if normalized_memory_summary:
+            policy_input["memory"]["summary"] = normalized_memory_summary
+        if normalized_memory_profile:
+            policy_input["memory"]["profile"] = normalized_memory_profile
 
     try:
         llm = get_llm_provider()
@@ -1187,12 +1252,19 @@ def route_llm_policy_core(
     retry_on_timeout = _is_env_enabled(POLICY_CORE_RETRY_ON_TIMEOUT, default=True)
     timeout_attempts = [policy_timeout_seconds]
     if retry_on_timeout:
-        timeout_attempts.append(min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds))
+        retry_timeout = min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds)
+        if retry_timeout > 0 and retry_timeout not in timeout_attempts:
+            timeout_attempts.append(retry_timeout)
+    fallback_model = POLICY_CORE_TIMEOUT_FALLBACK_MODEL.strip()
+    if fallback_model.casefold() == POLICY_CORE_MODEL.strip().casefold():
+        fallback_model = ""
 
     llm_start = time.monotonic()
     response = None
     error = None
     attempt_count = 0
+    model_name_used = POLICY_CORE_MODEL
+    fallback_model_attempted = False
     timeout_seconds_used = policy_timeout_seconds
     max_tokens_used = _resolve_policy_core_max_tokens(policy_timeout_seconds)
     for attempt_idx, timeout_seconds in enumerate(timeout_attempts):
@@ -1214,6 +1286,7 @@ def route_llm_policy_core(
                 timeout_seconds=timeout_seconds,
                 temperature=temperature,
             )
+            model_name_used = POLICY_CORE_MODEL
             error = None
             break
         except httpx.TimeoutException:
@@ -1234,6 +1307,35 @@ def route_llm_policy_core(
             error = _classify_llm_error(exc)
             break
 
+    if error == "timeout" and fallback_model:
+        fallback_timeout_seconds = min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds)
+        if _should_attempt_llm(
+            timing_context,
+            timeout_seconds=fallback_timeout_seconds,
+            stage="policy_core_llm_fallback",
+        ):
+            attempt_count += 1
+            timeout_seconds_used = fallback_timeout_seconds
+            max_tokens_used = _resolve_policy_core_max_tokens(fallback_timeout_seconds)
+            fallback_model_attempted = True
+            try:
+                response = llm.generate(
+                    messages=messages,
+                    max_tokens=max_tokens_used,
+                    model=fallback_model,
+                    timeout_seconds=fallback_timeout_seconds,
+                    temperature=temperature,
+                )
+                model_name_used = fallback_model
+                error = None
+            except httpx.TimeoutException:
+                error = "timeout"
+            except Exception as exc:
+                logger.warning(f"LLM policy core fallback model failed: {exc}")
+                error = _classify_llm_error(exc)
+        else:
+            error = "deadline_exceeded"
+
     elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
     result["attempted"] = True
     result["elapsed_ms"] = elapsed_ms
@@ -1242,12 +1344,14 @@ def route_llm_policy_core(
         elapsed_ms,
         timing_context=timing_context,
         extra={
-            "model_name": POLICY_CORE_MODEL,
+            "model_name": model_name_used,
             "model_tier": "fast",
             "timeout": error == "timeout",
             "timeout_seconds": timeout_seconds_used,
             "attempt_count": attempt_count,
             "retry_on_timeout": retry_on_timeout,
+            "fallback_model_attempted": fallback_model_attempted,
+            "fallback_model": fallback_model or None,
             "max_tokens": max_tokens_used,
             "timeout_budgeted": policy_timeout_seconds,
             "temperature": temperature,
