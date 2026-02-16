@@ -58,6 +58,9 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
         refetchCase,
         messages,
         messagesLoading,
+        messagesHasMore,
+        messagesLoadingMore,
+        loadMoreMessages,
     } = useCaseData(selectedCaseId);
 
     const canSend = Boolean(caseDetail && caseDetail.status === "active" && canWriteInbox);
@@ -167,6 +170,9 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                                         caseId={selectedCaseId}
                                         messages={messages}
                                         messagesLoading={messagesLoading}
+                                        messagesHasMore={messagesHasMore}
+                                        messagesLoadingMore={messagesLoadingMore}
+                                        onLoadMoreMessages={loadMoreMessages}
                                         canSend={canSend}
                                         canWrite={canWriteInbox}
                                         draft={draft}

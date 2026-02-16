@@ -490,6 +490,8 @@ def process_manager_message(
     handover.manager_response = message_text
     if resolved_manager_name and resolved_manager_name != "Unknown":
         handover.assigned_to_name = resolved_manager_name
+    if handover.first_response_at is None:
+        handover.first_response_at = datetime.now(timezone.utc)
 
     if is_simulation_context(conversation):
         logger.info(
@@ -633,6 +635,12 @@ async def process_console_media_upload(
         content=content,
         message_metadata={"media": media_meta, "source": "console"},
     )
+    if handover.first_response_at is None:
+        handover.first_response_at = datetime.now(timezone.utc)
+    if caption and caption.strip():
+        handover.manager_response = caption.strip()
+    if not handover.assigned_to_name and agent.name:
+        handover.assigned_to_name = agent.name
 
     record_audit_event(
         db,
@@ -802,6 +810,8 @@ def process_manager_media(
     resolved_manager_name = linked_agent.name or manager_name
     if resolved_manager_name and resolved_manager_name != "Unknown":
         handover.assigned_to_name = resolved_manager_name
+    if handover.first_response_at is None:
+        handover.first_response_at = datetime.now(timezone.utc)
 
     if is_simulation_context(conversation):
         if caption and caption.strip():

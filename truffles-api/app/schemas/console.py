@@ -559,6 +559,7 @@ class ConsoleCaseListResponse(BaseModel):
     items: list[ConsoleCase]
     cursor: Optional[str] = None
     has_more: bool
+    total: Optional[int] = None
 
 
 class ConsoleSyncStatus(BaseModel):

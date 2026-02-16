@@ -4,7 +4,7 @@ import { type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import api from "@/lib/api";
+import { casesApi, type CaseActionResponse } from "@/lib/api-client";
 import type { Case, Message } from "@/types";
 import ChatInterface from "./ChatInterface";
 import { getStatusLabel, getSlaLabel } from "@/utils/labels";
@@ -14,6 +14,9 @@ interface CaseConversationProps {
     caseId: string;
     messages: Message[];
     messagesLoading: boolean;
+    messagesHasMore?: boolean;
+    messagesLoadingMore?: boolean;
+    onLoadMoreMessages?: () => void;
     canSend: boolean;
     canWrite: boolean;
     draft?: string;
@@ -26,16 +29,30 @@ interface CaseConversationProps {
     layout?: "default" | "inbox";
 }
 
-async function takeCase(caseId: string): Promise<void> {
-    await api.post(`/cases/${caseId}/take`);
+async function takeCase(caseId: string): Promise<CaseActionResponse> {
+    const response = await casesApi.take(caseId);
+    return response.data;
 }
 
-async function resolveCase(caseId: string): Promise<void> {
-    await api.post(`/cases/${caseId}/resolve`);
+async function resolveCase(caseId: string): Promise<CaseActionResponse> {
+    const response = await casesApi.resolve(caseId);
+    return response.data;
 }
 
-async function returnCase(caseId: string): Promise<void> {
-    await api.post(`/cases/${caseId}/return`);
+async function returnCase(caseId: string): Promise<CaseActionResponse> {
+    const response = await casesApi.returnToBot(caseId);
+    return response.data;
+}
+
+function collectSyncIssues(sync?: CaseActionResponse["sync"]) {
+    const issues: string[] = [];
+    if (sync?.telegram?.status === "failed") {
+        issues.push(`Telegram: ${sync.telegram.detail || "ошибка синхронизации"}`);
+    }
+    if (sync?.client_notify?.status === "failed") {
+        issues.push(`Клиент: ${sync.client_notify.detail || "уведомление не доставлено"}`);
+    }
+    return issues;
 }
 
 function SlaBadge({ status }: { status?: string }) {
@@ -57,6 +74,9 @@ export default function CaseConversation({
     caseId,
     messages,
     messagesLoading,
+    messagesHasMore = false,
+    messagesLoadingMore = false,
+    onLoadMoreMessages,
     canSend,
     canWrite,
     draft,
@@ -74,8 +94,12 @@ export default function CaseConversation({
 
     const takeMutation = useMutation({
         mutationFn: () => takeCase(caseId),
-        onSuccess: () => {
+        onSuccess: (response) => {
             toast.success("Заявка назначена на вас!");
+            const issues = collectSyncIssues(response.sync);
+            if (issues.length > 0) {
+                toast.error(issues.join(" · "));
+            }
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
             queryClient.invalidateQueries({ queryKey: ["cases"] });
         },
@@ -91,8 +115,12 @@ export default function CaseConversation({
 
     const resolveMutation = useMutation({
         mutationFn: () => resolveCase(caseId),
-        onSuccess: () => {
+        onSuccess: (response) => {
             toast.success("Заявка закрыта!");
+            const issues = collectSyncIssues(response.sync);
+            if (issues.length > 0) {
+                toast.error(issues.join(" · "));
+            }
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
             queryClient.invalidateQueries({ queryKey: ["cases"] });
             handleResolved();
@@ -111,8 +139,12 @@ export default function CaseConversation({
 
     const returnMutation = useMutation({
         mutationFn: () => returnCase(caseId),
-        onSuccess: () => {
+        onSuccess: (response) => {
             toast.success("Заявка передана боту");
+            const issues = collectSyncIssues(response.sync);
+            if (issues.length > 0) {
+                toast.error(issues.join(" · "));
+            }
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
             queryClient.invalidateQueries({ queryKey: ["cases"] });
             handleResolved();
@@ -140,6 +172,13 @@ export default function CaseConversation({
     const showDetailsToggle = typeof onToggleDetails === "function";
     const detailsLabel = detailsOpen ? "Скрыть детали" : "Детали";
     const isInboxLayout = layout === "inbox";
+    const issueHints: string[] = [];
+    if (caseDetail.has_delivery_error) {
+        issueHints.push("Есть ошибка доставки. Ответ мог не дойти до клиента.");
+    }
+    if (caseDetail.has_pending_outbox) {
+        issueHints.push("Есть сообщения в очереди отправки. Доставка может задерживаться.");
+    }
     const headerClass = `flex flex-col gap-4 border-b border-border/60 pb-4 ${
         isInboxLayout ? "px-5 pt-5" : ""
     }`;
@@ -227,7 +266,7 @@ export default function CaseConversation({
                                                 disabled={returnMutation.isPending}
                                                 className="border border-border/60 px-4 py-2 rounded text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50"
                                             >
-                                                {returnMutation.isPending ? "Передаём..." : "Передать/Эскалировать"}
+                                                {returnMutation.isPending ? "Возвращаем..." : "Вернуть боту"}
                                             </button>
                                         </>
                                     )}
@@ -249,6 +288,13 @@ export default function CaseConversation({
                 </div>
                 <p className="text-sm text-foreground">{contextText}</p>
             </div>
+            {issueHints.length > 0 && (
+                <div className={`rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900 ${
+                    isInboxLayout ? "mx-5" : ""
+                }`}>
+                    {issueHints.join(" ")}
+                </div>
+            )}
 
             <div className="flex-1 min-h-0">
                 <ChatInterface
@@ -256,6 +302,9 @@ export default function CaseConversation({
                     conversationId={caseDetail.conversation_id}
                     caseId={caseId}
                     isLoading={messagesLoading}
+                    hasMoreMessages={messagesHasMore}
+                    loadingMoreMessages={messagesLoadingMore}
+                    onLoadMoreMessages={onLoadMoreMessages}
                     canSend={canSend}
                     draft={draft}
                     onDraftChange={onDraftChange}

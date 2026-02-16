@@ -11,6 +11,9 @@ interface ChatInterfaceProps {
     conversationId: string;
     caseId: string;  // For query invalidation (handover ID)
     isLoading?: boolean;
+    hasMoreMessages?: boolean;
+    loadingMoreMessages?: boolean;
+    onLoadMoreMessages?: () => void;
     canSend?: boolean; // Allow sending messages (case must be active)
     draft?: string;
     onDraftChange?: (value: string) => void;
@@ -29,11 +32,16 @@ type LocalMessage = Message & {
 const isLocalMessage = (message: Message | LocalMessage): message is LocalMessage =>
     "localStatus" in message;
 
+interface SendManagerMessageResponse {
+    success?: boolean;
+    message?: Message;
+}
+
 async function sendMessage(conversationId: string, content: string) {
     const response = await api.post(`/conversations/${conversationId}/messages`, {
         content,
     });
-    return response.data;
+    return response.data as SendManagerMessageResponse;
 }
 
 async function sendMediaMessage(conversationId: string, file: File, caption?: string) {
@@ -43,7 +51,7 @@ async function sendMediaMessage(conversationId: string, file: File, caption?: st
         formData.append("caption", caption.trim());
     }
     const response = await api.post(`/conversations/${conversationId}/messages/media`, formData);
-    return response.data;
+    return response.data as SendManagerMessageResponse;
 }
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"]);
@@ -88,6 +96,9 @@ export default function ChatInterface({
     conversationId,
     caseId,
     isLoading,
+    hasMoreMessages = false,
+    loadingMoreMessages = false,
+    onLoadMoreMessages,
     canSend = true,
     draft,
     onDraftChange,
@@ -104,6 +115,8 @@ export default function ChatInterface({
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const lastMessageIdRef = useRef<string | null>(null);
+    const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number; baseCount: number } | null>(null);
+    const shouldStickToBottomRef = useRef(true);
     const queryClient = useQueryClient();
     const isPlain = frame === "plain";
     const maxTextareaHeight = 220;
@@ -143,20 +156,57 @@ export default function ChatInterface({
 
     const displayMessages = localMessages.length ? [...localMessages, ...messages] : messages;
     const sortedMessages = [...displayMessages].reverse();
+    const isNearBottom = (node: HTMLDivElement, threshold = 120) =>
+        node.scrollHeight - node.scrollTop - node.clientHeight <= threshold;
+    const scrollToBottom = () => {
+        if (!scrollContainerRef.current) {
+            return;
+        }
+        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    };
 
     // Scroll to bottom on new messages
     useEffect(() => {
         const latestId = messages[0]?.id || null;
         if (latestId && latestId !== lastMessageIdRef.current) {
             lastMessageIdRef.current = latestId;
-            if (scrollContainerRef.current) {
-                scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+            if (scrollContainerRef.current && shouldStickToBottomRef.current) {
+                scrollToBottom();
             }
         }
     }, [messages]);
 
     useEffect(() => {
+        const anchor = prependAnchorRef.current;
+        if (!anchor || !scrollContainerRef.current) {
+            return;
+        }
+        if (sortedMessages.length > anchor.baseCount) {
+            const container = scrollContainerRef.current;
+            const delta = container.scrollHeight - anchor.scrollHeight;
+            container.scrollTop = anchor.scrollTop + delta;
+            prependAnchorRef.current = null;
+        }
+    }, [sortedMessages.length]);
+
+    useEffect(() => {
+        if (loadingMoreMessages) {
+            return;
+        }
+        const anchor = prependAnchorRef.current;
+        if (!anchor) {
+            return;
+        }
+        if (sortedMessages.length <= anchor.baseCount) {
+            prependAnchorRef.current = null;
+        }
+    }, [loadingMoreMessages, sortedMessages.length]);
+
+    useEffect(() => {
         setLocalMessages([]);
+        lastMessageIdRef.current = null;
+        prependAnchorRef.current = null;
+        shouldStickToBottomRef.current = true;
     }, [caseId]);
 
     useEffect(() => {
@@ -188,13 +238,22 @@ export default function ChatInterface({
             addLocalMessage(optimisticMessage);
 
             // Scroll to bottom on optimistic update
-            if (scrollContainerRef.current) {
-                scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
-            }
+            shouldStickToBottomRef.current = true;
+            scrollToBottom();
 
-            return { localId };
+            return { localId, content };
         },
-        onSuccess: (_, __, context) => {
+        onSuccess: (response, _, context) => {
+            if (response?.success === false) {
+                if (context?.localId) {
+                    updateLocalMessageStatus(context.localId, "failed");
+                }
+                if (context?.content) {
+                    setInputValue(context.content);
+                }
+                toast.error("Не удалось отправить сообщение");
+                return;
+            }
             if (context?.localId) {
                 removeLocalMessage(context.localId);
             }
@@ -205,6 +264,9 @@ export default function ChatInterface({
         onError: (error: unknown, _, context) => {
             if (context?.localId) {
                 updateLocalMessageStatus(context.localId, "failed");
+            }
+            if (context?.content) {
+                setInputValue(context.content);
             }
             const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
             if (code === "NOT_ASSIGNED") {
@@ -244,16 +306,18 @@ export default function ChatInterface({
             };
             addLocalMessage(optimisticMessage);
 
-            if (scrollContainerRef.current) {
-                scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
-            }
+            shouldStickToBottomRef.current = true;
+            scrollToBottom();
 
-            return { localId };
+            return { localId, caption: caption?.trim() || "" };
         },
-        onSuccess: (data: { success?: boolean } | undefined, _, context) => {
+        onSuccess: (data, _, context) => {
             if (data?.success === false) {
                 if (context?.localId) {
                     updateLocalMessageStatus(context.localId, "failed");
+                }
+                if (context?.caption) {
+                    setInputValue(context.caption);
                 }
                 toast.error("Не удалось отправить медиа");
                 return;
@@ -288,6 +352,25 @@ export default function ChatInterface({
     });
 
     const isSending = sendMutation.isPending || mediaMutation.isPending;
+    const handleMessagesScroll = () => {
+        if (!scrollContainerRef.current) {
+            return;
+        }
+        shouldStickToBottomRef.current = isNearBottom(scrollContainerRef.current);
+    };
+    const handleLoadMoreMessages = () => {
+        if (!onLoadMoreMessages || loadingMoreMessages) {
+            return;
+        }
+        if (scrollContainerRef.current) {
+            prependAnchorRef.current = {
+                scrollHeight: scrollContainerRef.current.scrollHeight,
+                scrollTop: scrollContainerRef.current.scrollTop,
+                baseCount: sortedMessages.length,
+            };
+        }
+        onLoadMoreMessages();
+    };
 
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -362,8 +445,22 @@ export default function ChatInterface({
             {/* Messages area */}
             <div
                 ref={scrollContainerRef}
+                onScroll={handleMessagesScroll}
                 className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4"
             >
+                {hasMoreMessages && (
+                    <div className="flex justify-center pb-2">
+                        <button
+                            type="button"
+                            onClick={handleLoadMoreMessages}
+                            disabled={loadingMoreMessages}
+                            className="rounded-full border border-border/60 px-3 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground disabled:opacity-60 disabled:cursor-not-allowed"
+                            data-testid="chat-load-more"
+                        >
+                            {loadingMoreMessages ? "Загрузка..." : "Загрузить более ранние"}
+                        </button>
+                    </div>
+                )}
                 {sortedMessages.length === 0 ? (
                     <div className="text-center text-muted-foreground my-auto">
                         Нет сообщений

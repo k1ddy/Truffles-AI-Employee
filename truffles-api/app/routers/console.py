@@ -4378,7 +4378,7 @@ async def list_cases(
 
     if not is_privileged:
         if not allowed_branch_ids:
-            return ConsoleCaseListResponse(items=[], cursor=None, has_more=False)
+            return ConsoleCaseListResponse(items=[], cursor=None, has_more=False, total=0)
         query = query.filter(Conversation.branch_id.in_(allowed_branch_ids))
     
     if branch_id is not None:
@@ -4446,6 +4446,9 @@ async def list_cases(
 
     if last_activity_since_dt:
         query = query.filter(latest_message_subq.c.created_at >= last_activity_since_dt)
+
+    # Full count for queue visibility (before cursor pagination).
+    total_count = query.order_by(None).count()
 
     # Sorting & Pagination (Cursor based on selected sort)
     sort_expr = Handover.created_at
@@ -4556,6 +4559,7 @@ async def list_cases(
         ],
         cursor=next_cursor,
         has_more=has_more,
+        total=total_count,
     )
 
 
@@ -5384,6 +5388,11 @@ async def send_manager_message(
             message_metadata={"source": "console"},
         )
         db.add(new_message)
+        case.manager_response = body.content
+        if case.first_response_at is None:
+            case.first_response_at = datetime.now(timezone.utc)
+        if not case.assigned_to_name and context.agent.name:
+            case.assigned_to_name = context.agent.name
 
         # Audit
         record_audit_event(

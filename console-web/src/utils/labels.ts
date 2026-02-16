@@ -77,15 +77,18 @@ export interface SlaIndicator {
     minutes: number;
 }
 
+const SLA_WARNING_MINUTES = 60;
+const SLA_BREACHED_MINUTES = 120;
+
 export function getSlaIndicator(createdAt: string): SlaIndicator {
     const created = new Date(createdAt);
     const now = new Date();
     const diffMs = now.getTime() - created.getTime();
-    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+    const diffMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
 
-    if (diffMinutes < 30) {
+    if (diffMinutes < SLA_WARNING_MINUTES) {
         return { label: `${diffMinutes}м`, className: "bg-green-100 text-green-800", minutes: diffMinutes };
-    } else if (diffMinutes < 60) {
+    } else if (diffMinutes < SLA_BREACHED_MINUTES) {
         return { label: `${diffMinutes}м`, className: "bg-yellow-100 text-yellow-800", minutes: diffMinutes };
     } else {
         const hours = Math.floor(diffMinutes / 60);

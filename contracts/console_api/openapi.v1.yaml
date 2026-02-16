@@ -5037,6 +5037,9 @@ components:
           nullable: true
         has_more:
           type: boolean
+        total:
+          type: integer
+          nullable: true
 
     CaseActionResponse:
       type: object

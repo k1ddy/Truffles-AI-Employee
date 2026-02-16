@@ -31,6 +31,7 @@ interface CasesResponse {
     items: Case[];
     cursor?: string;
     has_more?: boolean;
+    total?: number | null;
 }
 
 type CaseListVariant = "table" | "compact";
@@ -304,9 +305,13 @@ export default function CaseList({
         );
     }
 
-    const casesCountLabel = `${sortedCases.length} ${
-        sortedCases.length === 1 ? "заявка" : sortedCases.length < 5 ? "заявки" : "заявок"
-    }${data?.has_more ? " (есть ещё)" : ""}`;
+    const caseNoun = (count: number) => (count === 1 ? "заявка" : count < 5 ? "заявки" : "заявок");
+    const loadedCases = sortedCases.length;
+    const totalCases = typeof data?.total === "number" && data.total >= 0 ? data.total : loadedCases;
+    const countBaseLabel = totalCases > loadedCases
+        ? `Показано ${loadedCases} из ${totalCases} ${caseNoun(totalCases)}`
+        : `${loadedCases} ${caseNoun(loadedCases)}`;
+    const casesCountLabel = `${countBaseLabel}${data?.has_more ? " (есть ещё)" : ""}`;
 
     return (
         <div className={isCompact ? "flex flex-col h-full" : "w-full"}>

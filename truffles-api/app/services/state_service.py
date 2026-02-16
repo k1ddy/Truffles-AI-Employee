@@ -552,7 +552,6 @@ def manager_take(
         handover.status = "active"
         handover.assigned_to = manager_id
         handover.assigned_to_name = manager_name
-        handover.first_response_at = now
 
         db.flush()
 

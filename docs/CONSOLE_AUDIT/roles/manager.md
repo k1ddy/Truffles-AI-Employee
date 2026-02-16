@@ -21,11 +21,18 @@ Selection gates
 
 Key UI actions
 - Inbox
-  - Take/resolve case: `POST /console/v1/cases/{id}/take|resolve`.
+  - Take/resolve/return-to-bot: `POST /console/v1/cases/{id}/take|resolve|return`.
   - Send messages/media: `POST /console/v1/conversations/{id}/messages` and `/messages/media`.
   - Quick replies/macros: allowed (canWriteInbox true).
+  - Message history pagination: `GET /console/v1/cases/{id}/messages?cursor=...&limit=...`.
 - Calendar
   - View specialists, slots, and create bookings.
+
+Manager UX specifics
+- Queue counter reflects loaded vs total cases from backend (`CaseListResponse.total`).
+- Chat shows "Загрузить старые" for long dialogs and keeps scroll position when loading history.
+- "Взять/Закрыть/Вернуть боту" actions surface sync warnings when Telegram/client notify fails.
+- Delivery risk hints are shown directly in conversation header (`has_delivery_error`, `has_pending_outbox`).
 
 Code references
 - RBAC: `console-web/src/lib/api-client.ts`, `truffles-api/app/services/console_auth.py`.
