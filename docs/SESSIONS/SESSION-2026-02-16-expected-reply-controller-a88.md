@@ -1,6 +1,6 @@
 # SESSION 2026-02-16-expected-reply-controller-a88 — expected_reply + controller taxonomy
 
-- status: done
+- status: active
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-16-expected-reply-controller-a88.md
 - branch: feat/2026-02-16-expected-reply-controller-a88
@@ -35,4 +35,4 @@
   - /tmp/booking_quality/a88-replay-local-20260216/brief.md
   - /tmp/booking_quality/a88-replay-local-20260216/responses.jsonl
   - /tmp/console_perf_baseline_20260216/local_admin_health_after_stats.txt
-- last_updated: 2026-02-16T22:05:00Z
+- last_updated: 2026-02-16T23:30:00Z
