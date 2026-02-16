@@ -4628,9 +4628,9 @@ async def list_cases(
     )
     last_activity_since_dt = _parse_datetime_param("last_activity_since", last_activity_since)
     sort_by_value = _parse_sort_param("sort_by", request.query_params.get("sort_by"))
-    
-    # Base query
-    query = (
+
+    # Base query with common filters used by both count and item fetch.
+    base_query = (
         db.query(Handover, Conversation, User)
         .join(Conversation, Handover.conversation_id == Conversation.id)
         .outerjoin(User, and_(User.id == Conversation.user_id, User.client_id == context.client.id))
@@ -4640,74 +4640,6 @@ async def list_cases(
         )
     )
 
-    latest_message_subq = (
-        db.query(
-            Message.conversation_id.label("conversation_id"),
-            Message.created_at.label("created_at"),
-            Message.role.label("role"),
-            Message.content.label("content"),
-            Message.message_metadata.label("metadata"),
-            func.row_number()
-            .over(
-                partition_by=Message.conversation_id,
-                order_by=Message.created_at.desc(),
-            )
-            .label("rn"),
-        )
-        .subquery()
-    )
-
-    last_inbound_subq = (
-        db.query(
-            Message.conversation_id.label("conversation_id"),
-            func.max(Message.created_at).label("last_inbound_at"),
-        )
-        .filter(Message.role == "user")
-        .group_by(Message.conversation_id)
-        .subquery()
-    )
-
-    last_outbound_subq = (
-        db.query(
-            Message.conversation_id.label("conversation_id"),
-            func.max(Message.created_at).label("last_outbound_at"),
-        )
-        .filter(Message.role.in_(["assistant", "manager", "system"]))
-        .group_by(Message.conversation_id)
-        .subquery()
-    )
-
-    outbox_subq = (
-        db.query(
-            OutboxMessage.conversation_id.label("conversation_id"),
-            func.sum(
-                case(
-                    (OutboxMessage.status.in_(["PENDING", "PROCESSING"]), 1),
-                    else_=0,
-                )
-            ).label("pending_count"),
-            func.sum(
-                case(
-                    (OutboxMessage.status == "FAILED", 1),
-                    else_=0,
-                )
-            ).label("failed_count"),
-        )
-        .group_by(OutboxMessage.conversation_id)
-        .subquery()
-    )
-
-    query = query.outerjoin(
-        latest_message_subq,
-        and_(
-            latest_message_subq.c.conversation_id == Conversation.id,
-            latest_message_subq.c.rn == 1,
-        ),
-    )
-    query = query.outerjoin(last_inbound_subq, last_inbound_subq.c.conversation_id == Conversation.id)
-    query = query.outerjoin(last_outbound_subq, last_outbound_subq.c.conversation_id == Conversation.id)
-    query = query.outerjoin(outbox_subq, outbox_subq.c.conversation_id == Conversation.id)
-
     # Branch filter (RBAC + Request)
     allowed_branch_ids = {b.id for b in context.branches}
     is_privileged = _has_context_privileged_branch_access(context)
@@ -4715,35 +4647,35 @@ async def list_cases(
     if not is_privileged:
         if not allowed_branch_ids:
             return ConsoleCaseListResponse(items=[], cursor=None, has_more=False, total=0)
-        query = query.filter(Conversation.branch_id.in_(allowed_branch_ids))
-    
+        base_query = base_query.filter(Conversation.branch_id.in_(allowed_branch_ids))
+
     if branch_id is not None:
         bid = _parse_uuid_param("branch_id", branch_id)
         if not is_privileged and bid not in allowed_branch_ids:
             raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this branch denied")
-        query = query.filter(Conversation.branch_id == bid)
+        base_query = base_query.filter(Conversation.branch_id == bid)
     elif context.branch_restricted:
-        query = query.filter(Conversation.branch_id.in_(allowed_branch_ids))
-    
+        base_query = base_query.filter(Conversation.branch_id.in_(allowed_branch_ids))
+
     # Status filter
     status_filters = _parse_case_status_param("status", request.query_params.get("status") or status)
     if status_filters:
-        query = query.filter(Handover.status.in_(status_filters))
-    
+        base_query = base_query.filter(Handover.status.in_(status_filters))
+
     # Date range filter
     if date_from is not None:
         from_date = _parse_date_param("date_from", date_from)
         start_of_day = datetime.combine(from_date, time.min).replace(tzinfo=timezone.utc)
-        query = query.filter(Handover.created_at >= start_of_day)
-    
+        base_query = base_query.filter(Handover.created_at >= start_of_day)
+
     if date_to is not None:
         to_date = _parse_date_param("date_to", date_to)
         end_of_day = datetime.combine(to_date, time.max).replace(tzinfo=timezone.utc)
-        query = query.filter(Handover.created_at <= end_of_day)
-    
+        base_query = base_query.filter(Handover.created_at <= end_of_day)
+
     # Assigned to me
     if assigned_to_me:
-        query = query.filter(
+        base_query = base_query.filter(
             or_(
                 Handover.assigned_to == str(context.agent.id),
                 and_(
@@ -4765,14 +4697,124 @@ async def list_cases(
             conditions.append(func.regexp_replace(User.phone, r"\D", "", "g").ilike(f"%{digits}%"))
         conditions.append(User.name.ilike(f"%{query_value}%"))
         if conditions:
-            query = query.filter(or_(*conditions))
+            base_query = base_query.filter(or_(*conditions))
 
     if phone:
         digits = _normalize_phone_digits(phone)
         if digits:
-            query = query.filter(
+            base_query = base_query.filter(
                 func.regexp_replace(User.phone, r"\D", "", "g").ilike(f"%{digits}%")
             )
+
+    count_query = base_query
+    if has_delivery_error:
+        count_query = count_query.filter(
+            db.query(OutboxMessage.id)
+            .filter(
+                OutboxMessage.client_id == context.client.id,
+                OutboxMessage.conversation_id == Conversation.id,
+                OutboxMessage.status == "FAILED",
+            )
+            .exists()
+        )
+    if has_pending_outbox:
+        count_query = count_query.filter(
+            db.query(OutboxMessage.id)
+            .filter(
+                OutboxMessage.client_id == context.client.id,
+                OutboxMessage.conversation_id == Conversation.id,
+                OutboxMessage.status.in_(["PENDING", "PROCESSING"]),
+            )
+            .exists()
+        )
+    if last_activity_since_dt:
+        count_query = count_query.filter(
+            db.query(Message.id)
+            .filter(
+                Message.client_id == context.client.id,
+                Message.conversation_id == Conversation.id,
+                Message.created_at >= last_activity_since_dt,
+            )
+            .exists()
+        )
+    # Full count for queue visibility (before cursor pagination).
+    total_count = count_query.order_by(None).count()
+
+    latest_message_subq = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            Message.created_at.label("created_at"),
+            Message.role.label("role"),
+            Message.content.label("content"),
+            Message.message_metadata.label("metadata"),
+            func.row_number()
+            .over(
+                partition_by=Message.conversation_id,
+                order_by=Message.created_at.desc(),
+            )
+            .label("rn"),
+        )
+        .filter(Message.client_id == context.client.id)
+        .subquery()
+    )
+
+    last_inbound_subq = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            func.max(Message.created_at).label("last_inbound_at"),
+        )
+        .filter(
+            Message.client_id == context.client.id,
+            Message.role == "user",
+        )
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+
+    last_outbound_subq = (
+        db.query(
+            Message.conversation_id.label("conversation_id"),
+            func.max(Message.created_at).label("last_outbound_at"),
+        )
+        .filter(
+            Message.client_id == context.client.id,
+            Message.role.in_(["assistant", "manager", "system"]),
+        )
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+
+    outbox_subq = (
+        db.query(
+            OutboxMessage.conversation_id.label("conversation_id"),
+            func.sum(
+                case(
+                    (OutboxMessage.status.in_(["PENDING", "PROCESSING"]), 1),
+                    else_=0,
+                )
+            ).label("pending_count"),
+            func.sum(
+                case(
+                    (OutboxMessage.status == "FAILED", 1),
+                    else_=0,
+                )
+            ).label("failed_count"),
+        )
+        .filter(OutboxMessage.client_id == context.client.id)
+        .group_by(OutboxMessage.conversation_id)
+        .subquery()
+    )
+
+    query = base_query.outerjoin(
+        latest_message_subq,
+        and_(
+            latest_message_subq.c.conversation_id == Conversation.id,
+            latest_message_subq.c.rn == 1,
+        ),
+    )
+    query = query.outerjoin(last_inbound_subq, last_inbound_subq.c.conversation_id == Conversation.id)
+    query = query.outerjoin(last_outbound_subq, last_outbound_subq.c.conversation_id == Conversation.id)
+    query = query.outerjoin(outbox_subq, outbox_subq.c.conversation_id == Conversation.id)
 
     if has_delivery_error:
         query = query.filter(outbox_subq.c.failed_count > 0)
@@ -4782,9 +4824,6 @@ async def list_cases(
 
     if last_activity_since_dt:
         query = query.filter(latest_message_subq.c.created_at >= last_activity_since_dt)
-
-    # Full count for queue visibility (before cursor pagination).
-    total_count = query.order_by(None).count()
 
     # Sorting & Pagination (Cursor based on selected sort)
     sort_expr = Handover.created_at
