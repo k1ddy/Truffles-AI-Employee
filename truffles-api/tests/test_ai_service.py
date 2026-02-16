@@ -4,8 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
-import pytest
 import httpx
+import pytest
 
 import app.services.ai_service as ai_service
 from app.services.ai_service import (
