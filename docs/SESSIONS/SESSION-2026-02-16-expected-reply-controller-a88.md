@@ -1,0 +1,30 @@
+# SESSION 2026-02-16-expected-reply-controller-a88 — expected_reply + controller taxonomy
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-16-expected-reply-controller-a88.md
+- branch: feat/2026-02-16-expected-reply-controller-a88
+- worktree: /home/zhan/truffles-main
+- base_ref: origin/main
+- scope: TP#2 and TP#3 completion on fixed scenarios (`expected_reply_deferred` compatibility + controller observability in non-gated policy-tool path).
+- done:
+  - TP#2/TP#3 delivered with replay evidence and decision_meta contracts
+  - `ops/diagnose.py`: added compat counters `expected_reply_deferred` + `expected_reply_blocked`; controller stage now trusts `controller_eligible` and records non-eligible reasons without overcount from non-gated tool paths.
+  - `truffles-api/app/routers/webhook/decision.py`: added `_set_policy_core_tool_observability()` and applied it in `is_tool_action(...)` branch to mark non-gated tool path as `router/controller_eligible=true` with `*_skipped_reason=policy_core_tool`.
+  - `truffles-api/tests/test_message_endpoint.py`: added contract assertions for `decision_meta` (`router_eligible`, `controller_eligible`, `router_skipped_reason`, `controller_skipped_reason`) in policy-verifier blocked tool scenarios.
+  - Target checks passed:
+    - `pytest -q truffles-api/tests/test_message_endpoint.py` -> `184 passed`.
+    - `python3 -m py_compile ops/diagnose.py truffles-api/app/routers/webhook/decision.py`.
+  - Replay evidence on same lock scenarios (branch-local runtime):
+    - run: `/tmp/booking_quality/a88-replay-local-20260216/summary.json`
+    - `expected_reply_deferred=0` (DoD `<=20` satisfied)
+    - `controller_eligible=98`, `controller_non_eligible=8`, `skip_reasons={'policy_core_tool': 29, 'not_run': 8}`
+    - `infra_valid=true`; `semantic_valid=false` only because baseline comparison blocked (`baseline_non_canonical:judge_mode_off`), no threshold breaches.
+- next:
+  - Build canonical judge-enabled baseline to unblock regression comparison.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-16-expected-reply-controller-a88.md
+  - /tmp/booking_quality/a88-replay-local-20260216/summary.json
+  - /tmp/booking_quality/a88-replay-local-20260216/brief.md
+  - /tmp/booking_quality/a88-replay-local-20260216/responses.jsonl
+- last_updated: 2026-02-16

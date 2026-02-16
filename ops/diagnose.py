@@ -3685,6 +3685,26 @@ def _llm_quality_expected_response(state, meta):
     return True, None
 
 
+def _llm_quality_is_expected_reply_blocked(meta: dict | None) -> bool:
+    if not isinstance(meta, dict):
+        return False
+    if meta.get("expected_reply_blocked_by_info") is not True:
+        return False
+    if meta.get("expected_reply_matched") is True:
+        return False
+    return not _llm_quality_normalize_tool_token(meta.get("expected_reply_bypassed"))
+
+
+def _llm_quality_is_expected_reply_deferred(meta: dict | None) -> bool:
+    if not isinstance(meta, dict):
+        return False
+    controller_skip_reason = _llm_quality_normalize_tool_token(meta.get("controller_skipped_reason"))
+    router_skip_reason = _llm_quality_normalize_tool_token(meta.get("router_skipped_reason"))
+    if "expected_reply_deferred" in {controller_skip_reason, router_skip_reason}:
+        return True
+    return _llm_quality_is_expected_reply_blocked(meta) and meta.get("controller_attempted") is not True
+
+
 def _llm_quality_should_judge_turn(
     *,
     judge_enabled,
@@ -8224,6 +8244,8 @@ def _run_llm_quality(args):
             "non_eligible": 0,
             "attempted": 0,
             "skipped": 0,
+            "expected_reply_deferred": 0,
+            "expected_reply_blocked": 0,
             "skip_reasons": {},
             "non_eligible_reasons": {},
         },
@@ -9012,7 +9034,13 @@ def _run_llm_quality(args):
                             or _llm_quality_normalize_tool_token(meta.get("router_skipped_reason"))
                             or "not_attempted"
                         )
-                        non_eligible_reasons = {
+                        expected_reply_blocked = _llm_quality_is_expected_reply_blocked(meta)
+                        expected_reply_deferred = _llm_quality_is_expected_reply_deferred(meta)
+                        if expected_reply_blocked:
+                            controller_stats["expected_reply_blocked"] += 1
+                        if expected_reply_deferred:
+                            controller_stats["expected_reply_deferred"] += 1
+                        non_eligible_reason_tokens = {
                             "expected_reply_deferred",
                             "law_gate",
                             "policy_gate",
@@ -9020,23 +9048,51 @@ def _run_llm_quality(args):
                             "not_run",
                             "guard_not_eligible",
                         }
+                        controller_eligible = meta.get("controller_eligible")
+                        if controller_eligible is None and isinstance(meta.get("router_eligible"), bool):
+                            controller_eligible = meta.get("router_eligible")
                         if meta.get("controller_attempted") is True:
                             controller_stats["eligible"] += 1
                             controller_stats["attempted"] += 1
                         else:
                             skip_reasons = controller_stats.setdefault("skip_reasons", {})
                             skip_reasons[skip_reason] = skip_reasons.get(skip_reason, 0) + 1
-                            if skip_reason in non_eligible_reasons:
+                            if controller_eligible is True:
+                                controller_stats["eligible"] += 1
+                                controller_stats["skipped"] += 1
+                            elif controller_eligible is False:
                                 controller_stats["non_eligible"] += 1
                                 non_eligible_map = controller_stats.setdefault(
                                     "non_eligible_reasons", {}
                                 )
-                                non_eligible_map[skip_reason] = (
-                                    non_eligible_map.get(skip_reason, 0) + 1
+                                non_eligible_reason = skip_reason
+                                if expected_reply_deferred:
+                                    non_eligible_reason = "expected_reply_deferred"
+                                elif non_eligible_reason == "not_run" and expected_reply_blocked:
+                                    non_eligible_reason = "expected_reply_blocked"
+                                non_eligible_map[non_eligible_reason] = (
+                                    non_eligible_map.get(non_eligible_reason, 0) + 1
                                 )
                             else:
-                                controller_stats["eligible"] += 1
-                                controller_stats["skipped"] += 1
+                                fallback_non_eligible = expected_reply_deferred or (
+                                    skip_reason in non_eligible_reason_tokens
+                                )
+                                if fallback_non_eligible:
+                                    controller_stats["non_eligible"] += 1
+                                    non_eligible_map = controller_stats.setdefault(
+                                        "non_eligible_reasons", {}
+                                    )
+                                    non_eligible_reason = (
+                                        "expected_reply_deferred"
+                                        if expected_reply_deferred
+                                        else skip_reason
+                                    )
+                                    non_eligible_map[non_eligible_reason] = (
+                                        non_eligible_map.get(non_eligible_reason, 0) + 1
+                                    )
+                                else:
+                                    controller_stats["eligible"] += 1
+                                    controller_stats["skipped"] += 1
 
                     tool_action_token = _llm_quality_normalize_tool_token(meta.get("tool_action"))
                     if tool_action_token and "." in tool_action_token:
@@ -9709,6 +9765,8 @@ def _run_llm_quality(args):
             "non_eligible": controller_stage.get("non_eligible", 0),
             "attempted": controller_stage.get("attempted", 0),
             "skipped": controller_stage.get("skipped", 0),
+            "expected_reply_deferred": controller_stage.get("expected_reply_deferred", 0),
+            "expected_reply_blocked": controller_stage.get("expected_reply_blocked", 0),
             "skip_reasons": controller_stage.get("skip_reasons", {}),
             "non_eligible_reasons": controller_stage.get("non_eligible_reasons", {}),
             "eligibility_rate": round(

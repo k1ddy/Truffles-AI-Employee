@@ -8830,6 +8830,11 @@ def test_llm_policy_core_book_slot_unknown_tool_arg_rejected(monkeypatch):
     assert meta.get("tool_args_error") == "tool_args_unknown_field"
     assert meta.get("tool_args_error_field") == "mystery_field"
     assert meta.get("tool_verifier") == "pre_execute"
+    assert meta.get("router_eligible") is True
+    assert meta.get("controller_eligible") is True
+    assert meta.get("router_skipped_reason") == "policy_core_tool"
+    assert meta.get("controller_skipped_reason") == "policy_core_tool"
+    assert meta.get("controller_attempted") is not True
 
 
 def test_llm_policy_core_book_slot_missing_start_at_blocked_by_policy_verifier(monkeypatch):
@@ -8964,6 +8969,11 @@ def test_llm_policy_core_book_slot_missing_start_at_blocked_by_policy_verifier(m
     assert meta.get("tool_args_error") == "tool_args_required_missing"
     assert meta.get("tool_args_error_field") == "start_at"
     assert meta.get("tool_verifier_slot") == "datetime"
+    assert meta.get("router_eligible") is True
+    assert meta.get("controller_eligible") is True
+    assert meta.get("router_skipped_reason") == "policy_core_tool"
+    assert meta.get("controller_skipped_reason") == "policy_core_tool"
+    assert meta.get("controller_attempted") is not True
 
 
 def test_llm_policy_core_book_slot_contract_invalid_escalates(monkeypatch):

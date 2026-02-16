@@ -2442,6 +2442,51 @@ def _set_router_observability(message: Message | None, *, eligible: bool, reason
     return updates
 
 
+_OBSERVABILITY_REASONS_PROTECTED = {
+    "law_gate",
+    "policy_gate",
+    "pending",
+    "guard_not_eligible",
+    "expected_reply_deferred",
+    "none",
+}
+
+
+def _set_policy_core_tool_observability(message: Message | None) -> None:
+    if not message:
+        return
+    metadata = dict(message.message_metadata or {})
+    decision_meta = dict(metadata.get("decision_meta") or {})
+    if decision_meta.get("controller_attempted") is True:
+        return
+    router_reason = (
+        decision_meta.get("router_skipped_reason").strip().lower()
+        if isinstance(decision_meta.get("router_skipped_reason"), str)
+        else ""
+    )
+    controller_reason = (
+        decision_meta.get("controller_skipped_reason").strip().lower()
+        if isinstance(decision_meta.get("controller_skipped_reason"), str)
+        else ""
+    )
+    if (
+        router_reason in _OBSERVABILITY_REASONS_PROTECTED
+        or controller_reason in _OBSERVABILITY_REASONS_PROTECTED
+    ):
+        return
+    updates: dict[str, Any] = {}
+    if decision_meta.get("router_eligible") is not True:
+        updates["router_eligible"] = True
+    if decision_meta.get("controller_eligible") is not True:
+        updates["controller_eligible"] = True
+    if router_reason in {"", "not_run"}:
+        updates["router_skipped_reason"] = "policy_core_tool"
+    if controller_reason in {"", "not_run"}:
+        updates["controller_skipped_reason"] = "policy_core_tool"
+    if updates:
+        _update_message_decision_metadata(message, updates)
+
+
 _DEFAULT_RAG_SCORES = {"bm25_max": 0.0, "vector_max": 0.0, "hybrid_max": 0.0}
 
 
@@ -9068,6 +9113,7 @@ async def _handle_webhook_payload(
         )
 
         if is_tool_action(policy_tool_action):
+            _set_policy_core_tool_observability(saved_message)
             info_sections_hint: list[str] = []
             if policy_pack_refs:
                 info_sections_hint = [ref for ref in policy_pack_refs if ref in INFO_INTENTS]
