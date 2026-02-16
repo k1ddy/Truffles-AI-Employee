@@ -1,6 +1,10 @@
 import time
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
+
+import pytest
 
 import app.services.ai_service as ai_service
 from app.services.ai_service import (
@@ -16,6 +20,14 @@ from app.services.ai_service import (
     get_system_prompt,
 )
 from app.services.result import Result
+
+
+@pytest.fixture(autouse=True)
+def _disable_hierarchical_memory_by_default(monkeypatch):
+    monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_ENABLED", "0")
+    monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MESSAGES", 6)
+    monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MAX_LINES", 4)
+    monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MAX_CHARS", 320)
 
 
 class TestKnowledgeConfidenceThreshold:
@@ -47,6 +59,15 @@ class TestGetSystemPrompt:
 
 
 class TestGetConversationHistory:
+    @staticmethod
+    def _query_with_messages(messages):
+        query = Mock()
+        query.filter.return_value = query
+        query.order_by.return_value = query
+        query.limit.return_value = query
+        query.all.return_value = messages
+        return query
+
     def test_returns_empty_list_for_no_messages(self):
         mock_db = Mock()
         mock_db.query().filter().order_by().limit().all.return_value = []
@@ -77,6 +98,70 @@ class TestGetConversationHistory:
 
         assert len(result) == 1
         assert result[0]["role"] == "user"
+
+    def test_hierarchical_memory_inserts_summary_for_older_messages(self, monkeypatch):
+        monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_ENABLED", "1")
+        monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MESSAGES", 3)
+        monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MAX_LINES", 3)
+        monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MAX_CHARS", 500)
+
+        mock_db = Mock()
+        t1 = datetime(2026, 2, 16, 10, 0, tzinfo=timezone.utc)
+        t2 = datetime(2026, 2, 16, 10, 1, tzinfo=timezone.utc)
+        t3 = datetime(2026, 2, 16, 10, 2, tzinfo=timezone.utc)
+        t4 = datetime(2026, 2, 16, 10, 3, tzinfo=timezone.utc)
+
+        recent_desc = [
+            SimpleNamespace(role="assistant", content="recent answer", created_at=t4),
+            SimpleNamespace(role="user", content="recent question", created_at=t3),
+        ]
+        older_desc = [
+            SimpleNamespace(role="assistant", content="older answer", created_at=t2),
+            SimpleNamespace(role="system", content="ignore this", created_at=t1),
+            SimpleNamespace(role="user", content="older question", created_at=t1),
+        ]
+
+        mock_db.query.side_effect = [
+            self._query_with_messages(recent_desc),
+            self._query_with_messages(older_desc),
+        ]
+
+        result = get_conversation_history(mock_db, uuid4(), limit=2)
+
+        assert len(result) == 3
+        assert result[0]["role"] == "assistant"
+        assert result[0]["content"].startswith("[memory_summary] ")
+        assert "U: older question" in result[0]["content"]
+        assert "A: older answer" in result[0]["content"]
+        assert "ignore this" not in result[0]["content"]
+        assert result[1] == {"role": "user", "content": "recent question"}
+        assert result[2] == {"role": "assistant", "content": "recent answer"}
+
+    def test_hierarchical_memory_does_not_add_summary_when_disabled(self, monkeypatch):
+        monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_ENABLED", "0")
+
+        mock_db = Mock()
+        recent_desc = [
+            SimpleNamespace(
+                role="assistant",
+                content="recent answer",
+                created_at=datetime(2026, 2, 16, 10, 3, tzinfo=timezone.utc),
+            ),
+            SimpleNamespace(
+                role="user",
+                content="recent question",
+                created_at=datetime(2026, 2, 16, 10, 2, tzinfo=timezone.utc),
+            ),
+        ]
+        mock_db.query.side_effect = [self._query_with_messages(recent_desc)]
+
+        result = get_conversation_history(mock_db, uuid4(), limit=2)
+
+        assert result == [
+            {"role": "user", "content": "recent question"},
+            {"role": "assistant", "content": "recent answer"},
+        ]
+        assert mock_db.query.call_count == 1
 
 
 class TestSanitizeQueryForRag:

@@ -248,6 +248,10 @@ ELEVENLABS_ASR_MODEL_ID = (
 )
 LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "600"))
 MAX_HISTORY_MESSAGES = int(os.environ.get("LLM_HISTORY_MESSAGES", "6"))
+HIERARCHICAL_MEMORY_ENABLED = os.environ.get("LLM_HIER_MEMORY_ENABLED", "1")
+HIERARCHICAL_MEMORY_SUMMARY_MESSAGES = int(os.environ.get("LLM_HIER_SUMMARY_MESSAGES", "6"))
+HIERARCHICAL_MEMORY_SUMMARY_MAX_LINES = int(os.environ.get("LLM_HIER_SUMMARY_MAX_LINES", "4"))
+HIERARCHICAL_MEMORY_SUMMARY_MAX_CHARS = int(os.environ.get("LLM_HIER_SUMMARY_MAX_CHARS", "320"))
 MAX_KNOWLEDGE_CHARS = int(os.environ.get("LLM_KNOWLEDGE_CHARS", "1500"))
 LLM_CACHE_TTL_SECONDS = int(os.environ.get("LLM_CACHE_TTL_SECONDS", "86400"))
 CONSULT_LLM_TIMEOUT_SECONDS = float(os.environ.get("CONSULT_LLM_TIMEOUT_SECONDS", "6"))
@@ -986,6 +990,8 @@ def get_system_prompt(db: Session, client_id: UUID) -> Optional[str]:
 
 def get_conversation_history(db: Session, conversation_id: UUID, limit: int = MAX_HISTORY_MESSAGES) -> List[dict]:
     """Get recent conversation history."""
+    if limit <= 0:
+        return []
     messages = (
         db.query(Message)
         .filter(Message.conversation_id == conversation_id)
@@ -1004,7 +1010,51 @@ def get_conversation_history(db: Session, conversation_id: UUID, limit: int = MA
             continue  # Skip system messages
         history.append({"role": role, "content": msg.content})
 
+    if not history:
+        return history
+    if not _is_env_enabled(HIERARCHICAL_MEMORY_ENABLED, default=True):
+        return history
+    if HIERARCHICAL_MEMORY_SUMMARY_MESSAGES <= 0:
+        return history
+    oldest_recent = messages[0] if messages else None
+    oldest_recent_at = getattr(oldest_recent, "created_at", None)
+    if oldest_recent_at is None:
+        return history
+    older_messages = (
+        db.query(Message)
+        .filter(
+            Message.conversation_id == conversation_id,
+            Message.created_at < oldest_recent_at,
+        )
+        .order_by(Message.created_at.desc())
+        .limit(HIERARCHICAL_MEMORY_SUMMARY_MESSAGES)
+        .all()
+    )
+    if not older_messages:
+        return history
+    older_messages = list(reversed(older_messages))
+    summary = _build_compact_history_summary(older_messages)
+    if summary:
+        history.insert(0, {"role": "assistant", "content": f"[memory_summary] {summary}"})
     return history
+
+
+def _build_compact_history_summary(messages: List[Message]) -> str:
+    summary_lines: list[str] = []
+    max_lines = max(1, HIERARCHICAL_MEMORY_SUMMARY_MAX_LINES)
+    for msg in messages:
+        role_value = str(getattr(msg, "role", "") or "").strip().casefold()
+        if role_value == "system":
+            continue
+        content = _trim_text(str(getattr(msg, "content", "") or "").strip(), 120)
+        if not content:
+            continue
+        role_prefix = "A" if role_value == "assistant" else "U"
+        summary_lines.append(f"{role_prefix}: {content}")
+    if not summary_lines:
+        return ""
+    compact = " | ".join(summary_lines[-max_lines:])
+    return _trim_text(compact, HIERARCHICAL_MEMORY_SUMMARY_MAX_CHARS)
 
 
 def normalize_for_matching(text: str) -> str:
