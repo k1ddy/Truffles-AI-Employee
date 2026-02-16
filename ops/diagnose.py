@@ -5559,6 +5559,36 @@ def _parse_llm_quality_args(argv):
     args = parser.parse_args(argv)
     return _llm_quality_apply_timeout_profile(args)
 
+
+def _parse_llm_quality_matrix_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py llm-quality-matrix",
+        description=(
+            "Run llm-quality with identical args across multiple client slugs "
+            "and produce matrix_summary.json."
+        ),
+    )
+    parser.add_argument(
+        "--client-slugs",
+        required=True,
+        help="Comma-separated client slugs, e.g. demo_salon,clinic_pack,spa_pack",
+    )
+    parser.add_argument(
+        "--run-id-prefix",
+        default=None,
+        help="Prefix for child run_id values (default: matrix-<utc-timestamp>).",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Matrix output directory (default: /tmp/booking_quality/<run-id-prefix>).",
+    )
+    parser.add_argument("--allow-output-overwrite", action="store_true")
+    parser.add_argument("--continue-on-error", action="store_true")
+    args, llm_quality_args = parser.parse_known_args(argv)
+    args.llm_quality_args = list(llm_quality_args or [])
+    return args
+
 def _parse_explain_args(argv):
     parser = argparse.ArgumentParser(
         prog="ops/diagnose.py explain",
@@ -10027,6 +10057,170 @@ def _run_llm_quality(args):
             raise SystemExit(
                 f"llm-quality: regression breaches ({', '.join(regression_breaches)})"
             )
+
+
+def _run_llm_quality_matrix(args):
+    raw_client_slugs = _parse_csv_values(getattr(args, "client_slugs", None))
+    client_slugs = []
+    seen_slugs = set()
+    for slug in raw_client_slugs:
+        normalized = slug.strip()
+        if not normalized or normalized in seen_slugs:
+            continue
+        seen_slugs.add(normalized)
+        client_slugs.append(normalized)
+    if not client_slugs:
+        raise SystemExit("llm-quality-matrix: provide at least one --client-slugs value")
+
+    forwarded_args = list(getattr(args, "llm_quality_args", []) or [])
+    if forwarded_args and forwarded_args[0] == "--":
+        forwarded_args = forwarded_args[1:]
+    forbidden_flags = ("--client-slug", "--run-id", "--output-dir")
+    for token in forwarded_args:
+        if token in forbidden_flags:
+            raise SystemExit(
+                f"llm-quality-matrix: forward args must not override {token}; use matrix options"
+            )
+        for flag in forbidden_flags:
+            if token.startswith(f"{flag}="):
+                raise SystemExit(
+                    f"llm-quality-matrix: forward args must not override {flag}; use matrix options"
+                )
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    run_id_prefix = (args.run_id_prefix or f"matrix-{timestamp}").strip()
+    if not run_id_prefix:
+        run_id_prefix = f"matrix-{timestamp}"
+    output_dir = _llm_quality_prepare_output_dir(
+        args.output_dir or os.path.join("/tmp/booking_quality", run_id_prefix),
+        allow_overwrite=bool(getattr(args, "allow_output_overwrite", False)),
+    )
+
+    matrix_rows = []
+    for index, client_slug in enumerate(client_slugs, start=1):
+        child_run_id = f"{run_id_prefix}-{index:02d}-{client_slug}"
+        child_output_dir = os.path.join(output_dir, child_run_id)
+        child_argv = [
+            "--client-slug",
+            client_slug,
+            "--run-id",
+            child_run_id,
+            "--output-dir",
+            child_output_dir,
+            *forwarded_args,
+        ]
+        started_at = datetime.now(timezone.utc)
+        row = {
+            "client_slug": client_slug,
+            "run_id": child_run_id,
+            "output_dir": child_output_dir,
+            "started_at": started_at.isoformat(),
+            "finished_at": None,
+            "status": "ok",
+            "exit_code": 0,
+            "error": None,
+            "summary": None,
+            "infra_valid": None,
+            "semantic_valid": None,
+            "comparison_blocked": None,
+            "strict_pass_rate": None,
+            "degraded_fallback_rate": None,
+            "missing_bot_reply": None,
+        }
+        try:
+            child_args = _parse_llm_quality_args(child_argv)
+            _run_llm_quality(child_args)
+        except SystemExit as exc:
+            code = exc.code
+            if code in (None, 0):
+                row["exit_code"] = 0
+            elif isinstance(code, int):
+                row["exit_code"] = code
+                row["status"] = "failed"
+            else:
+                row["exit_code"] = 1
+                row["status"] = "failed"
+            if row["status"] != "ok":
+                row["error"] = str(code)
+        except Exception as exc:
+            row["exit_code"] = 1
+            row["status"] = "failed"
+            row["error"] = str(exc)
+
+        summary_path = os.path.join(child_output_dir, "summary.json")
+        row["summary"] = summary_path if os.path.exists(summary_path) else None
+        if row["summary"]:
+            try:
+                with open(summary_path, "r", encoding="utf-8") as handle:
+                    summary_payload = json.load(handle)
+                row["infra_valid"] = summary_payload.get("infra_valid")
+                row["semantic_valid"] = summary_payload.get("semantic_valid")
+                quality_status = summary_payload.get("quality_status")
+                if isinstance(quality_status, dict):
+                    row["comparison_blocked"] = quality_status.get("comparison_blocked")
+                metrics = summary_payload.get("metrics")
+                if isinstance(metrics, dict):
+                    rates = metrics.get("rates")
+                    if isinstance(rates, dict):
+                        row["strict_pass_rate"] = rates.get("strict_pass_rate")
+                        row["degraded_fallback_rate"] = rates.get("degraded_fallback_rate")
+                    counts = metrics.get("counts")
+                    if isinstance(counts, dict):
+                        row["missing_bot_reply"] = counts.get("turns_missing_response")
+            except Exception as exc:
+                row["status"] = "failed"
+                row["exit_code"] = row["exit_code"] or 1
+                row["error"] = f"summary_parse_error:{exc}"
+        row["finished_at"] = datetime.now(timezone.utc).isoformat()
+        matrix_rows.append(row)
+        print(
+            json.dumps(
+                {
+                    "stage": "llm_quality_matrix_child",
+                    "client_slug": row["client_slug"],
+                    "run_id": row["run_id"],
+                    "status": row["status"],
+                    "exit_code": row["exit_code"],
+                    "summary": row["summary"],
+                    "strict_pass_rate": row["strict_pass_rate"],
+                    "degraded_fallback_rate": row["degraded_fallback_rate"],
+                    "missing_bot_reply": row["missing_bot_reply"],
+                },
+                ensure_ascii=False,
+            )
+        )
+        if row["status"] != "ok" and not args.continue_on_error:
+            break
+
+    all_ok = all(row.get("status") == "ok" for row in matrix_rows)
+    matrix_summary = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "run_id_prefix": run_id_prefix,
+        "output_dir": output_dir,
+        "client_slugs": client_slugs,
+        "all_ok": all_ok,
+        "rows": matrix_rows,
+        "forwarded_args": forwarded_args,
+    }
+    matrix_summary_path = os.path.join(output_dir, "matrix_summary.json")
+    with open(matrix_summary_path, "w", encoding="utf-8") as handle:
+        json.dump(matrix_summary, handle, ensure_ascii=False, indent=2)
+
+    print(
+        json.dumps(
+            {
+                "stage": "llm_quality_matrix_done",
+                "output_dir": output_dir,
+                "summary": matrix_summary_path,
+                "all_ok": all_ok,
+                "rows": len(matrix_rows),
+            },
+            ensure_ascii=False,
+        )
+    )
+    if not all_ok:
+        raise SystemExit("llm-quality-matrix: one or more child runs failed")
+
 
 def _run_webhook_fuzz(args):
     if args.count < 1:
@@ -15198,6 +15392,9 @@ if len(sys.argv) > 1 and sys.argv[1] == "chaos-sim":
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "llm-quality":
     _run_llm_quality(_parse_llm_quality_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "llm-quality-matrix":
+    _run_llm_quality_matrix(_parse_llm_quality_matrix_args(sys.argv[2:]))
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "send-text":
     _run_send_text(_parse_send_text_args(sys.argv[2:]))
