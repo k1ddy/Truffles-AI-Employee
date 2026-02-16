@@ -37,6 +37,27 @@ def test_validate_llm_policy_core_output_invalid():
     assert error is not None
 
 
+def test_validate_llm_policy_core_output_rejects_unknown_calendar_tool_arg():
+    payload = {
+        "intent": "booking",
+        "action": "fact",
+        "tool_action": "calendar.book_slot",
+        "tool_args": {"service_query": "маникюр", "start_at": "2026-02-17T13:00:00", "foo": "bar"},
+        "pack_refs": [],
+        "slots": {"service": "маникюр", "datetime": "2026-02-17 13:00", "name": "Алия"},
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+        "confidence": 0.9,
+    }
+
+    contract, error = validate_llm_policy_core_output(payload)
+
+    assert contract is None
+    assert error is not None
+    assert "tool_args_unknown_field:foo" in error
+
+
 def test_low_confidence_allowlist_includes_reschedule():
     assert "calendar.reschedule" in decision_router.LLM_POLICY_CORE_LOW_CONFIDENCE_TOOL_ALLOWLIST
 

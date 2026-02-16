@@ -293,6 +293,42 @@ class TestPolicyCoreTimeoutRetry:
         assert models[:2] == ["gpt-primary", "gpt-primary"]
         assert models[2] == "gpt-fallback"
 
+    def test_retries_once_after_transient_connection_error(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_RETRY_ON_TIMEOUT",
+            "0",
+        )
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_RETRY_ON_TRANSIENT",
+            "1",
+        )
+
+        payload = {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "calendar.list_slots",
+            "tool_args": {},
+            "pack_refs": [],
+            "language": "ru",
+            "confidence": 0.8,
+            "reason": "ask_time",
+            "goal": "booking",
+            "slots": {},
+            "open_questions": ["datetime"],
+            "expected_reply_type": "time",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                Exception("Connection refused while calling upstream provider"),
+                DummyResponse(json.dumps(payload)),
+            ]
+            result = route_llm_policy_core("Нужно время", expected_reply_type="time")
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert mock_llm.return_value.generate.call_count == 2
+
     def test_uses_adaptive_timeout_when_pipeline_budget_is_tight(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         monkeypatch.setattr(
@@ -373,6 +409,8 @@ class TestPolicyCoreTimeoutRetry:
                 memory_profile={
                     "consent_status": "granted",
                     "active_goal": "booking",
+                    "expected_reply_type": "time",
+                    "active_slots": ["service", "datetime", "service"],
                     "stored_keys": [
                         "preferred_master",
                         "preferred_master",
@@ -391,6 +429,8 @@ class TestPolicyCoreTimeoutRetry:
         assert len(memory_payload.get("summary")) <= 360
         assert memory_payload.get("profile", {}).get("consent_status") == "granted"
         assert memory_payload.get("profile", {}).get("active_goal") == "booking"
+        assert memory_payload.get("profile", {}).get("expected_reply_type") == "time"
+        assert memory_payload.get("profile", {}).get("active_slots") == ["service", "datetime"]
         assert memory_payload.get("profile", {}).get("stored_keys") == [
             "preferred_master",
             "parking_near",
