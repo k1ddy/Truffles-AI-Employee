@@ -47,11 +47,11 @@ from app.services.outbox_service import (
     enqueue_outbox_message,
     mark_outbox_status,
 )
+from app.services.provider_error_policy import is_permanent_provider_error
 from app.services.state_machine import ConversationState
 from app.services.state_service import is_simulation_context
 from app.services.telegram_service import TelegramService
 from app.services.tenant_context_contract import validate_tenant_context_contract
-from app.services.provider_error_policy import is_permanent_provider_error
 
 logger = get_logger("webhook")
 

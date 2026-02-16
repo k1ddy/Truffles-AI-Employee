@@ -1,6 +1,6 @@
 # SESSION 2026-02-16-expected-reply-controller-a88 — expected_reply + controller taxonomy
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-16-expected-reply-controller-a88.md
 - branch: feat/2026-02-16-expected-reply-controller-a88
@@ -23,6 +23,7 @@
   - Console Plane P0-2/P0-3 wave delivered in same branch: inbox polling-budget + scoped invalidation + `/cases` count-path optimization, with before/after SQL evidence (`p50 -35.4%`, `p95 -26.4%`).
   - Console Plane P0-1 follow-up delivered: `/admin/health/check` cache/timeout guard + grouped outbox query, with targeted tests (`test_admin_health_cache.py`) and local replay stats (`p50 3.533ms`, `p95 4.061ms` on cached poll window).
   - PR opened: https://github.com/k1ddy/Truffles-AI-Employee/pull/706.
+  - PR #711 follow-up: resolved red CI (`lint` import order in `truffles-api/app/routers/webhook/outbox.py` + mandatory session artifacts for `session-gate`).
 - next:
   - Execute dedicated DB index wave for `/cases` hot path from `docs/TASK_PACKAGES/TP-2026-02-16-console-cases-index-wave-a88.md`.
 - evidence:
@@ -34,4 +35,4 @@
   - /tmp/booking_quality/a88-replay-local-20260216/brief.md
   - /tmp/booking_quality/a88-replay-local-20260216/responses.jsonl
   - /tmp/console_perf_baseline_20260216/local_admin_health_after_stats.txt
-- last_updated: 2026-02-16
+- last_updated: 2026-02-16T22:05:00Z

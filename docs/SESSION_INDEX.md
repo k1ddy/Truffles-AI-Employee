@@ -4,7 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
-| 2026-02-16-expected-reply-controller-a88 | active | feat/2026-02-16-expected-reply-controller-a88 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-16-expected-reply-controller-a88.md | 2026-02-16 |
+| 2026-02-16-expected-reply-controller-a88 | done | feat/2026-02-16-expected-reply-controller-a88 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-16-expected-reply-controller-a88.md | 2026-02-16T22:05:00Z |
 | 2026-02-16-hierarchical-memory-a88 | active | feat/2026-02-16-hierarchical-memory-a88 | /home/zhan/worktrees/2026-02-16-wave123-a88 | docs/TASK_PACKAGES/TP-2026-02-16-hierarchical-memory-a88.md | 2026-02-16 |
 | 2026-02-16-timeout-resilience-a88 | active | feat/2026-02-16-timeout-resilience-a88 | /home/zhan/worktrees/2026-02-16-wave123-a88 | docs/TASK_PACKAGES/TP-2026-02-16-timeout-resilience-a88.md | 2026-02-16 |
 | 2026-02-16-tool-args-typed-a88 | active | feat/2026-02-16-tool-args-typed-a88 | /home/zhan/worktrees/2026-02-16-verifier-timeout-kernel-a88 | docs/TASK_PACKAGES/TP-2026-02-16-tool-args-typed-a88.md | 2026-02-16 |
