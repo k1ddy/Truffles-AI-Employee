@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { usePathname } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -833,6 +833,23 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     };
     const healthIncidentHidden = !!healthIncidentFingerprint && healthIncidentHiddenUntil > Date.now();
 
+    const navigateFromNav = (event: MouseEvent<HTMLAnchorElement>, href: string) => {
+        if (
+            event.defaultPrevented
+            || event.button !== 0
+            || event.metaKey
+            || event.ctrlKey
+            || event.shiftKey
+            || event.altKey
+            || event.currentTarget.target === "_blank"
+            || event.currentTarget.hasAttribute("download")
+        ) {
+            return;
+        }
+        event.preventDefault();
+        window.location.assign(href);
+    };
+
     useEffect(() => {
         if (!contextNotice) {
             return undefined;
@@ -1082,9 +1099,10 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                 ? pathname === "/"
                                 : pathname.startsWith(item.href);
                             return (
-                                <Link
+                                <a
                                     key={item.href}
                                     href={item.href}
+                                    onClick={(event) => navigateFromNav(event, item.href)}
                                     className={`flex items-center rounded-lg transition ${
                                         navCollapsed ? "justify-center px-2 py-2" : "gap-3 px-3 py-2"
                                     } ${isActive ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted"}`}
@@ -1104,7 +1122,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                         )}
                                     </span>
                                     {navCollapsed ? <span className="sr-only">{item.label}</span> : item.label}
-                                </Link>
+                                </a>
                             );
                         })}
                     </nav>
@@ -1313,16 +1331,17 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                     ? pathname === "/"
                                     : pathname.startsWith(item.href);
                                 return (
-                                    <Link
+                                    <a
                                         key={item.href}
                                         href={item.href}
+                                        onClick={(event) => navigateFromNav(event, item.href)}
                                         className={`shrink-0 rounded-full px-4 py-2 transition ${
                                             isActive ? "bg-primary text-primary-foreground" : "bg-muted"
                                         }`}
                                         data-testid={`mobile-${item.testId}`}
                                     >
                                         {item.label}
-                                    </Link>
+                                    </a>
                                 );
                             })}
                         </nav>

@@ -56,8 +56,80 @@ _TOOL_ARGS_ALLOWED_FIELDS: dict[str, set[str]] = {
     "catalog.portfolio": {"service_query"},
 }
 
-_TOOL_ARGS_LIST_FIELDS = {"info_refs"}
-_TOOL_ARGS_NUMBER_FIELDS = {"duration_min"}
+_TOOL_ARG_KIND_TEXT = "text"
+_TOOL_ARG_KIND_TEXT_LIST = "text_list"
+_TOOL_ARG_KIND_NUMBER = "number"
+_TOOL_ARG_FALLBACK_KINDS: dict[str, str] = {
+    "info_refs": _TOOL_ARG_KIND_TEXT_LIST,
+    "duration_min": _TOOL_ARG_KIND_NUMBER,
+}
+
+_TOOL_ARGS_FIELD_KINDS: dict[str, dict[str, str]] = {
+    "calendar.list_slots": {
+        "service_query": _TOOL_ARG_KIND_TEXT,
+        "date": _TOOL_ARG_KIND_TEXT,
+        "start_at": _TOOL_ARG_KIND_TEXT,
+        "duration_min": _TOOL_ARG_KIND_NUMBER,
+        "specialist_id": _TOOL_ARG_KIND_TEXT,
+        "specialist_name": _TOOL_ARG_KIND_TEXT,
+    },
+    "calendar.book_slot": {
+        "service_query": _TOOL_ARG_KIND_TEXT,
+        "start_at": _TOOL_ARG_KIND_TEXT,
+        "end_at": _TOOL_ARG_KIND_TEXT,
+        "specialist_id": _TOOL_ARG_KIND_TEXT,
+        "specialist_name": _TOOL_ARG_KIND_TEXT,
+        "customer_name": _TOOL_ARG_KIND_TEXT,
+        "customer_phone": _TOOL_ARG_KIND_TEXT,
+    },
+    "calendar.get_booking": {
+        "appointment_id": _TOOL_ARG_KIND_TEXT,
+    },
+    "calendar.reschedule": {
+        "appointment_id": _TOOL_ARG_KIND_TEXT,
+        "start_at": _TOOL_ARG_KIND_TEXT,
+        "end_at": _TOOL_ARG_KIND_TEXT,
+    },
+    "calendar.cancel": {
+        "appointment_id": _TOOL_ARG_KIND_TEXT,
+        "reason": _TOOL_ARG_KIND_TEXT,
+    },
+    "catalog.service_query": {
+        "service_query": _TOOL_ARG_KIND_TEXT,
+    },
+    "catalog.location": {
+        "info_ref": _TOOL_ARG_KIND_TEXT,
+        "info_refs": _TOOL_ARG_KIND_TEXT_LIST,
+    },
+    "catalog.portfolio": {
+        "service_query": _TOOL_ARG_KIND_TEXT,
+    },
+}
+
+
+def _is_supported_number_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return False
+        if stripped.startswith(("+", "-")):
+            stripped = stripped[1:]
+        return stripped.isdigit()
+    return False
+
+
+def _validate_tool_arg_value(*, kind: str, value: Any) -> bool:
+    if kind == _TOOL_ARG_KIND_TEXT:
+        return isinstance(value, str)
+    if kind == _TOOL_ARG_KIND_TEXT_LIST:
+        return isinstance(value, list) and all(isinstance(item, str) for item in value)
+    if kind == _TOOL_ARG_KIND_NUMBER:
+        return _is_supported_number_value(value)
+    return False
 
 
 def validate_tool_args_shape(
@@ -69,37 +141,32 @@ def validate_tool_args_shape(
         return {}, None
     if not isinstance(tool_args, dict):
         return None, "tool_args_invalid"
+    for key in tool_args:
+        if not isinstance(key, str):
+            return None, "tool_args_key_invalid"
+
     normalized_action = (
         tool_action.strip().casefold()
         if isinstance(tool_action, str) and tool_action.strip()
         else None
     )
-    if not normalized_action:
-        return dict(tool_args), None
 
-    allowed_fields = _TOOL_ARGS_ALLOWED_FIELDS.get(normalized_action)
-    if allowed_fields is not None:
+    normalized_args = dict(tool_args)
+    if not normalized_action:
+        return normalized_args, None
+
+    allowed_fields = _TOOL_ARGS_ALLOWED_FIELDS.get(normalized_action) or set()
+    if allowed_fields:
         for key in tool_args:
-            if not isinstance(key, str):
-                return None, "tool_args_key_invalid"
             if key not in allowed_fields:
                 return None, f"tool_args_unknown_field:{key}"
 
-    normalized_args = dict(tool_args)
+    field_kinds = _TOOL_ARGS_FIELD_KINDS.get(normalized_action) or {}
     for key, value in normalized_args.items():
         if value is None:
             continue
-        if key in _TOOL_ARGS_LIST_FIELDS:
-            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
-                return None, f"tool_args_type_invalid:{key}"
-            continue
-        if key in _TOOL_ARGS_NUMBER_FIELDS:
-            if isinstance(value, bool):
-                return None, f"tool_args_type_invalid:{key}"
-            if not isinstance(value, (int, float, str)):
-                return None, f"tool_args_type_invalid:{key}"
-            continue
-        if not isinstance(value, str):
+        kind = field_kinds.get(key) or _TOOL_ARG_FALLBACK_KINDS.get(key, _TOOL_ARG_KIND_TEXT)
+        if not _validate_tool_arg_value(kind=kind, value=value):
             return None, f"tool_args_type_invalid:{key}"
     return normalized_args, None
 
@@ -271,6 +338,17 @@ class LlmPlanOutput(BaseModel):
     @classmethod
     def _validate_slot_state(cls, value: Any) -> dict[str, str]:
         return _normalize_slots(value)
+
+    @model_validator(mode="after")
+    def _validate_tool_args_for_action(self):
+        normalized, error = validate_tool_args_shape(
+            tool_action=self.tool_action,
+            tool_args=self.tool_args,
+        )
+        if error:
+            raise ValueError(error)
+        self.tool_args = normalized or {}
+        return self
 
 
 class LlmPolicyCoreOutput(BaseModel):

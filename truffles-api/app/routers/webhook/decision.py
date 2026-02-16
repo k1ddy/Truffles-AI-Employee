@@ -3443,6 +3443,11 @@ TOOL_VERIFIER_APPOINTMENT_ID_ACTIONS = {
     "calendar.reschedule",
     "calendar.cancel",
 }
+TOOL_VERIFIER_STRICT_DECISION_ACTIONS = {
+    "calendar.book_slot",
+    "calendar.reschedule",
+    "calendar.cancel",
+}
 TOOL_VERIFIER_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "calendar.book_slot": ("service_query", "start_at"),
     "calendar.reschedule": ("appointment_id", "start_at"),
@@ -3479,18 +3484,48 @@ def _looks_like_booking_verification_request(message_text: str | None) -> bool:
 def _detect_tool_contract_error(
     *,
     tool_action: str | None,
+    tool_ok: bool,
+    response_text: str | None,
     decision_meta: dict[str, Any] | None,
 ) -> str | None:
-    if not tool_action or tool_action not in TOOL_VERIFIER_APPOINTMENT_ID_ACTIONS:
-        return None
     if not isinstance(decision_meta, dict):
         return "decision_meta_missing"
     tool_decision = str(decision_meta.get("tool_decision") or "").strip().casefold()
+    if not tool_decision:
+        return "tool_decision_missing"
+    enforce_decision_match = tool_action in TOOL_VERIFIER_STRICT_DECISION_ACTIONS
+    if enforce_decision_match:
+        if tool_ok and tool_decision != "ok":
+            return "tool_decision_mismatch"
+        if not tool_ok and tool_decision == "ok":
+            return "tool_decision_mismatch"
+    if tool_ok and not (isinstance(response_text, str) and response_text.strip()):
+        return "tool_response_missing"
+    if not tool_action or tool_action not in TOOL_VERIFIER_APPOINTMENT_ID_ACTIONS:
+        return None
     if tool_decision == "ok":
         appointment_id = decision_meta.get("appointment_id")
         if not (isinstance(appointment_id, str) and appointment_id.strip()):
             return "appointment_id_missing"
     return None
+
+
+def _detect_tool_state_guard_error(
+    *,
+    tool_action: str | None,
+    tool_decision: str | None,
+    conversation_state: str | None,
+) -> str | None:
+    if tool_action not in {"calendar.book_slot", "calendar.reschedule", "calendar.cancel"}:
+        return None
+    if (tool_decision or "").strip().casefold() != "ok":
+        return None
+    if conversation_state not in {
+        ConversationState.PENDING.value,
+        ConversationState.MANAGER_ACTIVE.value,
+    }:
+        return None
+    return "state_guard_blocked"
 
 
 def _verify_policy_tool_args_contract(
@@ -9383,21 +9418,33 @@ async def _handle_webhook_payload(
             if tool_result.handled:
                 tool_response_text = tool_result.response_text
                 tool_expected_reply_type = tool_result.expected_reply_type
+                tool_decision_token = ""
                 if isinstance(tool_result.decision_meta, dict):
                     tool_result.decision_meta.setdefault("tool_args_checked", True)
                     if tool_result.decision_meta.get("tool_args_contract") not in {"valid", "invalid"}:
                         tool_result.decision_meta["tool_args_contract"] = "valid"
+                    tool_decision_token = str(
+                        tool_result.decision_meta.get("tool_decision") or ""
+                    ).strip().casefold()
                 if isinstance(tool_result.trace, dict):
                     tool_result.trace.setdefault("tool_args_checked", True)
                     if tool_result.trace.get("tool_args_contract") not in {"valid", "invalid"}:
                         tool_result.trace["tool_args_contract"] = "valid"
                 tool_contract_error = _detect_tool_contract_error(
                     tool_action=policy_tool_action,
+                    tool_ok=bool(tool_result.ok),
+                    response_text=tool_response_text,
                     decision_meta=tool_result.decision_meta
                     if isinstance(tool_result.decision_meta, dict)
                     else None,
                 )
-                if tool_contract_error:
+                state_guard_error = _detect_tool_state_guard_error(
+                    tool_action=policy_tool_action,
+                    tool_decision=tool_decision_token,
+                    conversation_state=conversation.state,
+                )
+                verifier_post_error = state_guard_error or tool_contract_error
+                if verifier_post_error:
                     tool_response_text = (
                         "Не удалось подтвердить действие автоматически. "
                         "Передам менеджеру, чтобы проверить вручную."
@@ -9407,7 +9454,11 @@ async def _handle_webhook_payload(
                             {
                                 "tool_decision": "contract_invalid",
                                 "tool_contract": "post_condition",
-                                "tool_contract_error": tool_contract_error,
+                                "tool_contract_error": verifier_post_error,
+                                "tool_verifier_post": "invalid",
+                                "tool_verifier_guard": (
+                                    "state_transition" if state_guard_error else "post_condition"
+                                ),
                             }
                         )
                     if isinstance(tool_result.trace, dict):
@@ -9415,9 +9466,31 @@ async def _handle_webhook_payload(
                             {
                                 "decision": "contract_invalid",
                                 "tool_contract": "post_condition",
-                                "tool_contract_error": tool_contract_error,
+                                "tool_contract_error": verifier_post_error,
+                                "tool_verifier_post": "invalid",
+                                "tool_verifier_guard": (
+                                    "state_transition" if state_guard_error else "post_condition"
+                                ),
                             }
                         )
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "policy_verifier",
+                            "decision": "invalid",
+                            "tool_action": policy_tool_action,
+                            "tool_contract": "post_condition",
+                            "tool_contract_error": verifier_post_error,
+                            "tool_verifier_guard": (
+                                "state_transition" if state_guard_error else "post_condition"
+                            ),
+                        },
+                    )
+                else:
+                    if isinstance(tool_result.decision_meta, dict):
+                        tool_result.decision_meta["tool_verifier_post"] = "ok"
+                    if isinstance(tool_result.trace, dict):
+                        tool_result.trace["tool_verifier_post"] = "ok"
                 if (
                     policy_tool_action == "catalog.service_query"
                     and isinstance(policy_service_query, str)

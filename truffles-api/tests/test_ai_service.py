@@ -1,6 +1,11 @@
 import time
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
+
+import httpx
+import pytest
 
 import app.services.ai_service as ai_service
 from app.services.ai_service import (
@@ -16,6 +21,14 @@ from app.services.ai_service import (
     get_system_prompt,
 )
 from app.services.result import Result
+
+
+@pytest.fixture(autouse=True)
+def _disable_hierarchical_memory_by_default(monkeypatch):
+    monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_ENABLED", "0")
+    monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MESSAGES", 6)
+    monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MAX_LINES", 4)
+    monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MAX_CHARS", 320)
 
 
 class TestKnowledgeConfidenceThreshold:
@@ -47,6 +60,15 @@ class TestGetSystemPrompt:
 
 
 class TestGetConversationHistory:
+    @staticmethod
+    def _query_with_messages(messages):
+        query = Mock()
+        query.filter.return_value = query
+        query.order_by.return_value = query
+        query.limit.return_value = query
+        query.all.return_value = messages
+        return query
+
     def test_returns_empty_list_for_no_messages(self):
         mock_db = Mock()
         mock_db.query().filter().order_by().limit().all.return_value = []
@@ -77,6 +99,70 @@ class TestGetConversationHistory:
 
         assert len(result) == 1
         assert result[0]["role"] == "user"
+
+    def test_hierarchical_memory_inserts_summary_for_older_messages(self, monkeypatch):
+        monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_ENABLED", "1")
+        monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MESSAGES", 3)
+        monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MAX_LINES", 3)
+        monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MAX_CHARS", 500)
+
+        mock_db = Mock()
+        t1 = datetime(2026, 2, 16, 10, 0, tzinfo=timezone.utc)
+        t2 = datetime(2026, 2, 16, 10, 1, tzinfo=timezone.utc)
+        t3 = datetime(2026, 2, 16, 10, 2, tzinfo=timezone.utc)
+        t4 = datetime(2026, 2, 16, 10, 3, tzinfo=timezone.utc)
+
+        recent_desc = [
+            SimpleNamespace(role="assistant", content="recent answer", created_at=t4),
+            SimpleNamespace(role="user", content="recent question", created_at=t3),
+        ]
+        older_desc = [
+            SimpleNamespace(role="assistant", content="older answer", created_at=t2),
+            SimpleNamespace(role="system", content="ignore this", created_at=t1),
+            SimpleNamespace(role="user", content="older question", created_at=t1),
+        ]
+
+        mock_db.query.side_effect = [
+            self._query_with_messages(recent_desc),
+            self._query_with_messages(older_desc),
+        ]
+
+        result = get_conversation_history(mock_db, uuid4(), limit=2)
+
+        assert len(result) == 3
+        assert result[0]["role"] == "assistant"
+        assert result[0]["content"].startswith("[memory_summary] ")
+        assert "U: older question" in result[0]["content"]
+        assert "A: older answer" in result[0]["content"]
+        assert "ignore this" not in result[0]["content"]
+        assert result[1] == {"role": "user", "content": "recent question"}
+        assert result[2] == {"role": "assistant", "content": "recent answer"}
+
+    def test_hierarchical_memory_does_not_add_summary_when_disabled(self, monkeypatch):
+        monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_ENABLED", "0")
+
+        mock_db = Mock()
+        recent_desc = [
+            SimpleNamespace(
+                role="assistant",
+                content="recent answer",
+                created_at=datetime(2026, 2, 16, 10, 3, tzinfo=timezone.utc),
+            ),
+            SimpleNamespace(
+                role="user",
+                content="recent question",
+                created_at=datetime(2026, 2, 16, 10, 2, tzinfo=timezone.utc),
+            ),
+        ]
+        mock_db.query.side_effect = [self._query_with_messages(recent_desc)]
+
+        result = get_conversation_history(mock_db, uuid4(), limit=2)
+
+        assert result == [
+            {"role": "user", "content": "recent question"},
+            {"role": "assistant", "content": "recent answer"},
+        ]
+        assert mock_db.query.call_count == 1
 
 
 class TestSanitizeQueryForRag:
@@ -113,6 +199,101 @@ class TestGenerateAIResponse:
         assert result.value[0] == "AI generated response"
         assert result.value[1] == "high"
         mock_llm.return_value.generate.assert_called_once()
+
+    @patch("app.services.ai_service.get_llm_provider")
+    @patch("app.services.ai_service.search_knowledge")
+    @patch("app.services.ai_service.get_system_prompt")
+    @patch("app.services.ai_service.get_conversation_history")
+    def test_retries_once_after_timeout_and_succeeds(
+        self, mock_history, mock_prompt, mock_search, mock_llm
+    ):
+        mock_db = Mock()
+        mock_prompt.return_value = "You are a helpful assistant"
+        mock_history.return_value = []
+        mock_search.return_value = [{"score": 0.85, "text": "Relevant info"}]
+        success_response = Mock()
+        success_response.content = "Recovered response"
+        mock_llm.return_value.generate.side_effect = [
+            httpx.TimeoutException("timeout-1"),
+            success_response,
+        ]
+
+        result = generate_ai_response(mock_db, uuid4(), "test-client", uuid4(), "What is X?")
+
+        assert result.ok is True
+        assert result.value[0] == "Recovered response"
+        assert result.value[1] == "high"
+        assert mock_llm.return_value.generate.call_count == 2
+
+    @patch("app.services.ai_service.get_llm_provider")
+    @patch("app.services.ai_service.search_knowledge")
+    @patch("app.services.ai_service.get_system_prompt")
+    @patch("app.services.ai_service.get_conversation_history")
+    def test_timeout_retry_uses_fallback_model(
+        self, mock_history, mock_prompt, mock_search, mock_llm
+    ):
+        mock_db = Mock()
+        mock_prompt.return_value = "You are a helpful assistant"
+        mock_history.return_value = []
+        mock_search.return_value = [{"score": 0.85, "text": "Relevant info"}]
+        fallback_response = Mock()
+        fallback_response.content = "Fallback response"
+        mock_llm.return_value.generate.side_effect = [
+            httpx.TimeoutException("timeout-1"),
+            httpx.TimeoutException("timeout-2"),
+            fallback_response,
+        ]
+
+        with patch.dict(
+            "os.environ",
+            {
+                "LLM_RETRY_ON_TIMEOUT": "1",
+                "LLM_RETRY_TIMEOUT_SECONDS": "2",
+                "LLM_TIMEOUT_FALLBACK_MODEL": "gpt-fallback",
+            },
+            clear=False,
+        ), patch.object(ai_service, "LLM_TIMEOUT_FALLBACK_MODEL", "gpt-fallback"), patch.object(
+            ai_service, "LLM_RETRY_TIMEOUT_SECONDS", 2.0
+        ):
+            result = generate_ai_response(mock_db, uuid4(), "test-client", uuid4(), "What is X?")
+
+        assert result.ok is True
+        assert result.value[0] == "Fallback response"
+        models = [call.kwargs.get("model") for call in mock_llm.return_value.generate.call_args_list]
+        assert models[:2] == [ai_service.FAST_MODEL, ai_service.FAST_MODEL]
+        assert models[2] == "gpt-fallback"
+
+    @patch("app.services.ai_service.get_llm_provider")
+    @patch("app.services.ai_service.search_knowledge")
+    @patch("app.services.ai_service.get_system_prompt")
+    @patch("app.services.ai_service.get_conversation_history")
+    def test_transient_error_retries_once_and_degrades_to_low_confidence(
+        self, mock_history, mock_prompt, mock_search, mock_llm
+    ):
+        mock_db = Mock()
+        mock_prompt.return_value = "You are a helpful assistant"
+        mock_history.return_value = []
+        mock_search.return_value = [{"score": 0.85, "text": "Relevant info"}]
+        mock_llm.return_value.generate.side_effect = [
+            httpx.ConnectError("connection reset"),
+            httpx.ConnectError("connection reset again"),
+        ]
+        timing_context = {}
+
+        result = generate_ai_response(
+            mock_db,
+            uuid4(),
+            "test-client",
+            uuid4(),
+            "What is X?",
+            timing_context=timing_context,
+        )
+
+        assert result.ok is True
+        assert result.value[0] is None
+        assert result.value[1] == "low_confidence"
+        assert timing_context.get("llm_degradation_reason") == "provider_unavailable"
+        assert mock_llm.return_value.generate.call_count == 2
 
     @patch("app.services.ai_service.get_llm_provider")
     @patch("app.services.ai_service.search_knowledge")
