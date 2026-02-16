@@ -524,7 +524,7 @@ jobs:
               token = json.load(resp)["access_token"]
           print(f"::add-mask::{token}")
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
-              env_file.write(f"CONSOLE_API_TOKEN={token}\\n")
+              env_file.write(f"CONSOLE_API_TOKEN={token}\n")
           PY
 
       - name: k6 console smoke
@@ -1095,8 +1095,8 @@ jobs:
 
           token, source = selected
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
-              env_file.write(f"SCHEMATHESIS_TOKEN={token}\\n")
-              env_file.write(f"SCHEMATHESIS_TOKEN_SOURCE={source}\\n")
+              env_file.write(f"SCHEMATHESIS_TOKEN={token}\n")
+              env_file.write(f"SCHEMATHESIS_TOKEN_SOURCE={source}\n")
           PY
 
       - name: Resolve console selection headers
@@ -1137,9 +1137,9 @@ jobs:
 
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
               if client_id:
-                  env_file.write(f"SCHEMATHESIS_CLIENT_ID={client_id}\\n")
+                  env_file.write(f"SCHEMATHESIS_CLIENT_ID={client_id}\n")
               if branch_id:
-                  env_file.write(f"SCHEMATHESIS_BRANCH_ID={branch_id}\\n")
+                  env_file.write(f"SCHEMATHESIS_BRANCH_ID={branch_id}\n")
           PY
 
       - name: Schemathesis GET-only smoke
