@@ -2,6 +2,7 @@ import asyncio
 import os
 import time
 
+import httpx
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
@@ -299,9 +300,6 @@ async def health_check(db: Session = Depends(get_db)):
 
 
 async def _compute_admin_health_payload(db: Session) -> dict:
-    import time
-    import httpx
-
     checks = {}
     start_total = time.time()
     overall_healthy = True
