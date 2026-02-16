@@ -1,0 +1,21 @@
+# SESSION 2026-02-16-console-nav-click-hotfix-a88 — nav tabs unclickable P0
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-16-console-nav-click-hotfix-a88.md
+- branch: fix/2026-02-16-console-nav-click-hotfix-a88
+- worktree: /home/zhan/worktrees/2026-02-16-console-nav-click-hotfix-a88
+- base_ref: origin/main
+- scope: Restore deterministic navigation for Console sidebar/mobile tabs (`business/settings/subscription`) when client-router click path stalls.
+- done:
+  - Reproduced incident: e2e `Owner/Admin Business Control` fails with URL pinned to `/` after nav click.
+  - Isolated hotfix in `console-web/src/components/ConsoleShell.tsx`: sidebar/mobile tabs switched to explicit `<a href ... onClick>` with guarded `window.location.assign(href)`.
+  - Removed dependence on fragile client-router click dispatch for core tab navigation.
+  - Verified lint/build and runtime URL transitions on local https runtime.
+- next:
+  - Open PR and run post-merge production check for Platform Admin and Owner/Admin roles.
+- evidence:
+  - `npm --prefix console-web run lint`
+  - `npm --prefix console-web run build`
+  - Playwright runtime check: `/ -> /business -> /settings` on local `https://localhost:3300`.
+- last_updated: 2026-02-16
