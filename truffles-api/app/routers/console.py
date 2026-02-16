@@ -179,6 +179,8 @@ from app.schemas.console import (
     ConsoleSettingsResponse,
     ConsoleSettingsUpdateRequest,
     ConsoleSettingsUpdateResponse,
+    ConsoleSubscriptionContractGap,
+    ConsoleSubscriptionContractHealth,
     ConsoleSubscriptionEvidenceItem,
     ConsoleSubscriptionMeterItem,
     ConsoleSubscriptionPlanDefaults,
@@ -6723,9 +6725,11 @@ def _resolve_subscription_count_meter_status(
 
 def _resolve_subscription_toggle_meter_status(
     *,
-    included: int,
+    included: Optional[int],
     used: int,
-) -> Literal["ok", "over_limit", "not_included", "included_not_configured"]:
+) -> Literal["ok", "over_limit", "not_included", "included_not_configured", "unknown"]:
+    if included is None:
+        return "unknown"
     if included <= 0:
         if used > 0:
             return "over_limit"
@@ -6749,6 +6753,106 @@ def _resolve_subscription_payment_status_message(
     if payment_status == "rejected":
         return "Оплата отклонена. Нужна повторная проверка и подтверждение."
     return "Статус оплаты не заполнен в онбординге."
+
+
+def _append_subscription_contract_gap(
+    gaps: list[ConsoleSubscriptionContractGap],
+    *,
+    code: str,
+    message: str,
+    severity: Literal["critical", "warn", "info"],
+) -> None:
+    if any(item.code == code for item in gaps):
+        return
+    gaps.append(
+        ConsoleSubscriptionContractGap(
+            code=code,
+            message=message,
+            severity=severity,
+        )
+    )
+
+
+def _resolve_subscription_contract_health(
+    *,
+    plan_name: Optional[str],
+    contract_label: Optional[str],
+    monthly_quota: Optional[int],
+    quota_source: Literal["company_billing_info", "client_config", "unknown"],
+    whatsapp_included: Optional[int],
+    whatsapp_source: Literal["company_billing_info", "client_config", "onboarding_contract", "unknown"],
+    whatsapp_used: int,
+    payment_status: str,
+    payment_status_source: Literal["onboarding_contract", "unknown"],
+    has_active_onboarding_contract: bool,
+) -> ConsoleSubscriptionContractHealth:
+    gaps: list[ConsoleSubscriptionContractGap] = []
+
+    if not _normalize_optional_text(plan_name) and not _normalize_optional_text(contract_label):
+        _append_subscription_contract_gap(
+            gaps,
+            code="plan_missing",
+            message="Не указан тариф или номер договора.",
+            severity="warn",
+        )
+    if monthly_quota is None:
+        _append_subscription_contract_gap(
+            gaps,
+            code="monthly_quota_missing",
+            message="Не зафиксирован лимит сообщений в месяц.",
+            severity="critical",
+        )
+    if whatsapp_included is None:
+        _append_subscription_contract_gap(
+            gaps,
+            code="whatsapp_limit_missing",
+            message="Не зафиксирован лимит WhatsApp-каналов.",
+            severity="warn",
+        )
+    elif whatsapp_included <= 0 and whatsapp_used > 0:
+        _append_subscription_contract_gap(
+            gaps,
+            code="whatsapp_contract_mismatch",
+            message="Есть активные WhatsApp-каналы, но контрактный лимит равен нулю.",
+            severity="critical",
+        )
+    if payment_status == "unknown":
+        _append_subscription_contract_gap(
+            gaps,
+            code="payment_status_missing",
+            message="Не заполнен статус оплаты в онбординге.",
+            severity="warn",
+        )
+
+    known_signals = 0
+    if _normalize_optional_text(plan_name) or _normalize_optional_text(contract_label):
+        known_signals += 1
+    if monthly_quota is not None:
+        known_signals += 1
+    if whatsapp_included is not None:
+        known_signals += 1
+    if payment_status != "unknown":
+        known_signals += 1
+
+    if not gaps:
+        status: Literal["ok", "partial", "missing"] = "ok"
+        summary = "Контракт заполнен: лимиты и оплата подтверждены."
+    elif known_signals == 0:
+        status = "missing"
+        summary = "Контракт не заполнен: доступны только фактические данные использования."
+    else:
+        status = "partial"
+        summary = "Контракт заполнен частично: часть лимитов или статусов отсутствует."
+
+    return ConsoleSubscriptionContractHealth(
+        status=status,
+        summary=summary,
+        gaps=gaps,
+        quota_source=quota_source,
+        whatsapp_source=whatsapp_source,
+        payment_status_source=payment_status_source,
+        has_active_onboarding_contract=has_active_onboarding_contract,
+    )
 
 
 def _append_subscription_action(
@@ -6928,6 +7032,16 @@ async def get_subscription_summary(
     purchased_capabilities = (
         effective_onboarding_payload.purchased if effective_onboarding_payload else CapabilitiesPayload()
     )
+    has_contract_entitlements = effective_onboarding_payload is not None
+    onboarding_whatsapp_enabled = (
+        purchased_capabilities.channels.whatsapp if has_contract_entitlements else None
+    )
+    onboarding_telegram_enabled = (
+        purchased_capabilities.channels.telegram if has_contract_entitlements else None
+    )
+    onboarding_instagram_enabled = (
+        purchased_capabilities.channels.instagram if has_contract_entitlements else None
+    )
     plan_name, contract_label, currency, monthly_quota, quota_source = _resolve_subscription_contract_info(context)
 
     elapsed_days = max(1, (now.date() - period_start.date()).days + 1)
@@ -6961,6 +7075,7 @@ async def get_subscription_summary(
         included_messages=_DEFAULT_STARTER_INCLUDED_MESSAGES,
         included_whatsapp_channels=_DEFAULT_STARTER_INCLUDED_WHATSAPP_CHANNELS,
         source="STRATEGY/PRODUCT.md",
+        reference_only=True,
     )
     active_branches = [branch for branch in scoped_branches if branch.is_active]
     whatsapp_used = sum(1 for branch in active_branches if _normalize_optional_text(branch.instance_id))
@@ -6970,13 +7085,11 @@ async def get_subscription_summary(
     whatsapp_included, whatsapp_source = _resolve_subscription_channel_limit(
         context=context,
         channel="whatsapp",
-        onboarding_enabled=purchased_capabilities.channels.whatsapp,
+        onboarding_enabled=onboarding_whatsapp_enabled,
     )
     whatsapp_note = None
     if whatsapp_included is None:
-        whatsapp_included = default_plan.included_whatsapp_channels
-        whatsapp_source = "default_starter"
-        whatsapp_note = "Лимит взят из стандартного плана. Зафиксируйте договор в онбординге."
+        whatsapp_note = "Лимит WhatsApp не подтвержден в контракте. Starter-план показывается только как справка."
     whatsapp_status, whatsapp_remaining = _resolve_subscription_count_meter_status(
         included=whatsapp_included,
         used=whatsapp_used,
@@ -6985,7 +7098,7 @@ async def get_subscription_summary(
     telegram_included, telegram_source = _resolve_subscription_channel_limit(
         context=context,
         channel="telegram",
-        onboarding_enabled=purchased_capabilities.channels.telegram,
+        onboarding_enabled=onboarding_telegram_enabled,
     )
     telegram_status, telegram_remaining = _resolve_subscription_count_meter_status(
         included=telegram_included,
@@ -6995,40 +7108,54 @@ async def get_subscription_summary(
     instagram_included, instagram_source = _resolve_subscription_channel_limit(
         context=context,
         channel="instagram",
-        onboarding_enabled=purchased_capabilities.channels.instagram,
+        onboarding_enabled=onboarding_instagram_enabled,
     )
     instagram_status, instagram_remaining = _resolve_subscription_count_meter_status(
         included=instagram_included,
         used=instagram_used,
     )
 
-    messages_meter_included = monthly_quota if monthly_quota is not None and monthly_quota > 0 else default_plan.included_messages
-    messages_meter_source = f"subscription_contract:{quota_source}" if monthly_quota is not None else "default_starter"
+    messages_meter_included = monthly_quota if monthly_quota is not None and monthly_quota > 0 else None
+    messages_meter_source = (
+        f"subscription_contract:{quota_source}"
+        if messages_meter_included is not None
+        else "subscription_contract:unknown"
+    )
     messages_meter_note = None
-    if monthly_quota is None:
-        messages_meter_note = "Лимит взят из стандартного плана. Зафиксируйте договор в онбординге."
+    if messages_meter_included is None:
+        messages_meter_note = "Лимит сообщений не подтвержден в контракте. Billing показывает только факт отправок."
     messages_meter_status, messages_meter_remaining = _resolve_subscription_count_meter_status(
         included=messages_meter_included,
         used=billable_messages,
     )
 
-    calendar_included = 1 if purchased_capabilities.providers.calendar_provider not in (None, "none") else 0
+    calendar_included = None
+    if has_contract_entitlements:
+        calendar_included = 1 if purchased_capabilities.providers.calendar_provider not in (None, "none") else 0
     calendar_used = 1 if effective_capabilities.providers.calendar_provider not in (None, "none") else 0
     calendar_status = _resolve_subscription_toggle_meter_status(included=calendar_included, used=calendar_used)
 
-    crm_included = 1 if purchased_capabilities.providers.crm_provider not in (None, "none") else 0
+    crm_included = None
+    if has_contract_entitlements:
+        crm_included = 1 if purchased_capabilities.providers.crm_provider not in (None, "none") else 0
     crm_used = 1 if effective_capabilities.providers.crm_provider not in (None, "none") else 0
     crm_status = _resolve_subscription_toggle_meter_status(included=crm_included, used=crm_used)
 
-    knowledge_included = 1 if purchased_capabilities.features.knowledge_upload is True else 0
+    knowledge_included = None
+    if has_contract_entitlements:
+        knowledge_included = 1 if purchased_capabilities.features.knowledge_upload is True else 0
     knowledge_used = 1 if effective_capabilities.features.knowledge_upload is True else 0
     knowledge_status = _resolve_subscription_toggle_meter_status(included=knowledge_included, used=knowledge_used)
 
-    analytics_included = 1 if purchased_capabilities.features.analytics is True else 0
+    analytics_included = None
+    if has_contract_entitlements:
+        analytics_included = 1 if purchased_capabilities.features.analytics is True else 0
     analytics_used = 1 if effective_capabilities.features.analytics is True else 0
     analytics_status = _resolve_subscription_toggle_meter_status(included=analytics_included, used=analytics_used)
 
-    auto_learn_included = 1 if purchased_capabilities.features.auto_learn is True else 0
+    auto_learn_included = None
+    if has_contract_entitlements:
+        auto_learn_included = 1 if purchased_capabilities.features.auto_learn is True else 0
     auto_learn_used = 1 if effective_capabilities.features.auto_learn is True else 0
     auto_learn_status = _resolve_subscription_toggle_meter_status(
         included=auto_learn_included,
@@ -7053,6 +7180,19 @@ async def get_subscription_summary(
     elif binding_warn_total > 0:
         warn_note = f"{binding_warn_total} канал(ов) WhatsApp требуют плановой проверки."
         whatsapp_note = f"{whatsapp_note} {warn_note}".strip() if whatsapp_note else warn_note
+
+    contract_health = _resolve_subscription_contract_health(
+        plan_name=plan_name,
+        contract_label=contract_label,
+        monthly_quota=monthly_quota,
+        quota_source=quota_source,
+        whatsapp_included=whatsapp_included,
+        whatsapp_source=whatsapp_source,
+        whatsapp_used=whatsapp_used,
+        payment_status=payment_status,
+        payment_status_source=payment_status_source,
+        has_active_onboarding_contract=bool(active_client_contract or active_branch_contract),
+    )
 
     meters = [
         ConsoleSubscriptionMeterItem(
@@ -7104,7 +7244,7 @@ async def get_subscription_summary(
             meter_type="addon",
             included=calendar_included,
             used=calendar_used,
-            remaining=max(0, calendar_included - calendar_used),
+            remaining=max(0, calendar_included - calendar_used) if calendar_included is not None else None,
             status=calendar_status,
             source="onboarding_contract.purchased.providers.calendar_provider",
         ),
@@ -7114,7 +7254,7 @@ async def get_subscription_summary(
             meter_type="addon",
             included=crm_included,
             used=crm_used,
-            remaining=max(0, crm_included - crm_used),
+            remaining=max(0, crm_included - crm_used) if crm_included is not None else None,
             status=crm_status,
             source="onboarding_contract.purchased.providers.crm_provider",
         ),
@@ -7124,7 +7264,7 @@ async def get_subscription_summary(
             meter_type="addon",
             included=knowledge_included,
             used=knowledge_used,
-            remaining=max(0, knowledge_included - knowledge_used),
+            remaining=max(0, knowledge_included - knowledge_used) if knowledge_included is not None else None,
             status=knowledge_status,
             source="onboarding_contract.purchased.features.knowledge_upload",
         ),
@@ -7134,7 +7274,7 @@ async def get_subscription_summary(
             meter_type="addon",
             included=analytics_included,
             used=analytics_used,
-            remaining=max(0, analytics_included - analytics_used),
+            remaining=max(0, analytics_included - analytics_used) if analytics_included is not None else None,
             status=analytics_status,
             source="onboarding_contract.purchased.features.analytics",
         ),
@@ -7144,22 +7284,60 @@ async def get_subscription_summary(
             meter_type="addon",
             included=auto_learn_included,
             used=auto_learn_used,
-            remaining=max(0, auto_learn_included - auto_learn_used),
+            remaining=max(0, auto_learn_included - auto_learn_used) if auto_learn_included is not None else None,
             status=auto_learn_status,
             source="onboarding_contract.purchased.features.auto_learn",
         ),
     ]
 
     recommended_actions: list[ConsoleBusinessActionItem] = []
-    if effective_onboarding_payload is None:
+    if contract_health.status == "missing":
         _append_subscription_action(
             recommended_actions,
-            action_id="fill_onboarding_contract",
-            title="Заполните договор онбординга",
-            description="Без договора часть лимитов считается по стандартному плану. Зафиксируйте условия клиента.",
+            action_id="contract_fill_required",
+            title="Заполните контракт подписки",
+            description="Контрактные лимиты не подтверждены. До заполнения доступны только факты использования и доказательства outbox.",
+            href="/settings",
+            severity="critical",
+        )
+    elif contract_health.status == "partial":
+        _append_subscription_action(
+            recommended_actions,
+            action_id="contract_complete_required",
+            title="Дозаполните контракт подписки",
+            description="Часть коммерческих полей отсутствует. Это мешает корректно оценивать риски по лимитам.",
             href="/settings",
             severity="warn",
         )
+
+    if any(gap.code == "monthly_quota_missing" for gap in contract_health.gaps):
+        _append_subscription_action(
+            recommended_actions,
+            action_id="set_monthly_quota_contract",
+            title="Укажите лимит сообщений в договоре",
+            description="Без лимита невозможно корректно считать остаток и риск перерасхода.",
+            href="/settings",
+            severity="critical",
+        )
+    if any(gap.code == "whatsapp_limit_missing" for gap in contract_health.gaps):
+        _append_subscription_action(
+            recommended_actions,
+            action_id="set_whatsapp_limit_contract",
+            title="Укажите лимит WhatsApp-каналов",
+            description="Лимит каналов не зафиксирован. Уточните условия тарифа и обновите контракт.",
+            href="/settings",
+            severity="warn",
+        )
+    if any(gap.code == "payment_status_missing" for gap in contract_health.gaps):
+        _append_subscription_action(
+            recommended_actions,
+            action_id="set_payment_status_contract",
+            title="Заполните статус оплаты",
+            description="Статус оплаты не указан в онбординге. Обновите поле, чтобы исключить двусмысленность.",
+            href="/settings",
+            severity="warn",
+        )
+
     if over_quota or quota_alert_level == "limit_100":
         _append_subscription_action(
             recommended_actions,
@@ -7307,12 +7485,12 @@ async def get_subscription_summary(
             sample_size=whatsapp_used,
         ),
         "whatsapp_channels_included": _build_metric_meta(
-            kind="estimate" if whatsapp_source == "default_starter" else "fact",
+            kind="fact" if whatsapp_included is not None else "missing",
             source=f"subscription_contract:{whatsapp_source}",
             as_of=now.isoformat(),
             scope="client",
-            sample_size=1,
-            note=whatsapp_note if whatsapp_source == "default_starter" else None,
+            sample_size=1 if whatsapp_included is not None else None,
+            note=whatsapp_note if whatsapp_included is None else None,
         ),
         "payment_status": _build_metric_meta(
             kind="fact" if payment_status != "unknown" else "missing",
@@ -7367,6 +7545,7 @@ async def get_subscription_summary(
             payment_status=payment_status,
             payment_confirmed_at=payment_confirmed_at,
         ),
+        contract_health=contract_health,
         plan_defaults=default_plan,
         meters=meters,
         recommended_actions=recommended_actions,

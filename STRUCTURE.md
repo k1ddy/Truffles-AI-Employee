@@ -146,11 +146,12 @@
 | `docs/REPORTS/2026-02-15-owner-admin-wave7-fact-os-v1.md` | Report: Owner/Admin wave-7 (fact contract layer + server-driven owner operations) | Brain/Architect |
 | `docs/REPORTS/2026-02-15-owner-admin-wave8-incident-control-v1.md` | Report: Owner/Admin + Platform Admin wave-8 (incident control loop + safe remediation actions) | Brain/Architect |
 | `docs/REPORTS/2026-02-16-owner-admin-wave9-subscription-contract-v1.md` | Report: Owner/Admin wave-9 (subscription contract = plan + fact + action) | Brain/Architect |
+| `docs/REPORTS/2026-02-16-owner-admin-wave10-subscription-truth-v1.md` | Report: Owner/Admin wave-10 (subscription truth mode: fail-closed contract + diagnostics) | Brain/Architect |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
-- `docs/TASK_PACKAGES/TP-2026-02-16-owner-admin-wave9-subscription-contract-a88.md`
+- `docs/TASK_PACKAGES/TP-2026-02-16-owner-admin-wave10-subscription-truth-a88.md`
 - `docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave7-fact-os-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-02-05-llm-quality-runner.md`
 - `docs/TASK_PACKAGES/TP-2026-02-04-llm-policy-core-dec.md`

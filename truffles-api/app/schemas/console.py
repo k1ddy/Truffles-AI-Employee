@@ -718,6 +718,7 @@ ConsoleSubscriptionMeterStatus = Literal[
     "included_not_configured",
     "unknown",
 ]
+ConsoleSubscriptionContractHealthStatus = Literal["ok", "partial", "missing"]
 
 
 class ConsoleSubscriptionPlanDefaults(BaseModel):
@@ -725,6 +726,28 @@ class ConsoleSubscriptionPlanDefaults(BaseModel):
     included_messages: int
     included_whatsapp_channels: int
     source: str
+    reference_only: bool = True
+
+
+class ConsoleSubscriptionContractGap(BaseModel):
+    code: str
+    message: str
+    severity: ConsoleBusinessSeverity = "warn"
+
+
+class ConsoleSubscriptionContractHealth(BaseModel):
+    status: ConsoleSubscriptionContractHealthStatus = "missing"
+    summary: str
+    gaps: list[ConsoleSubscriptionContractGap] = []
+    quota_source: ConsoleSubscriptionQuotaSource = "unknown"
+    whatsapp_source: Literal[
+        "company_billing_info",
+        "client_config",
+        "onboarding_contract",
+        "unknown",
+    ] = "unknown"
+    payment_status_source: Literal["onboarding_contract", "unknown"] = "unknown"
+    has_active_onboarding_contract: bool = False
 
 
 class ConsoleSubscriptionMeterItem(BaseModel):
@@ -764,6 +787,7 @@ class ConsoleSubscriptionSummaryResponse(BaseModel):
     payment_confirmed_at: Optional[str] = None
     payment_status_source: Literal["onboarding_contract", "unknown"] = "unknown"
     payment_status_message: Optional[str] = None
+    contract_health: ConsoleSubscriptionContractHealth
     plan_defaults: ConsoleSubscriptionPlanDefaults
     meters: list[ConsoleSubscriptionMeterItem] = []
     recommended_actions: list[ConsoleBusinessActionItem] = []

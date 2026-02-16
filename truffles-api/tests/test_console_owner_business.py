@@ -192,6 +192,7 @@ def test_resolve_subscription_count_meter_status_thresholds() -> None:
 
 
 def test_resolve_subscription_toggle_meter_status() -> None:
+    assert console_router._resolve_subscription_toggle_meter_status(included=None, used=0) == "unknown"
     assert console_router._resolve_subscription_toggle_meter_status(included=1, used=1) == "ok"
     assert (
         console_router._resolve_subscription_toggle_meter_status(included=1, used=0)
@@ -199,6 +200,69 @@ def test_resolve_subscription_toggle_meter_status() -> None:
     )
     assert console_router._resolve_subscription_toggle_meter_status(included=0, used=0) == "not_included"
     assert console_router._resolve_subscription_toggle_meter_status(included=0, used=1) == "over_limit"
+
+
+def test_resolve_subscription_contract_health_missing() -> None:
+    health = console_router._resolve_subscription_contract_health(
+        plan_name=None,
+        contract_label=None,
+        monthly_quota=None,
+        quota_source="unknown",
+        whatsapp_included=None,
+        whatsapp_source="unknown",
+        whatsapp_used=0,
+        payment_status="unknown",
+        payment_status_source="unknown",
+        has_active_onboarding_contract=False,
+    )
+
+    gap_codes = {gap.code for gap in health.gaps}
+    assert health.status == "missing"
+    assert health.has_active_onboarding_contract is False
+    assert gap_codes == {
+        "plan_missing",
+        "monthly_quota_missing",
+        "whatsapp_limit_missing",
+        "payment_status_missing",
+    }
+
+
+def test_resolve_subscription_contract_health_partial_on_whatsapp_mismatch() -> None:
+    health = console_router._resolve_subscription_contract_health(
+        plan_name="Starter",
+        contract_label="starter-2026",
+        monthly_quota=1000,
+        quota_source="company_billing_info",
+        whatsapp_included=0,
+        whatsapp_source="company_billing_info",
+        whatsapp_used=1,
+        payment_status="confirmed",
+        payment_status_source="onboarding_contract",
+        has_active_onboarding_contract=True,
+    )
+
+    gap_codes = {gap.code for gap in health.gaps}
+    assert health.status == "partial"
+    assert health.has_active_onboarding_contract is True
+    assert "whatsapp_contract_mismatch" in gap_codes
+
+
+def test_resolve_subscription_contract_health_ok() -> None:
+    health = console_router._resolve_subscription_contract_health(
+        plan_name="Starter",
+        contract_label="starter-2026",
+        monthly_quota=1000,
+        quota_source="company_billing_info",
+        whatsapp_included=1,
+        whatsapp_source="company_billing_info",
+        whatsapp_used=1,
+        payment_status="confirmed",
+        payment_status_source="onboarding_contract",
+        has_active_onboarding_contract=True,
+    )
+
+    assert health.status == "ok"
+    assert health.gaps == []
 
 
 def test_derive_business_status_thresholds() -> None:
