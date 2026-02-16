@@ -1,0 +1,24 @@
+# SESSION 2026-02-16-owner-admin-wave10-subscription-truth-a88 — Session 2026-02-16-owner-admin-wave10-subscription-truth-a88
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-16-owner-admin-wave10-subscription-truth-a88.md
+- branch: feat/2026-02-16-owner-admin-wave10-subscription-truth-a88
+- worktree: /home/zhan/worktrees/2026-02-16-owner-admin-wave10-subscription-truth-a88
+- base_ref: origin/main
+- scope: owner/admin subscription truth-mode hardening (`1+2+3` in one pass: fail-closed contract + diagnostics + clear actions)
+- done:
+  - Wave-10 subscription truth-mode delivered and verified.
+  - `/subscription/summary` switched to fail-closed contract behavior (no Starter fallback in client metrics).
+  - Added `contract_health` contract (`ok|partial|missing` + `gaps[]` + source hints + onboarding-contract flag).
+  - Added deterministic remediation actions for missing contract fields (`monthly_quota`, `whatsapp_limit`, `payment_status`).
+  - Updated `/subscription` UI with explicit `Состояние контракта` diagnostics and `Starter reference-only` block.
+  - Added backend tests for contract-health states and updated owner/admin smoke assertions for new sections.
+  - Updated docs/report/state artifacts for wave-10 evidence.
+- next:
+  - Open PR and hand off for review/merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-16-owner-admin-wave10-subscription-truth-a88.md
+  - docs/REPORTS/2026-02-16-owner-admin-wave10-subscription-truth-v1.md
+  - STATE.md
+- last_updated: 2026-02-16

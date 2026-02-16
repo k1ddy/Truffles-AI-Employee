@@ -74,7 +74,7 @@ function meterStatusLabel(status: "ok" | "warning" | "limit_reached" | "over_lim
     if (status === "not_included") {
         return "Не входит";
     }
-    return "Неизвестно";
+    return "Нет контракта";
 }
 
 function paymentStatusClass(status: "pending" | "confirmed" | "rejected" | "unknown"): string {
@@ -103,12 +103,69 @@ function paymentStatusLabel(status: "pending" | "confirmed" | "rejected" | "unkn
     return "Статус не заполнен";
 }
 
+function contractHealthClass(status: "ok" | "partial" | "missing"): string {
+    if (status === "ok") {
+        return "bg-emerald-100 text-emerald-800";
+    }
+    if (status === "partial") {
+        return "bg-amber-100 text-amber-800";
+    }
+    return "bg-red-100 text-red-800";
+}
+
+function contractHealthLabel(status: "ok" | "partial" | "missing"): string {
+    if (status === "ok") {
+        return "Контракт подтвержден";
+    }
+    if (status === "partial") {
+        return "Контракт частичный";
+    }
+    return "Контракт не заполнен";
+}
+
 function formatMetricMeta(meta?: MetricFactMeta): string {
     if (!meta) {
         return "missing · source: n/a";
     }
     const asOf = meta.as_of ? ` · as_of: ${meta.as_of}` : "";
     return `${meta.kind} · source: ${meta.source}${asOf}`;
+}
+
+function subscriptionSourceLabel(source: string): string {
+    if (source === "company_billing_info") {
+        return "Карточка компании";
+    }
+    if (source === "client_config") {
+        return "Настройки клиента";
+    }
+    if (source === "onboarding_contract") {
+        return "Онбординг контракт";
+    }
+    if (source === "unknown") {
+        return "Источник не указан";
+    }
+    return source;
+}
+
+function meterSourceLabel(source: string): string {
+    if (source.startsWith("subscription_contract:")) {
+        const raw = source.replace("subscription_contract:", "");
+        return `Контракт: ${subscriptionSourceLabel(raw)}`;
+    }
+    if (source.startsWith("onboarding_contract")) {
+        return "Онбординг контракт";
+    }
+    return source;
+}
+
+function severityLabel(severity: "critical" | "warn" | "info"): string {
+    if (severity === "critical") {
+        return "Критично";
+    }
+    if (severity === "warn") {
+        return "Внимание";
+    }
+    return "Инфо";
 }
 
 export default function SubscriptionPage() {
@@ -271,21 +328,77 @@ export default function SubscriptionPage() {
                     <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
                         <p className="text-xs text-muted-foreground">Текущий план клиента</p>
                         <p className="mt-1 text-lg font-semibold text-foreground">{data.plan_name || data.contract_label || "Не указан"}</p>
-                        <p className="text-xs text-muted-foreground">Источник лимита: {data.quota_source}</p>
-                    </div>
-                    <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
-                        <p className="text-xs text-muted-foreground">Стандартный план по умолчанию</p>
-                        <p className="mt-1 text-lg font-semibold text-foreground">{data.plan_defaults.plan_name}</p>
-                        <p className="text-xs text-muted-foreground">
-                            {formatNumber(data.plan_defaults.included_messages)} сообщений · {formatNumber(data.plan_defaults.included_whatsapp_channels)} WhatsApp
-                        </p>
+                        <p className="text-xs text-muted-foreground">Источник лимита: {subscriptionSourceLabel(data.quota_source)}</p>
                     </div>
                     <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
                         <p className="text-xs text-muted-foreground">Оплата</p>
                         <p className="mt-1 text-sm font-semibold text-foreground">{data.payment_status_message || "Статус оплаты не задан"}</p>
-                        <p className="text-xs text-muted-foreground">Источник: {data.payment_status_source}</p>
+                        <p className="text-xs text-muted-foreground">Источник: {subscriptionSourceLabel(data.payment_status_source)}</p>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">Лимит сообщений (контракт)</p>
+                        <p className="mt-1 text-lg font-semibold text-foreground">{formatNumber(data.monthly_quota)}</p>
+                        <p className="text-xs text-muted-foreground">
+                            {data.monthly_quota === null || data.monthly_quota === undefined
+                                ? "Не подтвержден"
+                                : "Подтвержден"}
+                        </p>
                     </div>
                 </div>
+            </section>
+
+            <section className="mt-4 rounded-xl border border-border/60 bg-card p-4" data-testid="subscription-contract-health">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-foreground">Состояние контракта</p>
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${contractHealthClass(data.contract_health.status)}`}>
+                        {contractHealthLabel(data.contract_health.status)}
+                    </span>
+                </div>
+                <p className="text-sm text-muted-foreground">{data.contract_health.summary}</p>
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">Источник лимита сообщений</p>
+                        <p className="mt-1 text-sm font-semibold text-foreground">{subscriptionSourceLabel(data.contract_health.quota_source)}</p>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">Источник лимита WhatsApp</p>
+                        <p className="mt-1 text-sm font-semibold text-foreground">{subscriptionSourceLabel(data.contract_health.whatsapp_source)}</p>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                        <p className="text-xs text-muted-foreground">Активный onboarding-контракт</p>
+                        <p className="mt-1 text-sm font-semibold text-foreground">
+                            {data.contract_health.has_active_onboarding_contract ? "Да" : "Нет"}
+                        </p>
+                    </div>
+                </div>
+                {data.contract_health.gaps.length > 0 ? (
+                    <div className="mt-3 space-y-2">
+                        {data.contract_health.gaps.map((gap) => (
+                            <div key={gap.code} className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                                <p className="text-sm font-semibold text-foreground">{gap.message}</p>
+                                <p className="text-xs text-muted-foreground">Код: {gap.code} · Приоритет: {severityLabel(gap.severity)}</p>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <p className="mt-3 text-xs text-muted-foreground">Критичных пробелов по контракту не найдено.</p>
+                )}
+            </section>
+
+            <section className="mt-4 rounded-xl border border-border/60 bg-card p-4" data-testid="subscription-reference-plan">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-foreground">Справка: стандартный Starter</p>
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-muted-foreground">
+                        reference-only
+                    </span>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                    Этот блок не применяется автоматически к клиенту и не участвует в расчетах лимитов без подтвержденного контракта.
+                </p>
+                <p className="mt-2 text-sm font-semibold text-foreground">
+                    {data.plan_defaults.plan_name}: {formatNumber(data.plan_defaults.included_messages)} сообщений · {formatNumber(data.plan_defaults.included_whatsapp_channels)} WhatsApp
+                </p>
+                <p className="text-xs text-muted-foreground">Источник справки: {data.plan_defaults.source}</p>
             </section>
 
             <section className="mt-4 rounded-xl border border-border/60 bg-card p-4" data-testid="subscription-meters">
@@ -309,7 +422,7 @@ export default function SubscriptionPage() {
                                 <tr key={meter.key} className="border-b border-border/40 align-top">
                                     <td className="py-2 pr-4">
                                         <p className="font-medium text-foreground">{meter.label}</p>
-                                        <p className="text-xs text-muted-foreground">source: {meter.source}</p>
+                                        <p className="text-xs text-muted-foreground">Источник: {meterSourceLabel(meter.source)}</p>
                                         {meter.note ? (
                                             <p className="mt-1 text-xs text-muted-foreground">{meter.note}</p>
                                         ) : null}
@@ -386,7 +499,7 @@ export default function SubscriptionPage() {
                             <div className="flex flex-wrap items-center justify-between gap-2">
                                 <p className="text-sm font-semibold text-foreground">{action.title}</p>
                                 <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${action.severity === "critical" ? "bg-red-100 text-red-800" : action.severity === "warn" ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
-                                    {action.severity}
+                                    {severityLabel(action.severity)}
                                 </span>
                             </div>
                             <p className="mt-2 text-xs text-muted-foreground">{action.description}</p>

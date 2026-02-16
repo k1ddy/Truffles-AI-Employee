@@ -199,6 +199,8 @@ test.describe('Owner/Admin Business Control', () => {
         await expect(page).toHaveURL(urlPathPattern('/subscription'));
         await expect(page.getByTestId('subscription-title')).toBeVisible();
         await expect(page.getByTestId('subscription-contract')).toBeVisible();
+        await expect(page.getByTestId('subscription-contract-health')).toBeVisible();
+        await expect(page.getByTestId('subscription-reference-plan')).toBeVisible();
         await expect(page.getByTestId('subscription-meters')).toBeVisible();
         await expect(page.getByTestId('subscription-alert')).toBeVisible();
         await expect(page.getByTestId('subscription-forecast-v2')).toBeVisible();

@@ -10,7 +10,7 @@ Roles
 - Read: `platform_admin`, `owner`, `admin`.
 
 Purpose
-- Owner/Admin transparent subscription view: contract terms, payment status, usage meters, actionable next steps, and billable evidence rows.
+- Owner/Admin transparent subscription view with strict fact-mode: confirmed contract terms, payment status, usage facts, contract gaps, and actionable next steps.
 
 Sections
 - Header: billing period + next billing date + refresh.
@@ -21,8 +21,10 @@ Sections
   - projected month total + quota usage.
 - Contract & payment:
   - payment status from onboarding contract,
-  - explicit default baseline (`Starter`, `1000` messages, `1` WhatsApp),
-  - source tagging for plan/payment fields.
+  - contract values shown only from confirmed sources (no auto-apply fallback baseline),
+  - explicit `contract_health` diagnostics (`ok|partial|missing`) with gap list.
+- Reference baseline:
+  - Starter (`1000` messages, `1` WhatsApp) shown as `reference-only` helper and does not affect usage/overage calculations.
 - Meters:
   - per-meter view (`messages/channels/add-ons`) with `included/used/remaining/status/source`,
   - statuses: `ok|warning|limit_reached|over_limit|not_included|included_not_configured|unknown`.
@@ -55,6 +57,7 @@ Data sources
 - `companies.billing_info` and `clients.config.billing` for plan/quota metadata.
 - `client_onboarding_contracts` for payment status + purchased channels/features.
 - `client_capabilities` + active branch settings for configured add-on/channel usage facts.
+- Contract quality signals derived from the same sources and surfaced as `contract_health.gaps`.
 
 Related code
 - UI: `console-web/src/app/subscription/page.tsx`

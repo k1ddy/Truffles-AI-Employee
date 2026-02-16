@@ -565,6 +565,21 @@ export type SubscriptionPlanDefaults = {
     included_messages: number;
     included_whatsapp_channels: number;
     source: string;
+    reference_only: boolean;
+};
+export type SubscriptionContractGap = {
+    code: string;
+    message: string;
+    severity: "critical" | "warn" | "info";
+};
+export type SubscriptionContractHealth = {
+    status: "ok" | "partial" | "missing";
+    summary: string;
+    gaps: SubscriptionContractGap[];
+    quota_source: "company_billing_info" | "client_config" | "unknown";
+    whatsapp_source: "company_billing_info" | "client_config" | "onboarding_contract" | "unknown";
+    payment_status_source: "onboarding_contract" | "unknown";
+    has_active_onboarding_contract: boolean;
 };
 export type SubscriptionMeterItem = {
     key: string;
@@ -602,6 +617,7 @@ export type SubscriptionSummaryResponse = {
     payment_confirmed_at?: string | null;
     payment_status_source: "onboarding_contract" | "unknown";
     payment_status_message?: string | null;
+    contract_health: SubscriptionContractHealth;
     plan_defaults: SubscriptionPlanDefaults;
     meters: SubscriptionMeterItem[];
     recommended_actions: BusinessSummaryAction[];
