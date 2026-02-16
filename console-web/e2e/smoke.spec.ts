@@ -832,6 +832,34 @@ test.describe('Inbox Features', () => {
         await expectRowsOrEmpty(page, 'cases-row', 'cases-empty');
     });
 
+    test('should keep filters after opening case @smoke', async ({ page }) => {
+        const waitForPending = waitForCasesWithStatus(page, 'pending');
+        await page.getByTestId('cases-filter-status').selectOption('pending');
+        await waitForPending;
+        await expectRowsOrEmpty(page, 'cases-row', 'cases-empty');
+
+        const emptyState = page.getByTestId('cases-empty');
+        if (await emptyState.isVisible().catch(() => false)) {
+            await expect(emptyState).toBeVisible();
+            return;
+        }
+
+        await page.getByTestId('cases-row').first().click();
+        await expect(page).toHaveURL(/\/cases\/[a-f0-9-]+/);
+        await expect(page.getByTestId('cases-filter-status')).toHaveValue('pending');
+        await expect(page.getByTestId('cases-workspace-persistence')).toBeVisible();
+    });
+
+    test('should auto-open a case when queue has items @smoke', async ({ page }) => {
+        const state = await waitForCasesState(page);
+        if (state !== 'row') {
+            await expect(page.getByTestId('cases-empty').or(page.getByTestId('cases-error'))).toBeVisible();
+            return;
+        }
+        await expect(page).toHaveURL(/\/cases\/[a-f0-9-]+/);
+        await expect(page.getByTestId('case-conversation')).toBeVisible();
+    });
+
     test('should navigate to case detail @smoke', async ({ page }) => {
         await expect(page.getByTestId('cases-table')).toBeVisible();
         const emptyState = page.getByTestId('cases-empty');

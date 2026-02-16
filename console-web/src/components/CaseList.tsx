@@ -7,19 +7,15 @@ import { useAuthenticatedApi } from "@/hooks/useAuthenticatedApi";
 import Link from "next/link";
 import { Case } from "@/types";
 import { getStatusLabel, getSlaIndicator } from "@/utils/labels";
+import {
+    type InboxCaseFilters,
+    type InboxCaseListPrefs,
+    readInboxCaseListPrefs,
+    writeInboxCaseListPrefs,
+} from "@/lib/inbox-workspace";
 
 // Filter state interface
-interface CaseFilters {
-    status?: string;
-    branchId?: string;
-    assignedToMe: boolean;
-    query?: string;
-    hasDeliveryError: boolean;
-    hasPendingOutbox: boolean;
-    dateFrom?: string;
-    dateTo?: string;
-    sortBy: "created_at" | "sla" | "activity";
-}
+type CaseFilters = InboxCaseFilters;
 
 interface Branch {
     id?: string;
@@ -42,6 +38,51 @@ interface CaseListProps {
     onSelectCase?: (caseId: string) => void;
     branches?: Branch[];
     showBranchFilter?: boolean;
+    workspaceScope?: string | null;
+    onCaseIdsChange?: (caseIds: string[]) => void;
+}
+
+const DEFAULT_FILTERS: CaseFilters = {
+    status: "open",
+    branchId: undefined,
+    assignedToMe: false,
+    query: undefined,
+    hasDeliveryError: false,
+    hasPendingOutbox: false,
+    dateFrom: undefined,
+    dateTo: undefined,
+    sortBy: "activity",
+};
+
+function normalizeStoredPrefs(raw: InboxCaseListPrefs | null): InboxCaseListPrefs | null {
+    if (!raw || typeof raw !== "object") {
+        return null;
+    }
+    const filters = raw.filters;
+    if (!filters || typeof filters !== "object") {
+        return null;
+    }
+    const sortBy = filters.sortBy;
+    if (sortBy !== "activity" && sortBy !== "created_at" && sortBy !== "sla") {
+        return null;
+    }
+    return {
+        filters: {
+            status: filters.status,
+            branchId: filters.branchId,
+            assignedToMe: Boolean(filters.assignedToMe),
+            query: filters.query,
+            hasDeliveryError: Boolean(filters.hasDeliveryError),
+            hasPendingOutbox: Boolean(filters.hasPendingOutbox),
+            dateFrom: filters.dateFrom,
+            dateTo: filters.dateTo,
+            sortBy,
+        },
+        searchValue: typeof raw.searchValue === "string" ? raw.searchValue : "",
+        showAdvancedFilters: Boolean(raw.showAdvancedFilters),
+        filtersCollapsed: Boolean(raw.filtersCollapsed),
+        autoRefreshEnabled: typeof raw.autoRefreshEnabled === "boolean" ? raw.autoRefreshEnabled : true,
+    };
 }
 
 // Loading skeleton component
@@ -67,21 +108,15 @@ export default function CaseList({
     onSelectCase,
     branches = [],
     showBranchFilter = false,
+    workspaceScope,
+    onCaseIdsChange,
 }: CaseListProps) {
     const { data: session } = useSession();
     const api = useAuthenticatedApi();
+    const storageEnabled = Boolean(workspaceScope);
+    const [stateReady, setStateReady] = useState(!storageEnabled);
 
-    const [filters, setFilters] = useState<CaseFilters>({
-        status: "open",
-        branchId: undefined,
-        assignedToMe: false,
-        query: undefined,
-        hasDeliveryError: false,
-        hasPendingOutbox: false,
-        dateFrom: undefined,
-        dateTo: undefined,
-        sortBy: "activity",
-    });
+    const [filters, setFilters] = useState<CaseFilters>(DEFAULT_FILTERS);
     const [cursor, setCursor] = useState<string | undefined>(undefined);
     const [caseItems, setCaseItems] = useState<Case[]>([]);
     const [searchValue, setSearchValue] = useState("");
@@ -96,6 +131,28 @@ export default function CaseList({
         { id: "created_at", label: "Новые" },
         { id: "sla", label: "Срочные" },
     ];
+
+    useEffect(() => {
+        setStateReady(!workspaceScope);
+    }, [workspaceScope]);
+
+    useEffect(() => {
+        if (!workspaceScope) {
+            setStateReady(true);
+            return;
+        }
+        const restored = normalizeStoredPrefs(readInboxCaseListPrefs(workspaceScope));
+        if (restored) {
+            setFilters(restored.filters);
+            setSearchValue(restored.searchValue);
+            setShowAdvancedFilters(restored.showAdvancedFilters);
+            setFiltersCollapsed(restored.filtersCollapsed);
+            setAutoRefreshEnabled(restored.autoRefreshEnabled);
+            setCursor(undefined);
+            setCaseItems([]);
+        }
+        setStateReady(true);
+    }, [workspaceScope]);
 
     useEffect(() => {
         const handle = setTimeout(() => {
@@ -218,7 +275,7 @@ export default function CaseList({
                 throw err;
             }
         },
-        enabled: hasToken,
+        enabled: hasToken && stateReady,
         refetchInterval: autoRefreshEnabled ? 10000 : false, // Auto-refresh every 10 seconds
         refetchIntervalInBackground: false, // Only refresh when tab is active
     });
@@ -263,6 +320,30 @@ export default function CaseList({
                 return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
             });
 
+    useEffect(() => {
+        if (!workspaceScope || !stateReady) {
+            return;
+        }
+        writeInboxCaseListPrefs(workspaceScope, {
+            filters,
+            searchValue,
+            showAdvancedFilters,
+            filtersCollapsed,
+            autoRefreshEnabled,
+        });
+    }, [workspaceScope, stateReady, filters, searchValue, showAdvancedFilters, filtersCollapsed, autoRefreshEnabled]);
+
+    useEffect(() => {
+        if (!onCaseIdsChange) {
+            return;
+        }
+        onCaseIdsChange(
+            sortedCases
+                .map((item) => item.id)
+                .filter((item): item is string => Boolean(item))
+        );
+    }, [onCaseIdsChange, sortedCases]);
+
     const loadMore = () => {
         if (data?.cursor) {
             setCursor(data.cursor);
@@ -276,6 +357,15 @@ export default function CaseList({
 
     if (!session) {
         return null;
+    }
+
+    if (!stateReady) {
+        return (
+            <div className="w-full">
+                <h2 className="text-xl font-semibold mb-4" data-testid="cases-title">{headingLabel}</h2>
+                <TableSkeleton />
+            </div>
+        );
     }
 
     if (isLoading && !cursor) {
@@ -452,13 +542,7 @@ export default function CaseList({
                                 setSearchValue("");
                                 resetPagination();
                                 setShowAdvancedFilters(false);
-                                setFilters({
-                                    status: "open",
-                                    assignedToMe: false,
-                                    sortBy: "activity",
-                                    hasDeliveryError: false,
-                                    hasPendingOutbox: false,
-                                });
+                                setFilters({ ...DEFAULT_FILTERS });
                             }}
                             className="text-xs text-muted-foreground hover:text-destructive whitespace-nowrap"
                             data-testid="cases-filter-clear"
@@ -532,6 +616,11 @@ export default function CaseList({
                 {!filtersCompact && (
                     <div className="text-xs text-muted-foreground" data-testid="cases-count">
                         {casesCountLabel}
+                    </div>
+                )}
+                {storageEnabled && (
+                    <div className="text-[11px] text-muted-foreground" data-testid="cases-workspace-persistence">
+                        Вид менеджера сохраняется 24 часа
                     </div>
                 )}
             </div>

@@ -57,15 +57,28 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
     }
 }
 
+const SESSION_MAX_AGE_SECONDS = Number(process.env.CONSOLE_SESSION_MAX_AGE_SECONDS ?? 24 * 60 * 60);
+const SESSION_UPDATE_AGE_SECONDS = Number(process.env.CONSOLE_SESSION_UPDATE_AGE_SECONDS ?? 5 * 60);
+const KEYCLOAK_SCOPE = process.env.KEYCLOAK_SCOPE ?? "openid profile email offline_access";
+
 export const authOptions: NextAuthOptions = {
     providers: [
         KeycloakProvider({
             clientId: process.env.KEYCLOAK_CLIENT_ID!,
             clientSecret: process.env.KEYCLOAK_CLIENT_SECRET!,
             issuer: process.env.KEYCLOAK_ISSUER,
+            authorization: { params: { scope: KEYCLOAK_SCOPE } },
             httpOptions: { timeout: 10000 },
         }),
     ],
+    session: {
+        strategy: "jwt",
+        maxAge: SESSION_MAX_AGE_SECONDS,
+        updateAge: SESSION_UPDATE_AGE_SECONDS,
+    },
+    jwt: {
+        maxAge: SESSION_MAX_AGE_SECONDS,
+    },
     callbacks: {
         async jwt({ token, account }) {
             // Initial sign in

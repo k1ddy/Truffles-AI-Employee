@@ -30,9 +30,16 @@ Key UI actions
 
 Manager UX specifics
 - Queue counter reflects loaded vs total cases from backend (`CaseListResponse.total`).
-- Chat shows "Загрузить старые" for long dialogs and keeps scroll position when loading history.
+- Inbox workspace is sticky for 24h: filters/search/auto-refresh and last selected case are restored per manager scope.
+- Inbox auto-opens a case when queue has visible items (saved case first, otherwise first in queue).
+- Chat shows "Загрузить более ранние" for long dialogs and keeps scroll position when loading history.
+- Case header includes SLA countdown and "Следующая заявка" action for fast queue handling.
 - "Взять/Закрыть/Вернуть боту" actions surface sync warnings when Telegram/client notify fails.
 - Delivery risk hints are shown directly in conversation header (`has_delivery_error`, `has_pending_outbox`).
+
+Session policy
+- Console session for manager path is configured for 24h JWT/session window.
+- SessionProvider keepalive refetch runs every 5 minutes to reduce unexpected sign-outs during long shifts.
 
 Code references
 - RBAC: `console-web/src/lib/api-client.ts`, `truffles-api/app/services/console_auth.py`.

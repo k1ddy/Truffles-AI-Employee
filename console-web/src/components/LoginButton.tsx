@@ -15,6 +15,21 @@ export default function LoginButton() {
                             window.localStorage.removeItem("console:company_id")
                             window.localStorage.removeItem("console:client_id")
                             window.localStorage.removeItem("console:branch_id")
+                            const inboxWorkspacePrefixes = [
+                                "console:inbox:case-list:v1:",
+                                "console:inbox:selected-case:v1:",
+                            ]
+                            const keysToRemove: string[] = []
+                            for (let index = 0; index < window.localStorage.length; index += 1) {
+                                const key = window.localStorage.key(index)
+                                if (!key) {
+                                    continue
+                                }
+                                if (inboxWorkspacePrefixes.some((prefix) => key.startsWith(prefix))) {
+                                    keysToRemove.push(key)
+                                }
+                            }
+                            keysToRemove.forEach((key) => window.localStorage.removeItem(key))
                         }
                         signOut()
                     }}

@@ -1,0 +1,112 @@
+"use client";
+
+import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
+
+const WORKSPACE_TTL_MS = 24 * 60 * 60 * 1000;
+const CASE_LIST_KEY_PREFIX = "console:inbox:case-list:v1:";
+const SELECTED_CASE_KEY_PREFIX = "console:inbox:selected-case:v1:";
+
+export type InboxSortBy = "created_at" | "sla" | "activity";
+
+export interface InboxCaseFilters {
+    status?: string;
+    branchId?: string;
+    assignedToMe: boolean;
+    query?: string;
+    hasDeliveryError: boolean;
+    hasPendingOutbox: boolean;
+    dateFrom?: string;
+    dateTo?: string;
+    sortBy: InboxSortBy;
+}
+
+export interface InboxCaseListPrefs {
+    filters: InboxCaseFilters;
+    searchValue: string;
+    showAdvancedFilters: boolean;
+    filtersCollapsed: boolean;
+    autoRefreshEnabled: boolean;
+}
+
+type StoredValue<T> = {
+    savedAt: number;
+    value: T;
+};
+
+function isFresh(savedAt: number): boolean {
+    return Number.isFinite(savedAt) && Date.now() - savedAt <= WORKSPACE_TTL_MS;
+}
+
+function readStoredValue<T>(key: string): T | null {
+    const raw = readBrowserStorage(key);
+    if (!raw) {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(raw) as StoredValue<T>;
+        if (!parsed || typeof parsed !== "object" || typeof parsed.savedAt !== "number" || !("value" in parsed)) {
+            writeBrowserStorage(key, null);
+            return null;
+        }
+        if (!isFresh(parsed.savedAt)) {
+            writeBrowserStorage(key, null);
+            return null;
+        }
+        return parsed.value;
+    } catch {
+        writeBrowserStorage(key, null);
+        return null;
+    }
+}
+
+function writeStoredValue<T>(key: string, value: T | null) {
+    if (value == null) {
+        writeBrowserStorage(key, null);
+        return;
+    }
+    writeBrowserStorage(
+        key,
+        JSON.stringify({
+            savedAt: Date.now(),
+            value,
+        } satisfies StoredValue<T>)
+    );
+}
+
+function buildScopedKey(prefix: string, scope: string): string {
+    return `${prefix}${scope}`;
+}
+
+export function buildInboxWorkspaceScope({
+    role,
+    agentId,
+    clientId,
+    branchId,
+}: {
+    role?: string | null;
+    agentId?: string | null;
+    clientId?: string | null;
+    branchId?: string | null;
+}): string {
+    const safeRole = (role || "unknown").trim() || "unknown";
+    const safeAgent = (agentId || "unknown").trim() || "unknown";
+    const safeClient = (clientId || "unknown").trim() || "unknown";
+    const safeBranch = (branchId || "all").trim() || "all";
+    return `${safeRole}:${safeAgent}:${safeClient}:${safeBranch}`;
+}
+
+export function readInboxCaseListPrefs(scope: string): InboxCaseListPrefs | null {
+    return readStoredValue<InboxCaseListPrefs>(buildScopedKey(CASE_LIST_KEY_PREFIX, scope));
+}
+
+export function writeInboxCaseListPrefs(scope: string, prefs: InboxCaseListPrefs | null) {
+    writeStoredValue(buildScopedKey(CASE_LIST_KEY_PREFIX, scope), prefs);
+}
+
+export function readInboxSelectedCase(scope: string): string | null {
+    return readStoredValue<string>(buildScopedKey(SELECTED_CASE_KEY_PREFIX, scope));
+}
+
+export function writeInboxSelectedCase(scope: string, caseId: string | null) {
+    writeStoredValue(buildScopedKey(SELECTED_CASE_KEY_PREFIX, scope), caseId);
+}
