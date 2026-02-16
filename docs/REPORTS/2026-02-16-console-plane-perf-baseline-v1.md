@@ -95,3 +95,30 @@ Additional artifacts
 - `/tmp/console_perf_baseline_20260216/query_cases_total_count_after.sql`
 - `/tmp/console_perf_baseline_20260216/cases_list_after_stats.txt`
 - `/tmp/console_perf_baseline_20260216/cases_total_count_after_stats.txt`
+
+## 6) P0-1 runtime remediation (`/admin/health/check`)
+
+Patch scope
+- Added short-lived cache for health payload (`ADMIN_HEALTH_CACHE_TTL_SECONDS`, default `10s`).
+- Added bounded Qdrant timeout for health check (`ADMIN_HEALTH_QDRANT_TIMEOUT_SECONDS`, default `1.5s`).
+- Replaced dual outbox counts (`PENDING` + `FAILED`) with one grouped query.
+
+Code evidence
+- `truffles-api/app/main.py` (`/admin/health/check` + `_compute_admin_health_payload`).
+- `truffles-api/tests/test_admin_health_cache.py` (cache contract tests).
+
+Checks
+- `python3 -m py_compile truffles-api/app/main.py`
+- `pytest -q truffles-api/tests/test_admin_health_cache.py` (`2 passed`)
+
+After metrics (local uvicorn with patched code, 20 samples)
+- First uncached sample: `latency_ms=253` (payload field from endpoint response).
+- Cached poll window: `p50=3.533ms`, `p95=4.061ms`, `avg=3.540ms`, `max=4.109ms`.
+
+After artifacts
+- `/tmp/console_perf_baseline_20260216/local_admin_health_after_snapshot.json`
+- `/tmp/console_perf_baseline_20260216/local_admin_health_after_seconds.txt`
+- `/tmp/console_perf_baseline_20260216/local_admin_health_after_stats.txt`
+
+Notes
+- This reduces health-tail pressure for Console polling path, but does not by itself resolve runtime backlog (`outbox.pending/failed`) issues.

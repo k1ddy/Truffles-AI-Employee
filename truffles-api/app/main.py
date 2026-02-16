@@ -5,7 +5,7 @@ import time
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, engine, get_db
@@ -113,6 +113,27 @@ def _is_env_enabled(value: str | None, default: bool = True) -> bool:
     if value is None:
         return default
     return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _float_env(name: str, default: float, minimum: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        parsed = float(raw)
+    except ValueError:
+        return default
+    return max(minimum, parsed)
+
+
+_ADMIN_HEALTH_CACHE_TTL_SECONDS = _float_env("ADMIN_HEALTH_CACHE_TTL_SECONDS", 10.0, 0.0)
+_ADMIN_HEALTH_QDRANT_TIMEOUT_SECONDS = _float_env(
+    "ADMIN_HEALTH_QDRANT_TIMEOUT_SECONDS",
+    1.5,
+    0.2,
+)
+_admin_health_cache: dict[str, object] = {"expires_at": 0.0, "payload": None}
+_admin_health_lock = asyncio.Lock()
 
 
 
@@ -246,15 +267,45 @@ def db_check(db: Session = Depends(get_db)):
 
 @app.get("/admin/health/check")
 async def health_check(db: Session = Depends(get_db)):
-    """Comprehensive health check for monitoring."""
-    import time
+    """Comprehensive health check for monitoring with short-lived caching."""
+    now = time.time()
+    cached_payload = _admin_health_cache.get("payload")
+    expires_at = _admin_health_cache.get("expires_at")
+    if isinstance(cached_payload, dict) and isinstance(expires_at, (int, float)) and now < float(expires_at):
+        response = dict(cached_payload)
+        response["cached"] = True
+        response["cache_ttl_seconds"] = _ADMIN_HEALTH_CACHE_TTL_SECONDS
+        return response
 
+    async with _admin_health_lock:
+        now = time.time()
+        cached_payload = _admin_health_cache.get("payload")
+        expires_at = _admin_health_cache.get("expires_at")
+        if isinstance(cached_payload, dict) and isinstance(expires_at, (int, float)) and now < float(expires_at):
+            response = dict(cached_payload)
+            response["cached"] = True
+            response["cache_ttl_seconds"] = _ADMIN_HEALTH_CACHE_TTL_SECONDS
+            return response
+
+        payload = await _compute_admin_health_payload(db)
+        if _ADMIN_HEALTH_CACHE_TTL_SECONDS > 0:
+            _admin_health_cache["payload"] = payload
+            _admin_health_cache["expires_at"] = time.time() + _ADMIN_HEALTH_CACHE_TTL_SECONDS
+
+        response = dict(payload)
+        response["cached"] = False
+        response["cache_ttl_seconds"] = _ADMIN_HEALTH_CACHE_TTL_SECONDS
+        return response
+
+
+async def _compute_admin_health_payload(db: Session) -> dict:
+    import time
     import httpx
-    
+
     checks = {}
     start_total = time.time()
     overall_healthy = True
-    
+
     # Database check
     try:
         start = time.time()
@@ -264,14 +315,13 @@ async def health_check(db: Session = Depends(get_db)):
         checks["database"] = {"status": "unhealthy", "error": str(e)[:100]}
         overall_healthy = False
     
-    # Qdrant check
+    # Qdrant check (bounded timeout to avoid 5s tail on each poll)
     qdrant_url = os.environ.get("QDRANT_HOST", "http://qdrant:6333")
     qdrant_key = os.environ.get("QDRANT_API_KEY")
-    print(f"DEBUG: Qdrant key present: {bool(qdrant_key)}")
     try:
         start = time.time()
         headers = {"api-key": qdrant_key} if qdrant_key else {}
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=_ADMIN_HEALTH_QDRANT_TIMEOUT_SECONDS) as client:
             resp = await client.get(f"{qdrant_url}/collections", headers=headers)
             if resp.status_code == 200:
                 checks["qdrant"] = {"status": "healthy", "latency_ms": int((time.time() - start) * 1000)}
@@ -282,11 +332,27 @@ async def health_check(db: Session = Depends(get_db)):
         checks["qdrant"] = {"status": "unhealthy", "error": str(e)[:100]}
         overall_healthy = False
     
-    # Outbox check
+    # Outbox check via a single grouped query.
     try:
         from app.models import OutboxMessage
-        pending = db.query(OutboxMessage).filter(OutboxMessage.status == "PENDING").count()
-        failed = db.query(OutboxMessage).filter(OutboxMessage.status == "FAILED").count()
+
+        counts_rows = (
+            db.query(
+                OutboxMessage.status,
+                func.count(OutboxMessage.id).label("count"),
+            )
+            .filter(OutboxMessage.status.in_(["PENDING", "FAILED"]))
+            .group_by(OutboxMessage.status)
+            .all()
+        )
+        pending = 0
+        failed = 0
+        for status_value, count in counts_rows:
+            normalized = str(status_value or "").upper()
+            if normalized == "PENDING":
+                pending = int(count or 0)
+            elif normalized == "FAILED":
+                failed = int(count or 0)
         checks["outbox"] = {"status": "healthy" if failed < 100 else "warning", "pending": pending, "failed": failed}
         if failed >= 100:
             overall_healthy = False
@@ -315,5 +381,5 @@ async def health_check(db: Session = Depends(get_db)):
     
     if alerts_sent:
         response["alerts_sent"] = alerts_sent
-    
+
     return response
