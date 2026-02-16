@@ -1,0 +1,22 @@
+# SESSION 2026-02-16-hierarchical-memory-a88 — Hierarchical Memory
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-16-hierarchical-memory-a88.md
+- branch: feat/2026-02-16-hierarchical-memory-a88
+- worktree: /home/zhan/worktrees/2026-02-16-wave123-a88
+- base_ref: origin/main
+- scope: Отдельный TP: deterministic compact summary старых сообщений + recent tail в `get_conversation_history`.
+- done:
+  - Шаг 1 replay evidence получен.
+  - Шаг 2 вынесен в отдельный PR #704.
+  - Создан TP для hierarchical memory.
+  - В `truffles-api/app/services/ai_service.py` добавлен bounded summary префикс (`[memory_summary]`) для older history + env-флаги.
+  - В `truffles-api/tests/test_ai_service.py` добавлены контрактные тесты для summary-injection и disabled режима.
+  - Проверки пройдены: `pytest -q truffles-api/tests/test_ai_service.py` (`25 passed`), `python3 -m py_compile truffles-api/app/services/ai_service.py`.
+- next:
+  - Открыть отдельный PR для TP-3 и передать на review.
+- evidence:
+  - /tmp/booking_quality/postmerge-verifier-typed-a88/summary.json
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/704
+- last_updated: 2026-02-16
