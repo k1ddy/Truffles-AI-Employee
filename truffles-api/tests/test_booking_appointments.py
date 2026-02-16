@@ -792,6 +792,27 @@ def test_tool_registry_rejects_invalid_args_contract_for_get_booking():
     assert result.decision_meta.get("tool_args_error_field") == "appointment_id"
 
 
+def test_tool_registry_rejects_invalid_args_contract_for_catalog_location():
+    db = Mock()
+
+    result = tool_registry_service.execute_tool_action(
+        db,
+        tool_action="catalog.location",
+        tool_args={"info_refs": "parking"},
+        conversation_id=uuid4(),
+        branch_id=None,
+        client_slug="demo_salon",
+        service_query=None,
+    )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "tool_args_invalid"
+    assert result.decision_meta.get("tool_decision") == "invalid_args"
+    assert result.decision_meta.get("tool_args_error") == "info_refs_type_invalid"
+    assert result.decision_meta.get("tool_args_error_field") == "info_refs"
+
+
 def test_tool_registry_catalog_location_includes_parking_section():
     db = Mock()
 

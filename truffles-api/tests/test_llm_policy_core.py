@@ -1,5 +1,5 @@
 from app.routers.webhook import decision as decision_router
-from app.schemas.intent import validate_llm_policy_core_output
+from app.schemas.intent import validate_llm_plan_output, validate_llm_policy_core_output
 
 
 def test_validate_llm_policy_core_output_valid():
@@ -56,6 +56,42 @@ def test_validate_llm_policy_core_output_rejects_unknown_calendar_tool_arg():
     assert contract is None
     assert error is not None
     assert "tool_args_unknown_field:foo" in error
+
+
+def test_validate_llm_policy_core_output_rejects_invalid_catalog_info_refs_type():
+    payload = {
+        "intent": "location",
+        "action": "fact",
+        "tool_action": "catalog.location",
+        "tool_args": {"info_refs": "parking"},
+        "pack_refs": ["location"],
+        "slots": {},
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+        "confidence": 0.9,
+    }
+
+    contract, error = validate_llm_policy_core_output(payload)
+
+    assert contract is None
+    assert error is not None
+    assert "tool_args_type_invalid:info_refs" in error
+
+
+def test_validate_llm_plan_output_rejects_invalid_tool_args_shape():
+    payload = {
+        "outcome": "fact",
+        "tool_action": "catalog.location",
+        "tool_args": {"info_refs": "parking"},
+        "confidence": 0.8,
+    }
+
+    contract, error = validate_llm_plan_output(payload)
+
+    assert contract is None
+    assert error is not None
+    assert "tool_args_type_invalid:info_refs" in error
 
 
 def test_low_confidence_allowlist_includes_reschedule():

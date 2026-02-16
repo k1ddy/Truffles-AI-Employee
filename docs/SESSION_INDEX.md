@@ -5,6 +5,11 @@
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
 | 2026-02-16-expected-reply-controller-a88 | active | feat/2026-02-16-expected-reply-controller-a88 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-16-expected-reply-controller-a88.md | 2026-02-16 |
+| 2026-02-16-hierarchical-memory-a88 | active | feat/2026-02-16-hierarchical-memory-a88 | /home/zhan/worktrees/2026-02-16-wave123-a88 | docs/TASK_PACKAGES/TP-2026-02-16-hierarchical-memory-a88.md | 2026-02-16 |
+| 2026-02-16-timeout-resilience-a88 | active | feat/2026-02-16-timeout-resilience-a88 | /home/zhan/worktrees/2026-02-16-wave123-a88 | docs/TASK_PACKAGES/TP-2026-02-16-timeout-resilience-a88.md | 2026-02-16 |
+| 2026-02-16-tool-args-typed-a88 | active | feat/2026-02-16-tool-args-typed-a88 | /home/zhan/worktrees/2026-02-16-verifier-timeout-kernel-a88 | docs/TASK_PACKAGES/TP-2026-02-16-tool-args-typed-a88.md | 2026-02-16 |
+| 2026-02-16-console-nav-click-hotfix-a88 | active | fix/2026-02-16-console-nav-click-hotfix-a88 | /home/zhan/worktrees/2026-02-16-console-nav-click-hotfix-a88 | docs/TASK_PACKAGES/TP-2026-02-16-console-nav-click-hotfix-a88.md | 2026-02-16 |
+| 2026-02-16-expected-reply-controller-a88 | done | feat/2026-02-16-expected-reply-controller-a88 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-16-expected-reply-controller-a88.md | 2026-02-16 |
 | 2026-02-16-llm-reliability-kernel-a88 | active | feat/2026-02-16-llm-reliability-kernel-a88 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-16-llm-reliability-kernel-a88.md | 2026-02-16 |
 | 2026-02-16-booking-baseline-canonical-a88 | active | chore/2026-02-16-booking-baseline-canonical-a88 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-16-booking-baseline-canonical-a88.md | 2026-02-16 |
 | 2026-02-15-owner-admin-wave4-action-loop-a1 | active | feat/2026-02-15-owner-admin-wave4-action-loop-a1 | /home/zhan/worktrees/2026-02-15-owner-admin-business-audit-a1 | docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave4-action-loop-a1.md | 2026-02-15 |
@@ -452,3 +457,4 @@
 | 2026-02-16-verifier-timeout-kernel-a88 | active | feat/2026-02-16-verifier-timeout-kernel-a88 | /home/zhan/worktrees/2026-02-16-verifier-timeout-kernel-a88 | docs/TASK_PACKAGES/TP-2026-02-16-verifier-timeout-kernel-a88.md | 2026-02-16 |
 | 2026-02-16-manager-inbox-productivity-a1 | active | feat/2026-02-16-manager-inbox-productivity-a1 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-16-manager-inbox-productivity-a1.md | 2026-02-16 |
 | 2026-02-16-owner-admin-wave10-subscription-truth-a88 | done | feat/2026-02-16-owner-admin-wave10-subscription-truth-a88 | /home/zhan/worktrees/2026-02-16-owner-admin-wave10-subscription-truth-a88 | docs/TASK_PACKAGES/TP-2026-02-16-owner-admin-wave10-subscription-truth-a88.md | 2026-02-16 |
+| 2026-02-16-console-login-scope-fix-a1 | done | feat/2026-02-16-console-login-scope-fix-a1 | /home/zhan/worktrees/2026-02-16-console-login-scope-fix-a1 | docs/TASK_PACKAGES/TP-2026-02-16-console-login-scope-fix-a1.md | 2026-02-16 |
