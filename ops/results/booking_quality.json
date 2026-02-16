@@ -1,15 +1,17 @@
 {
-  "updated_at": "2026-02-06T06:56:28.335817+00:00",
+  "updated_at": "2026-02-16T02:50:45.987395+00:00",
   "config": {
     "mode": "llm",
     "count": 5,
+    "requested_count": 5,
     "min_turns": 10,
     "max_turns": 15,
-    "include_media": true,
+    "include_media": false,
     "media_mode": "text",
     "media_kind": "photo",
-    "scenario_coverage": "booking,info,interrupt,handoff",
-    "seed": 42,
+    "scenario_coverage": "booking,info,interrupt",
+    "scenarios_file": "/tmp/booking_quality/offline-replay-20260215-p0-r27/scenarios.json",
+    "seed": null,
     "manager_mode": "simulate",
     "pending_mode": "ack",
     "tool_hooks": "auto",
@@ -18,23 +20,36 @@
     "tool_cancel_text": "отмена",
     "tool_calendar_text": "проверь запись",
     "tool_hook_wait": 0.8,
-    "jid_mode": "round_robin",
+    "tool_evidence_policy": "strict",
+    "jid_mode": "unique",
+    "jid_mode_requested": "auto",
+    "max_failures": 0,
+    "baseline_summary": null,
     "regression_tolerance": 0.02,
-    "judge_mode": "off",
+    "judge_mode": "all",
+    "judge_required": true,
+    "llm_api_key_source": "env_file:/home/zhan/truffles-main/truffles-api/.env",
+    "judge_api_key_source": "env:OPENAI_API_KEY",
     "judge_sample": 0.1,
-    "judge_model": null,
+    "judge_model": "gpt-4o-mini",
+    "judge_max_tokens": 320,
+    "judge_cache_file": "/tmp/booking_quality/_judge_cache/truffles-main-b427c5d3-api.openai.com-gpt-4o-mini.json",
+    "judge_cache_max_entries": 5000,
     "judge_redact": true
   },
   "metrics": {
     "counts": {
       "dialogs": 5,
       "turns": 64,
-      "turns_expected_response": 58,
+      "turns_expected_response": 52,
       "turns_with_response": 64,
       "turns_missing_response": 0,
       "turns_expected_missing": 0,
-      "turns_passed": 60,
-      "turns_failed": 4,
+      "turns_passed": 64,
+      "turns_failed": 0,
+      "turns_strict_passed": 60,
+      "turns_strict_failed": 4,
+      "turns_hard_failed": 0,
       "unknown_state": 0,
       "decision_meta_missing": 0,
       "decision_trace_missing": 0,
@@ -42,12 +57,15 @@
       "infra_errors": 0,
       "decision_meta_errors": 0,
       "decision_trace_errors": 0,
-      "info_mismatch": 1
+      "info_mismatch": 0,
+      "policy_core_turns": 58,
+      "policy_core_degraded_turns": 0,
+      "policy_core_infra_errors": 0
     },
     "state": {
       "counts": {
-        "bot_active": 58,
-        "pending": 6
+        "bot_active": 52,
+        "pending": 12
       },
       "reply_rate_by_state": {
         "bot_active": 1.0,
@@ -58,15 +76,15 @@
       },
       "raw": {
         "bot_active": {
-          "turns": 58,
-          "replies": 58,
-          "expected_turns": 58,
-          "expected_replies": 58,
+          "turns": 52,
+          "replies": 52,
+          "expected_turns": 52,
+          "expected_replies": 52,
           "expected_missing": 0
         },
         "pending": {
-          "turns": 6,
-          "replies": 6,
+          "turns": 12,
+          "replies": 12,
           "expected_turns": 0,
           "expected_replies": 0,
           "expected_missing": 0
@@ -74,33 +92,33 @@
       }
     },
     "info": {
-      "turns_with_info_request": 32,
-      "turns_info_answered": 31,
-      "turns_info_missed": 1,
+      "turns_with_info_request": 26,
+      "turns_info_answered": 26,
+      "turns_info_missed": 0,
       "by_tag": {
         "hours": {
-          "requested": 5,
+          "requested": 4,
           "answered": 4,
-          "missed": 1
-        },
-        "master": {
-          "requested": 1,
-          "answered": 1,
           "missed": 0
         },
-        "parking": {
+        "duration": {
           "requested": 5,
           "answered": 5,
           "missed": 0
         },
         "promo": {
-          "requested": 5,
-          "answered": 5,
+          "requested": 4,
+          "answered": 4,
           "missed": 0
         },
-        "price": {
-          "requested": 5,
-          "answered": 5,
+        "parking": {
+          "requested": 2,
+          "answered": 2,
+          "missed": 0
+        },
+        "master": {
+          "requested": 0,
+          "answered": 0,
           "missed": 0
         },
         "location": {
@@ -108,7 +126,7 @@
           "answered": 5,
           "missed": 0
         },
-        "duration": {
+        "price": {
           "requested": 6,
           "answered": 6,
           "missed": 0
@@ -116,20 +134,20 @@
       }
     },
     "manager": {
-      "handovers_seen": 6,
+      "handovers_seen": 12,
       "actions": {
-        "take": 6,
-        "resolve": 6,
+        "take": 12,
+        "resolve": 12,
         "return": 0,
         "skip": 0
       },
       "errors": 0,
-      "actions_total": 12,
-      "actions_ok": 12
+      "actions_total": 24,
+      "actions_ok": 24
     },
     "booking": {
-      "turns": 57,
-      "progress_opportunities": 7,
+      "turns": 46,
+      "progress_opportunities": 4,
       "progressed": 4,
       "filled_slots_total": 2
     },
@@ -139,10 +157,64 @@
       "decision_meta_coverage": 1.0,
       "decision_trace_coverage": 1.0,
       "unknown_state_rate": 0.0,
-      "pass_rate": 0.9375,
-      "info_answer_rate": 0.9688,
-      "booking_slot_progress_rate": 0.5714,
-      "handoff_correct_rate": 1.0
+      "pass_rate": 1.0,
+      "strict_pass_rate": 0.9375,
+      "hard_fail_rate": 0.0,
+      "info_answer_rate": 1.0,
+      "booking_slot_progress_rate": 1.0,
+      "handoff_correct_rate": 1.0,
+      "degraded_fallback_rate": 0.0
+    },
+    "stages": {
+      "controller": {
+        "total_expected": 52,
+        "opportunities": 34,
+        "eligible": 34,
+        "non_eligible": 18,
+        "attempted": 34,
+        "skipped": 0,
+        "skip_reasons": {
+          "not_run": 18
+        },
+        "non_eligible_reasons": {
+          "not_run": 18
+        },
+        "eligibility_rate": 0.6538,
+        "attempt_rate": 1.0,
+        "skip_rate": 0.0
+      },
+      "tool_selection": {
+        "selected": 32,
+        "ok": 32,
+        "blocked": 0,
+        "invalid": 0,
+        "ok_rate": 1.0
+      },
+      "tool_args": {
+        "checked": 32,
+        "valid": 32,
+        "invalid": 0,
+        "invalid_reasons": {},
+        "valid_rate": 1.0
+      },
+      "state_transition": {
+        "checks": 24,
+        "passed": 24,
+        "failed": 0,
+        "pass_rate": 1.0
+      },
+      "response_contract": {
+        "checks": 52,
+        "passed": 52,
+        "failed": 0,
+        "pass_rate": 1.0
+      },
+      "strict_contract": {
+        "checks": 64,
+        "passed": 60,
+        "failed": 4,
+        "pass_rate": 0.9375
+      }
     }
   },
   "history": [
@@ -548,6 +620,84 @@
         "errors": 0,
         "skipped": 0
       }
+    },
+    {
+      "run_id": "booking-lock-20260216-a88-fast5",
+      "finished_at": "2026-02-16T02:50:45.987395+00:00",
+      "config": {
+        "mode": "llm",
+        "count": 5,
+        "requested_count": 5,
+        "min_turns": 10,
+        "max_turns": 15,
+        "include_media": false,
+        "media_mode": "text",
+        "media_kind": "photo",
+        "scenario_coverage": "booking,info,interrupt",
+        "scenarios_file": "/tmp/booking_quality/offline-replay-20260215-p0-r27/scenarios.json",
+        "seed": null,
+        "manager_mode": "simulate",
+        "pending_mode": "ack",
+        "tool_hooks": "auto",
+        "tool_hook_limit": 2,
+        "tool_confirm_text": "да",
+        "tool_cancel_text": "отмена",
+        "tool_calendar_text": "проверь запись",
+        "tool_hook_wait": 0.8,
+        "tool_evidence_policy": "strict",
+        "jid_mode": "unique",
+        "jid_mode_requested": "auto",
+        "max_failures": 0,
+        "baseline_summary": null,
+        "regression_tolerance": 0.02,
+        "judge_mode": "all",
+        "judge_required": true,
+        "llm_api_key_source": "env_file:/home/zhan/truffles-main/truffles-api/.env",
+        "judge_api_key_source": "env:OPENAI_API_KEY",
+        "judge_sample": 0.1,
+        "judge_model": "gpt-4o-mini",
+        "judge_max_tokens": 320,
+        "judge_cache_file": "/tmp/booking_quality/_judge_cache/truffles-main-b427c5d3-api.openai.com-gpt-4o-mini.json",
+        "judge_cache_max_entries": 5000,
+        "judge_redact": true
+      },
+      "rates": {
+        "reply_rate": 1.0,
+        "expected_reply_rate": 1.0,
+        "decision_meta_coverage": 1.0,
+        "decision_trace_coverage": 1.0,
+        "unknown_state_rate": 0.0,
+        "pass_rate": 1.0,
+        "strict_pass_rate": 0.9375,
+        "hard_fail_rate": 0.0,
+        "info_answer_rate": 1.0,
+        "booking_slot_progress_rate": 1.0,
+        "handoff_correct_rate": 1.0,
+        "degraded_fallback_rate": 0.0
+      },
+      "failure_counts": {
+        "judge_fail": 4
+      },
+      "taxonomy": {
+        "expectation": 4,
+        "canon": 0,
+        "code": 0,
+        "data": 0,
+        "unknown": 0
+      },
+      "judge": {
+        "candidates": 50,
+        "judged": 50,
+        "pass": 42,
+        "fail": 8,
+        "uncertain": 0,
+        "errors": 0,
+        "skipped": 14,
+        "cache_hits": 32,
+        "cache_misses": 18
+      },
+      "infra_valid": true,
+      "semantic_valid": true
     }
   ]
 }
