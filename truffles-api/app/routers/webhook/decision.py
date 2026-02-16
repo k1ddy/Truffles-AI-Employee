@@ -6332,6 +6332,38 @@ async def _handle_webhook_payload(
     expected_reply_blocked_by_info = expected_reply_state.expected_reply_blocked_by_info
     memory_expected_reply_type = expected_reply_state.memory_expected_reply_type
     expected_reply_shortcircuit_effective = bool(expected_reply_shortcircuit)
+    policy_memory_summary_seed = None
+    compact_summary_seed = context_manager.get("compact_summary") if isinstance(context_manager, dict) else None
+    if isinstance(compact_summary_seed, dict):
+        summary_text_seed = compact_summary_seed.get("text")
+        if isinstance(summary_text_seed, str) and summary_text_seed.strip():
+            policy_memory_summary_seed = summary_text_seed.strip()
+    policy_memory_profile_seed = None
+    memory_profile_seed, _ = _get_memory_profile(context, now=now)
+    if isinstance(memory_profile_seed, dict):
+        consent_seed = memory_profile_seed.get("consent")
+        consent_status_seed = None
+        if isinstance(consent_seed, dict):
+            raw_status_seed = consent_seed.get("status")
+            if isinstance(raw_status_seed, str) and raw_status_seed.strip():
+                consent_status_seed = raw_status_seed.strip()
+        memory_items_seed = memory_profile_seed.get("items")
+        stored_keys_seed: list[str] = []
+        if isinstance(memory_items_seed, dict):
+            for key in sorted(memory_items_seed.keys()):
+                if isinstance(key, str) and key.strip():
+                    stored_keys_seed.append(key.strip())
+        memory_active_goal_seed = None
+        if isinstance(current_goal, str) and current_goal.strip():
+            memory_active_goal_seed = current_goal.strip()
+        if consent_status_seed or stored_keys_seed or memory_active_goal_seed:
+            policy_memory_profile_seed = {}
+            if consent_status_seed:
+                policy_memory_profile_seed["consent_status"] = consent_status_seed
+            if stored_keys_seed:
+                policy_memory_profile_seed["stored_keys"] = stored_keys_seed
+            if memory_active_goal_seed:
+                policy_memory_profile_seed["active_goal"] = memory_active_goal_seed
 
     # 4.5 Branch routing (instance_id -> branch, or ask user)
     branch_response = _handle_branch_selection_gate(
@@ -7310,6 +7342,8 @@ async def _handle_webhook_payload(
     policy_low_confidence_ok = False
     policy_pack_refs_dropped = False
     policy_action_normalized = False
+    policy_memory_summary: str | None = None
+    policy_memory_profile: dict[str, Any] | None = None
     policy_core_runtime_active = bool(
         LLM_POLICY_CORE_ENABLED
         and routing["allow_bot_reply"]
@@ -7326,6 +7360,40 @@ async def _handle_webhook_payload(
                 value = booking.get(slot_key)
                 if isinstance(value, str) and value.strip():
                     policy_slot_state[slot_key] = value.strip()
+        policy_memory_summary = policy_memory_summary_seed
+        if not policy_memory_summary:
+            compact_summary = context_manager.get("compact_summary") if isinstance(context_manager, dict) else None
+            if isinstance(compact_summary, dict):
+                summary_text = compact_summary.get("text")
+                if isinstance(summary_text, str) and summary_text.strip():
+                    policy_memory_summary = summary_text.strip()
+        policy_memory_profile = policy_memory_profile_seed
+        if not policy_memory_profile:
+            memory_profile, _ = _get_memory_profile(context, now=now)
+            if isinstance(memory_profile, dict):
+                consent = memory_profile.get("consent")
+                consent_status = None
+                if isinstance(consent, dict):
+                    raw_status = consent.get("status")
+                    if isinstance(raw_status, str) and raw_status.strip():
+                        consent_status = raw_status.strip()
+                memory_items = memory_profile.get("items")
+                stored_keys: list[str] = []
+                if isinstance(memory_items, dict):
+                    for key in sorted(memory_items.keys()):
+                        if isinstance(key, str) and key.strip():
+                            stored_keys.append(key.strip())
+                memory_active_goal = None
+                if isinstance(current_goal, str) and current_goal.strip():
+                    memory_active_goal = current_goal.strip()
+                if consent_status or stored_keys or memory_active_goal:
+                    policy_memory_profile = {}
+                    if consent_status:
+                        policy_memory_profile["consent_status"] = consent_status
+                    if stored_keys:
+                        policy_memory_profile["stored_keys"] = stored_keys
+                    if memory_active_goal:
+                        policy_memory_profile["active_goal"] = memory_active_goal
         info_refs = sorted(INFO_INTENTS)
         consult_refs, consult_refs_error = _collect_plan_consult_refs(payload.client_slug)
         policy_result = route_llm_policy_core(
@@ -7335,6 +7403,8 @@ async def _handle_webhook_payload(
             slot_state=policy_slot_state,
             info_refs=info_refs,
             consult_refs=consult_refs,
+            memory_summary=policy_memory_summary,
+            memory_profile=policy_memory_profile,
             client_slug=payload.client_slug,
             client_config=client.config if client else None,
             timing_context=timing_context,
@@ -7674,6 +7744,13 @@ async def _handle_webhook_payload(
             "pack_refs_dropped": policy_pack_refs_dropped,
             "action_normalized": policy_action_normalized,
             "consult_normalized_to_info": consult_normalized_to_info,
+            "memory_summary_used": bool(policy_memory_summary),
+            "memory_profile_used": bool(policy_memory_profile),
+            "memory_profile_keys": (
+                policy_memory_profile.get("stored_keys")
+                if isinstance(policy_memory_profile, dict)
+                else []
+            ),
         }
         if saved_message:
             _update_message_decision_metadata(
@@ -7693,6 +7770,8 @@ async def _handle_webhook_payload(
                 "low_confidence_ok": policy_low_confidence_ok,
                 "pack_refs_dropped": policy_pack_refs_dropped,
                 "action_normalized": policy_action_normalized,
+                "memory_summary_used": bool(policy_memory_summary),
+                "memory_profile_used": bool(policy_memory_profile),
                 "confidence": policy_confidence,
                 "tool_action": policy_tool_action,
                 "pack_refs": policy_pack_refs or resolved_policy_refs,

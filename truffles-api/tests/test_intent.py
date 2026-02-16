@@ -348,6 +348,54 @@ class TestPolicyCoreTimeoutRetry:
         assert result["error"] == "deadline_exceeded"
         mock_llm.assert_not_called()
 
+    def test_policy_core_includes_memory_payload_when_provided(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "intent": "booking",
+            "action": "collect",
+            "tool_action": "calendar.list_slots",
+            "tool_args": {},
+            "pack_refs": [],
+            "language": "ru",
+            "confidence": 0.8,
+            "reason": "ask_time",
+            "goal": "booking",
+            "slots": {},
+            "open_questions": ["datetime"],
+            "expected_reply_type": "time",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Нужно время",
+                expected_reply_type="time",
+                memory_summary=("  Клиент хочет стрижку и просит завтра после 15:00. " * 12),
+                memory_profile={
+                    "consent_status": "granted",
+                    "active_goal": "booking",
+                    "stored_keys": [
+                        "preferred_master",
+                        "preferred_master",
+                        "parking_near",
+                    ],
+                },
+            )
+
+        assert result["ok"] is True
+        assert result["error"] is None
+        llm_messages = mock_llm.return_value.generate.call_args.kwargs["messages"]
+        policy_input = json.loads(llm_messages[1]["content"])
+        memory_payload = policy_input.get("memory")
+        assert isinstance(memory_payload, dict)
+        assert memory_payload.get("summary")
+        assert len(memory_payload.get("summary")) <= 360
+        assert memory_payload.get("profile", {}).get("consent_status") == "granted"
+        assert memory_payload.get("profile", {}).get("active_goal") == "booking"
+        assert memory_payload.get("profile", {}).get("stored_keys") == [
+            "preferred_master",
+            "parking_near",
+        ]
+
 
 class TestPolicyCoreErrorClassification:
     def test_maps_insufficient_quota_error(self, monkeypatch):

@@ -180,6 +180,14 @@ POLICY_CORE_TIMEOUT_FALLBACK_MODEL = os.environ.get(
 POLICY_CORE_CONFIDENCE_THRESHOLD = float(
     os.environ.get("LLM_POLICY_CORE_CONFIDENCE_THRESHOLD", "0.3")
 )
+POLICY_CORE_MEMORY_SUMMARY_MAX_CHARS = max(
+    int(os.environ.get("LLM_POLICY_CORE_MEMORY_SUMMARY_MAX_CHARS", "360")),
+    80,
+)
+POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS = max(
+    int(os.environ.get("LLM_POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS", "8")),
+    1,
+)
 ANSWER_INTERPRETER_TIMEOUT_SECONDS = float(
     os.environ.get("ANSWER_INTERPRETER_TIMEOUT_SECONDS", "2.5")
 )
@@ -207,6 +215,46 @@ def _resolve_policy_core_max_tokens(timeout_seconds: float) -> int:
     if timeout_seconds < 3.0:
         return min(POLICY_CORE_MAX_TOKENS, 200)
     return POLICY_CORE_MAX_TOKENS
+
+
+def _normalize_policy_core_memory_summary(summary: str | None) -> str | None:
+    if not isinstance(summary, str):
+        return None
+    compact = " ".join(summary.split())
+    if not compact:
+        return None
+    return compact[:POLICY_CORE_MEMORY_SUMMARY_MAX_CHARS]
+
+
+def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(profile, dict):
+        return None
+    normalized: dict[str, Any] = {}
+    consent_status = profile.get("consent_status")
+    if isinstance(consent_status, str) and consent_status.strip():
+        normalized["consent_status"] = consent_status.strip().casefold()
+    active_goal = profile.get("active_goal")
+    if isinstance(active_goal, str) and active_goal.strip():
+        normalized["active_goal"] = active_goal.strip().casefold()
+    stored_keys = profile.get("stored_keys")
+    if isinstance(stored_keys, list):
+        cleaned_keys: list[str] = []
+        seen_keys: set[str] = set()
+        for raw_key in stored_keys:
+            if len(cleaned_keys) >= POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS:
+                break
+            if not isinstance(raw_key, str):
+                continue
+            key = raw_key.strip()
+            if not key or key in seen_keys:
+                continue
+            cleaned_keys.append(key[:80])
+            seen_keys.add(key)
+        if cleaned_keys:
+            normalized["stored_keys"] = cleaned_keys
+    return normalized or None
+
+
 ANSWER_INTERPRETER_SLOTS = {"service", "datetime", "name"}
 ANSWER_INTERPRETER_SLOT_ALIASES = {
     "service": "service",
@@ -1092,6 +1140,8 @@ def route_llm_policy_core(
     slot_state: dict | None = None,
     info_refs: list[str] | None = None,
     consult_refs: list[str] | None = None,
+    memory_summary: str | None = None,
+    memory_profile: dict[str, Any] | None = None,
     client_slug: str | None = None,
     client_config: dict | None = None,
     timing_context: dict | None = None,
@@ -1171,6 +1221,14 @@ def route_llm_policy_core(
             "consult_refs": list(consult_refs or []),
         },
     }
+    normalized_memory_summary = _normalize_policy_core_memory_summary(memory_summary)
+    normalized_memory_profile = _normalize_policy_core_memory_profile(memory_profile)
+    if normalized_memory_summary or normalized_memory_profile:
+        policy_input["memory"] = {}
+        if normalized_memory_summary:
+            policy_input["memory"]["summary"] = normalized_memory_summary
+        if normalized_memory_profile:
+            policy_input["memory"]["profile"] = normalized_memory_profile
 
     try:
         llm = get_llm_provider()
