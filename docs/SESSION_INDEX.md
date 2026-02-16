@@ -5,6 +5,7 @@
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
 | 2026-02-16-tool-args-typed-a88 | active | feat/2026-02-16-tool-args-typed-a88 | /home/zhan/worktrees/2026-02-16-verifier-timeout-kernel-a88 | docs/TASK_PACKAGES/TP-2026-02-16-tool-args-typed-a88.md | 2026-02-16 |
+| 2026-02-16-console-nav-click-hotfix-a88 | active | fix/2026-02-16-console-nav-click-hotfix-a88 | /home/zhan/worktrees/2026-02-16-console-nav-click-hotfix-a88 | docs/TASK_PACKAGES/TP-2026-02-16-console-nav-click-hotfix-a88.md | 2026-02-16 |
 | 2026-02-16-expected-reply-controller-a88 | done | feat/2026-02-16-expected-reply-controller-a88 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-16-expected-reply-controller-a88.md | 2026-02-16 |
 | 2026-02-16-llm-reliability-kernel-a88 | active | feat/2026-02-16-llm-reliability-kernel-a88 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-16-llm-reliability-kernel-a88.md | 2026-02-16 |
 | 2026-02-16-booking-baseline-canonical-a88 | active | chore/2026-02-16-booking-baseline-canonical-a88 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-16-booking-baseline-canonical-a88.md | 2026-02-16 |
