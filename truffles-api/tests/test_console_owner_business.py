@@ -197,6 +197,76 @@ def test_resolve_owner_mode_profile_capture_leads() -> None:
     assert warnings
 
 
+def test_classify_outbox_incident_reason_markers() -> None:
+    reason_unavailable, _ = console_router._classify_outbox_incident_reason(
+        last_error="provider timeout while sending message",
+        integration_degraded=False,
+    )
+    reason_auth, _ = console_router._classify_outbox_incident_reason(
+        last_error="401 unauthorized token expired",
+        integration_degraded=False,
+    )
+    reason_rate, _ = console_router._classify_outbox_incident_reason(
+        last_error="429 too many requests",
+        integration_degraded=False,
+    )
+    reason_drift, _ = console_router._classify_outbox_incident_reason(
+        last_error=None,
+        integration_degraded=True,
+    )
+
+    assert reason_unavailable == "provider_unavailable"
+    assert reason_auth == "provider_auth"
+    assert reason_rate == "provider_rate_limited"
+    assert reason_drift == "integration_degraded"
+
+
+def test_build_scope_incident_items_empty_for_healthy_signals() -> None:
+    items = console_router._build_scope_incident_items(
+        scope="client",
+        signals=console_router._IncidentSignals(
+            outbox_backlog=10,
+            outbox_failed_24h=0,
+            pending_handovers=0,
+            integration_degraded_branches=0,
+            last_error=None,
+        ),
+        detected_at=datetime.now(timezone.utc),
+        client_id=uuid4(),
+        client_slug="demo",
+        branch_id=None,
+        branch_ids=None,
+        platform_scope=False,
+    )
+
+    assert items == []
+
+
+def test_build_scope_incident_items_includes_delivery_and_handover_risks() -> None:
+    items = console_router._build_scope_incident_items(
+        scope="client",
+        signals=console_router._IncidentSignals(
+            outbox_backlog=1200,
+            outbox_failed_24h=140,
+            pending_handovers=35,
+            integration_degraded_branches=2,
+            last_error="service unavailable",
+        ),
+        detected_at=datetime.now(timezone.utc),
+        client_id=uuid4(),
+        client_slug="demo",
+        branch_id=None,
+        branch_ids=None,
+        platform_scope=False,
+    )
+
+    assert len(items) == 2
+    assert items[0].reason_code in {"provider_unavailable", "integration_degraded"}
+    assert items[0].severity == "critical"
+    assert items[1].reason_code == "handover_backlog"
+    assert items[1].severity == "critical"
+
+
 def test_summarize_owner_operation_delta_states() -> None:
     improved = console_router._summarize_owner_operation_delta(
         {
@@ -539,6 +609,58 @@ async def test_business_summary_requires_business_permission(monkeypatch):
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_business_incidents_requires_business_permission(monkeypatch):
+    context = _build_context(role="manager")
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_business_incidents(request=SimpleNamespace(), db=SimpleNamespace())
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_admin_incidents_requires_platform_admin(monkeypatch):
+    context = _build_context(role="owner")
+    context.accessible_clients = []
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: context,
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_admin_incidents(
+            request=SimpleNamespace(query_params={}),
+            db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_admin_incidents_returns_empty_summary_without_active_clients(monkeypatch):
+    context = _build_context(role="platform_admin")
+    context.accessible_clients = []
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: context,
+    )
+
+    response = await console_router.list_admin_incidents(
+        request=SimpleNamespace(query_params={}),
+        db=SimpleNamespace(),
+    )
+
+    assert response.scope == "fleet"
+    assert response.summary.total == 0
+    assert response.items == []
 
 
 @pytest.mark.asyncio

@@ -55,6 +55,16 @@ function actionChipClass(severity: "critical" | "warn" | "info"): string {
     return "bg-slate-100 text-slate-700";
 }
 
+function incidentChipClass(severity: "critical" | "warn" | "info"): string {
+    if (severity === "critical") {
+        return "bg-red-100 text-red-800";
+    }
+    if (severity === "warn") {
+        return "bg-amber-100 text-amber-800";
+    }
+    return "bg-slate-100 text-slate-700";
+}
+
 function formatMetricMeta(meta?: MetricFactMeta): string {
     if (!meta) {
         return "missing · source: n/a";
@@ -82,6 +92,16 @@ export default function BusinessPage() {
         queryKey: ["business-summary"],
         queryFn: async () => {
             const response = await businessApi.getSummary();
+            return response.data;
+        },
+        enabled: !!session && canReadBusiness,
+        refetchInterval: 30000,
+    });
+
+    const { data: incidentsData, isLoading: incidentsLoading } = useQuery({
+        queryKey: ["business-incidents"],
+        queryFn: async () => {
+            const response = await businessApi.getIncidents();
             return response.data;
         },
         enabled: !!session && canReadBusiness,
@@ -175,6 +195,46 @@ export default function BusinessPage() {
                         {data.status}
                     </span>
                 </div>
+            </section>
+
+            <section className="mb-4 rounded-xl border border-border/60 bg-card p-4" data-testid="business-incidents-card">
+                <div className="mb-3 flex items-center justify-between">
+                    <h2 className="text-lg font-semibold">Ключевые инциденты</h2>
+                    <span className="text-xs text-muted-foreground">{incidentsData?.summary.total ?? 0} шт.</span>
+                </div>
+                {incidentsLoading ? (
+                    <p className="text-sm text-muted-foreground">Проверяем инциденты...</p>
+                ) : !incidentsData?.items?.length ? (
+                    <p className="text-sm text-muted-foreground">Критичных инцидентов не найдено. Продолжайте ежедневный контроль.</p>
+                ) : (
+                    <div className="space-y-3">
+                        {incidentsData.items.map((incident) => (
+                            <article key={incident.id} className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid={`business-incident-${incident.id}`}>
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <p className="text-sm font-semibold">{incident.title}</p>
+                                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${incidentChipClass(incident.severity)}`}>
+                                        {incident.severity}
+                                    </span>
+                                </div>
+                                <p className="mt-1 text-xs text-muted-foreground">{incident.reason_label}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">{incident.summary}</p>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                    {incident.actions.map((action) => (
+                                        action.href ? (
+                                            <Link key={action.id} href={action.href} className="btn-ghost text-xs">
+                                                {action.title}
+                                            </Link>
+                                        ) : (
+                                            <span key={action.id} className="rounded-full border border-border/60 px-2 py-1 text-[11px] text-muted-foreground">
+                                                {action.title} {action.job_type ? `(${action.job_type}:${action.mode})` : ""}
+                                            </span>
+                                        )
+                                    ))}
+                                </div>
+                            </article>
+                        ))}
+                    </div>
+                )}
             </section>
 
             <section className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid="business-kpi-grid">

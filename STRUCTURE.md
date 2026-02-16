@@ -144,6 +144,7 @@
 | `docs/REPORTS/2026-02-15-owner-admin-wave5-control-hardening-v1.md` | Report: Owner/Admin wave-5 (control hardening + rollback + decomposition start) | Brain/Architect |
 | `docs/REPORTS/2026-02-15-owner-admin-wave6-automation-v1.md` | Report: Owner/Admin wave-6 (automation wrapper + goal-mode + publish preflight gate) | Brain/Architect |
 | `docs/REPORTS/2026-02-15-owner-admin-wave7-fact-os-v1.md` | Report: Owner/Admin wave-7 (fact contract layer + server-driven owner operations) | Brain/Architect |
+| `docs/REPORTS/2026-02-15-owner-admin-wave8-incident-control-v1.md` | Report: Owner/Admin + Platform Admin wave-8 (incident control loop + safe remediation actions) | Brain/Architect |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 

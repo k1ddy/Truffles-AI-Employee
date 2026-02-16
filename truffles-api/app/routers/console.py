@@ -104,6 +104,10 @@ from app.schemas.console import (
     ConsoleFleetAttentionSummary,
     ConsoleFleetSummary,
     ConsoleHealthResponse,
+    ConsoleIncidentAction,
+    ConsoleIncidentItem,
+    ConsoleIncidentListResponse,
+    ConsoleIncidentSummary,
     ConsoleIntegrationBranchActionRequest,
     ConsoleIntegrationBranchActionResponse,
     ConsoleIntegrationsListResponse,
@@ -223,6 +227,9 @@ from app.services.console_owner_admin import (
 )
 from app.services.console_owner_admin import (
     build_team_performance_actions as _build_team_performance_actions,
+)
+from app.services.console_owner_admin import (
+    classify_outbox_incident_reason as _classify_outbox_incident_reason,
 )
 from app.services.console_owner_admin import (
     derive_business_status as _derive_business_status,
@@ -3396,6 +3403,330 @@ def _query_pending_handovers_map(
     return {row[0]: int(row[1] or 0) for row in rows if row[0]}
 
 
+def _query_outbox_backlog_map(
+    db: Session,
+    *,
+    client_ids: list[UUID],
+) -> dict[UUID, int]:
+    if not client_ids:
+        return {}
+    rows = (
+        db.query(
+            OutboxMessage.client_id,
+            func.count(OutboxMessage.id),
+        )
+        .filter(
+            OutboxMessage.client_id.in_(client_ids),
+            OutboxMessage.status.in_(["PENDING", "PROCESSING"]),
+        )
+        .group_by(OutboxMessage.client_id)
+        .all()
+    )
+    return {row[0]: int(row[1] or 0) for row in rows if row[0]}
+
+
+def _query_integration_degraded_branch_count_map(
+    db: Session,
+    *,
+    client_ids: list[UUID],
+) -> dict[UUID, int]:
+    if not client_ids:
+        return {}
+    rows = (
+        db.query(
+            Branch.client_id,
+            func.count(Branch.id),
+        )
+        .filter(
+            Branch.client_id.in_(client_ids),
+            Branch.is_active.is_(True),
+            func.lower(func.coalesce(Branch.integration_state, "ok")) == "degraded",
+        )
+        .group_by(Branch.client_id)
+        .all()
+    )
+    return {row[0]: int(row[1] or 0) for row in rows if row[0]}
+
+
+def _query_latest_failed_error_map(
+    db: Session,
+    *,
+    client_ids: list[UUID],
+    now: datetime,
+) -> dict[UUID, str]:
+    if not client_ids:
+        return {}
+    cutoff = now - timedelta(hours=24)
+    rows = (
+        db.query(
+            OutboxMessage.client_id,
+            OutboxMessage.last_error,
+            OutboxMessage.updated_at,
+            OutboxMessage.created_at,
+        )
+        .filter(
+            OutboxMessage.client_id.in_(client_ids),
+            OutboxMessage.status == "FAILED",
+            OutboxMessage.last_error.isnot(None),
+            OutboxMessage.updated_at >= cutoff,
+        )
+        .order_by(
+            OutboxMessage.client_id.asc(),
+            OutboxMessage.updated_at.desc(),
+            OutboxMessage.created_at.desc(),
+        )
+        .all()
+    )
+    result: dict[UUID, str] = {}
+    for client_id, last_error, _updated_at, _created_at in rows:
+        if client_id in result:
+            continue
+        normalized = _normalize_optional_text(last_error)
+        if normalized:
+            result[client_id] = normalized
+    return result
+
+
+@dataclass
+class _IncidentSignals:
+    outbox_backlog: int
+    outbox_failed_24h: int
+    pending_handovers: int
+    integration_degraded_branches: int
+    last_error: Optional[str]
+
+
+def _build_incident_actions(
+    *,
+    reason_code: str,
+    outbox_backlog: int,
+    integration_degraded_branches: int,
+    branch_ids: Optional[list[UUID]],
+    platform_scope: bool,
+) -> list[ConsoleIncidentAction]:
+    actions: list[ConsoleIncidentAction] = []
+    outbox_limit = max(10, min(200, outbox_backlog if outbox_backlog > 0 else 25))
+    outbox_params: dict[str, object] = {"limit": outbox_limit}
+    if branch_ids:
+        outbox_params["branch_ids"] = [str(branch_id) for branch_id in branch_ids]
+
+    actions.append(
+        ConsoleIncidentAction(
+            id="open_ops",
+            title="Открыть очередь отправки",
+            description="Проверьте failed/pending и тренд ошибок перед действиями.",
+            href="/ops",
+            dry_run_first=True,
+        )
+    )
+    actions.append(
+        ConsoleIncidentAction(
+            id="outbox_dry_run",
+            title="Запустить dry-run outbox_process",
+            description="Безопасная проверка: покажет, сколько сообщений можно обработать сейчас.",
+            job_type="outbox_process",
+            mode="dry_run",
+            params=outbox_params,
+            dry_run_first=True,
+        )
+    )
+
+    if reason_code == "integration_degraded" or integration_degraded_branches > 0:
+        reconcile_params: dict[str, object] = {
+            "limit": max(1, min(200, integration_degraded_branches or 25))
+        }
+        if branch_ids:
+            reconcile_params["branch_ids"] = [str(branch_id) for branch_id in branch_ids]
+        actions.append(
+            ConsoleIncidentAction(
+                id="integration_reconcile_dry_run",
+                title="Запустить dry-run integration_reconcile",
+                description="Проверьте drift/биндинги и оцените эффект до execute.",
+                job_type="integration_reconcile",
+                mode="dry_run",
+                params=reconcile_params,
+                dry_run_first=True,
+            )
+        )
+        actions.append(
+            ConsoleIncidentAction(
+                id="open_integrations",
+                title="Проверить интеграции",
+                description="Откройте реестр интеграций и исправьте проблемные биндинги.",
+                href="/integrations",
+                dry_run_first=True,
+            )
+        )
+
+    if platform_scope:
+        actions.append(
+            ConsoleIncidentAction(
+                id="open_fleet_attention",
+                title="Проверить fleet attention",
+                description="Сверьте соседние компании с высоким риском и приоритизируйте remediation.",
+                href="/tenants",
+                dry_run_first=True,
+            )
+        )
+    return actions
+
+
+def _incident_severity_from_signals(signals: _IncidentSignals) -> Literal["critical", "warn"]:
+    if (
+        signals.outbox_backlog >= 1000
+        or signals.outbox_failed_24h >= 100
+        or signals.integration_degraded_branches >= 3
+        or signals.pending_handovers >= 30
+    ):
+        return "critical"
+    return "warn"
+
+
+def _build_outbox_incident_item(
+    *,
+    scope: Literal["fleet", "client", "branch"],
+    signals: _IncidentSignals,
+    detected_at: datetime,
+    client_id: Optional[UUID],
+    client_slug: Optional[str],
+    branch_id: Optional[UUID],
+    branch_ids: Optional[list[UUID]],
+    platform_scope: bool,
+) -> ConsoleIncidentItem:
+    reason_code, reason_label = _classify_outbox_incident_reason(
+        last_error=signals.last_error,
+        integration_degraded=signals.integration_degraded_branches > 0,
+    )
+    severity = _incident_severity_from_signals(signals)
+    return ConsoleIncidentItem(
+        id=f"outbox-{client_id or 'scope'}",
+        scope=scope,
+        severity=severity,
+        title="Риск доставки сообщений",
+        summary=(
+            f"backlog={signals.outbox_backlog}, failed_24h={signals.outbox_failed_24h}, "
+            f"integration_degraded={signals.integration_degraded_branches}"
+        ),
+        reason_code=reason_code,
+        reason_label=reason_label,
+        source="outbox_messages+branches",
+        detected_at=detected_at.isoformat(),
+        client_id=client_id,
+        client_slug=client_slug,
+        branch_id=branch_id,
+        metrics={
+            "outbox_backlog": signals.outbox_backlog,
+            "outbox_failed_24h": signals.outbox_failed_24h,
+            "integration_degraded_branches": signals.integration_degraded_branches,
+            "pending_handovers": signals.pending_handovers,
+            "last_error": _truncate_preview(signals.last_error, limit=160),
+        },
+        actions=_build_incident_actions(
+            reason_code=reason_code,
+            outbox_backlog=signals.outbox_backlog,
+            integration_degraded_branches=signals.integration_degraded_branches,
+            branch_ids=branch_ids,
+            platform_scope=platform_scope,
+        ),
+    )
+
+
+def _build_handover_incident_item(
+    *,
+    scope: Literal["fleet", "client", "branch"],
+    signals: _IncidentSignals,
+    detected_at: datetime,
+    client_id: Optional[UUID],
+    client_slug: Optional[str],
+    branch_id: Optional[UUID],
+) -> ConsoleIncidentItem:
+    severity: Literal["critical", "warn"] = "critical" if signals.pending_handovers >= 30 else "warn"
+    return ConsoleIncidentItem(
+        id=f"handover-{client_id or 'scope'}",
+        scope=scope,
+        severity=severity,
+        title="Очередь эскалаций перегружена",
+        summary=f"pending_handovers={signals.pending_handovers}",
+        reason_code="handover_backlog",
+        reason_label="Неразобранные эскалации копятся",
+        source="handovers",
+        detected_at=detected_at.isoformat(),
+        client_id=client_id,
+        client_slug=client_slug,
+        branch_id=branch_id,
+        metrics={"pending_handovers": signals.pending_handovers},
+        actions=[
+            ConsoleIncidentAction(
+                id="open_inbox_queue",
+                title="Открыть очередь заявок",
+                description="Назначьте ответственных менеджеров и разгрузите pending.",
+                href="/",
+                dry_run_first=True,
+            ),
+            ConsoleIncidentAction(
+                id="open_team_kpi",
+                title="Проверить Team KPI",
+                description="Проверьте перегрузку по менеджерам и распределите нагрузку.",
+                href="/business/team-performance",
+                dry_run_first=True,
+            ),
+        ],
+    )
+
+
+def _build_scope_incident_items(
+    *,
+    scope: Literal["fleet", "client", "branch"],
+    signals: _IncidentSignals,
+    detected_at: datetime,
+    client_id: Optional[UUID],
+    client_slug: Optional[str],
+    branch_id: Optional[UUID],
+    branch_ids: Optional[list[UUID]],
+    platform_scope: bool,
+) -> list[ConsoleIncidentItem]:
+    items: list[ConsoleIncidentItem] = []
+    has_delivery_risk = (
+        signals.outbox_backlog >= 500
+        or signals.outbox_failed_24h >= 30
+        or signals.integration_degraded_branches > 0
+    )
+    if has_delivery_risk:
+        items.append(
+            _build_outbox_incident_item(
+                scope=scope,
+                signals=signals,
+                detected_at=detected_at,
+                client_id=client_id,
+                client_slug=client_slug,
+                branch_id=branch_id,
+                branch_ids=branch_ids,
+                platform_scope=platform_scope,
+            )
+        )
+    if signals.pending_handovers >= 10:
+        items.append(
+            _build_handover_incident_item(
+                scope=scope,
+                signals=signals,
+                detected_at=detected_at,
+                client_id=client_id,
+                client_slug=client_slug,
+                branch_id=branch_id,
+            )
+        )
+    return items
+
+
+def _build_incident_summary(items: list[ConsoleIncidentItem]) -> ConsoleIncidentSummary:
+    return ConsoleIncidentSummary(
+        total=len(items),
+        critical=sum(1 for item in items if item.severity == "critical"),
+        warn=sum(1 for item in items if item.severity == "warn"),
+        info=sum(1 for item in items if item.severity == "info"),
+    )
+
+
 def _parse_date_param(name: str, value: Optional[str]) -> Optional[dt_date]:
     if value is None:
         return None
@@ -6155,6 +6486,133 @@ async def get_business_summary(
         first_response_p90_seconds=first_response_p90_seconds,
         actions=actions,
         metric_meta=metric_meta,
+    )
+
+
+@router.get(
+    "/business/incidents",
+    response_model=ConsoleIncidentListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_business_incidents(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleIncidentListResponse:
+    context = get_console_context(request, db)
+    require_console_permission(
+        context,
+        "business",
+        "read",
+        message="Only owner/admin can access business incidents",
+    )
+
+    now = datetime.now(timezone.utc)
+    outbox_failed_window_start = now - timedelta(hours=24)
+    allowed_branch_ids = _resolve_branch_scope(context)
+    scope: Literal["client", "branch"] = "branch" if allowed_branch_ids is not None else "client"
+
+    outbox_query = db.query(OutboxMessage).filter(OutboxMessage.client_id == context.client.id)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            outbox_backlog = 0
+            outbox_failed_24h = 0
+            latest_failed_error = None
+        else:
+            outbox_query = outbox_query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
+            outbox_backlog = outbox_query.filter(
+                OutboxMessage.status.in_(["PENDING", "PROCESSING"])
+            ).count()
+            outbox_failed_24h = outbox_query.filter(
+                OutboxMessage.status == "FAILED",
+                OutboxMessage.created_at >= outbox_failed_window_start,
+            ).count()
+            latest_failed_row = (
+                outbox_query.filter(
+                    OutboxMessage.status == "FAILED",
+                    OutboxMessage.last_error.isnot(None),
+                )
+                .order_by(OutboxMessage.updated_at.desc(), OutboxMessage.created_at.desc())
+                .first()
+            )
+            latest_failed_error = (
+                _normalize_optional_text(getattr(latest_failed_row, "last_error", None))
+                if latest_failed_row
+                else None
+            )
+    else:
+        outbox_backlog = outbox_query.filter(
+            OutboxMessage.status.in_(["PENDING", "PROCESSING"])
+        ).count()
+        outbox_failed_24h = outbox_query.filter(
+            OutboxMessage.status == "FAILED",
+            OutboxMessage.created_at >= outbox_failed_window_start,
+        ).count()
+        latest_failed_row = (
+            outbox_query.filter(
+                OutboxMessage.status == "FAILED",
+                OutboxMessage.last_error.isnot(None),
+            )
+            .order_by(OutboxMessage.updated_at.desc(), OutboxMessage.created_at.desc())
+            .first()
+        )
+        latest_failed_error = (
+            _normalize_optional_text(getattr(latest_failed_row, "last_error", None))
+            if latest_failed_row
+            else None
+        )
+
+    handover_query = db.query(Handover).filter(
+        Handover.client_id == context.client.id,
+        Handover.status.in_(["pending", "active"]),
+    )
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            pending_handovers = 0
+        else:
+            handover_query = handover_query.join(
+                Conversation,
+                Handover.conversation_id == Conversation.id,
+            ).filter(Conversation.branch_id.in_(allowed_branch_ids))
+            pending_handovers = handover_query.count()
+    else:
+        pending_handovers = handover_query.count()
+
+    degraded_query = db.query(func.count(Branch.id)).filter(
+        Branch.client_id == context.client.id,
+        Branch.is_active.is_(True),
+        func.lower(func.coalesce(Branch.integration_state, "ok")) == "degraded",
+    )
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            integration_degraded_branches = 0
+        else:
+            degraded_query = degraded_query.filter(Branch.id.in_(allowed_branch_ids))
+            integration_degraded_branches = int(degraded_query.scalar() or 0)
+    else:
+        integration_degraded_branches = int(degraded_query.scalar() or 0)
+
+    signals = _IncidentSignals(
+        outbox_backlog=outbox_backlog,
+        outbox_failed_24h=outbox_failed_24h,
+        pending_handovers=pending_handovers,
+        integration_degraded_branches=integration_degraded_branches,
+        last_error=latest_failed_error,
+    )
+    items = _build_scope_incident_items(
+        scope=scope,
+        signals=signals,
+        detected_at=now,
+        client_id=context.client.id,
+        client_slug=context.client.name,
+        branch_id=context.effective_branch_id,
+        branch_ids=allowed_branch_ids,
+        platform_scope=False,
+    )
+    return ConsoleIncidentListResponse(
+        generated_at=now.isoformat(),
+        scope=scope,
+        summary=_build_incident_summary(items),
+        items=items,
     )
 
 
@@ -10210,6 +10668,88 @@ async def list_fleet_attention(
         stale_after_minutes=stale_after_minutes,
         summary=summary,
         items=items[:limit],
+    )
+
+
+@router.get(
+    "/admin/incidents",
+    response_model=ConsoleIncidentListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_admin_incidents(
+    request: Request,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+) -> ConsoleIncidentListResponse:
+    _reject_unknown_query_params(request, {"limit"})
+    _validate_limit(limit)
+
+    context = get_console_context(
+        request,
+        db,
+        require_selection=False,
+        include_inactive_tenants=False,
+    )
+    _require_platform_admin(context)
+
+    active_clients = [
+        client for client in (context.accessible_clients or []) if _is_client_active_status(client.status)
+    ]
+    if not active_clients:
+        return ConsoleIncidentListResponse(
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            scope="fleet",
+            summary=ConsoleIncidentSummary(total=0, critical=0, warn=0, info=0),
+            items=[],
+        )
+
+    now = datetime.now(timezone.utc)
+    client_ids = [client.id for client in active_clients]
+    outbox_backlog_map = _query_outbox_backlog_map(db, client_ids=client_ids)
+    outbox_failed_map = _query_outbox_failed_24h_map(db, client_ids=client_ids, now=now)
+    pending_handovers_map = _query_pending_handovers_map(db, client_ids=client_ids)
+    degraded_map = _query_integration_degraded_branch_count_map(db, client_ids=client_ids)
+    latest_error_map = _query_latest_failed_error_map(db, client_ids=client_ids, now=now)
+
+    items: list[ConsoleIncidentItem] = []
+    for client in active_clients:
+        signals = _IncidentSignals(
+            outbox_backlog=outbox_backlog_map.get(client.id, 0),
+            outbox_failed_24h=outbox_failed_map.get(client.id, 0),
+            pending_handovers=pending_handovers_map.get(client.id, 0),
+            integration_degraded_branches=degraded_map.get(client.id, 0),
+            last_error=latest_error_map.get(client.id),
+        )
+        items.extend(
+            _build_scope_incident_items(
+                scope="fleet",
+                signals=signals,
+                detected_at=now,
+                client_id=client.id,
+                client_slug=client.name,
+                branch_id=None,
+                branch_ids=None,
+                platform_scope=True,
+            )
+        )
+
+    severity_rank = {"critical": 2, "warn": 1, "info": 0}
+    items.sort(
+        key=lambda item: (
+            severity_rank.get(item.severity, 0),
+            int(item.metrics.get("outbox_backlog") or 0),
+            int(item.metrics.get("outbox_failed_24h") or 0),
+            int(item.metrics.get("integration_degraded_branches") or 0),
+            int(item.metrics.get("pending_handovers") or 0),
+        ),
+        reverse=True,
+    )
+    limited_items = items[:limit]
+    return ConsoleIncidentListResponse(
+        generated_at=now.isoformat(),
+        scope="fleet",
+        summary=_build_incident_summary(limited_items),
+        items=limited_items,
     )
 
 

@@ -626,6 +626,62 @@ class ConsoleBusinessActionItem(BaseModel):
     severity: ConsoleBusinessSeverity
 
 
+ConsoleIncidentSeverity = Literal["critical", "warn", "info"]
+ConsoleIncidentScope = Literal["fleet", "client", "branch"]
+ConsoleIncidentReasonCode = Literal[
+    "outbox_backlog",
+    "provider_unavailable",
+    "provider_auth",
+    "provider_rate_limited",
+    "integration_degraded",
+    "handover_backlog",
+    "unknown",
+]
+
+
+class ConsoleIncidentAction(BaseModel):
+    id: str
+    title: str
+    description: str
+    href: Optional[str] = None
+    job_type: Optional[Literal["outbox_process", "integration_reconcile", "heal", "metrics_snapshot"]] = None
+    mode: Optional[Literal["dry_run", "execute"]] = None
+    params: Optional[dict] = None
+    dry_run_first: bool = True
+    requires_confirmation: bool = False
+
+
+class ConsoleIncidentItem(BaseModel):
+    id: str
+    scope: ConsoleIncidentScope
+    severity: ConsoleIncidentSeverity
+    title: str
+    summary: str
+    reason_code: ConsoleIncidentReasonCode
+    reason_label: str
+    source: str
+    detected_at: str
+    client_id: Optional[UUID] = None
+    client_slug: Optional[str] = None
+    branch_id: Optional[UUID] = None
+    metrics: dict[str, str | int | float | bool | None] = {}
+    actions: list[ConsoleIncidentAction] = []
+
+
+class ConsoleIncidentSummary(BaseModel):
+    total: int
+    critical: int
+    warn: int
+    info: int
+
+
+class ConsoleIncidentListResponse(BaseModel):
+    generated_at: str
+    scope: ConsoleIncidentScope
+    summary: ConsoleIncidentSummary
+    items: list[ConsoleIncidentItem]
+
+
 class ConsoleBusinessSummaryResponse(BaseModel):
     generated_at: str
     status: ConsoleBusinessStatus
