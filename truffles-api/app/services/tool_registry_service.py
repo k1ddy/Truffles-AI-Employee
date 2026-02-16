@@ -17,6 +17,7 @@ from app.models.branch import Branch
 from app.models.service import Service
 from app.models.specialist import Specialist
 from app.models.specialist_service import SpecialistService
+from app.schemas.intent import validate_tool_args_shape
 from app.services.appointment_reminder_service import (
     mark_pending_reminders_failed,
     schedule_default_reminders,
@@ -212,46 +213,34 @@ def _expected_reply_prompt_from_hint(expected_reply_type: str | None) -> str | N
     return None
 
 
+def _map_tool_args_shape_error(error: str) -> tuple[str, str]:
+    if error == "tool_args_invalid":
+        return "tool_args_not_dict", "tool_args"
+    if error == "tool_args_key_invalid":
+        return "tool_args_key_invalid", "tool_args"
+    if error.startswith("tool_args_unknown_field:"):
+        _, _, field = error.partition(":")
+        return "tool_args_unknown_field", (field or "tool_args")
+    if error.startswith("tool_args_type_invalid:"):
+        _, _, field = error.partition(":")
+        field_name = field or "tool_args"
+        return f"{field_name}_type_invalid", field_name
+    return "tool_args_invalid", "tool_args"
+
+
 def _validate_tool_args_contract(
     *,
     tool_action: str,
     tool_args: Any,
     fallback_tz: str | None = None,
 ) -> tuple[str | None, str | None]:
-    if not isinstance(tool_args, dict):
-        return "tool_args_not_dict", "tool_args"
-    for key in tool_args:
-        if not isinstance(key, str):
-            return "tool_args_key_invalid", "tool_args"
-
-    # Verifier-lite: reject hallucinated fields before executing critical tool actions.
-    allowed_fields_map: dict[str, set[str]] = {
-        "calendar.list_slots": {
-            "service_query",
-            "date",
-            "start_at",
-            "duration_min",
-            "specialist_id",
-            "specialist_name",
-        },
-        "calendar.book_slot": {
-            "service_query",
-            "start_at",
-            "end_at",
-            "specialist_id",
-            "specialist_name",
-            "customer_name",
-            "customer_phone",
-        },
-        "calendar.get_booking": {"appointment_id"},
-        "calendar.reschedule": {"appointment_id", "start_at", "end_at"},
-        "calendar.cancel": {"appointment_id", "reason"},
-    }
-    allowed_fields = allowed_fields_map.get(tool_action)
-    if allowed_fields is not None:
-        unknown_fields = sorted(key for key in tool_args if key not in allowed_fields)
-        if unknown_fields:
-            return "tool_args_unknown_field", unknown_fields[0]
+    normalized_args, shape_error = validate_tool_args_shape(
+        tool_action=tool_action,
+        tool_args=tool_args,
+    )
+    if shape_error:
+        return _map_tool_args_shape_error(shape_error)
+    tool_args = normalized_args or {}
 
     def _validate_optional_text(field: str) -> tuple[str | None, str | None]:
         value = tool_args.get(field)
