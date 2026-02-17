@@ -13,6 +13,7 @@ from app.models.branch import Branch
 from app.models.client_capability import ClientCapability
 from app.models.client_onboarding_contract import ClientOnboardingContract
 from app.models.client_settings import ClientSettings
+from app.models.knowledge_version import KnowledgeVersion
 from app.models.reference_pack import ReferencePack
 from app.models.specialist import Specialist
 from app.schemas.capabilities import CapabilitiesPayload
@@ -50,6 +51,20 @@ ONBOARDING_STEPS = [
 ]
 
 STEP_INDEX = {step: index for index, step in enumerate(ONBOARDING_STEPS)}
+
+_DOCUMENT_INGESTION_CRITICAL_FIELDS = {
+    "client_pack.booking.collect_fields",
+    "client_pack.booking.bot_can_confirm",
+    "client_pack.policy.hard_law",
+    "client_pack.policy.payment_info",
+    "client_pack.policy.reschedule",
+    "client_pack.policy.cancel",
+    "client_pack.policy.medical",
+    "client_pack.policy.legal",
+    "client_pack.policy.complaint",
+    "client_pack.policy.discounts",
+    "client_pack.policy.guard_topics.refund",
+}
 
 
 @dataclass(frozen=True)
@@ -93,6 +108,10 @@ class OnboardingInputs:
     has_knowledge_tag: bool
     has_published_knowledge: bool
     missing_pack_fields: list[str]
+    document_ingestion_valid: bool
+    document_ingestion_source: str
+    document_ingestion_missing_fields: list[str]
+    document_ingestion_critical_missing_fields: list[str]
     has_working_hours: bool
     has_booking_settings: bool
     has_specialists: bool
@@ -121,10 +140,20 @@ class OnboardingScorecardCheck:
 
 
 @dataclass(frozen=True)
+class OnboardingDocumentIngestion:
+    status: str
+    valid: bool
+    source: str
+    missing_fields: list[str]
+    critical_missing_fields: list[str]
+
+
+@dataclass(frozen=True)
 class OnboardingScorecard:
     ready: bool
     checks: list[OnboardingScorecardCheck]
     missing: list[str]
+    document_ingestion: Optional[OnboardingDocumentIngestion] = None
 
 
 def _parse_onboarding_state(value: Optional[str]) -> Optional[OnboardingStep]:
@@ -268,6 +297,22 @@ def _parse_iso_date(value: Optional[str]) -> Optional[date]:
         return None
 
 
+def _get_latest_draft(db: Session, branch: Branch) -> Optional[KnowledgeVersion]:
+    return (
+        db.query(KnowledgeVersion)
+        .filter(
+            KnowledgeVersion.branch_id == branch.id,
+            KnowledgeVersion.status == "draft",
+        )
+        .order_by(KnowledgeVersion.created_at.desc())
+        .first()
+    )
+
+
+def _critical_document_missing_fields(missing_fields: list[str]) -> list[str]:
+    return [field for field in missing_fields if field in _DOCUMENT_INGESTION_CRITICAL_FIELDS]
+
+
 def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
     capabilities = _load_capabilities(db, branch)
     onboarding_contract = _load_onboarding_contract(db, branch)
@@ -286,6 +331,7 @@ def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
     published_version = get_current_published(db, branch_id=branch.id)
     has_published_knowledge = published_version is not None
     missing_pack_fields: list[str] = []
+    draft_version = _get_latest_draft(db, branch)
 
     has_specialists = (
         db.query(Specialist)
@@ -340,6 +386,26 @@ def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
             domain_slug=reference_pack_domain_slug,
             require_booking=booking_required,
         )
+    document_ingestion_source = "none"
+    document_ingestion_missing_fields: list[str] = []
+    document_ingestion_critical_missing_fields: list[str] = []
+    if published_version and isinstance(published_version.payload_json, dict):
+        document_ingestion_source = "published"
+        document_ingestion_missing_fields = list(missing_pack_fields)
+    elif draft_version and isinstance(draft_version.payload_json, dict):
+        document_ingestion_source = "draft"
+        document_ingestion_missing_fields = get_missing_required_fields(
+            draft_version.payload_json,
+            domain_slug=reference_pack_domain_slug,
+            require_booking=booking_required,
+        )
+    document_ingestion_critical_missing_fields = _critical_document_missing_fields(
+        document_ingestion_missing_fields
+    )
+    document_ingestion_valid = (
+        document_ingestion_source != "none"
+        and len(document_ingestion_missing_fields) == 0
+    )
     instance_id = (branch.instance_id or "").strip() or None
 
     return OnboardingInputs(
@@ -366,6 +432,10 @@ def build_onboarding_inputs(db: Session, branch: Branch) -> OnboardingInputs:
         has_knowledge_tag=bool(branch.knowledge_tag),
         has_published_knowledge=has_published_knowledge,
         missing_pack_fields=missing_pack_fields,
+        document_ingestion_valid=document_ingestion_valid,
+        document_ingestion_source=document_ingestion_source,
+        document_ingestion_missing_fields=document_ingestion_missing_fields,
+        document_ingestion_critical_missing_fields=document_ingestion_critical_missing_fields,
         has_working_hours=_has_non_empty_dict(branch.working_hours),
         has_booking_settings=_has_non_empty_dict(branch.booking_settings),
         has_specialists=has_specialists,
@@ -496,6 +566,10 @@ def missing_prerequisites(step: OnboardingStep, inputs: OnboardingInputs) -> lis
                 missing.append("knowledge_published")
             if inputs.has_published_knowledge and inputs.missing_pack_fields:
                 missing.extend(inputs.missing_pack_fields)
+            if not inputs.document_ingestion_valid:
+                missing.append("document_ingestion_invalid")
+                if inputs.document_ingestion_critical_missing_fields:
+                    missing.extend(inputs.document_ingestion_critical_missing_fields)
 
         if inputs.has_capabilities and inputs.capabilities.features.booking_mode is not None:
             if not inputs.has_working_hours:
@@ -542,10 +616,34 @@ def build_onboarding_scorecard_from_inputs(inputs: OnboardingInputs) -> Onboardi
         )
 
     go_no_go_missing = _deduplicate_strings(missing_prerequisites(OnboardingStep.GO_NO_GO, inputs))
+    knowledge_required = (
+        inputs.has_capabilities
+        and inputs.capabilities.features.knowledge_upload is True
+    )
+    document_ingestion_status = OnboardingDocumentIngestion(
+        status=(
+            "skipped"
+            if not knowledge_required
+            else ("pass" if inputs.document_ingestion_valid else "fail")
+        ),
+        valid=(inputs.document_ingestion_valid if knowledge_required else True),
+        source=inputs.document_ingestion_source,
+        missing_fields=(
+            _deduplicate_strings(inputs.document_ingestion_missing_fields)
+            if knowledge_required
+            else []
+        ),
+        critical_missing_fields=(
+            _deduplicate_strings(inputs.document_ingestion_critical_missing_fields)
+            if knowledge_required
+            else []
+        ),
+    )
     return OnboardingScorecard(
         ready=len(go_no_go_missing) == 0,
         checks=checks,
         missing=go_no_go_missing,
+        document_ingestion=document_ingestion_status,
     )
 
 

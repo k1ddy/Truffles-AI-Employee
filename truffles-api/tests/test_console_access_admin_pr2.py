@@ -1279,6 +1279,13 @@ async def test_get_onboarding_scorecard_returns_fail_payload(monkeypatch):
         lambda *_args, **_kwargs: SimpleNamespace(
             ready=False,
             missing=["payment_confirmed"],
+            document_ingestion=SimpleNamespace(
+                status="fail",
+                valid=False,
+                source="draft",
+                missing_fields=["client_pack.policy.hard_law"],
+                critical_missing_fields=["client_pack.policy.hard_law"],
+            ),
             checks=[
                 SimpleNamespace(
                     id=console_router.OnboardingStep.GO_NO_GO,
@@ -1302,6 +1309,10 @@ async def test_get_onboarding_scorecard_returns_fail_payload(monkeypatch):
     assert response.missing == ["payment_confirmed"]
     assert response.checks[0].id == "go_no_go"
     assert response.checks[0].passed is False
+    assert response.document_ingestion is not None
+    assert response.document_ingestion.status == "fail"
+    assert response.document_ingestion.valid is False
+    assert response.document_ingestion.source == "draft"
 
 
 @pytest.mark.asyncio

@@ -49,6 +49,12 @@ def _make_inputs(*, capabilities: CapabilitiesPayload, has_capabilities: bool = 
         has_knowledge_tag=overrides.get("has_knowledge_tag", False),
         has_published_knowledge=overrides.get("has_published_knowledge", False),
         missing_pack_fields=overrides.get("missing_pack_fields", []),
+        document_ingestion_valid=overrides.get("document_ingestion_valid", True),
+        document_ingestion_source=overrides.get("document_ingestion_source", "published"),
+        document_ingestion_missing_fields=overrides.get("document_ingestion_missing_fields", []),
+        document_ingestion_critical_missing_fields=overrides.get(
+            "document_ingestion_critical_missing_fields", []
+        ),
         has_working_hours=overrides.get("has_working_hours", False),
         has_booking_settings=overrides.get("has_booking_settings", False),
         has_specialists=overrides.get("has_specialists", False),
@@ -103,6 +109,24 @@ def test_go_no_go_includes_missing_pack_fields():
 
     missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
     assert "client_pack.location.address.full" in missing
+
+
+def test_go_no_go_requires_document_ingestion_gate_when_knowledge_enabled():
+    capabilities = CapabilitiesPayload.model_validate({"features": {"knowledge_upload": True}})
+    inputs = _make_inputs(
+        capabilities=capabilities,
+        has_capabilities=True,
+        has_knowledge_tag=True,
+        has_published_knowledge=True,
+        document_ingestion_valid=False,
+        document_ingestion_source="draft",
+        document_ingestion_missing_fields=["client_pack.policy.hard_law"],
+        document_ingestion_critical_missing_fields=["client_pack.policy.hard_law"],
+    )
+
+    missing = missing_prerequisites(OnboardingStep.GO_NO_GO, inputs)
+    assert "document_ingestion_invalid" in missing
+    assert "client_pack.policy.hard_law" in missing
 
 
 def test_go_no_go_requires_payment_confirmation():
@@ -397,6 +421,9 @@ def test_onboarding_scorecard_passes_when_go_no_go_requirements_are_satisfied():
     go_no_go = next(check for check in scorecard.checks if check.id == OnboardingStep.GO_NO_GO)
     assert go_no_go.passed is True
     assert go_no_go.missing == []
+    assert scorecard.document_ingestion is not None
+    assert scorecard.document_ingestion.status == "pass"
+    assert scorecard.document_ingestion.valid is True
 
 
 def test_onboarding_scorecard_fails_when_go_no_go_requirements_missing():
@@ -415,3 +442,21 @@ def test_onboarding_scorecard_fails_when_go_no_go_requirements_missing():
     assert "payment_confirmed" in scorecard.missing
     assert "instance_id" in scorecard.missing
     assert "phone" in scorecard.missing
+
+
+def test_onboarding_scorecard_skips_document_ingestion_when_knowledge_feature_disabled():
+    capabilities = CapabilitiesPayload.model_validate({"channels": {"whatsapp": True}})
+    inputs = _make_inputs(
+        capabilities=capabilities,
+        has_capabilities=True,
+        has_instance_id=True,
+        branch_is_active=True,
+        has_phone=True,
+        document_ingestion_valid=False,
+        document_ingestion_source="none",
+    )
+
+    scorecard = build_onboarding_scorecard_from_inputs(inputs)
+    assert scorecard.document_ingestion is not None
+    assert scorecard.document_ingestion.status == "skipped"
+    assert scorecard.document_ingestion.valid is True
