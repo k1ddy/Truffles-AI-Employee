@@ -314,18 +314,18 @@ from app.services.intent_service import (
     Intent,
     classify_domain_with_scores,
     classify_intent,
+    extract_customer_name_hint_llm,
+    extract_service_query_hint_llm,
+    extract_specialist_hint_llm,
     interpret_expected_reply,
     is_frustration_message,
     is_human_request_message,
     is_opt_out_message,
     is_rejection,
     is_strong_out_of_domain,
-    extract_customer_name_hint_llm,
-    extract_service_query_hint_llm,
     route_dialogue_controller,
     route_llm_policy_core,
     should_escalate,
-    extract_specialist_hint_llm,
 )
 from app.services.knowledge_registry_service import get_current_published
 from app.services.knowledge_runtime import (
