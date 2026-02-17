@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, List, Optional
 
 
 @dataclass
@@ -21,6 +21,7 @@ class LLMProvider(ABC):
         temperature: float = 0.7,
         max_tokens: int = 1000,
         timeout_seconds: Optional[float] = None,
+        response_format: Optional[dict[str, Any]] = None,
     ) -> LLMResponse:
         """Generate response from LLM."""
         pass
