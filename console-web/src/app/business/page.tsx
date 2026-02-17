@@ -6,7 +6,10 @@ import { useSession } from "next-auth/react";
 import { useMemo } from "react";
 
 import AccessDenied from "@/components/AccessDenied";
+import { ConsolePageError, ConsolePageSkeleton } from "@/components/PageStates";
 import { authApi, businessApi, canAccessConsole, type IncidentItem, type MetricFactMeta } from "@/lib/api-client";
+import { getProviderErrorContract } from "@/lib/provider-error-contract";
+import { QUERY_PROFILE_CONTEXT, QUERY_PROFILE_DASHBOARD, keepPreviousData } from "@/lib/query-profiles";
 
 function formatMinutes(value?: number | null): string {
     if (value === null || value === undefined || Number.isNaN(value)) {
@@ -86,22 +89,6 @@ function severityLabel(severity: "critical" | "warn" | "info"): string {
     return "Планово";
 }
 
-function incidentReasonHint(reasonCode: IncidentItem["reason_code"]): string | null {
-    if (reasonCode === "provider_billing_blocked") {
-        return "Оплата/тариф у провайдера заблокированы: сообщения не отправятся, пока не будет подтверждена оплата.";
-    }
-    if (reasonCode === "provider_unavailable") {
-        return "Сервис провайдера недоступен: это технический outage, а не проблема оплаты.";
-    }
-    if (reasonCode === "provider_auth") {
-        return "Ошибка авторизации у провайдера: проверьте токены, webhook и instance binding.";
-    }
-    if (reasonCode === "provider_rate_limited") {
-        return "Провайдер ограничил скорость/объём запросов: нужна пауза или распределение очереди.";
-    }
-    return null;
-}
-
 type BusinessNowStep = {
     id: string;
     title: string;
@@ -135,6 +122,7 @@ export default function BusinessPage() {
             return response.data;
         },
         enabled: !!session,
+        ...QUERY_PROFILE_CONTEXT,
     });
 
     const role = meData?.agent?.role ?? "manager";
@@ -148,6 +136,8 @@ export default function BusinessPage() {
         },
         enabled: !!session && canReadBusiness,
         refetchInterval: 30000,
+        placeholderData: keepPreviousData,
+        ...QUERY_PROFILE_DASHBOARD,
     });
 
     const { data: incidentsData, isLoading: incidentsLoading } = useQuery({
@@ -158,6 +148,8 @@ export default function BusinessPage() {
         },
         enabled: !!session && canReadBusiness,
         refetchInterval: 30000,
+        placeholderData: keepPreviousData,
+        ...QUERY_PROFILE_DASHBOARD,
     });
     const billingBlockedIncident = useMemo(
         () => findBillingBlockedIncident(incidentsData?.items),
@@ -171,6 +163,14 @@ export default function BusinessPage() {
                 ?? []
         ),
         [billingBlockedIncident?.actions],
+    );
+    const billingBlockedContract = useMemo(
+        () => (
+            billingBlockedIncident
+                ? getProviderErrorContract(billingBlockedIncident.reason_code)
+                : null
+        ),
+        [billingBlockedIncident],
     );
 
     const todaySteps = useMemo<BusinessNowStep[]>(() => {
@@ -249,35 +249,23 @@ export default function BusinessPage() {
     }
 
     if (isLoading) {
-        return (
-            <div className="mx-auto max-w-5xl p-6" data-testid="business-page">
-                <h1 className="mb-6 text-2xl font-bold" data-testid="business-title">Бизнес</h1>
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                    <div className="h-28 animate-pulse rounded-lg bg-muted/70" />
-                    <div className="h-28 animate-pulse rounded-lg bg-muted/70" />
-                    <div className="h-28 animate-pulse rounded-lg bg-muted/70" />
-                </div>
-            </div>
-        );
+        return <ConsolePageSkeleton pageTestId="business-page" title="Бизнес" titleTestId="business-title" columns={3} cardCount={3} cardHeightClass="h-28" maxWidthClass="max-w-5xl" />;
     }
 
     if (error || !data) {
         return (
-            <div className="mx-auto max-w-5xl p-6" data-testid="business-page">
-                <h1 className="mb-6 text-2xl font-bold" data-testid="business-title">Бизнес</h1>
-                <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-6 text-center" data-testid="business-error">
-                    <p className="mb-4 text-destructive">Не удалось загрузить бизнес-сводку</p>
-                    <button
-                        onClick={() => {
-                            refetch();
-                        }}
-                        className="rounded-full bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition hover:bg-destructive/90"
-                        data-testid="business-retry"
-                    >
-                        Повторить
-                    </button>
-                </div>
-            </div>
+            <ConsolePageError
+                pageTestId="business-page"
+                title="Бизнес"
+                titleTestId="business-title"
+                errorTestId="business-error"
+                retryTestId="business-retry"
+                errorMessage="Не удалось загрузить бизнес-сводку"
+                maxWidthClass="max-w-5xl"
+                onRetry={() => {
+                    refetch();
+                }}
+            />
         );
     }
 
@@ -331,10 +319,19 @@ export default function BusinessPage() {
                     </div>
                     <p className="mt-1 text-xs">{billingBlockedIncident.reason_label}</p>
                     <p className="mt-1 text-xs">{billingBlockedIncident.summary}</p>
+                    {billingBlockedContract && (
+                        <p className="mt-1 text-xs">
+                            {billingBlockedContract.businessImpact}
+                        </p>
+                    )}
                     <ol className="mt-2 space-y-1 text-[11px]" data-testid="business-billing-incident-runbook">
-                        <li>1. Откройте Подписку и проверьте оплату/лимиты провайдера.</li>
-                        <li>2. Откройте Интеграции и проверьте `paid_until`, `next_renewal_at`, `webhook_status`.</li>
-                        <li>3. После исправления запустите dry-run outbox и проверьте, что `failed` не растёт.</li>
+                        {(billingBlockedContract?.runbook ?? [
+                            "Откройте Подписку и проверьте оплату/лимиты провайдера.",
+                            "Откройте Интеграции и проверьте `paid_until`, `next_renewal_at`, `webhook_status`.",
+                            "После исправления запустите dry-run outbox и проверьте, что `failed` не растет.",
+                        ]).map((step, index) => (
+                            <li key={step}>{index + 1}. {step}</li>
+                        ))}
                     </ol>
                     <div className="mt-3 flex flex-wrap gap-2">
                         {billingIncidentLinks.length > 0 ? (
@@ -396,12 +393,12 @@ export default function BusinessPage() {
                 ) : (
                     <div className="space-y-3">
                         {incidentsData.items.map((incident) => {
-                            const reasonHint = incidentReasonHint(incident.reason_code);
+                            const providerContract = getProviderErrorContract(incident.reason_code);
                             return (
                                 <article key={incident.id} className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid={`business-incident-${incident.id}`}>
-                                    {reasonHint && (
+                                    {providerContract && (
                                         <p className="mb-2 rounded-md border border-border/60 bg-background px-2 py-1 text-[11px] text-muted-foreground">
-                                            {reasonHint}
+                                            {providerContract.shortLabel}. {providerContract.businessImpact}
                                         </p>
                                     )}
                                     <div className="flex flex-wrap items-center justify-between gap-2">

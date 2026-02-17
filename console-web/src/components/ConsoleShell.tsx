@@ -28,6 +28,7 @@ import {
     writeConsoleContextScopeToStorage,
 } from "@/lib/console-context-storage";
 import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
+import { QUERY_PROFILE_CONTEXT } from "@/lib/query-profiles";
 
 const NAV_COLLAPSED_STORAGE_KEY = "console:nav_collapsed";
 const OWNER_ADMIN_ADVANCED_NAV_STORAGE_KEY = "console:owner_admin_advanced_nav";
@@ -353,6 +354,14 @@ type HealthIncidentUiState = {
     hiddenUntilByFingerprint: Record<string, number>;
 };
 
+type ContextHealthTone = "ok" | "info" | "warn";
+
+type ContextHealthMessage = {
+    id: string;
+    tone: ContextHealthTone;
+    text: string;
+};
+
 function formatRelativeAgeLabel(timestampMs: number): string {
     if (!Number.isFinite(timestampMs) || timestampMs <= 0) {
         return "время обновления неизвестно";
@@ -413,6 +422,16 @@ function formatAbsoluteTimeLabel(timestampMs: number): string {
         hour: "2-digit",
         minute: "2-digit",
     });
+}
+
+function contextHealthToneClass(tone: ContextHealthTone): string {
+    if (tone === "warn") {
+        return "border-amber-300/80 bg-amber-50 text-amber-900";
+    }
+    if (tone === "info") {
+        return "border-sky-300/80 bg-sky-50 text-sky-900";
+    }
+    return "border-emerald-300/80 bg-emerald-50 text-emerald-900";
 }
 
 function deriveHealthIncident(
@@ -697,7 +716,6 @@ function ContextBar({
     const companyName = companies.find((company) => company.id === companyId)?.name ?? me.client?.company_name;
     const clientName = findClientName(clients, clientId, me.client?.name);
     const branchName = findBranchName(branches, branchId, allowAllBranches);
-    const showPlatformScopeHint = me.agent?.role === "platform_admin";
 
     return (
         <div className="flex flex-wrap items-center gap-6 text-sm" data-testid="context-bar">
@@ -767,14 +785,91 @@ function ContextBar({
                     </span>
                 )}
             </div>
-            {showPlatformScopeHint && (
-                <p
-                    className="w-full rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
-                    data-testid="context-active-filter-hint"
+        </div>
+    );
+}
+
+function ContextHealthStrip({
+    me,
+    companyId,
+    visibleClients,
+    canReadOps,
+    canReadTenants,
+}: {
+    me: ConsoleMe;
+    companyId: string;
+    visibleClients: ClientSummary[];
+    canReadOps: boolean;
+    canReadTenants: boolean;
+}) {
+    const companies = me.companies ?? [];
+    const clients = me.clients ?? [];
+    const branches = me.branches ?? [];
+    const role = me.agent?.role ?? null;
+    const messages: ContextHealthMessage[] = [];
+
+    if (companies.length > 1 && !companyId) {
+        messages.push({
+            id: "company_missing",
+            tone: "warn",
+            text: "Контекст компании не выбран. Данные могут выглядеть неполными.",
+        });
+    }
+    if (companyId && clients.length > 0 && visibleClients.length === 0) {
+        messages.push({
+            id: "no_clients_for_company",
+            tone: "warn",
+            text: "Для выбранной компании нет активных клиентов.",
+        });
+    }
+    if (branches.length === 0) {
+        messages.push({
+            id: "no_active_branches",
+            tone: "warn",
+            text: "В текущем контексте нет активных филиалов.",
+        });
+    } else if (!me.branch_selection_required && !me.selected_branch_id && branches.length > 1) {
+        messages.push({
+            id: "all_branches_mode",
+            tone: "info",
+            text: "Режим контекста: все активные филиалы.",
+        });
+    }
+    if (role === "platform_admin") {
+        messages.push({
+            id: "platform_active_filter",
+            tone: "info",
+            text: "Контекст показывает только активные сущности. Архивные и деактивированные доступны в Тенанты.",
+        });
+    }
+    if (messages.length === 0) {
+        messages.push({
+            id: "context_ok",
+            tone: "ok",
+            text: "Контекст согласован: компания, клиент и филиалы отображаются корректно.",
+        });
+    }
+
+    return (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]" data-testid="context-health-strip">
+            {messages.map((message) => (
+                <span
+                    key={message.id}
+                    className={`rounded-full border px-2 py-1 ${contextHealthToneClass(message.tone)}`}
+                    data-testid={`context-health-${message.id}`}
                 >
-                    Показаны только активные компании, клиенты и филиалы. Архивные и деактивированные сущности доступны в
-                    разделе Тенанты.
-                </p>
+                    {message.text}
+                </span>
+            ))}
+            {canReadOps && (
+                <Link href="/ops" className="btn-ghost text-[11px]" data-testid="context-health-open-ops">
+                    Открыть Ops
+                </Link>
+            )}
+            {canReadTenants && (
+                <Link href="/tenants" className="btn-ghost text-[11px]" data-testid="context-health-open-tenants">
+                    Открыть Тенанты
+                </Link>
             )}
         </div>
     );
@@ -832,8 +927,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             return response.data as ConsoleMe;
         },
         enabled: hasSession,
-        staleTime: 15000,
-        refetchOnWindowFocus: false,
+        ...QUERY_PROFILE_CONTEXT,
     });
 
     useEffect(() => {
@@ -912,6 +1006,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [contextNotice, setContextNotice] = useState<string | null>(null);
+    const [navTransitioning, setNavTransitioning] = useState(false);
     const [navCollapsed, setNavCollapsed] = useState(
         () => readBrowserStorage(NAV_COLLAPSED_STORAGE_KEY) === "1"
     );
@@ -958,6 +1053,10 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             return;
         }
         event.preventDefault();
+        if (href === pathname) {
+            return;
+        }
+        setNavTransitioning(true);
         router.push(href);
     };
 
@@ -968,6 +1067,10 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         const timeout = window.setTimeout(() => setContextNotice(null), 2500);
         return () => window.clearTimeout(timeout);
     }, [contextNotice]);
+
+    useEffect(() => {
+        setNavTransitioning(false);
+    }, [pathname]);
 
     useEffect(() => {
         writeBrowserStorage(NAV_COLLAPSED_STORAGE_KEY, navCollapsed ? "1" : null);
@@ -1297,7 +1400,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                 </span>
                             </div>
                             {data && (
-                                <>
+                                <div className="w-full lg:w-auto lg:flex-1">
                                     <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground md:hidden">
                                         Контекст:{" "}
                                         <span className="font-semibold text-foreground">
@@ -1326,9 +1429,24 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                             isBusy={contextBusy}
                                         />
                                     </div>
-                                </>
+                                    <ContextHealthStrip
+                                        me={data}
+                                        companyId={companyId}
+                                        visibleClients={visibleClients}
+                                        canReadOps={canReadOps}
+                                        canReadTenants={canReadTenants}
+                                    />
+                                </div>
                             )}
                             <div className="flex items-center justify-between gap-4">
+                                {navTransitioning && (
+                                    <span
+                                        className="rounded-full bg-sky-50 px-3 py-1 text-xs text-sky-700"
+                                        data-testid="nav-transitioning"
+                                    >
+                                        Переход...
+                                    </span>
+                                )}
                                 {contextBusy && (
                                     <span
                                         className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground"
