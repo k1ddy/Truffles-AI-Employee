@@ -7104,6 +7104,11 @@ async def _handle_webhook_payload(
                 else:
                     media_response = MSG_MEDIA_RECEIVED
                 if media_info.media_type == "photo" and not style_request:
+                    saved_media_meta = {}
+                    if saved_message and isinstance(saved_message.message_metadata, dict):
+                        raw_media_meta = saved_message.message_metadata.get("media")
+                        if isinstance(raw_media_meta, dict):
+                            saved_media_meta = raw_media_meta
                     pending_payload = {
                         "reason": "photo_only",
                         "created_at": now.isoformat(),
@@ -7120,6 +7125,9 @@ async def _handle_webhook_payload(
                             "ptt": media_info.is_ptt,
                         },
                         "storage_path": storage_path,
+                        "public_url": saved_media_meta.get("public_url"),
+                        "public_url_expires_at": saved_media_meta.get("expires_at"),
+                        "sha256": saved_media_meta.get("sha256"),
                     }
                     context = _get_conversation_context(conversation)
                     context = _set_style_reference_pending(context, pending_payload)
