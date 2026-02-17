@@ -172,7 +172,9 @@ class TestEscalateToPending:
         message_query = Mock()
         message_query.filter.return_value = message_query
         message_query.order_by.return_value = message_query
+        message_query.limit.return_value = message_query
         message_query.first.return_value = trigger_message
+        message_query.all.return_value = [trigger_message]
 
         handover_query = Mock()
         handover_query.filter.return_value = handover_query
@@ -239,7 +241,9 @@ class TestEscalateToPending:
         message_query = Mock()
         message_query.filter.return_value = message_query
         message_query.order_by.return_value = message_query
+        message_query.limit.return_value = message_query
         message_query.first.return_value = trigger_message
+        message_query.all.return_value = [trigger_message]
 
         handover_query = Mock()
         handover_query.filter.return_value = handover_query
@@ -292,6 +296,85 @@ class TestEscalateToPending:
         assert decision_meta.get("media_handoff_bound") is True
         assert decision_meta.get("media_handoff_refs_count") == 1
 
+    @patch("app.services.state_service.TelegramService")
+    @patch("app.services.state_service.resolve_telegram_routing")
+    def test_handover_meta_binds_media_contract_from_recent_media_history(
+        self, mock_routing, mock_telegram_class
+    ):
+        mock_routing.return_value = {"bot_token": "token", "chat_id": "chat_id"}
+        mock_telegram = Mock()
+        mock_telegram.create_forum_topic.return_value = 12345
+        mock_telegram_class.return_value = mock_telegram
+
+        db = Mock()
+        user = Mock(name="Test User", phone="123")
+        user.telegram_topic_id = None
+        user_query = Mock()
+        user_query.filter.return_value = user_query
+        user_query.first.return_value = user
+
+        trigger_message = SimpleNamespace(
+            id="msg-db-id-trigger",
+            message_id="msg-inbound-trigger",
+            message_metadata={},
+            created_at=datetime.now(timezone.utc),
+        )
+        recent_media_message = SimpleNamespace(
+            id="msg-db-id-media",
+            message_id="msg-inbound-media",
+            message_metadata={
+                "media": {
+                    "media_type": "photo",
+                    "storage_path": "/tmp/recent-photo.jpg",
+                    "public_url": "https://example.com/recent-photo.jpg",
+                    "sha256": "recent-sha",
+                }
+            },
+            created_at=datetime.now(timezone.utc),
+        )
+        message_query = Mock()
+        message_query.filter.return_value = message_query
+        message_query.order_by.return_value = message_query
+        message_query.limit.return_value = message_query
+        message_query.first.return_value = trigger_message
+        message_query.all.return_value = [trigger_message, recent_media_message]
+
+        handover_query = Mock()
+        handover_query.filter.return_value = handover_query
+        handover_query.order_by.return_value = handover_query
+        handover_query.first.return_value = None
+
+        def query_side_effect(model):
+            if model is User:
+                return user_query
+            if model is Message:
+                return message_query
+            if model is Handover:
+                return handover_query
+            return Mock()
+
+        db.query.side_effect = query_side_effect
+
+        conversation = Mock()
+        conversation.state = ConversationState.BOT_ACTIVE.value
+        conversation.id = "conv-123"
+        conversation.client_id = "client-123"
+        conversation.user_id = "user-123"
+        conversation.telegram_topic_id = None
+        conversation.retry_offered_at = None
+        conversation.context = {}
+
+        result = escalate_to_pending(db, conversation, "Передайте менеджеру", "intent", "human_request")
+
+        assert result.ok is True
+        assert isinstance(result.value.meta, dict)
+        contract = result.value.meta.get("media_handoff_contract") or {}
+        assert contract.get("required") is True
+        assert contract.get("bound") is True
+        media_refs = result.value.meta.get("media_refs") or []
+        assert media_refs
+        assert media_refs[0].get("source") == "recent_message_history"
+        assert media_refs[0].get("public_url") == "https://example.com/recent-photo.jpg"
     def test_fails_from_wrong_state(self):
         db = Mock()
         conversation = Mock()

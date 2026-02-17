@@ -36,6 +36,8 @@ PENDING_RESUME_CLEAR_KEYS = {
     "last_service_hint_at",
 }
 HANDOVER_REOPEN_WINDOW_SECONDS = 4 * 60 * 60
+HANDOVER_MEDIA_LOOKBACK_LIMIT = 12
+HANDOVER_MEDIA_HISTORY_WINDOW = timedelta(minutes=30)
 
 
 def _normalize_slot_value(value: object) -> str | None:
@@ -106,9 +108,20 @@ def _media_ref_fingerprint(ref: dict) -> tuple[str | None, ...]:
     )
 
 
-def _extract_handover_media_refs(conversation: Conversation, message: Message | None) -> tuple[list[dict], bool]:
+def _extract_handover_media_refs(
+    conversation: Conversation,
+    message: Message | None,
+    *,
+    recent_messages: list[Message] | None = None,
+) -> tuple[list[dict], bool]:
     refs: list[dict] = []
     required = False
+    reference_time = datetime.now(timezone.utc)
+    trigger_created_at = getattr(message, "created_at", None) if message is not None else None
+    if isinstance(trigger_created_at, datetime):
+        if trigger_created_at.tzinfo is None:
+            trigger_created_at = trigger_created_at.replace(tzinfo=timezone.utc)
+        reference_time = trigger_created_at
 
     message_meta = message.message_metadata if message and isinstance(message.message_metadata, dict) else {}
     message_media = message_meta.get("media") if isinstance(message_meta, dict) else None
@@ -148,6 +161,34 @@ def _extract_handover_media_refs(conversation: Conversation, message: Message | 
             if media_ref:
                 refs.append(media_ref)
 
+    for recent_message in recent_messages or []:
+        if recent_message is None:
+            continue
+        created_at = getattr(recent_message, "created_at", None)
+        if isinstance(created_at, datetime):
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            if reference_time - created_at > HANDOVER_MEDIA_HISTORY_WINDOW:
+                continue
+        if message is not None and getattr(recent_message, "id", None) == getattr(message, "id", None):
+            continue
+        recent_meta = (
+            recent_message.message_metadata
+            if isinstance(recent_message.message_metadata, dict)
+            else {}
+        )
+        recent_media = recent_meta.get("media") if isinstance(recent_meta, dict) else None
+        if not isinstance(recent_media, dict):
+            continue
+        required = True
+        recent_inbound_id = _normalize_slot_value(getattr(recent_message, "message_id", None))
+        media_ref = _normalize_media_ref(
+            recent_media,
+            source="recent_message_history",
+            inbound_message_id=recent_inbound_id,
+        )
+        if media_ref:
+            refs.append(media_ref)
     deduped: list[dict] = []
     seen: set[tuple[str | None, ...]] = set()
     for ref in refs:
@@ -197,7 +238,13 @@ def _extract_decision_meta(message: Message | None) -> dict:
     return decision_meta if isinstance(decision_meta, dict) else {}
 
 
-def _build_handover_meta(conversation: Conversation, message: Message | None, user: User | None) -> dict | None:
+def _build_handover_meta(
+    conversation: Conversation,
+    message: Message | None,
+    user: User | None,
+    *,
+    recent_messages: list[Message] | None = None,
+) -> dict | None:
     decision_meta = _extract_decision_meta(message)
     meta: dict = {}
     intent = decision_meta.get("intent")
@@ -240,7 +287,11 @@ def _build_handover_meta(conversation: Conversation, message: Message | None, us
     if slots:
         meta["slots"] = slots
 
-    media_refs, media_required = _extract_handover_media_refs(conversation, message)
+    media_refs, media_required = _extract_handover_media_refs(
+        conversation,
+        message,
+        recent_messages=recent_messages,
+    )
     if media_refs:
         meta["media_refs"] = media_refs
     if media_required or media_refs:
@@ -331,6 +382,30 @@ def _get_latest_user_message(db: Session, conversation_id: uuid.UUID) -> Message
         .order_by(Message.created_at.desc())
         .first()
     )
+
+
+def _get_recent_user_messages(
+    db: Session,
+    conversation_id: uuid.UUID,
+    *,
+    limit: int = HANDOVER_MEDIA_LOOKBACK_LIMIT,
+) -> list[Message]:
+    safe_limit = max(1, int(limit or HANDOVER_MEDIA_LOOKBACK_LIMIT))
+    try:
+        rows = (
+            db.query(Message)
+            .filter(Message.conversation_id == conversation_id, Message.role == "user")
+            .order_by(Message.created_at.desc())
+            .limit(safe_limit)
+            .all()
+        )
+    except Exception:
+        return []
+    if isinstance(rows, list):
+        return rows
+    if isinstance(rows, tuple):
+        return list(rows)
+    return []
 
 
 def _reset_context_preserving_trace(conversation: Conversation) -> None:
@@ -584,7 +659,13 @@ def escalate_to_pending(
             remote_jid = user.remote_jid if user else None
             topic_id = _build_simulated_topic_id(conversation, user)
             trigger_message = _get_latest_user_message(db, conversation.id)
-            handover_meta = _build_handover_meta(conversation, trigger_message, user)
+            recent_messages = _get_recent_user_messages(db, conversation.id)
+            handover_meta = _build_handover_meta(
+                conversation,
+                trigger_message,
+                user,
+                recent_messages=recent_messages,
+            )
             _apply_handover_contract_to_message(trigger_message, handover_meta)
             _record_handover_contract_trace(conversation, handover_meta)
 
@@ -654,7 +735,13 @@ def escalate_to_pending(
         user = db.query(User).filter(User.id == conversation.user_id).first()
         remote_jid = user.remote_jid if user else None
         trigger_message = _get_latest_user_message(db, conversation.id)
-        handover_meta = _build_handover_meta(conversation, trigger_message, user)
+        recent_messages = _get_recent_user_messages(db, conversation.id)
+        handover_meta = _build_handover_meta(
+            conversation,
+            trigger_message,
+            user,
+            recent_messages=recent_messages,
+        )
         _apply_handover_contract_to_message(trigger_message, handover_meta)
         _record_handover_contract_trace(conversation, handover_meta)
 

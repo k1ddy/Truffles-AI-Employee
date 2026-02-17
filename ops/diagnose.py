@@ -2724,6 +2724,178 @@ def _llm_quality_extract_turn_tags(turn):
     return tags
 
 
+LLM_QUALITY_DYNAMIC_SLOT_TIME_TOKEN = "{{AUTO_SLOT_TIME}}"
+LLM_QUALITY_DYNAMIC_SLOT_DATE_TOKEN = "{{AUTO_SLOT_DATE}}"
+LLM_QUALITY_DYNAMIC_SLOT_SPECIALIST_TOKEN = "{{AUTO_SLOT_SPECIALIST}}"
+
+
+def _llm_quality_parse_slot_candidates(outbox_text: str | None) -> list[dict]:
+    if not isinstance(outbox_text, str):
+        return []
+    text = outbox_text.strip()
+    if not text:
+        return []
+    marker = "Свободные слоты:"
+    marker_idx = text.find(marker)
+    if marker_idx == -1:
+        return []
+    tail = text[marker_idx + len(marker) :].strip()
+    if not tail:
+        return []
+
+    candidates: list[dict[str, str]] = []
+    for part in tail.split("|"):
+        segment = part.strip()
+        if not segment or ":" not in segment:
+            continue
+        specialist, times_blob = segment.split(":", 1)
+        specialist_name = specialist.strip()
+        if not specialist_name:
+            continue
+        times = re.findall(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", times_blob)
+        for hour, minute in times:
+            candidates.append(
+                {
+                    "specialist": specialist_name,
+                    "time": f"{int(hour):02d}:{minute}",
+                }
+            )
+    return candidates
+
+
+def _llm_quality_pick_slot_candidate(
+    candidates: list[dict] | None,
+    *,
+    prefer_specialist: str | None = None,
+) -> dict | None:
+    rows = [item for item in (candidates or []) if isinstance(item, dict)]
+    if not rows:
+        return None
+    specialist_hint = (prefer_specialist or "").strip().casefold()
+    if specialist_hint:
+        for item in rows:
+            specialist = str(item.get("specialist") or "").casefold()
+            if specialist_hint in specialist:
+                return item
+    return rows[0]
+
+
+def _llm_quality_resolve_dynamic_slot_date(date_hint: str | None, *, now: datetime | None = None) -> str:
+    current = now if isinstance(now, datetime) else datetime.now(timezone.utc)
+    token = (date_hint or "").strip().casefold()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", token):
+        return token
+    if token in {"today", "сегодня"}:
+        return current.date().isoformat()
+    if token in {"tomorrow", "завтра"}:
+        return (current + timedelta(days=1)).date().isoformat()
+    if "сегодня" in token or "today" in token:
+        return current.date().isoformat()
+    if "завтра" in token or "tomorrow" in token:
+        return (current + timedelta(days=1)).date().isoformat()
+    return (current + timedelta(days=1)).date().isoformat()
+
+
+def _llm_quality_prepare_turn_text(
+    turn: dict,
+    dialog_runtime_state: dict | None,
+    *,
+    now: datetime | None = None,
+) -> tuple[str, dict | None]:
+    base_text = turn.get("text") if isinstance(turn, dict) else ""
+    text = base_text if isinstance(base_text, str) else str(base_text or "")
+    if not isinstance(turn, dict):
+        return text, None
+    dynamic_booking = turn.get("dynamic_booking")
+    has_auto_tokens = any(
+        token in text
+        for token in (
+            LLM_QUALITY_DYNAMIC_SLOT_TIME_TOKEN,
+            LLM_QUALITY_DYNAMIC_SLOT_DATE_TOKEN,
+            LLM_QUALITY_DYNAMIC_SLOT_SPECIALIST_TOKEN,
+        )
+    )
+    if not has_auto_tokens and not isinstance(dynamic_booking, dict):
+        return text, None
+
+    slot_candidates = (
+        dialog_runtime_state.get("slot_candidates")
+        if isinstance(dialog_runtime_state, dict)
+        else None
+    )
+    prefer_specialist = None
+    if isinstance(dynamic_booking, dict):
+        prefer_specialist = dynamic_booking.get("prefer_specialist") or dynamic_booking.get("specialist")
+    selected = _llm_quality_pick_slot_candidate(
+        slot_candidates if isinstance(slot_candidates, list) else [],
+        prefer_specialist=prefer_specialist if isinstance(prefer_specialist, str) else None,
+    )
+    if not selected:
+        return text, {
+            "dynamic_booking": True,
+            "resolved": False,
+            "reason": "slot_candidates_missing",
+        }
+
+    slot_time = str(selected.get("time") or "").strip()
+    specialist = str(selected.get("specialist") or "").strip()
+    if not slot_time:
+        return text, {
+            "dynamic_booking": True,
+            "resolved": False,
+            "reason": "slot_time_missing",
+        }
+    date_hint = None
+    if isinstance(dynamic_booking, dict):
+        raw_hint = dynamic_booking.get("date")
+        if isinstance(raw_hint, str):
+            date_hint = raw_hint
+    if not date_hint:
+        date_hint = text
+    slot_date = _llm_quality_resolve_dynamic_slot_date(date_hint, now=now)
+
+    resolved_text = text
+    if has_auto_tokens:
+        resolved_text = resolved_text.replace(LLM_QUALITY_DYNAMIC_SLOT_TIME_TOKEN, slot_time)
+        resolved_text = resolved_text.replace(LLM_QUALITY_DYNAMIC_SLOT_DATE_TOKEN, slot_date)
+        resolved_text = resolved_text.replace(LLM_QUALITY_DYNAMIC_SLOT_SPECIALIST_TOKEN, specialist)
+    elif isinstance(dynamic_booking, dict):
+        service = str(dynamic_booking.get("service") or "маникюр").strip()
+        client_name = str(dynamic_booking.get("name") or "Лена").strip()
+        specialist_part = f"к {specialist} " if specialist else ""
+        resolved_text = (
+            f"Запишите меня {specialist_part}на {service} {slot_date} {slot_time}, имя {client_name}."
+        )
+
+    return resolved_text, {
+        "dynamic_booking": True,
+        "resolved": True,
+        "slot_time": slot_time,
+        "slot_date": slot_date,
+        "specialist": specialist,
+    }
+
+
+def _llm_quality_update_dialog_runtime_slots(
+    dialog_runtime_state: dict | None,
+    *,
+    meta: dict | None,
+    outbox_text: str | None,
+) -> None:
+    if not isinstance(dialog_runtime_state, dict):
+        return
+    if not isinstance(meta, dict):
+        return
+    tool_action = _llm_quality_normalize_tool_token(meta.get("tool_action"))
+    tool_decision = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+    if tool_action != "calendar.list_slots" or tool_decision != "ok":
+        return
+    parsed = _llm_quality_parse_slot_candidates(outbox_text)
+    if not parsed:
+        return
+    dialog_runtime_state["slot_candidates"] = parsed
+
+
 def _llm_quality_should_expect_booking_progress(expected_reply_type, turn_tags, meta=None):
     if expected_reply_type not in CHAOS_BOOKING_REPLY_TYPES:
         return False
@@ -5054,6 +5226,11 @@ def _llm_quality_evaluate_turn(
     meta_source_value = _llm_quality_normalize_tool_token(
         (meta or {}).get("source") if isinstance(meta, dict) else None
     )
+    slot_confirmation_required = bool(
+        (meta or {}).get("slot_confirmation_required")
+        if isinstance(meta, dict)
+        else False
+    )
     appointment_id = (meta or {}).get("appointment_id") if isinstance(meta, dict) else None
     appointment_status = _llm_quality_normalize_tool_token(
         (meta or {}).get("appointment_status") if isinstance(meta, dict) else None
@@ -5076,7 +5253,7 @@ def _llm_quality_evaluate_turn(
         and (
             appointment_id
             or appointment_status in LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS
-            or meta_action_value == "booking_confirm"
+            or (meta_action_value == "booking_confirm" and not slot_confirmation_required)
             or intent_value == "calendar.get_booking"
             or _llm_quality_is_booking_confirmation_text(outbox_text)
         )
@@ -7554,6 +7731,8 @@ def _is_infra_error(error):
         return False
     lowered = error.lower()
     markers = [
+        "curl_error: rc=52",
+        "empty reply from server",
         "remote_disconnected",
         "timeout",
         "timed out",
@@ -8738,6 +8917,7 @@ def _run_llm_quality(args):
         trace_bundle_path, "w", encoding="utf-8"
     ) as trace_handle:
         for dialog_idx, dialog in enumerate(dialogs, start=1):
+            dialog_runtime_state = {"slot_candidates": []}
             remote_jid = args.remote_jid or _llm_quality_pick_jid(
                 allowlist_jids, dialog_idx - 1, rng, jid_mode_effective, run_id=run_id
             )
@@ -8764,7 +8944,11 @@ def _run_llm_quality(args):
                 if wait_seconds > 0:
                     time.sleep(wait_seconds)
 
-                text = turn.get("text") or ""
+                text, dynamic_turn_meta = _llm_quality_prepare_turn_text(
+                    turn if isinstance(turn, dict) else {},
+                    dialog_runtime_state,
+                    now=datetime.now(timezone.utc),
+                )
                 message_id = (
                     f"LLM-QUAL-{run_id}-{dialog_idx:03d}-{turn_idx:02d}-{uuid.uuid4().hex[:6]}"
                 )
@@ -8950,6 +9134,11 @@ def _run_llm_quality(args):
                     outbox_text = _llm_quality_extract_outbox_text(outbox_payload)
                 if not outbox_text and inline_response_text:
                     outbox_text = inline_response_text
+                _llm_quality_update_dialog_runtime_slots(
+                    dialog_runtime_state,
+                    meta=meta if isinstance(meta, dict) else None,
+                    outbox_text=outbox_text,
+                )
 
                 bot_response = _llm_quality_has_bot_reply(
                     outbox_summary=outbox_summary,
@@ -9544,6 +9733,7 @@ def _run_llm_quality(args):
                     "turn_kind": turn.get("kind"),
                     "turn_tags": turn_tags,
                     "turn_text": text,
+                    "turn_dynamic": dynamic_turn_meta,
                     "remote_jid": remote_jid,
                     "message_id": message_id,
                     "conversation_id": conversation_id,
