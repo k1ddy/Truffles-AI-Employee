@@ -47,7 +47,7 @@ from app.services.outbox_service import (
     enqueue_outbox_message,
     mark_outbox_status,
 )
-from app.services.provider_error_policy import is_permanent_provider_error
+from app.services.provider_error_policy import classify_provider_error, is_permanent_provider_error
 from app.services.state_machine import ConversationState
 from app.services.state_service import is_simulation_context
 from app.services.telegram_service import TelegramService
@@ -134,6 +134,18 @@ def _merge_nested_dict(base: dict, updates: dict) -> dict:
 
 def _is_permanent_delivery_error(error_text: str) -> bool:
     return is_permanent_provider_error(error_text)
+
+
+def _classify_transport_degradation(error_text: str | None) -> dict[str, str] | None:
+    classified = classify_provider_error(error_text)
+    if classified.kind != "billing_blocked":
+        return None
+    return {
+        "delivery_state": "transport_degraded",
+        "delivery_error_code": classified.error_code or "CHATFLOW_BILLING_BLOCKED",
+        "delivery_error_class": classified.incident_reason_code,
+        "delivery_error_kind": classified.kind,
+    }
 
 
 async def _prepare_skip_persist(
@@ -692,6 +704,57 @@ async def _process_outbox_rows(
                 },
             )
 
+    def _record_outbox_transport_degraded(
+        *,
+        outbox_id: str,
+        error: str,
+        degradation_meta: dict[str, str],
+    ) -> None:
+        info = pick_info.get(outbox_id, {})
+        conversation = None
+        if info.get("conversation_id"):
+            conversation = (
+                db.query(Conversation)
+                .filter(Conversation.id == info.get("conversation_id"))
+                .first()
+            )
+        if conversation:
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "transport",
+                    "decision": "degraded",
+                    "reason": degradation_meta.get("delivery_error_class"),
+                    "error_code": degradation_meta.get("delivery_error_code"),
+                    "error": error,
+                    "state": conversation.state,
+                },
+            )
+        message = _resolve_outbox_message(outbox_id)
+        if message:
+            _update_message_decision_metadata(
+                message,
+                {
+                    "delivery_state": degradation_meta.get("delivery_state"),
+                    "delivery_error_code": degradation_meta.get("delivery_error_code"),
+                    "delivery_error_class": degradation_meta.get("delivery_error_class"),
+                    "delivery_error_kind": degradation_meta.get("delivery_error_kind"),
+                    "transport_degraded": True,
+                },
+            )
+        _merge_outbox_meta(
+            outbox_id,
+            {
+                "transport": {
+                    "state": degradation_meta.get("delivery_state"),
+                    "error_code": degradation_meta.get("delivery_error_code"),
+                    "error_class": degradation_meta.get("delivery_error_class"),
+                    "error_kind": degradation_meta.get("delivery_error_kind"),
+                    "error": error,
+                }
+            },
+        )
+
     def _notify_outbox_failure(
         *,
         outbox_id: str,
@@ -1234,7 +1297,15 @@ async def _process_outbox_rows(
                     }
                 },
             )
-            _record_outbox_action_error(outbox_id=outbox_id_str, error=str(exc))
+            degradation_meta = _classify_transport_degradation(str(exc))
+            if degradation_meta:
+                _record_outbox_transport_degraded(
+                    outbox_id=outbox_id_str,
+                    error=str(exc),
+                    degradation_meta=degradation_meta,
+                )
+            else:
+                _record_outbox_action_error(outbox_id=outbox_id_str, error=str(exc))
             _log_outbox_done(outbox_id_str, error=str(exc), total_ms=outbox_total_ms)
             now = datetime.now(timezone.utc)
             attempts = int(row.get("attempts") or 0)
@@ -1249,7 +1320,11 @@ async def _process_outbox_rows(
                 provider_name = payload_json.get("provider") or "chatflow"
                 _notify_outbox_failure(
                     outbox_id=outbox_id_str,
-                    reason="permanent_provider_error",
+                    reason=(
+                        degradation_meta.get("delivery_error_class")
+                        if isinstance(degradation_meta, dict)
+                        else "permanent_provider_error"
+                    ),
                     error=str(exc),
                     provider=provider_name,
                     attempts=attempts,
@@ -1542,6 +1617,7 @@ async def _process_outbox_rows(
 
 
 __all__ = [
+    "_classify_transport_degradation",
     "_coerce_outbox_created_at",
     "_get_outbox_window_merge_seconds",
     "_handle_enqueue_only_accept",

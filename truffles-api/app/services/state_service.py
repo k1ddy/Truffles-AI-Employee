@@ -45,6 +45,121 @@ def _normalize_slot_value(value: object) -> str | None:
     return cleaned or None
 
 
+def _normalize_media_ref(
+    raw_media: dict | None,
+    *,
+    source: str,
+    inbound_message_id: str | None = None,
+) -> dict | None:
+    if not isinstance(raw_media, dict):
+        return None
+
+    ref: dict[str, object] = {"source": source}
+    for key in (
+        "media_type",
+        "raw_type",
+        "mime",
+        "url",
+        "file_name",
+        "caption",
+        "storage_path",
+        "public_url",
+        "expires_at",
+        "sha256",
+    ):
+        value = _normalize_slot_value(raw_media.get(key))
+        if value:
+            ref[key] = value
+
+    if "media_type" not in ref:
+        media_type = _normalize_slot_value(raw_media.get("type"))
+        if media_type:
+            ref["media_type"] = media_type
+
+    size_bytes = raw_media.get("size_bytes")
+    if isinstance(size_bytes, int) and size_bytes >= 0:
+        ref["size_bytes"] = size_bytes
+    duration_seconds = raw_media.get("duration_seconds")
+    if isinstance(duration_seconds, int) and duration_seconds >= 0:
+        ref["duration_seconds"] = duration_seconds
+    if isinstance(raw_media.get("ptt"), bool):
+        ref["ptt"] = raw_media["ptt"]
+    if isinstance(raw_media.get("forwarded_to_telegram"), bool):
+        ref["forwarded_to_telegram"] = raw_media["forwarded_to_telegram"]
+    if inbound_message_id:
+        ref["inbound_message_id"] = inbound_message_id
+
+    # Require at least one concrete media locator to avoid empty contracts.
+    if not any(ref.get(locator_key) for locator_key in ("storage_path", "public_url", "url")):
+        return None
+    return ref
+
+
+def _media_ref_fingerprint(ref: dict) -> tuple[str | None, ...]:
+    return (
+        ref.get("sha256"),
+        ref.get("storage_path"),
+        ref.get("public_url"),
+        ref.get("url"),
+        ref.get("media_type"),
+        ref.get("inbound_message_id"),
+    )
+
+
+def _extract_handover_media_refs(conversation: Conversation, message: Message | None) -> tuple[list[dict], bool]:
+    refs: list[dict] = []
+    required = False
+
+    message_meta = message.message_metadata if message and isinstance(message.message_metadata, dict) else {}
+    message_media = message_meta.get("media") if isinstance(message_meta, dict) else None
+    if isinstance(message_media, dict):
+        required = True
+        inbound_message_id = _normalize_slot_value(getattr(message, "message_id", None))
+        media_ref = _normalize_media_ref(
+            message_media,
+            source="message_metadata",
+            inbound_message_id=inbound_message_id,
+        )
+        if media_ref:
+            refs.append(media_ref)
+
+    context = conversation.context if isinstance(conversation.context, dict) else {}
+    pending_style = context.get("style_reference_pending") if isinstance(context, dict) else None
+    if isinstance(pending_style, dict):
+        pending_media = pending_style.get("media")
+        if isinstance(pending_media, dict):
+            required = True
+            pending_payload = dict(pending_media)
+            for key in ("storage_path", "public_url", "sha256"):
+                if key in pending_style and key not in pending_payload:
+                    pending_payload[key] = pending_style.get(key)
+            if "expires_at" not in pending_payload:
+                media_expires_at = (
+                    pending_style.get("public_url_expires_at")
+                    or pending_style.get("media_expires_at")
+                    or pending_style.get("expires_at")
+                )
+                if media_expires_at:
+                    pending_payload["expires_at"] = media_expires_at
+            media_ref = _normalize_media_ref(
+                pending_payload,
+                source="style_reference_pending",
+            )
+            if media_ref:
+                refs.append(media_ref)
+
+    deduped: list[dict] = []
+    seen: set[tuple[str | None, ...]] = set()
+    for ref in refs:
+        fingerprint = _media_ref_fingerprint(ref)
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        deduped.append(ref)
+
+    return deduped, required
+
+
 def _is_env_enabled(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
@@ -125,7 +240,88 @@ def _build_handover_meta(conversation: Conversation, message: Message | None, us
     if slots:
         meta["slots"] = slots
 
+    media_refs, media_required = _extract_handover_media_refs(conversation, message)
+    if media_refs:
+        meta["media_refs"] = media_refs
+    if media_required or media_refs:
+        contract = {
+            "required": bool(media_required),
+            "bound": bool(media_refs),
+            "media_refs_count": len(media_refs),
+        }
+        sources = sorted({item.get("source") for item in media_refs if isinstance(item.get("source"), str)})
+        if sources:
+            contract["sources"] = sources
+        if media_required and not media_refs:
+            contract["reason"] = "media_ref_missing"
+        meta["media_handoff_contract"] = contract
+
     return meta or None
+
+
+def _apply_handover_contract_to_message(message: Message | None, handover_meta: dict | None) -> None:
+    if not message or not isinstance(handover_meta, dict):
+        return
+    contract = handover_meta.get("media_handoff_contract")
+    if not isinstance(contract, dict):
+        return
+
+    metadata = dict(message.message_metadata or {})
+    decision_meta = dict(metadata.get("decision_meta") or {})
+    media_refs = handover_meta.get("media_refs") if isinstance(handover_meta.get("media_refs"), list) else []
+    sources = sorted(
+        {
+            item.get("source")
+            for item in media_refs
+            if isinstance(item, dict) and isinstance(item.get("source"), str)
+        }
+    )
+    decision_meta.update(
+        {
+            "media_handoff_required": bool(contract.get("required")),
+            "media_handoff_bound": bool(contract.get("bound")),
+            "media_handoff_refs_count": len(media_refs),
+            "media_handoff_missing": bool(contract.get("required")) and not bool(contract.get("bound")),
+        }
+    )
+    if sources:
+        decision_meta["media_handoff_sources"] = sources
+    metadata["decision_meta"] = decision_meta
+    message.message_metadata = metadata
+
+
+def _record_handover_contract_trace(conversation: Conversation, handover_meta: dict | None) -> None:
+    if not isinstance(handover_meta, dict):
+        return
+    contract = handover_meta.get("media_handoff_contract")
+    if not isinstance(contract, dict):
+        return
+
+    context = conversation.context if isinstance(conversation.context, dict) else {}
+    existing = context.get(DECISION_TRACE_KEY)
+    if isinstance(existing, list):
+        trace_list = [item for item in existing if isinstance(item, dict)]
+    elif isinstance(existing, dict):
+        trace_list = [existing]
+    else:
+        trace_list = []
+
+    decision = "bound" if contract.get("bound") else "missing"
+    trace_list.append(
+        {
+            "stage": "media_handoff_contract",
+            "decision": decision,
+            "required": bool(contract.get("required")),
+            "media_refs_count": int(contract.get("media_refs_count") or 0),
+            "state": conversation.state,
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    # Keep this lightweight to avoid unbounded growth when service writes traces directly.
+    if len(trace_list) > 100:
+        trace_list = trace_list[-100:]
+    context[DECISION_TRACE_KEY] = trace_list
+    conversation.context = context
 
 
 def _get_latest_user_message(db: Session, conversation_id: uuid.UUID) -> Message | None:
@@ -389,6 +585,8 @@ def escalate_to_pending(
             topic_id = _build_simulated_topic_id(conversation, user)
             trigger_message = _get_latest_user_message(db, conversation.id)
             handover_meta = _build_handover_meta(conversation, trigger_message, user)
+            _apply_handover_contract_to_message(trigger_message, handover_meta)
+            _record_handover_contract_trace(conversation, handover_meta)
 
             handover = _find_recent_resolved_handover(db, conversation, now=now)
             if handover:
@@ -457,6 +655,8 @@ def escalate_to_pending(
         remote_jid = user.remote_jid if user else None
         trigger_message = _get_latest_user_message(db, conversation.id)
         handover_meta = _build_handover_meta(conversation, trigger_message, user)
+        _apply_handover_contract_to_message(trigger_message, handover_meta)
+        _record_handover_contract_trace(conversation, handover_meta)
 
         topic_id = get_or_create_topic(db, telegram, chat_id, conversation, user)
         if not topic_id:

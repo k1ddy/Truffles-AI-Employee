@@ -5661,6 +5661,12 @@ async def get_case(
         )
 
     case_health = _fetch_case_health(db, conversation) if conversation else {}
+    handover_meta = case.meta if isinstance(case.meta, dict) else None
+    handover_media_refs = (
+        handover_meta.get("media_refs")
+        if isinstance(handover_meta, dict) and isinstance(handover_meta.get("media_refs"), list)
+        else None
+    )
 
     # Check branch access (skip if branch_id is None or agent is admin/owner)
     allowed_branch_ids = {b.id for b in context.branches}
@@ -5686,6 +5692,8 @@ async def get_case(
         customer_name=customer_name,
         customer_phone=customer_phone,
         customer_remote_jid=customer_remote_jid,
+        handover_meta=handover_meta,
+        handover_media_refs=handover_media_refs,
         decision_trace=decision_trace,
         last_inbound_at=case_health.get("last_inbound_at").isoformat() if case_health.get("last_inbound_at") else None,
         last_outbound_at=case_health.get("last_outbound_at").isoformat() if case_health.get("last_outbound_at") else None,
