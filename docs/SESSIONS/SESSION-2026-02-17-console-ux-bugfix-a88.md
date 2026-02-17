@@ -1,0 +1,23 @@
+# SESSION 2026-02-17-console-ux-bugfix-a88 — Console UX/UI + contract-live stabilization
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-17-console-ux-bugfix-a88.md
+- branch: feat/2026-02-17-console-ux-bugfix-a88
+- worktree: /tmp/truffles-main-console-ux
+- base_ref: origin/main
+- scope: Упростить UX/UI для бизнес-пользователя в Console Plane и убрать флак `console-contract-live` (selection headers resolver).
+- done:
+  - Оптимизирован контекст-switch flow в `ConsoleShell` (stale+background refetch, без блокирующего массового refetch).
+  - Улучшены context gate hints и applied-context notices.
+  - Усилена обработка Knowledge action errors (gateway + selection required) и branch empty-state с явным переходом в Workspace.
+  - Добавлены owner/admin пояснения по типам provider incident причин (billing block vs unavailable/auth/rate-limit).
+  - Устойчиво доработан `console-contract-live` step `Resolve console selection headers`.
+  - Локально пройдены lint/tsc/build/smoke-list.
+- next:
+  - Пройти `scripts/session_check.sh`.
+  - Commit, push, open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-17-console-ux-bugfix-a88.md
+  - Локальные проверки в текущей сессии: lint/tsc/build/smoke-list
+- last_updated: 2026-02-17T03:08:20Z

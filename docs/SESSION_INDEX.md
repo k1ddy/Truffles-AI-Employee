@@ -4,6 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-02-17-console-ux-bugfix-a88 | active | feat/2026-02-17-console-ux-bugfix-a88 | /tmp/truffles-main-console-ux | docs/TASK_PACKAGES/TP-2026-02-17-console-ux-bugfix-a88.md | 2026-02-17T03:08:20Z |
 | 2026-02-16-console-contract-live-root-a88 | done | fix/2026-02-16-console-contract-live-root-a88 | /tmp/fix-console-contract-live-root-1771285761 | docs/TASK_PACKAGES/TP-2026-02-16-console-contract-live-root-a88.md | 2026-02-16T23:56:00Z |
 | 2026-02-16-expected-reply-controller-a88 | active | feat/2026-02-16-expected-reply-controller-a88 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-16-expected-reply-controller-a88.md | 2026-02-16T23:30:00Z |
 | 2026-02-16-console-contract-live-auth-fallback-a88 | done | fix/2026-02-16-console-contract-live-auth-fallback-a88 | /tmp/fix-console-contract-live-1771283493 | docs/TASK_PACKAGES/TP-2026-02-16-console-contract-live-auth-fallback-a88.md | 2026-02-16T22:34:00Z |
