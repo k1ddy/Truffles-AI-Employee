@@ -3398,6 +3398,20 @@ LLM_POLICY_CORE_ENABLED = _is_env_enabled(
 POLICY_CORE_RESCUE_MATRIX_ENABLED = _is_env_enabled(
     os.environ.get("POLICY_CORE_RESCUE_MATRIX"), default=True
 )
+POLICY_CORE_RESCUE_TIMEOUT_SECONDS = max(
+    float(os.environ.get("LLM_POLICY_CORE_RESCUE_TIMEOUT_SECONDS", "2.4")),
+    0.2,
+)
+POLICY_CORE_RESCUE_ERROR_CODES = {
+    "deadline_exceeded",
+    "timeout",
+    "invalid_json",
+    "invalid_schema",
+    "empty_response",
+    "connection_error",
+    "service_unavailable",
+    "rate_limit",
+}
 CONSULT_INTERRUPT_INTENTS = {"booking", "pricing", "duration", "location", "hours"}
 INFO_INTENT_PRIORITY_SERVICE = ("pricing", "duration", "location", "hours", "master")
 INFO_INTENT_PRIORITY_GENERIC = ("location", "hours", "pricing", "duration", "master")
@@ -4097,6 +4111,111 @@ def _is_retryable_policy_core_error_code(code: str | None) -> bool:
     if normalized.startswith("http_5"):
         return True
     return False
+
+
+def _supports_policy_core_llm_rescue(error: str | None) -> bool:
+    if not isinstance(error, str):
+        return False
+    normalized = error.strip().casefold()
+    if not normalized:
+        return False
+    return normalized in POLICY_CORE_RESCUE_ERROR_CODES
+
+
+def _is_policy_core_rescue_critical_turn(
+    *,
+    conversation_state: str | None,
+    expected_reply_type: str | None,
+    expected_reply_blocked_by_info: bool,
+    info_class_intents: set[str] | list[str] | tuple[str, ...] | None,
+    booking_wants_flow: bool,
+    message_text: str | None,
+    intent_decomp_set: set[str],
+    consult_intent: bool,
+    client_slug: str | None,
+) -> bool:
+    if info_class_intents:
+        return False
+    expected_reply_active = bool(
+        expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
+        and not expected_reply_blocked_by_info
+    )
+    pending_flow = conversation_state in {
+        ConversationState.PENDING.value,
+        ConversationState.MANAGER_ACTIVE.value,
+    }
+    booking_flow = bool(
+        booking_wants_flow
+        and message_text
+        and _is_booking_request(message_text, client_slug=client_slug)
+        and not (intent_decomp_set & INFO_INTENTS)
+        and not consult_intent
+    )
+    return bool(expected_reply_active or pending_flow or booking_flow)
+
+
+def _should_attempt_policy_core_llm_rescue(
+    *,
+    policy_result: dict[str, Any] | None,
+    conversation_state: str | None,
+    expected_reply_type: str | None,
+    expected_reply_blocked_by_info: bool,
+    info_class_intents: set[str] | list[str] | tuple[str, ...] | None,
+    booking_wants_flow: bool,
+    message_text: str | None,
+    intent_decomp_set: set[str],
+    consult_intent: bool,
+    client_slug: str | None,
+) -> bool:
+    if not POLICY_CORE_RESCUE_MATRIX_ENABLED:
+        return False
+    if not isinstance(policy_result, dict):
+        return False
+    if policy_result.get("ok") or not policy_result.get("attempted"):
+        return False
+    if not _supports_policy_core_llm_rescue(policy_result.get("error")):
+        return False
+    return _is_policy_core_rescue_critical_turn(
+        conversation_state=conversation_state,
+        expected_reply_type=expected_reply_type,
+        expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+        info_class_intents=info_class_intents,
+        booking_wants_flow=booking_wants_flow,
+        message_text=message_text,
+        intent_decomp_set=intent_decomp_set,
+        consult_intent=consult_intent,
+        client_slug=client_slug,
+    )
+
+
+def _build_policy_core_rescue_timing_context(
+    *,
+    base_timing_context: dict | None,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    timeout_seconds = max(float(timeout_seconds), 0.1)
+    rescue_context: dict[str, Any] = {
+        "pipeline_budget_ms": int(timeout_seconds * 1000),
+        "pipeline_deadline": time.monotonic() + timeout_seconds,
+        "timing": {},
+    }
+    if not isinstance(base_timing_context, dict):
+        return rescue_context
+    for key in (
+        "trace_id",
+        "client_slug",
+        "conversation_id",
+        "message_id",
+        "branch_id",
+        "outbox_id",
+    ):
+        value = base_timing_context.get(key)
+        if value is not None:
+            rescue_context[key] = value
+    simulation = base_timing_context.get("simulation")
+    if isinstance(simulation, dict):
+        rescue_context["simulation"] = dict(simulation)
+    return rescue_context
 
 
 def _classify_policy_core_degrade_reason(reason: str | None) -> dict[str, Any]:
@@ -7688,6 +7807,11 @@ async def _handle_webhook_payload(
     policy_action_normalized = False
     policy_memory_summary: str | None = None
     policy_memory_profile: dict[str, Any] | None = None
+    policy_rescue_attempted = False
+    policy_rescue_applied = False
+    policy_rescue_trigger_error = None
+    policy_rescue_error = None
+    policy_rescue_elapsed_ms = 0.0
     policy_core_runtime_active = bool(
         LLM_POLICY_CORE_ENABLED
         and routing["allow_bot_reply"]
@@ -7775,6 +7899,47 @@ async def _handle_webhook_payload(
             client_config=client.config if client else None,
             timing_context=timing_context,
         )
+        if _should_attempt_policy_core_llm_rescue(
+            policy_result=policy_result if isinstance(policy_result, dict) else None,
+            conversation_state=conversation.state,
+            expected_reply_type=expected_reply_type,
+            expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+            info_class_intents=info_class_intents,
+            booking_wants_flow=booking_wants_flow,
+            message_text=message_text,
+            intent_decomp_set=intent_decomp_set,
+            consult_intent=consult_intent,
+            client_slug=payload.client_slug,
+        ):
+            policy_rescue_attempted = True
+            if isinstance(policy_result, dict):
+                policy_rescue_trigger_error = policy_result.get("error")
+            rescue_timing_context = _build_policy_core_rescue_timing_context(
+                base_timing_context=timing_context,
+                timeout_seconds=POLICY_CORE_RESCUE_TIMEOUT_SECONDS,
+            )
+            rescue_result = route_llm_policy_core(
+                message_text,
+                expected_reply_type=expected_reply_type,
+                current_goal=current_goal,
+                slot_state=policy_slot_state,
+                info_refs=info_refs,
+                consult_refs=consult_refs,
+                memory_summary=policy_memory_summary,
+                memory_profile=policy_memory_profile,
+                client_slug=payload.client_slug,
+                client_config=client.config if client else None,
+                timing_context=rescue_timing_context,
+            )
+            if isinstance(rescue_result, dict):
+                policy_rescue_error = rescue_result.get("error")
+                rescue_elapsed = rescue_result.get("elapsed_ms")
+                if isinstance(rescue_elapsed, (int, float)):
+                    policy_rescue_elapsed_ms = float(rescue_elapsed)
+                if rescue_result.get("ok"):
+                    policy_rescue_applied = True
+                    policy_result = rescue_result
+
         policy_payload = policy_result.get("payload") if isinstance(policy_result, dict) else None
 
         if isinstance(policy_payload, dict):
@@ -8101,6 +8266,11 @@ async def _handle_webhook_payload(
             "ok": policy_result.get("ok") if isinstance(policy_result, dict) else False,
             "error": policy_result.get("error") if isinstance(policy_result, dict) else None,
             "elapsed_ms": policy_result.get("elapsed_ms") if isinstance(policy_result, dict) else 0.0,
+            "rescue_attempted": policy_rescue_attempted,
+            "rescue_applied": policy_rescue_applied,
+            "rescue_trigger_error": policy_rescue_trigger_error,
+            "rescue_error": policy_rescue_error,
+            "rescue_elapsed_ms": policy_rescue_elapsed_ms,
             "payload": policy_payload,
             "raw": policy_result.get("raw") if isinstance(policy_result, dict) else None,
             "intent": policy_intent,
@@ -8143,6 +8313,11 @@ async def _handle_webhook_payload(
                 "attempted": llm_policy_core_meta["attempted"],
                 "ok": llm_policy_core_meta["ok"],
                 "error": llm_policy_core_meta["error"],
+                "rescue_attempted": policy_rescue_attempted,
+                "rescue_applied": policy_rescue_applied,
+                "rescue_trigger_error": policy_rescue_trigger_error,
+                "rescue_error": policy_rescue_error,
+                "rescue_elapsed_ms": policy_rescue_elapsed_ms,
                 "validated": policy_valid,
                 "validation_error": policy_validation_error,
                 "low_confidence_ok": policy_low_confidence_ok,
