@@ -146,6 +146,9 @@ from app.schemas.console import (
     ConsoleOnboardingContractRecord,
     ConsoleOnboardingContractResponse,
     ConsoleOnboardingDocumentIngestion,
+    ConsoleOnboardingIntakeCompile,
+    ConsoleOnboardingIntakeQualityDimension,
+    ConsoleOnboardingIntakeQualityMatrix,
     ConsoleOnboardingScorecardCheck,
     ConsoleOnboardingScorecardResponse,
     ConsoleOnboardingStatusResponse,
@@ -297,6 +300,7 @@ from app.services.onboarding_contract_service import (
 )
 from app.services.onboarding_intake_service import (
     build_intake_field_states,
+    build_intake_pack_quality_summary,
     build_intake_payload,
     build_intake_question_queue,
     evaluate_intake_payload,
@@ -14799,6 +14803,11 @@ async def run_onboarding_autopilot(
         client_data_json=body.client_data_json or {},
     )
     question_queue = build_intake_question_queue(missing_fields)
+    pack_quality = build_intake_pack_quality_summary(
+        effective_intake_payload,
+        domain_slug=effective_domain_slug,
+        require_booking=booking_required,
+    )
 
     inputs = build_onboarding_inputs(db, branch)
     scorecard = build_onboarding_scorecard(db, branch)
@@ -14883,6 +14892,40 @@ async def run_onboarding_autopilot(
                 }
                 for item in question_queue
             ],
+            compile=ConsoleOnboardingIntakeCompile(
+                status=pack_quality.compile.status,
+                infra_valid=pack_quality.compile.infra_valid,
+                schema_version=pack_quality.compile.schema_version,
+                hash=pack_quality.compile.hash,
+                pack_index_hash=pack_quality.compile.pack_index_hash,
+                signal_graph_present=pack_quality.compile.signal_graph_present,
+                policy_bundle_present=pack_quality.compile.policy_bundle_present,
+                errors=pack_quality.compile.errors,
+            ),
+            quality_matrix=ConsoleOnboardingIntakeQualityMatrix(
+                status=pack_quality.quality_matrix.status,
+                infra_valid=pack_quality.quality_matrix.infra_valid,
+                semantic_valid=pack_quality.quality_matrix.semantic_valid,
+                required_fields_count=pack_quality.quality_matrix.required_fields_count,
+                missing_fields_count=pack_quality.quality_matrix.missing_fields_count,
+                critical_missing_fields_count=pack_quality.quality_matrix.critical_missing_fields_count,
+                integrity_missing_count=pack_quality.quality_matrix.integrity_missing_count,
+                missing_fields=pack_quality.quality_matrix.missing_fields,
+                critical_missing_fields=pack_quality.quality_matrix.critical_missing_fields,
+                integrity_missing=pack_quality.quality_matrix.integrity_missing,
+                dimensions=[
+                    ConsoleOnboardingIntakeQualityDimension(
+                        id=item.id,
+                        status=item.status,
+                        required=item.required,
+                        details=item.details,
+                    )
+                    for item in pack_quality.quality_matrix.dimensions
+                ],
+                regressions=pack_quality.quality_matrix.regressions,
+                comparison_blocked=pack_quality.quality_matrix.comparison_blocked,
+                comparison_block_reason=pack_quality.quality_matrix.comparison_block_reason,
+            ),
             payload=intake_payload,
         ),
         actions=actions,

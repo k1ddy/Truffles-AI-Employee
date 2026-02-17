@@ -668,6 +668,45 @@ async def test_run_onboarding_autopilot_activate_requires_scorecard_pass(monkeyp
     monkeypatch.setattr(console_router, "build_intake_payload", lambda *args, **kwargs: {"client_pack": {}})
     monkeypatch.setattr(console_router, "upsert_draft", lambda *args, **kwargs: SimpleNamespace(id=uuid4()))
     monkeypatch.setattr(console_router, "evaluate_intake_payload", lambda *args, **kwargs: ([], []))
+    monkeypatch.setattr(
+        console_router,
+        "build_intake_pack_quality_summary",
+        lambda *args, **kwargs: SimpleNamespace(
+            compile=SimpleNamespace(
+                status="pass",
+                infra_valid=True,
+                schema_version="compiled_pack.v1",
+                hash="hash-1",
+                pack_index_hash="pack-hash-1",
+                signal_graph_present=True,
+                policy_bundle_present=True,
+                errors=[],
+            ),
+            quality_matrix=SimpleNamespace(
+                status="pass",
+                infra_valid=True,
+                semantic_valid=True,
+                required_fields_count=1,
+                missing_fields_count=0,
+                critical_missing_fields_count=0,
+                integrity_missing_count=0,
+                missing_fields=[],
+                critical_missing_fields=[],
+                integrity_missing=[],
+                dimensions=[
+                    SimpleNamespace(
+                        id="pack_compile",
+                        status="pass",
+                        required=True,
+                        details=[],
+                    )
+                ],
+                regressions=[],
+                comparison_blocked=False,
+                comparison_block_reason=None,
+            ),
+        ),
+    )
     monkeypatch.setattr(console_router, "build_onboarding_inputs", lambda *args, **kwargs: SimpleNamespace())
     monkeypatch.setattr(console_router, "build_onboarding_status", lambda *args, **kwargs: SimpleNamespace())
     monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
@@ -873,6 +912,9 @@ async def test_run_onboarding_autopilot_preserves_existing_provider_binding(monk
     assert binding.webhook_status == "configured"
     assert binding.paid_until == "2030-01-01"
     assert binding.notes == "existing binding"
+    assert response.intake.compile is not None
+    assert response.intake.quality_matrix is not None
+    assert response.intake.quality_matrix.status in {"pass", "fail"}
 
 
 @pytest.mark.asyncio

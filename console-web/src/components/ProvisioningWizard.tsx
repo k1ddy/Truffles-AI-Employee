@@ -35,6 +35,7 @@ type OnboardingScorecardCheck = components["schemas"]["OnboardingScorecardCheck"
 type OnboardingDocumentIngestion = components["schemas"]["OnboardingDocumentIngestion"];
 type OnboardingIntakeFieldState = components["schemas"]["OnboardingIntakeFieldState"];
 type OnboardingIntakeQuestion = components["schemas"]["OnboardingIntakeQuestion"];
+type OnboardingIntakeQualityDimension = components["schemas"]["OnboardingIntakeQualityDimension"];
 
 type AgentRole = ConsoleRole;
 type OnboardingMode = "autopilot" | "manual";
@@ -507,6 +508,32 @@ function intakeStatusClass(value?: string): string {
         return "border-blue-300/60 bg-blue-50 text-blue-800";
     }
     return "border-border/60 bg-muted/40 text-muted-foreground";
+}
+
+function qualityStatusLabel(value?: string): string {
+    if (value === "pass") {
+        return "pass";
+    }
+    if (value === "warn") {
+        return "warn";
+    }
+    if (value === "skip") {
+        return "skip";
+    }
+    return "fail";
+}
+
+function qualityStatusClass(value?: string): string {
+    if (value === "pass") {
+        return "border-green-200 bg-green-50 text-green-800";
+    }
+    if (value === "warn") {
+        return "border-amber-300/60 bg-amber-50 text-amber-800";
+    }
+    if (value === "skip") {
+        return "border-blue-300/60 bg-blue-50 text-blue-800";
+    }
+    return "border-destructive/30 bg-destructive/10 text-destructive";
 }
 
 function normalizeCapabilities(payload?: CapabilitiesPayload | null): CapabilitiesPayload {
@@ -2934,6 +2961,93 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                         </div>
                                     ))}
                                 </div>
+                            </div>
+                        )}
+                        {autopilotResult.intake.compile && (
+                            <div className="rounded-lg border border-border/60 bg-muted/10 p-2">
+                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                    Pack compile
+                                </div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-semibold ${qualityStatusClass(autopilotResult.intake.compile.status)}`}>
+                                        {qualityStatusLabel(autopilotResult.intake.compile.status)}
+                                    </span>
+                                    <span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-semibold ${autopilotResult.intake.compile.infra_valid ? "border-green-200 bg-green-50 text-green-800" : "border-destructive/30 bg-destructive/10 text-destructive"}`}>
+                                        infra_valid={String(autopilotResult.intake.compile.infra_valid)}
+                                    </span>
+                                    {autopilotResult.intake.compile.schema_version && (
+                                        <span className="font-mono text-[11px]">{autopilotResult.intake.compile.schema_version}</span>
+                                    )}
+                                </div>
+                                <div className="mt-1 text-[11px] text-muted-foreground">
+                                    hash: <span className="font-mono">{autopilotResult.intake.compile.hash ?? "n/a"}</span>
+                                </div>
+                                <div className="text-[11px] text-muted-foreground">
+                                    pack_index_hash: <span className="font-mono">{autopilotResult.intake.compile.pack_index_hash ?? "n/a"}</span>
+                                </div>
+                                <div className="text-[11px] text-muted-foreground">
+                                    signal_graph: <span className="font-mono">{String(autopilotResult.intake.compile.signal_graph_present)}</span>, policy_bundle:{" "}
+                                    <span className="font-mono">{String(autopilotResult.intake.compile.policy_bundle_present)}</span>
+                                </div>
+                                {(autopilotResult.intake.compile.errors?.length ?? 0) > 0 && (
+                                    <div className="mt-2 space-y-1">
+                                        {(autopilotResult.intake.compile.errors ?? []).map((item: string, index: number) => (
+                                            <div key={`${item}-${index}`} className="font-mono text-[11px] text-destructive">
+                                                {item}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        {autopilotResult.intake.quality_matrix && (
+                            <div className="rounded-lg border border-border/60 bg-muted/10 p-2">
+                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                    Quality matrix (P4+P5)
+                                </div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-semibold ${qualityStatusClass(autopilotResult.intake.quality_matrix.status)}`}>
+                                        {qualityStatusLabel(autopilotResult.intake.quality_matrix.status)}
+                                    </span>
+                                    <span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-semibold ${autopilotResult.intake.quality_matrix.infra_valid ? "border-green-200 bg-green-50 text-green-800" : "border-destructive/30 bg-destructive/10 text-destructive"}`}>
+                                        infra_valid={String(autopilotResult.intake.quality_matrix.infra_valid)}
+                                    </span>
+                                    <span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-semibold ${autopilotResult.intake.quality_matrix.semantic_valid ? "border-green-200 bg-green-50 text-green-800" : "border-destructive/30 bg-destructive/10 text-destructive"}`}>
+                                        semantic_valid={String(autopilotResult.intake.quality_matrix.semantic_valid)}
+                                    </span>
+                                </div>
+                                <div className="mt-1 text-[11px] text-muted-foreground">
+                                    required={autopilotResult.intake.quality_matrix.required_fields_count}, missing={autopilotResult.intake.quality_matrix.missing_fields_count}, critical_missing={autopilotResult.intake.quality_matrix.critical_missing_fields_count}, integrity_missing={autopilotResult.intake.quality_matrix.integrity_missing_count}
+                                </div>
+                                {(autopilotResult.intake.quality_matrix.dimensions?.length ?? 0) > 0 && (
+                                    <div className="mt-2 space-y-1">
+                                        {(autopilotResult.intake.quality_matrix.dimensions ?? []).map((item: OnboardingIntakeQualityDimension) => (
+                                            <div key={item.id} className="rounded-md border border-border/60 bg-background px-2 py-2">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className="font-mono text-[11px]">{item.id}</span>
+                                                    <span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-semibold ${qualityStatusClass(item.status)}`}>
+                                                        {qualityStatusLabel(item.status)}
+                                                    </span>
+                                                    {!item.required && (
+                                                        <span className="inline-flex rounded border border-border/60 bg-muted/40 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                                                            optional
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                {(item.details?.length ?? 0) > 0 && (
+                                                    <div className="mt-1 text-[11px] text-muted-foreground">
+                                                        {item.details?.join(" | ")}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {(autopilotResult.intake.quality_matrix.regressions?.length ?? 0) > 0 && (
+                                    <div className="mt-2 rounded border border-destructive/30 bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
+                                        regressions: {(autopilotResult.intake.quality_matrix.regressions ?? []).join(", ")}
+                                    </div>
+                                )}
                             </div>
                         )}
                         <div className="pt-1">
