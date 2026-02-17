@@ -149,8 +149,11 @@ from app.schemas.console import (
     ConsoleOnboardingIntakeCompile,
     ConsoleOnboardingIntakeQualityDimension,
     ConsoleOnboardingIntakeQualityMatrix,
+    ConsoleOnboardingOperationalPipeline,
+    ConsoleOnboardingOperationalStage,
     ConsoleOnboardingScorecardCheck,
     ConsoleOnboardingScorecardResponse,
+    ConsoleOnboardingSlaControlLoop,
     ConsoleOnboardingStatusResponse,
     ConsoleOnboardingStepStatus,
     ConsoleOpsJobCatalogResponse,
@@ -929,6 +932,8 @@ def _serialize_onboarding_scorecard(
     scorecard,
 ) -> ConsoleOnboardingScorecardResponse:
     document_ingestion = getattr(scorecard, "document_ingestion", None)
+    sla_control_loop = getattr(scorecard, "sla_control_loop", None)
+    operational_pipeline = getattr(scorecard, "operational_pipeline", None)
     document_ingestion_payload = None
     if document_ingestion is not None:
         document_ingestion_payload = ConsoleOnboardingDocumentIngestion(
@@ -937,6 +942,44 @@ def _serialize_onboarding_scorecard(
             source=document_ingestion.source,
             missing_fields=document_ingestion.missing_fields,
             critical_missing_fields=document_ingestion.critical_missing_fields,
+        )
+    sla_control_loop_payload = None
+    if sla_control_loop is not None:
+        sla_control_loop_payload = ConsoleOnboardingSlaControlLoop(
+            status=sla_control_loop.status,
+            reminder_1_minutes=sla_control_loop.reminder_1_minutes,
+            reminder_2_minutes=sla_control_loop.reminder_2_minutes,
+            escalation_timeout_minutes=sla_control_loop.escalation_timeout_minutes,
+            pending_total=sla_control_loop.pending_total,
+            warning_total=sla_control_loop.warning_total,
+            breached_total=sla_control_loop.breached_total,
+            provider_status=sla_control_loop.provider_status,
+            provider_paid_until=sla_control_loop.provider_paid_until,
+            provider_days_to_renewal=sla_control_loop.provider_days_to_renewal,
+            provider_alert_state=sla_control_loop.provider_alert_state,
+            active_incidents=sla_control_loop.active_incidents,
+            recommended_actions=sla_control_loop.recommended_actions,
+        )
+    operational_pipeline_payload = None
+    if operational_pipeline is not None:
+        operational_pipeline_payload = ConsoleOnboardingOperationalPipeline(
+            status=operational_pipeline.status,
+            blocked=operational_pipeline.blocked,
+            current_stage_id=operational_pipeline.current_stage_id,
+            blockers=operational_pipeline.blockers,
+            next_actions=operational_pipeline.next_actions,
+            stages=[
+                ConsoleOnboardingOperationalStage(
+                    id=stage.id,
+                    label=stage.label,
+                    owner_lane=stage.owner_lane,
+                    required=stage.required,
+                    status=stage.status,
+                    blockers=stage.blockers,
+                    next_action=stage.next_action,
+                )
+                for stage in operational_pipeline.stages
+            ],
         )
     return ConsoleOnboardingScorecardResponse(
         branch_id=branch.id,
@@ -953,6 +996,8 @@ def _serialize_onboarding_scorecard(
         ],
         missing=scorecard.missing,
         document_ingestion=document_ingestion_payload,
+        sla_control_loop=sla_control_loop_payload,
+        operational_pipeline=operational_pipeline_payload,
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
 

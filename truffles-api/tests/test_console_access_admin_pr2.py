@@ -1321,6 +1321,48 @@ async def test_get_onboarding_scorecard_returns_fail_payload(monkeypatch):
         lambda *_args, **_kwargs: SimpleNamespace(
             ready=False,
             missing=["payment_confirmed"],
+            sla_control_loop=SimpleNamespace(
+                status="warn",
+                reminder_1_minutes=10,
+                reminder_2_minutes=45,
+                escalation_timeout_minutes=120,
+                pending_total=1,
+                warning_total=1,
+                breached_total=0,
+                provider_status="configured",
+                provider_paid_until="2026-03-10",
+                provider_days_to_renewal=21,
+                provider_alert_state="ok",
+                active_incidents=["handover_sla_warning"],
+                recommended_actions=["review_pending_handovers"],
+            ),
+            operational_pipeline=SimpleNamespace(
+                status="fail",
+                blocked=True,
+                current_stage_id="contract_alignment",
+                blockers=["payment_confirmed"],
+                next_actions=["complete_contract_and_payment"],
+                stages=[
+                    SimpleNamespace(
+                        id="contract_alignment",
+                        label="Contract alignment",
+                        owner_lane="owner_admin",
+                        required=True,
+                        status="fail",
+                        blockers=["payment_confirmed"],
+                        next_action="complete_contract_and_payment",
+                    ),
+                    SimpleNamespace(
+                        id="go_live_control",
+                        label="Go-live control",
+                        owner_lane="owner_admin",
+                        required=True,
+                        status="fail",
+                        blockers=["payment_confirmed"],
+                        next_action="resolve_go_live_blockers",
+                    ),
+                ],
+            ),
             document_ingestion=SimpleNamespace(
                 status="fail",
                 valid=False,
@@ -1355,6 +1397,16 @@ async def test_get_onboarding_scorecard_returns_fail_payload(monkeypatch):
     assert response.document_ingestion.status == "fail"
     assert response.document_ingestion.valid is False
     assert response.document_ingestion.source == "draft"
+    assert response.sla_control_loop is not None
+    assert response.sla_control_loop.status == "warn"
+    assert response.sla_control_loop.warning_total == 1
+    assert response.sla_control_loop.active_incidents == ["handover_sla_warning"]
+    assert response.operational_pipeline is not None
+    assert response.operational_pipeline.status == "fail"
+    assert response.operational_pipeline.blocked is True
+    assert response.operational_pipeline.current_stage_id == "contract_alignment"
+    assert response.operational_pipeline.blockers == ["payment_confirmed"]
+    assert response.operational_pipeline.stages[0].id == "contract_alignment"
 
 
 @pytest.mark.asyncio

@@ -37,6 +37,46 @@ type OnboardingIntakeFieldState = components["schemas"]["OnboardingIntakeFieldSt
 type OnboardingIntakeQuestion = components["schemas"]["OnboardingIntakeQuestion"];
 type OnboardingIntakeQualityDimension = components["schemas"]["OnboardingIntakeQualityDimension"];
 
+type OnboardingSlaControlLoop = {
+    status: "pass" | "warn" | "fail";
+    reminder_1_minutes: number;
+    reminder_2_minutes: number;
+    escalation_timeout_minutes: number;
+    pending_total: number;
+    warning_total: number;
+    breached_total: number;
+    provider_status: string;
+    provider_paid_until?: string | null;
+    provider_days_to_renewal?: number | null;
+    provider_alert_state?: string | null;
+    active_incidents?: string[];
+    recommended_actions?: string[];
+};
+
+type OnboardingOperationalStage = {
+    id: string;
+    label: string;
+    owner_lane: string;
+    required: boolean;
+    status: "pass" | "warn" | "fail" | "skip";
+    blockers: string[];
+    next_action?: string | null;
+};
+
+type OnboardingOperationalPipeline = {
+    status: "pass" | "warn" | "fail";
+    blocked: boolean;
+    current_stage_id?: string | null;
+    blockers?: string[];
+    next_actions?: string[];
+    stages?: OnboardingOperationalStage[];
+};
+
+type OnboardingScorecardEnterprise = OnboardingScorecard & {
+    sla_control_loop?: OnboardingSlaControlLoop | null;
+    operational_pipeline?: OnboardingOperationalPipeline | null;
+};
+
 type AgentRole = ConsoleRole;
 type OnboardingMode = "autopilot" | "manual";
 type DomainTemplateId = "beauty" | "clinic" | "legal" | "ecom";
@@ -155,6 +195,45 @@ const CAPABILITY_FIELD_LABELS: Record<string, string> = {
     "features.knowledge_upload": "knowledge_upload",
     "features.analytics": "analytics",
     "features.auto_learn": "auto_learn",
+};
+
+const SLA_INCIDENT_LABELS: Record<string, string> = {
+    handover_sla_breached: "Просроченные handover в очереди",
+    handover_sla_warning: "Handover близко к SLA-нарушению",
+    provider_binding_missing: "Не заполнен provider binding",
+    provider_webhook_not_configured: "Webhook provider не сконфигурирован",
+    provider_rebind_required: "Требуется rebind provider",
+    provider_billing_expired: "Подписка provider истекла",
+    provider_renewal_due: "Скоро продление provider",
+    provider_capability_alert_critical: "Provider capability check: critical",
+    provider_capability_alert_warn: "Provider capability check: warn",
+};
+
+const PIPELINE_ACTION_LABELS: Record<string, string> = {
+    complete_contract_and_payment: "Закрыть договор и оплату",
+    fix_channel_bindings: "Починить channel bindings",
+    publish_knowledge_pack: "Опубликовать knowledge pack",
+    configure_booking_runtime: "Настроить booking runtime",
+    resolve_go_live_blockers: "Снять go-live блокеры",
+    resolve_breached_handovers: "Разобрать просроченные handover",
+    review_pending_handovers: "Проверить pending handover",
+    fix_provider_binding: "Исправить provider binding",
+    renew_provider_subscription_urgent: "Срочно продлить provider",
+    renew_provider_subscription: "Продлить provider",
+    run_provider_capability_check: "Проверить provider capability",
+    monitor_sla_loop: "Мониторить SLA контрольный цикл",
+    monitor_go_live_readiness: "Мониторить go-live readiness",
+};
+
+const SLA_PROVIDER_STATUS_LABELS: Record<string, string> = {
+    configured: "configured",
+    missing: "missing",
+    webhook_not_configured: "webhook_not_configured",
+    rebind_required: "rebind_required",
+    billing_expired: "billing_expired",
+    renewal_due: "renewal_due",
+    not_required: "not_required",
+    unknown: "unknown",
 };
 
 const AUTOPILOT_SERVICE_OPTIONS: Array<{
@@ -436,6 +515,34 @@ function formatMissingRequirement(code: string): string {
         return `Несоответствие договору: ${CAPABILITY_FIELD_LABELS[key] ?? key}`;
     }
     return MISSING_LABELS[code] ?? code;
+}
+
+function formatSlaIncident(code: string): string {
+    return SLA_INCIDENT_LABELS[code] ?? code;
+}
+
+function formatPipelineAction(code: string): string {
+    return PIPELINE_ACTION_LABELS[code] ?? code;
+}
+
+function formatSlaProviderStatus(status?: string): string {
+    if (!status) {
+        return "unknown";
+    }
+    return SLA_PROVIDER_STATUS_LABELS[status] ?? status;
+}
+
+function formatOperationalBlocker(code: string): string {
+    if (
+        code.startsWith("capability_mismatch:")
+        || code.startsWith("provider_binding.whatsapp")
+        || code.startsWith("client_pack.")
+        || code.startsWith("reference_pack")
+        || Object.prototype.hasOwnProperty.call(MISSING_LABELS, code)
+    ) {
+        return formatMissingRequirement(code);
+    }
+    return formatSlaIncident(code);
 }
 
 function onboardingStepStatusLabel(status: "complete" | "available" | "locked" | "skipped"): string {
@@ -1735,7 +1842,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const hasBookingSettings = isNonEmptyRecord(branchData?.booking_settings);
     const bookingEnabled = capabilitiesPreview.features?.booking_mode != null;
     const knowledgeUploadEnabled = capabilitiesPreview.features?.knowledge_upload === true;
+    const onboardingScorecardEnterprise = onboardingScorecard as OnboardingScorecardEnterprise | undefined;
     const documentIngestionGate: OnboardingDocumentIngestion | null = onboardingScorecard?.document_ingestion ?? null;
+    const onboardingSlaControlLoop: OnboardingSlaControlLoop | null = onboardingScorecardEnterprise?.sla_control_loop ?? null;
+    const onboardingOperationalPipeline: OnboardingOperationalPipeline | null = onboardingScorecardEnterprise?.operational_pipeline ?? null;
 
     const readinessItems = useMemo(() => {
         return [
@@ -1844,6 +1954,26 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         () => documentIngestionGate?.critical_missing_fields ?? [],
         [documentIngestionGate?.critical_missing_fields],
     );
+    const onboardingSlaIncidents = useMemo(
+        () => onboardingSlaControlLoop?.active_incidents ?? [],
+        [onboardingSlaControlLoop?.active_incidents],
+    );
+    const onboardingSlaActions = useMemo(
+        () => onboardingSlaControlLoop?.recommended_actions ?? [],
+        [onboardingSlaControlLoop?.recommended_actions],
+    );
+    const operationalPipelineStages = useMemo(
+        () => onboardingOperationalPipeline?.stages ?? [],
+        [onboardingOperationalPipeline?.stages],
+    );
+    const operationalPipelineBlockers = useMemo(
+        () => onboardingOperationalPipeline?.blockers ?? [],
+        [onboardingOperationalPipeline?.blockers],
+    );
+    const operationalPipelineActions = useMemo(
+        () => onboardingOperationalPipeline?.next_actions ?? [],
+        [onboardingOperationalPipeline?.next_actions],
+    );
     const goNoGoMissing = useMemo(
         () => (scorecardMissing.length > 0 ? scorecardMissing : (stepStateById.go_no_go?.missing ?? [])),
         [scorecardMissing, stepStateById.go_no_go?.missing],
@@ -1875,8 +2005,17 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         goNoGoMissing.forEach((item) => blockers.push(formatMissingRequirement(item)));
         scorecardFailedChecks.forEach((check) => blockers.push(`Scorecard step: ${check.id}`));
         capabilityMismatches.forEach((item) => blockers.push(`Договор: ${CAPABILITY_FIELD_LABELS[item] ?? item}`));
+        operationalPipelineBlockers.forEach((item) => blockers.push(formatOperationalBlocker(item)));
+        onboardingSlaIncidents.forEach((item) => blockers.push(formatSlaIncident(item)));
         return Array.from(new Set(blockers));
-    }, [missingRequirements, goNoGoMissing, scorecardFailedChecks, capabilityMismatches]);
+    }, [
+        missingRequirements,
+        goNoGoMissing,
+        scorecardFailedChecks,
+        capabilityMismatches,
+        operationalPipelineBlockers,
+        onboardingSlaIncidents,
+    ]);
     const branchGoLiveStateRaw = (branchData as Record<string, unknown> | null)?.go_live_state;
     const branchGoLiveState: "pending" | "approved" | "rejected" = (
         branchGoLiveStateRaw === "pending" || branchGoLiveStateRaw === "approved" || branchGoLiveStateRaw === "rejected"
@@ -4235,6 +4374,94 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                         </div>
                                     )}
                                 </div>
+                                {onboardingSlaControlLoop && (
+                                    <div className={`rounded-lg border px-3 py-3 text-xs ${qualityStatusClass(onboardingSlaControlLoop.status)}`} data-testid="onboarding-sla-control-loop">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span className="font-semibold">SLA / Escalation Control Loop</span>
+                                            <span className="font-mono">{qualityStatusLabel(onboardingSlaControlLoop.status)}</span>
+                                        </div>
+                                        <div className="mt-1">
+                                            thresholds: r1={onboardingSlaControlLoop.reminder_1_minutes}m · r2={onboardingSlaControlLoop.reminder_2_minutes}m · escalation={onboardingSlaControlLoop.escalation_timeout_minutes}m
+                                        </div>
+                                        <div className="mt-1">
+                                            queue: pending={onboardingSlaControlLoop.pending_total} · warning={onboardingSlaControlLoop.warning_total} · breached={onboardingSlaControlLoop.breached_total}
+                                        </div>
+                                        <div className="mt-1">
+                                            provider: <span className="font-mono">{formatSlaProviderStatus(onboardingSlaControlLoop.provider_status)}</span>
+                                            {" · "}alert_state: <span className="font-mono">{onboardingSlaControlLoop.provider_alert_state || "unknown"}</span>
+                                            {onboardingSlaControlLoop.provider_paid_until ? (
+                                                <>
+                                                    {" · "}paid_until: <span className="font-mono">{onboardingSlaControlLoop.provider_paid_until}</span>
+                                                </>
+                                            ) : null}
+                                            {typeof onboardingSlaControlLoop.provider_days_to_renewal === "number" ? (
+                                                <>
+                                                    {" · "}days_to_renewal: <span className="font-mono">{onboardingSlaControlLoop.provider_days_to_renewal}</span>
+                                                </>
+                                            ) : null}
+                                        </div>
+                                        {onboardingSlaIncidents.length > 0 && (
+                                            <div className="mt-2">
+                                                incidents: {onboardingSlaIncidents.map((item) => formatSlaIncident(item)).join(", ")}
+                                            </div>
+                                        )}
+                                        {onboardingSlaActions.length > 0 && (
+                                            <div className="mt-2">
+                                                actions: {onboardingSlaActions.map((item) => formatPipelineAction(item)).join(", ")}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                {onboardingOperationalPipeline && (
+                                    <div className={`rounded-lg border px-3 py-3 text-xs ${qualityStatusClass(onboardingOperationalPipeline.status)}`} data-testid="onboarding-operational-pipeline">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span className="font-semibold">Operational Onboarding Pipeline</span>
+                                            <span className="font-mono">{qualityStatusLabel(onboardingOperationalPipeline.status)}</span>
+                                        </div>
+                                        <div className="mt-1">
+                                            current_stage: <span className="font-mono">{onboardingOperationalPipeline.current_stage_id ?? "n/a"}</span>
+                                            {" · "}blocked: <span className="font-mono">{onboardingOperationalPipeline.blocked ? "true" : "false"}</span>
+                                        </div>
+                                        {operationalPipelineBlockers.length > 0 && (
+                                            <div className="mt-2">
+                                                blockers: {operationalPipelineBlockers.map((item) => formatOperationalBlocker(item)).join(", ")}
+                                            </div>
+                                        )}
+                                        {operationalPipelineActions.length > 0 && (
+                                            <div className="mt-2">
+                                                next_actions: {operationalPipelineActions.map((item) => formatPipelineAction(item)).join(", ")}
+                                            </div>
+                                        )}
+                                        <div className="mt-2 space-y-2">
+                                            {operationalPipelineStages.map((stage: OnboardingOperationalStage) => (
+                                                <div
+                                                    key={stage.id}
+                                                    className={`rounded-md border px-2 py-2 ${qualityStatusClass(stage.status)}`}
+                                                >
+                                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                                        <span className="font-medium">{stage.label}</span>
+                                                        <span className="font-mono">{qualityStatusLabel(stage.status)}</span>
+                                                    </div>
+                                                    <div className="mt-1 text-[11px]">
+                                                        id: <span className="font-mono">{stage.id}</span>
+                                                        {" · "}owner: <span className="font-mono">{stage.owner_lane}</span>
+                                                        {" · "}required: <span className="font-mono">{stage.required ? "true" : "false"}</span>
+                                                    </div>
+                                                    {stage.blockers.length > 0 && (
+                                                        <div className="mt-1 text-[11px]">
+                                                            blockers: {stage.blockers.map((item) => formatOperationalBlocker(item)).join(", ")}
+                                                        </div>
+                                                    )}
+                                                    {stage.next_action && (
+                                                        <div className="mt-1 text-[11px]">
+                                                            next_action: {formatPipelineAction(stage.next_action)}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                                 <div className={`rounded-lg border px-3 py-3 text-xs ${readinessToneClass}`} data-testid="onboarding-readiness-score">
                                     <div className="flex items-center justify-between gap-3">
                                         <span className="font-semibold">Индекс готовности</span>

@@ -82,6 +82,10 @@ export default async function globalSetup(config: FullConfig) {
     const baseURL = process.env.PLAYWRIGHT_BASE_URL
         ?? (typeof projectBaseURL === "string" ? projectBaseURL : undefined)
         ?? "http://localhost:3000";
+    const loginTransitionTimeoutMs = Number.parseInt(
+        process.env.E2E_LOGIN_TRANSITION_TIMEOUT_MS ?? "60000",
+        10,
+    );
     const browser = await chromium.launch();
     const page = await browser.newPage();
 
@@ -89,13 +93,13 @@ export default async function globalSetup(config: FullConfig) {
     const logoutButton = page.getByTestId("logout-button");
 
     if (loginState !== "logged-in") {
-        await Promise.race([
-            page.waitForURL(keycloakHostPattern, { timeout: 20000 }),
-            logoutButton.waitFor({ state: "visible", timeout: 20000 }),
+        await Promise.any([
+            page.waitForURL(keycloakHostPattern, { timeout: loginTransitionTimeoutMs }),
+            logoutButton.waitFor({ state: "visible", timeout: loginTransitionTimeoutMs }),
         ]);
 
         if (keycloakHostPattern.test(page.url())) {
-            await page.waitForSelector("#username", { timeout: 20000 });
+            await page.waitForSelector("#username", { timeout: loginTransitionTimeoutMs });
             await page.fill("#username", username);
             await page.fill("#password", password);
             await page.click("#kc-login");

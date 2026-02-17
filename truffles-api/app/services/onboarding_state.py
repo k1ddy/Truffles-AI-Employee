@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
 from uuid import UUID
@@ -13,6 +13,8 @@ from app.models.branch import Branch
 from app.models.client_capability import ClientCapability
 from app.models.client_onboarding_contract import ClientOnboardingContract
 from app.models.client_settings import ClientSettings
+from app.models.conversation import Conversation
+from app.models.handover import Handover
 from app.models.knowledge_version import KnowledgeVersion
 from app.models.reference_pack import ReferencePack
 from app.models.specialist import Specialist
@@ -65,6 +67,11 @@ _DOCUMENT_INGESTION_CRITICAL_FIELDS = {
     "client_pack.policy.discounts",
     "client_pack.policy.guard_topics.refund",
 }
+
+_DEFAULT_REMINDER_1_MINUTES = 10
+_DEFAULT_REMINDER_2_MINUTES = 45
+_DEFAULT_ESCALATION_TIMEOUT_MINUTES = 120
+_SLA_ACTIVE_HANDOVER_STATUSES = ("pending", "active")
 
 
 @dataclass(frozen=True)
@@ -149,11 +156,51 @@ class OnboardingDocumentIngestion:
 
 
 @dataclass(frozen=True)
+class OnboardingSlaControlLoop:
+    status: str
+    reminder_1_minutes: int
+    reminder_2_minutes: int
+    escalation_timeout_minutes: int
+    pending_total: int
+    warning_total: int
+    breached_total: int
+    provider_status: str
+    provider_paid_until: Optional[str]
+    provider_days_to_renewal: Optional[int]
+    provider_alert_state: str
+    active_incidents: list[str]
+    recommended_actions: list[str]
+
+
+@dataclass(frozen=True)
+class OnboardingOperationalStage:
+    id: str
+    label: str
+    owner_lane: str
+    required: bool
+    status: str
+    blockers: list[str]
+    next_action: Optional[str]
+
+
+@dataclass(frozen=True)
+class OnboardingOperationalPipeline:
+    status: str
+    blocked: bool
+    current_stage_id: Optional[str]
+    blockers: list[str]
+    next_actions: list[str]
+    stages: list[OnboardingOperationalStage]
+
+
+@dataclass(frozen=True)
 class OnboardingScorecard:
     ready: bool
     checks: list[OnboardingScorecardCheck]
     missing: list[str]
     document_ingestion: Optional[OnboardingDocumentIngestion] = None
+    sla_control_loop: Optional[OnboardingSlaControlLoop] = None
+    operational_pipeline: Optional[OnboardingOperationalPipeline] = None
 
 
 def _parse_onboarding_state(value: Optional[str]) -> Optional[OnboardingStep]:
@@ -295,6 +342,157 @@ def _parse_iso_date(value: Optional[str]) -> Optional[date]:
         return date.fromisoformat(cleaned)
     except ValueError:
         return None
+
+
+def _normalize_timeout_minutes(value: Optional[int], *, fallback: int, minimum: int) -> int:
+    if value is None:
+        return fallback
+    if value < minimum:
+        return minimum
+    return value
+
+
+def _resolve_sla_thresholds(db: Session, branch: Branch) -> tuple[int, int, int]:
+    settings = db.query(ClientSettings).filter(ClientSettings.client_id == branch.client_id).first()
+    reminder_1 = _normalize_timeout_minutes(
+        settings.reminder_timeout_1 if settings else None,
+        fallback=_DEFAULT_REMINDER_1_MINUTES,
+        minimum=1,
+    )
+    reminder_2 = _normalize_timeout_minutes(
+        settings.reminder_timeout_2 if settings else None,
+        fallback=_DEFAULT_REMINDER_2_MINUTES,
+        minimum=reminder_1 + 1,
+    )
+    escalation = _normalize_timeout_minutes(
+        settings.auto_close_timeout if settings else None,
+        fallback=_DEFAULT_ESCALATION_TIMEOUT_MINUTES,
+        minimum=reminder_2 + 1,
+    )
+    return reminder_1, reminder_2, escalation
+
+
+def _build_sla_control_loop(
+    db: Session,
+    branch: Branch,
+    *,
+    inputs: OnboardingInputs,
+) -> OnboardingSlaControlLoop:
+    reminder_1, reminder_2, escalation_timeout = _resolve_sla_thresholds(db, branch)
+    now = datetime.now(timezone.utc)
+
+    unresolved_query = (
+        db.query(Handover)
+        .join(Conversation, Handover.conversation_id == Conversation.id)
+        .filter(
+            Handover.client_id == branch.client_id,
+            Conversation.branch_id == branch.id,
+            Handover.status.in_(_SLA_ACTIVE_HANDOVER_STATUSES),
+        )
+    )
+    pending_total = unresolved_query.count()
+    warning_cutoff = now - timedelta(minutes=reminder_2)
+    breach_cutoff = now - timedelta(minutes=escalation_timeout)
+    warning_total = unresolved_query.filter(
+        Handover.created_at <= warning_cutoff,
+        Handover.created_at > breach_cutoff,
+    ).count()
+    breached_total = unresolved_query.filter(Handover.created_at <= breach_cutoff).count()
+
+    provider_status = "not_required"
+    provider_paid_until: Optional[str] = None
+    provider_days_to_renewal: Optional[int] = None
+    provider_alert_state = "unknown"
+
+    whatsapp_required = (
+        inputs.has_capabilities
+        and inputs.capabilities.channels.whatsapp is True
+    )
+    whatsapp_binding = inputs.onboarding_contract.provider_binding.whatsapp
+    if whatsapp_required:
+        if not whatsapp_binding:
+            provider_status = "missing"
+        else:
+            provider_alert_state = (whatsapp_binding.alert_state or "unknown").strip() or "unknown"
+            provider_paid_until = whatsapp_binding.paid_until or whatsapp_binding.next_renewal_at
+            renewal_anchor = whatsapp_binding.next_renewal_at or whatsapp_binding.paid_until
+            renewal_until = _parse_iso_date(renewal_anchor)
+            if renewal_until is not None:
+                provider_days_to_renewal = (renewal_until - now.date()).days
+
+            if whatsapp_binding.rebind_required is True or whatsapp_binding.webhook_status == "rebind_required":
+                provider_status = "rebind_required"
+            elif whatsapp_binding.webhook_status != "configured":
+                provider_status = "webhook_not_configured"
+            elif provider_days_to_renewal is not None and provider_days_to_renewal < 0:
+                provider_status = "billing_expired"
+            elif provider_days_to_renewal is not None and provider_days_to_renewal <= 3:
+                provider_status = "renewal_due"
+            else:
+                provider_status = "configured"
+
+    incidents: list[str] = []
+    if breached_total > 0:
+        incidents.append("handover_sla_breached")
+    if warning_total > 0:
+        incidents.append("handover_sla_warning")
+    if provider_status == "missing":
+        incidents.append("provider_binding_missing")
+    elif provider_status == "webhook_not_configured":
+        incidents.append("provider_webhook_not_configured")
+    elif provider_status == "rebind_required":
+        incidents.append("provider_rebind_required")
+    elif provider_status == "billing_expired":
+        incidents.append("provider_billing_expired")
+    elif provider_status == "renewal_due":
+        incidents.append("provider_renewal_due")
+    if provider_alert_state == "critical":
+        incidents.append("provider_capability_alert_critical")
+    elif provider_alert_state == "warn":
+        incidents.append("provider_capability_alert_warn")
+
+    recommended_actions: list[str] = []
+    if breached_total > 0:
+        recommended_actions.append("resolve_breached_handovers")
+    elif warning_total > 0:
+        recommended_actions.append("review_pending_handovers")
+    if provider_status in {"missing", "webhook_not_configured", "rebind_required"}:
+        recommended_actions.append("fix_provider_binding")
+    if provider_status == "billing_expired":
+        recommended_actions.append("renew_provider_subscription_urgent")
+    elif provider_status == "renewal_due":
+        recommended_actions.append("renew_provider_subscription")
+    if provider_alert_state == "critical":
+        recommended_actions.append("run_provider_capability_check")
+    if not recommended_actions:
+        recommended_actions.append("monitor_sla_loop")
+
+    if (
+        breached_total > 0
+        or provider_status in {"missing", "webhook_not_configured", "rebind_required", "billing_expired"}
+        or provider_alert_state == "critical"
+    ):
+        status = "fail"
+    elif warning_total > 0 or provider_status in {"renewal_due", "unknown"} or provider_alert_state == "warn":
+        status = "warn"
+    else:
+        status = "pass"
+
+    return OnboardingSlaControlLoop(
+        status=status,
+        reminder_1_minutes=reminder_1,
+        reminder_2_minutes=reminder_2,
+        escalation_timeout_minutes=escalation_timeout,
+        pending_total=pending_total,
+        warning_total=warning_total,
+        breached_total=breached_total,
+        provider_status=provider_status,
+        provider_paid_until=provider_paid_until,
+        provider_days_to_renewal=provider_days_to_renewal,
+        provider_alert_state=provider_alert_state,
+        active_incidents=_deduplicate_strings(incidents),
+        recommended_actions=_deduplicate_strings(recommended_actions),
+    )
 
 
 def _get_latest_draft(db: Session, branch: Branch) -> Optional[KnowledgeVersion]:
@@ -601,7 +799,218 @@ def _deduplicate_strings(values: list[str]) -> list[str]:
     return unique
 
 
-def build_onboarding_scorecard_from_inputs(inputs: OnboardingInputs) -> OnboardingScorecard:
+def _collect_stage_blockers(
+    missing_codes: list[str],
+    *,
+    exact: set[str],
+    prefixes: tuple[str, ...] = (),
+) -> list[str]:
+    blockers: list[str] = []
+    for code in missing_codes:
+        if code in exact or any(code.startswith(prefix) for prefix in prefixes):
+            blockers.append(code)
+    return _deduplicate_strings(blockers)
+
+
+def _build_pipeline_stage(
+    *,
+    stage_id: str,
+    label: str,
+    owner_lane: str,
+    required: bool,
+    blockers: list[str],
+    next_action: Optional[str],
+    forced_status: Optional[str] = None,
+) -> OnboardingOperationalStage:
+    if forced_status is not None:
+        status = forced_status
+    elif not required:
+        status = "skip"
+    elif blockers:
+        status = "fail"
+    else:
+        status = "pass"
+    return OnboardingOperationalStage(
+        id=stage_id,
+        label=label,
+        owner_lane=owner_lane,
+        required=required,
+        status=status,
+        blockers=_deduplicate_strings(blockers),
+        next_action=next_action,
+    )
+
+
+def _build_operational_pipeline(
+    *,
+    inputs: OnboardingInputs,
+    go_no_go_missing: list[str],
+    sla_control_loop: Optional[OnboardingSlaControlLoop],
+) -> OnboardingOperationalPipeline:
+    contract_blockers = _collect_stage_blockers(
+        go_no_go_missing,
+        exact={
+            "capabilities",
+            "onboarding_contract",
+            "payment_confirmed",
+            "reference_pack_domain",
+            "reference_pack",
+            "reference_pack_integrity",
+        },
+        prefixes=("reference_pack_", "capability_mismatch:"),
+    )
+    channel_blockers = _collect_stage_blockers(
+        go_no_go_missing,
+        exact={
+            "instance_id",
+            "phone",
+            "branch_active",
+            "telegram_chat_id",
+            "webhook_secret",
+        },
+        prefixes=("provider_binding.whatsapp",),
+    )
+    knowledge_blockers = _collect_stage_blockers(
+        go_no_go_missing,
+        exact={
+            "knowledge_tag",
+            "knowledge_published",
+            "document_ingestion_invalid",
+        },
+        prefixes=("client_pack.",),
+    )
+    booking_blockers = _collect_stage_blockers(
+        go_no_go_missing,
+        exact={"working_hours", "booking_settings", "specialists"},
+    )
+    go_live_blockers = _deduplicate_strings(go_no_go_missing)
+
+    channels_required = (
+        inputs.has_capabilities
+        and (
+            inputs.capabilities.channels.whatsapp is True
+            or inputs.capabilities.channels.telegram is True
+        )
+    )
+    knowledge_required = (
+        inputs.has_capabilities
+        and inputs.capabilities.features.knowledge_upload is True
+    )
+    booking_required = (
+        inputs.has_capabilities
+        and inputs.capabilities.features.booking_mode is not None
+    )
+
+    stages: list[OnboardingOperationalStage] = [
+        _build_pipeline_stage(
+            stage_id="contract_alignment",
+            label="Contract alignment",
+            owner_lane="owner_admin",
+            required=True,
+            blockers=contract_blockers,
+            next_action="complete_contract_and_payment" if contract_blockers else None,
+        ),
+        _build_pipeline_stage(
+            stage_id="channel_readiness",
+            label="Channel readiness",
+            owner_lane="ops",
+            required=channels_required,
+            blockers=channel_blockers,
+            next_action="fix_channel_bindings" if channel_blockers else None,
+        ),
+        _build_pipeline_stage(
+            stage_id="knowledge_readiness",
+            label="Knowledge readiness",
+            owner_lane="knowledge",
+            required=knowledge_required,
+            blockers=knowledge_blockers,
+            next_action="publish_knowledge_pack" if knowledge_blockers else None,
+        ),
+        _build_pipeline_stage(
+            stage_id="booking_readiness",
+            label="Booking readiness",
+            owner_lane="operations",
+            required=booking_required,
+            blockers=booking_blockers,
+            next_action="configure_booking_runtime" if booking_blockers else None,
+        ),
+    ]
+
+    sla_required = sla_control_loop is not None
+    sla_blockers = (
+        list(sla_control_loop.active_incidents)
+        if sla_control_loop and sla_control_loop.status in {"warn", "fail"}
+        else []
+    )
+    sla_next_action = (
+        (sla_control_loop.recommended_actions[0] if sla_control_loop.recommended_actions else None)
+        if sla_control_loop and sla_control_loop.status in {"warn", "fail"}
+        else None
+    )
+    stages.append(
+        _build_pipeline_stage(
+            stage_id="sla_escalation_loop",
+            label="SLA/escalation loop",
+            owner_lane="support",
+            required=sla_required,
+            blockers=sla_blockers,
+            next_action=sla_next_action,
+            forced_status=sla_control_loop.status if sla_control_loop else None,
+        )
+    )
+    stages.append(
+        _build_pipeline_stage(
+            stage_id="go_live_control",
+            label="Go-live control",
+            owner_lane="owner_admin",
+            required=True,
+            blockers=go_live_blockers,
+            next_action="resolve_go_live_blockers" if go_live_blockers else None,
+        )
+    )
+
+    required_stages = [stage for stage in stages if stage.required]
+    blocked = any(stage.status == "fail" for stage in required_stages)
+    has_warning = any(stage.status == "warn" for stage in required_stages)
+    if blocked:
+        pipeline_status = "fail"
+    elif has_warning:
+        pipeline_status = "warn"
+    else:
+        pipeline_status = "pass"
+
+    current_stage = next(
+        (stage.id for stage in required_stages if stage.status in {"fail", "warn"}),
+        (required_stages[-1].id if required_stages else None),
+    )
+    blocker_list = _deduplicate_strings(
+        [code for stage in required_stages if stage.status == "fail" for code in stage.blockers]
+    )
+    next_actions = _deduplicate_strings(
+        [
+            stage.next_action
+            for stage in required_stages
+            if stage.status in {"fail", "warn"} and stage.next_action
+        ]
+    )
+    if not next_actions:
+        next_actions = ["monitor_go_live_readiness"]
+
+    return OnboardingOperationalPipeline(
+        status=pipeline_status,
+        blocked=blocked,
+        current_stage_id=current_stage,
+        blockers=blocker_list,
+        next_actions=next_actions,
+        stages=stages,
+    )
+
+
+def build_onboarding_scorecard_from_inputs(
+    inputs: OnboardingInputs,
+    *,
+    sla_control_loop: Optional[OnboardingSlaControlLoop] = None,
+) -> OnboardingScorecard:
     checks: list[OnboardingScorecardCheck] = []
     for step in ONBOARDING_STEPS:
         required = is_step_required(step, inputs)
@@ -639,17 +1048,32 @@ def build_onboarding_scorecard_from_inputs(inputs: OnboardingInputs) -> Onboardi
             else []
         ),
     )
+    operational_pipeline = _build_operational_pipeline(
+        inputs=inputs,
+        go_no_go_missing=go_no_go_missing,
+        sla_control_loop=sla_control_loop,
+    )
     return OnboardingScorecard(
         ready=len(go_no_go_missing) == 0,
         checks=checks,
         missing=go_no_go_missing,
         document_ingestion=document_ingestion_status,
+        sla_control_loop=sla_control_loop,
+        operational_pipeline=operational_pipeline,
     )
 
 
 def build_onboarding_scorecard(db: Session, branch: Branch) -> OnboardingScorecard:
     inputs = build_onboarding_inputs(db, branch)
-    return build_onboarding_scorecard_from_inputs(inputs)
+    sla_control_loop = _build_sla_control_loop(
+        db,
+        branch,
+        inputs=inputs,
+    )
+    return build_onboarding_scorecard_from_inputs(
+        inputs,
+        sla_control_loop=sla_control_loop,
+    )
 
 
 def derive_last_completed_step(inputs: OnboardingInputs) -> OnboardingStep:

@@ -2522,6 +2522,42 @@ export interface components {
             missing_fields?: string[];
             critical_missing_fields?: string[];
         };
+        OnboardingSlaControlLoop: {
+            /** @enum {string} */
+            status: "pass" | "warn" | "fail";
+            reminder_1_minutes: number;
+            reminder_2_minutes: number;
+            escalation_timeout_minutes: number;
+            pending_total: number;
+            warning_total: number;
+            breached_total: number;
+            /** @enum {string} */
+            provider_status: "configured" | "missing" | "webhook_not_configured" | "rebind_required" | "billing_expired" | "renewal_due" | "not_required" | "unknown";
+            provider_paid_until?: string | null;
+            provider_days_to_renewal?: number | null;
+            provider_alert_state?: string | null;
+            active_incidents?: string[];
+            recommended_actions?: string[];
+        };
+        OnboardingOperationalStage: {
+            id: string;
+            label: string;
+            owner_lane: string;
+            required: boolean;
+            /** @enum {string} */
+            status: "pass" | "warn" | "fail" | "skip";
+            blockers: string[];
+            next_action?: string | null;
+        };
+        OnboardingOperationalPipeline: {
+            /** @enum {string} */
+            status: "pass" | "warn" | "fail";
+            blocked: boolean;
+            current_stage_id?: string | null;
+            blockers: string[];
+            next_actions: string[];
+            stages: components["schemas"]["OnboardingOperationalStage"][];
+        };
         OnboardingScorecardResponse: {
             /** Format: uuid */
             branch_id: string;
@@ -2531,6 +2567,8 @@ export interface components {
             checks: components["schemas"]["OnboardingScorecardCheck"][];
             missing: string[];
             document_ingestion?: components["schemas"]["OnboardingDocumentIngestion"] | null;
+            sla_control_loop?: components["schemas"]["OnboardingSlaControlLoop"] | null;
+            operational_pipeline?: components["schemas"]["OnboardingOperationalPipeline"] | null;
             /** Format: date-time */
             generated_at: string;
         };

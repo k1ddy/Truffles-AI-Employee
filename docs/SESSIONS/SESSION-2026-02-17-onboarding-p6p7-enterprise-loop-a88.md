@@ -1,0 +1,22 @@
+# SESSION 2026-02-17-onboarding-p6p7-enterprise-loop-a88 — Session 2026-02-17-onboarding-p6p7-enterprise-loop-a88
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-17-onboarding-p6p7-enterprise-loop-a88.md
+- branch: feat/2026-02-17-onboarding-p6p7-enterprise-loop-a88
+- worktree: /home/zhan/worktrees/worktrees/2026-02-17-onboarding-p6p7-enterprise-loop-a88
+- base_ref: origin/main
+- scope: P6/P7 enterprise onboarding loop for Console Plane (SLA/escalation + operational pipeline)
+- done:
+  - Session created.
+  - Added SLA/escalation control loop to onboarding scorecard read model.
+  - Added operational onboarding pipeline stages with blockers/next actions.
+  - Extended scorecard API schema/serialization and console UI render blocks.
+  - Extended onboarding fleet diagnose output with SLA/pipeline signals.
+  - Completed backend/frontend checks and tests.
+- next:
+  - Prepare commit/PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-17-onboarding-p6p7-enterprise-loop-a88.md
+  - docs/REPORTS/2026-02-17-onboarding-p6p7-enterprise-loop-a88.md
+- last_updated: 2026-02-17
