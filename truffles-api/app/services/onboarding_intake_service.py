@@ -7,6 +7,12 @@ from typing import Any
 import yaml
 
 from app.services.knowledge_validation import get_missing_required_fields, get_required_fields_for_domain
+from app.services.pack_compiler_service import PackCompilerError, compile_pack_payload
+from app.services.reference_pack_integrity import (
+    REFERENCE_PACK_SCHEMA_VERSION,
+    build_reference_pack_metadata,
+    evaluate_reference_pack_integrity,
+)
 
 _TIME_RANGE_RE = re.compile(r"(?P<start>\d{1,2}:\d{2})\s*[-–]\s*(?P<end>\d{1,2}:\d{2})")
 _PRICE_RE = re.compile(r"(?P<price>\d[\d\s]{1,10})\s*(?:₸|тенге|kzt|тг)?", re.IGNORECASE)
@@ -186,6 +192,50 @@ class IntakeQuestionItem:
     blocking_go_live: bool
 
 
+@dataclass(frozen=True)
+class IntakeCompileSummary:
+    status: str
+    infra_valid: bool
+    schema_version: str | None
+    hash: str | None
+    pack_index_hash: str | None
+    signal_graph_present: bool
+    policy_bundle_present: bool
+    errors: list[str]
+
+
+@dataclass(frozen=True)
+class IntakeQualityDimension:
+    id: str
+    status: str
+    required: bool
+    details: list[str]
+
+
+@dataclass(frozen=True)
+class IntakeQualityMatrix:
+    status: str
+    infra_valid: bool
+    semantic_valid: bool
+    required_fields_count: int
+    missing_fields_count: int
+    critical_missing_fields_count: int
+    integrity_missing_count: int
+    missing_fields: list[str]
+    critical_missing_fields: list[str]
+    integrity_missing: list[str]
+    dimensions: list[IntakeQualityDimension]
+    regressions: list[str]
+    comparison_blocked: bool
+    comparison_block_reason: str | None
+
+
+@dataclass(frozen=True)
+class IntakePackQualitySummary:
+    compile: IntakeCompileSummary
+    quality_matrix: IntakeQualityMatrix
+
+
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     result = dict(base)
     for key, value in override.items():
@@ -242,6 +292,21 @@ def _field_priority(field: str) -> str:
     if field in _MEDIUM_FIELDS:
         return "medium"
     return "low"
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        token = str(value).strip()
+        if not token:
+            continue
+        lowered = token.casefold()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        normalized.append(token)
+    return normalized
 
 
 def _is_field_confirmed_by_json(field: str, client_data_json: dict[str, Any] | None) -> bool:
@@ -612,4 +677,250 @@ def build_intake_question_queue(
     return sorted(
         queue,
         key=lambda item: (_PRIORITY_ORDER.get(item.priority, 99), item.field),
+    )
+
+
+def build_intake_critical_missing_fields(missing_fields: list[str]) -> list[str]:
+    return [field for field in missing_fields if _field_priority(field) == "critical"]
+
+
+def build_intake_compile_summary(payload: dict[str, Any]) -> IntakeCompileSummary:
+    try:
+        compiled = compile_pack_payload(payload)
+    except PackCompilerError as exc:
+        errors = list(exc.errors) if exc.errors else [str(exc)]
+        return IntakeCompileSummary(
+            status="fail",
+            infra_valid=True,
+            schema_version=None,
+            hash=None,
+            pack_index_hash=None,
+            signal_graph_present=False,
+            policy_bundle_present=False,
+            errors=_dedupe_strings(errors),
+        )
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        return IntakeCompileSummary(
+            status="fail",
+            infra_valid=False,
+            schema_version=None,
+            hash=None,
+            pack_index_hash=None,
+            signal_graph_present=False,
+            policy_bundle_present=False,
+            errors=[f"compile_exception:{exc.__class__.__name__}"],
+        )
+
+    signal_graph = compiled.get("signal_graph")
+    policy_bundle = compiled.get("policy_bundle")
+    pack_index = compiled.get("pack_index")
+    pack_index_hash = pack_index.get("hash") if isinstance(pack_index, dict) else None
+    return IntakeCompileSummary(
+        status="pass",
+        infra_valid=True,
+        schema_version=compiled.get("schema_version"),
+        hash=compiled.get("hash"),
+        pack_index_hash=pack_index_hash if isinstance(pack_index_hash, str) else None,
+        signal_graph_present=isinstance(signal_graph, dict),
+        policy_bundle_present=isinstance(policy_bundle, dict),
+        errors=[],
+    )
+
+
+def _build_quality_dimension(
+    dimension_id: str,
+    *,
+    passed: bool,
+    details: list[str] | None = None,
+    required: bool = True,
+) -> IntakeQualityDimension:
+    return IntakeQualityDimension(
+        id=dimension_id,
+        status="pass" if passed else "fail",
+        required=required,
+        details=_dedupe_strings(list(details or [])),
+    )
+
+
+def _normalize_domain_slug(domain_slug: str | None) -> str | None:
+    if not isinstance(domain_slug, str):
+        return None
+    normalized = domain_slug.strip().lower()
+    return normalized or None
+
+
+def _collect_integrity_missing(domain_slug: str | None) -> list[str]:
+    normalized_domain = _normalize_domain_slug(domain_slug)
+    if not normalized_domain:
+        return ["reference_pack_domain"]
+    metadata = build_reference_pack_metadata(domain_slug=normalized_domain)
+    return evaluate_reference_pack_integrity(
+        domain_slug=normalized_domain,
+        schema_version=REFERENCE_PACK_SCHEMA_VERSION,
+        metadata=metadata,
+    )
+
+
+def _dimension_status_map(
+    dimensions: list[IntakeQualityDimension],
+) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for item in dimensions:
+        if not item.id:
+            continue
+        result[item.id] = item.status
+    return result
+
+
+def _compare_quality_baseline(
+    *,
+    compile_summary: IntakeCompileSummary,
+    quality_matrix: IntakeQualityMatrix,
+    baseline_summary: dict[str, Any] | None,
+) -> tuple[list[str], bool, str | None]:
+    if baseline_summary is None:
+        return [], False, None
+    if not isinstance(baseline_summary, dict):
+        return [], True, "baseline_not_object"
+
+    baseline_quality = baseline_summary.get("quality_matrix")
+    baseline_compile = baseline_summary.get("compile")
+    if not isinstance(baseline_quality, dict):
+        return [], True, "baseline_quality_matrix_missing"
+    if not isinstance(baseline_compile, dict):
+        return [], True, "baseline_compile_missing"
+
+    regressions: list[str] = []
+    if baseline_quality.get("status") == "pass" and quality_matrix.status != "pass":
+        regressions.append("status")
+    if baseline_quality.get("infra_valid") is True and not quality_matrix.infra_valid:
+        regressions.append("infra_valid")
+    if baseline_quality.get("semantic_valid") is True and not quality_matrix.semantic_valid:
+        regressions.append("semantic_valid")
+
+    baseline_missing = baseline_quality.get("missing_fields_count")
+    if isinstance(baseline_missing, int) and quality_matrix.missing_fields_count > baseline_missing:
+        regressions.append("missing_fields_count")
+    baseline_critical = baseline_quality.get("critical_missing_fields_count")
+    if isinstance(baseline_critical, int) and quality_matrix.critical_missing_fields_count > baseline_critical:
+        regressions.append("critical_missing_fields_count")
+
+    current_dimensions = _dimension_status_map(quality_matrix.dimensions)
+    baseline_dimensions = baseline_quality.get("dimensions")
+    if isinstance(baseline_dimensions, list):
+        for row in baseline_dimensions:
+            if not isinstance(row, dict):
+                continue
+            dimension_id = row.get("id")
+            baseline_status = row.get("status")
+            if not isinstance(dimension_id, str) or not isinstance(baseline_status, str):
+                continue
+            if baseline_status == "pass" and current_dimensions.get(dimension_id) != "pass":
+                regressions.append(f"dimension:{dimension_id}")
+
+    if baseline_compile.get("status") == "pass" and compile_summary.status != "pass":
+        regressions.append("compile.status")
+    if baseline_compile.get("policy_bundle_present") is True and not compile_summary.policy_bundle_present:
+        regressions.append("compile.policy_bundle_present")
+    if baseline_compile.get("signal_graph_present") is True and not compile_summary.signal_graph_present:
+        regressions.append("compile.signal_graph_present")
+
+    return _dedupe_strings(regressions), False, None
+
+
+def build_intake_pack_quality_summary(
+    payload: dict[str, Any],
+    *,
+    domain_slug: str | None = None,
+    require_booking: bool | None = None,
+    baseline_summary: dict[str, Any] | None = None,
+) -> IntakePackQualitySummary:
+    required_fields = get_required_fields_for_domain(
+        domain_slug=domain_slug,
+        require_booking=require_booking,
+    )
+    missing_fields = get_missing_required_fields(
+        payload,
+        domain_slug=domain_slug,
+        require_booking=require_booking,
+    )
+    critical_missing = build_intake_critical_missing_fields(missing_fields)
+    integrity_missing = _collect_integrity_missing(domain_slug)
+    compile_summary = build_intake_compile_summary(payload)
+
+    dimensions: list[IntakeQualityDimension] = [
+        _build_quality_dimension(
+            "intake_required_fields",
+            passed=len(missing_fields) == 0,
+            details=missing_fields[:20],
+        ),
+        _build_quality_dimension(
+            "intake_critical_fields",
+            passed=len(critical_missing) == 0,
+            details=critical_missing[:20],
+        ),
+        _build_quality_dimension(
+            "reference_pack_integrity",
+            passed=len(integrity_missing) == 0,
+            details=integrity_missing[:20],
+        ),
+        _build_quality_dimension(
+            "pack_compile",
+            passed=compile_summary.status == "pass",
+            details=compile_summary.errors[:20],
+        ),
+        _build_quality_dimension(
+            "policy_bundle_present",
+            passed=compile_summary.status == "pass" and compile_summary.policy_bundle_present,
+            details=(["policy_bundle_missing"] if compile_summary.status == "pass" and not compile_summary.policy_bundle_present else []),
+        ),
+        _build_quality_dimension(
+            "signal_graph_present",
+            passed=compile_summary.status == "pass" and compile_summary.signal_graph_present,
+            details=(["signal_graph_missing"] if compile_summary.status == "pass" and not compile_summary.signal_graph_present else []),
+        ),
+    ]
+
+    semantic_valid = all(item.status == "pass" for item in dimensions if item.required)
+    quality_matrix = IntakeQualityMatrix(
+        status="pass" if compile_summary.infra_valid and semantic_valid else "fail",
+        infra_valid=compile_summary.infra_valid,
+        semantic_valid=semantic_valid,
+        required_fields_count=len(required_fields),
+        missing_fields_count=len(missing_fields),
+        critical_missing_fields_count=len(critical_missing),
+        integrity_missing_count=len(integrity_missing),
+        missing_fields=_dedupe_strings(list(missing_fields)),
+        critical_missing_fields=_dedupe_strings(list(critical_missing)),
+        integrity_missing=_dedupe_strings(list(integrity_missing)),
+        dimensions=dimensions,
+        regressions=[],
+        comparison_blocked=False,
+        comparison_block_reason=None,
+    )
+
+    regressions, comparison_blocked, comparison_block_reason = _compare_quality_baseline(
+        compile_summary=compile_summary,
+        quality_matrix=quality_matrix,
+        baseline_summary=baseline_summary,
+    )
+    quality_matrix = IntakeQualityMatrix(
+        status=quality_matrix.status,
+        infra_valid=quality_matrix.infra_valid,
+        semantic_valid=quality_matrix.semantic_valid,
+        required_fields_count=quality_matrix.required_fields_count,
+        missing_fields_count=quality_matrix.missing_fields_count,
+        critical_missing_fields_count=quality_matrix.critical_missing_fields_count,
+        integrity_missing_count=quality_matrix.integrity_missing_count,
+        missing_fields=quality_matrix.missing_fields,
+        critical_missing_fields=quality_matrix.critical_missing_fields,
+        integrity_missing=quality_matrix.integrity_missing,
+        dimensions=quality_matrix.dimensions,
+        regressions=regressions,
+        comparison_blocked=comparison_blocked,
+        comparison_block_reason=comparison_block_reason,
+    )
+    return IntakePackQualitySummary(
+        compile=compile_summary,
+        quality_matrix=quality_matrix,
     )

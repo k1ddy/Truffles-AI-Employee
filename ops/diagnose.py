@@ -14736,7 +14736,11 @@ def _onboarding_quality_imports():
     if api_root not in sys.path:
         sys.path.insert(0, api_root)
     from app.services.knowledge_validation import get_missing_required_fields, get_required_fields_for_domain
-    from app.services.onboarding_intake_service import evaluate_intake_payload
+    from app.services.onboarding_intake_service import (
+        build_intake_pack_quality_summary,
+        build_intake_payload,
+        evaluate_intake_payload,
+    )
     from app.services.reference_pack_integrity import (
         REFERENCE_PACK_SCHEMA_VERSION,
         build_reference_pack_metadata,
@@ -14748,6 +14752,8 @@ def _onboarding_quality_imports():
         "get_missing_required_fields": get_missing_required_fields,
         "get_required_fields_for_domain": get_required_fields_for_domain,
         "evaluate_intake_payload": evaluate_intake_payload,
+        "build_intake_payload": build_intake_payload,
+        "build_intake_pack_quality_summary": build_intake_pack_quality_summary,
         "REFERENCE_PACK_SCHEMA_VERSION": REFERENCE_PACK_SCHEMA_VERSION,
         "build_reference_pack_metadata": build_reference_pack_metadata,
         "build_required_fields_checksum": build_required_fields_checksum,
@@ -14971,6 +14977,222 @@ def _run_onboarding_quality_smoke(args):
     if args.fail_on_regression and regressions:
         raise SystemExit(
             f"onboarding-quality-smoke: regressions ({', '.join(regressions)})"
+        )
+
+
+def _parse_onboarding_pack_quality_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py onboarding-pack-quality",
+        description=(
+            "Run document-driven onboarding pack compile + quality matrix "
+            "with optional baseline regression comparison."
+        ),
+    )
+    parser.add_argument("--domain-slug", default="beauty", help="Domain slug for minimum-data contract.")
+    parser.add_argument(
+        "--require-booking",
+        default="auto",
+        choices=["auto", "true", "false"],
+        help="Booking requirement mode: auto by domain, true, or false.",
+    )
+    parser.add_argument(
+        "--client-data-text",
+        default=None,
+        help="Inline client_data_text payload.",
+    )
+    parser.add_argument(
+        "--client-data-text-file",
+        default=None,
+        help="Path to client data markdown/text document.",
+    )
+    parser.add_argument(
+        "--client-data-json-file",
+        default=None,
+        help="Path to client_data_json file.",
+    )
+    parser.add_argument(
+        "--baseline-summary",
+        default=None,
+        help="Path to previous onboarding-pack-quality summary.json for regression compare.",
+    )
+    parser.add_argument(
+        "--save-summary",
+        default=None,
+        help="Write current summary json to this path.",
+    )
+    parser.add_argument(
+        "--fail-on-regression",
+        action="store_true",
+        help="Exit non-zero on baseline regressions.",
+    )
+    parser.add_argument("--json", action="store_true")
+    return parser.parse_args(argv)
+
+
+def _onboarding_pack_quality_resolve_require_booking(value):
+    token = str(value or "auto").strip().lower()
+    if token == "true":
+        return True
+    if token == "false":
+        return False
+    return None
+
+
+def _onboarding_pack_quality_load_json(path):
+    if not path:
+        return None
+    if not os.path.isfile(path):
+        raise SystemExit(f"onboarding-pack-quality: json file not found ({path})")
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception as exc:
+        raise SystemExit(f"onboarding-pack-quality: json parse failed ({exc})") from exc
+    if payload is not None and not isinstance(payload, dict):
+        raise SystemExit("onboarding-pack-quality: client_data_json must be an object")
+    return payload
+
+
+def _onboarding_pack_quality_load_text(file_path, inline_text):
+    parts = []
+    if file_path:
+        if not os.path.isfile(file_path):
+            raise SystemExit(f"onboarding-pack-quality: text file not found ({file_path})")
+        try:
+            with open(file_path, "r", encoding="utf-8") as handle:
+                parts.append(handle.read())
+        except Exception as exc:
+            raise SystemExit(f"onboarding-pack-quality: text file read failed ({exc})") from exc
+    if inline_text:
+        parts.append(str(inline_text))
+    if not parts:
+        return None
+    return "\n\n".join(parts).strip() or None
+
+
+def _onboarding_pack_quality_compile_to_dict(compile_summary):
+    return {
+        "status": compile_summary.status,
+        "infra_valid": bool(compile_summary.infra_valid),
+        "schema_version": compile_summary.schema_version,
+        "hash": compile_summary.hash,
+        "pack_index_hash": compile_summary.pack_index_hash,
+        "signal_graph_present": bool(compile_summary.signal_graph_present),
+        "policy_bundle_present": bool(compile_summary.policy_bundle_present),
+        "errors": list(compile_summary.errors or []),
+    }
+
+
+def _onboarding_pack_quality_matrix_to_dict(matrix):
+    return {
+        "status": matrix.status,
+        "infra_valid": bool(matrix.infra_valid),
+        "semantic_valid": bool(matrix.semantic_valid),
+        "required_fields_count": int(matrix.required_fields_count),
+        "missing_fields_count": int(matrix.missing_fields_count),
+        "critical_missing_fields_count": int(matrix.critical_missing_fields_count),
+        "integrity_missing_count": int(matrix.integrity_missing_count),
+        "missing_fields": list(matrix.missing_fields or []),
+        "critical_missing_fields": list(matrix.critical_missing_fields or []),
+        "integrity_missing": list(matrix.integrity_missing or []),
+        "dimensions": [
+            {
+                "id": item.id,
+                "status": item.status,
+                "required": bool(item.required),
+                "details": list(item.details or []),
+            }
+            for item in (matrix.dimensions or [])
+        ],
+        "regressions": list(matrix.regressions or []),
+        "comparison_blocked": bool(matrix.comparison_blocked),
+        "comparison_block_reason": matrix.comparison_block_reason,
+    }
+
+
+def _run_onboarding_pack_quality(args):
+    imports = _onboarding_quality_imports()
+    require_booking = _onboarding_pack_quality_resolve_require_booking(args.require_booking)
+    client_data_json = _onboarding_pack_quality_load_json(args.client_data_json_file)
+    client_data_text = _onboarding_pack_quality_load_text(
+        args.client_data_text_file,
+        args.client_data_text,
+    )
+    baseline_summary = _onboarding_pack_quality_load_json(args.baseline_summary)
+
+    payload = imports["build_intake_payload"](
+        client_data_json=client_data_json,
+        client_data_text=client_data_text,
+    )
+    missing_fields, missing_questions = imports["evaluate_intake_payload"](
+        payload,
+        domain_slug=args.domain_slug,
+        require_booking=require_booking,
+    )
+    quality_summary = imports["build_intake_pack_quality_summary"](
+        payload,
+        domain_slug=args.domain_slug,
+        require_booking=require_booking,
+        baseline_summary=baseline_summary,
+    )
+    compile_summary = _onboarding_pack_quality_compile_to_dict(quality_summary.compile)
+    quality_matrix = _onboarding_pack_quality_matrix_to_dict(quality_summary.quality_matrix)
+
+    summary = {
+        "status": quality_matrix["status"],
+        "domain_slug": args.domain_slug,
+        "require_booking": require_booking,
+        "input": {
+            "text_file": args.client_data_text_file,
+            "json_file": args.client_data_json_file,
+            "text_present": bool(client_data_text),
+            "json_present": isinstance(client_data_json, dict),
+        },
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "missing_questions": missing_questions,
+        "compile": compile_summary,
+        "quality_matrix": quality_matrix,
+    }
+
+    if args.save_summary:
+        output_dir = os.path.dirname(args.save_summary)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        with open(args.save_summary, "w", encoding="utf-8") as handle:
+            json.dump(summary, handle, ensure_ascii=False, indent=2)
+
+    if args.json:
+        print(json.dumps(summary, ensure_ascii=False))
+    else:
+        print(
+            json.dumps(
+                {
+                    "status": summary["status"],
+                    "domain_slug": summary["domain_slug"],
+                    "infra_valid": quality_matrix["infra_valid"],
+                    "semantic_valid": quality_matrix["semantic_valid"],
+                    "missing_fields_count": quality_matrix["missing_fields_count"],
+                    "critical_missing_fields_count": quality_matrix["critical_missing_fields_count"],
+                    "compile_status": compile_summary["status"],
+                    "regressions": quality_matrix["regressions"],
+                    "comparison_blocked": quality_matrix["comparison_blocked"],
+                },
+                ensure_ascii=False,
+            )
+        )
+
+    if quality_matrix["status"] != "pass":
+        raise SystemExit("onboarding-pack-quality: status=fail")
+
+    if args.fail_on_regression and quality_matrix["comparison_blocked"]:
+        raise SystemExit(
+            "onboarding-pack-quality: regression compare blocked "
+            f"({quality_matrix.get('comparison_block_reason') or 'unknown'})"
+        )
+    if args.fail_on_regression and quality_matrix["regressions"]:
+        raise SystemExit(
+            "onboarding-pack-quality: regressions "
+            f"({', '.join(quality_matrix['regressions'])})"
         )
 
 
@@ -15677,6 +15899,9 @@ if len(sys.argv) > 1 and sys.argv[1] == "onboarding-fleet-remediate":
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "onboarding-quality-smoke":
     _run_onboarding_quality_smoke(_parse_onboarding_quality_smoke_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "onboarding-pack-quality":
+    _run_onboarding_pack_quality(_parse_onboarding_pack_quality_args(sys.argv[2:]))
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "livecheck-auto":
     _run_livecheck_auto(_parse_livecheck_auto_args(sys.argv[2:]))
