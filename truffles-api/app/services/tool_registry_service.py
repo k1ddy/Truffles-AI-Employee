@@ -150,12 +150,21 @@ def _tool_action_block_reason(
     return None
 
 
-def _parse_datetime(value: str | None, *, fallback_tz: str | None = None) -> datetime | None:
+def _parse_datetime(
+    value: str | None,
+    *,
+    fallback_tz: str | None = None,
+    now: datetime | None = None,
+) -> datetime | None:
     if not value or not isinstance(value, str):
         return None
     text = value.strip()
     if not text:
         return None
+    timezone_name = fallback_tz or "Asia/Almaty"
+    reference_now = now or datetime.now(timezone.utc)
+    if reference_now.tzinfo is None:
+        reference_now = reference_now.replace(tzinfo=timezone.utc)
     try:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
@@ -164,13 +173,38 @@ def _parse_datetime(value: str | None, *, fallback_tz: str | None = None) -> dat
         try:
             import dateparser
 
-            parsed = dateparser.parse(text)
+            parsed = dateparser.parse(
+                text,
+                languages=["ru", "kk", "en"],
+                settings={
+                    "PREFER_DATES_FROM": "future",
+                    "RELATIVE_BASE": reference_now,
+                    "TIMEZONE": timezone_name,
+                    "TO_TIMEZONE": timezone_name,
+                    "RETURN_AS_TIMEZONE_AWARE": True,
+                },
+            )
         except Exception:
             parsed = None
     if not parsed:
+        time_only_match = re.fullmatch(r"(?P<hour>\d{1,2})[:.](?P<minute>\d{2})", text)
+        if time_only_match:
+            try:
+                hour = int(time_only_match.group("hour"))
+                minute = int(time_only_match.group("minute"))
+                if 0 <= hour <= 23 and 0 <= minute <= 59:
+                    from zoneinfo import ZoneInfo
+
+                    local_now = reference_now.astimezone(ZoneInfo(timezone_name))
+                    parsed = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                    if parsed <= local_now:
+                        parsed = parsed + timedelta(days=1)
+            except Exception:
+                parsed = None
+    if not parsed:
         return None
     if parsed.tzinfo is None:
-        tz_name = fallback_tz or "Asia/Almaty"
+        tz_name = timezone_name
         try:
             from zoneinfo import ZoneInfo
 
@@ -581,10 +615,15 @@ def _list_slots(
     specialist_id: UUID | None,
     date_value: str | None,
     duration_min: int | None,
+    now: datetime | None = None,
 ) -> tuple[str | None, str | None]:
     if not date_value:
         return None, "missing_date"
-    date_parsed = _parse_datetime(date_value, fallback_tz=branch.timezone if branch else None)
+    date_parsed = _parse_datetime(
+        date_value,
+        fallback_tz=branch.timezone if branch else None,
+        now=now,
+    )
     if not date_parsed:
         return None, "invalid_date"
 
@@ -1117,6 +1156,7 @@ def execute_tool_action(
             specialist_id=specialist_uuid,
             date_value=raw_date,
             duration_min=duration,
+            now=now,
         )
         if error:
             missing_type = "datetime" if error in {"missing_date", "invalid_date"} else None
@@ -1273,8 +1313,16 @@ def execute_tool_action(
         if not health.ready:
             provider_health_reason = health.reason
 
-        start_at = _parse_datetime(tool_args.get("start_at"), fallback_tz=branch.timezone)
-        end_at = _parse_datetime(tool_args.get("end_at"), fallback_tz=branch.timezone)
+        start_at = _parse_datetime(
+            tool_args.get("start_at"),
+            fallback_tz=branch.timezone,
+            now=now,
+        )
+        end_at = _parse_datetime(
+            tool_args.get("end_at"),
+            fallback_tz=branch.timezone,
+            now=now,
+        )
         specialist_id = tool_args.get("specialist_id")
         specialist_name = tool_args.get("specialist_name")
         specialist, specialist_selection, specialist_error = _resolve_specialist_for_booking(
@@ -1435,8 +1483,16 @@ def execute_tool_action(
                     "requested_time": requested_time,
                 },
             )
-        start_at = _parse_datetime(tool_args.get("start_at"), fallback_tz=branch.timezone)
-        end_at = _parse_datetime(tool_args.get("end_at"), fallback_tz=branch.timezone)
+        start_at = _parse_datetime(
+            tool_args.get("start_at"),
+            fallback_tz=branch.timezone,
+            now=now,
+        )
+        end_at = _parse_datetime(
+            tool_args.get("end_at"),
+            fallback_tz=branch.timezone,
+            now=now,
+        )
         updated, error = _reschedule_booking(
             db,
             appointment=appointment,

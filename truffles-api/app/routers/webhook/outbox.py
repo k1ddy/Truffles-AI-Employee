@@ -675,7 +675,8 @@ async def _process_outbox_rows(
         message = _resolve_outbox_message(outbox_id)
         if message and isinstance(message.message_metadata, dict):
             decision_meta = message.message_metadata.get("decision_meta")
-            if isinstance(decision_meta, dict) and decision_meta.get("action"):
+            # Do not overwrite an already-recorded inbound decision with transport-side errors.
+            if isinstance(decision_meta, dict) and decision_meta:
                 return
         if conversation:
             _record_decision_trace(

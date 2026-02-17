@@ -8,6 +8,12 @@ from app.services.intent_service import (
     ESCALATION_INTENTS,
     REJECTION_INTENTS,
     Intent,
+    _build_policy_core_response_format,
+    _build_customer_name_hint_response_format,
+    _build_service_query_hint_response_format,
+    _build_specialist_hint_response_format,
+    extract_customer_name_hint_llm,
+    extract_service_query_hint_llm,
     interpret_expected_reply,
     is_frustration_message,
     is_human_request_message,
@@ -444,6 +450,13 @@ class TestPolicyCoreTimeoutRetry:
         assert isinstance(first_kwargs.get("response_format"), dict)
         assert "response_format" not in second_kwargs or second_kwargs.get("response_format") is None
 
+    def test_policy_core_response_format_keeps_non_strict_dynamic_objects(self):
+        response_format = _build_policy_core_response_format(["calendar.book_slot"])
+        assert response_format["json_schema"]["strict"] is False
+        schema = response_format["json_schema"]["schema"]
+        assert schema["properties"]["tool_args"]["additionalProperties"] is True
+        assert schema["properties"]["slots"]["additionalProperties"] == {"type": "string"}
+
 
 class TestPolicyCoreErrorClassification:
     def test_maps_insufficient_quota_error(self, monkeypatch):
@@ -479,3 +492,90 @@ class TestPolicyCoreErrorClassification:
 
         assert result["ok"] is False
         assert result["error"] == "model_not_found"
+
+
+class TestCustomerNameHint:
+    def test_response_format_requires_all_declared_fields(self):
+        specialist_schema = _build_specialist_hint_response_format()["json_schema"]["schema"]
+        customer_schema = _build_customer_name_hint_response_format()["json_schema"]["schema"]
+        service_schema = _build_service_query_hint_response_format()["json_schema"]["schema"]
+
+        assert set(specialist_schema["required"]) == set(specialist_schema["properties"].keys())
+        assert set(customer_schema["required"]) == set(customer_schema["properties"].keys())
+        assert set(service_schema["required"]) == set(service_schema["properties"].keys())
+
+    def test_extracts_explicit_customer_name(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "customer_name": "Лена",
+            "confidence": 0.95,
+            "reason": "explicit_name_marker",
+            "language": "ru",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = extract_customer_name_hint_llm(
+                "Запишите меня к Айгерим на маникюр, имя Лена.",
+                specialist_name="Айгерим",
+            )
+
+        assert result["ok"] is True
+        assert result["customer_name"] == "Лена"
+        assert result["error"] is None
+
+    def test_rejects_name_matching_specialist(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "customer_name": "Айгерим",
+            "confidence": 0.99,
+            "reason": "name_found",
+            "language": "ru",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = extract_customer_name_hint_llm(
+                "Запишите меня к Айгерим на маникюр.",
+                specialist_name="Айгерим",
+            )
+
+        assert result["ok"] is False
+        assert result["customer_name"] is None
+        assert result["error"] == "matches_specialist"
+
+
+class TestServiceQueryHint:
+    def test_extracts_explicit_service_query(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "service_query": "маникюр",
+            "confidence": 0.93,
+            "reason": "explicit_service_in_text",
+            "language": "ru",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = extract_service_query_hint_llm(
+                "Запиши меня завтра на маникюр к Айгерим",
+            )
+
+        assert result["ok"] is True
+        assert result["service_query"] == "маникюр"
+        assert result["error"] is None
+
+    def test_returns_low_confidence_when_service_missing(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = {
+            "service_query": None,
+            "confidence": 0.21,
+            "reason": "service_not_explicit",
+            "language": "ru",
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = extract_service_query_hint_llm(
+                "Запиши меня к Айгерим завтра в 15:00",
+            )
+
+        assert result["ok"] is False
+        assert result["service_query"] is None
+        assert result["error"] == "low_confidence_or_empty"

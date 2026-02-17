@@ -546,6 +546,59 @@ def test_tool_registry_book_slot_allows_missing_specialist_when_not_explicit():
     assert kwargs["specialist_id"] is None
 
 
+def test_tool_registry_book_slot_time_only_uses_runtime_relative_base():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+    specialist = SimpleNamespace(id=uuid4(), name="Алия")
+    appointment = SimpleNamespace(id=uuid4(), specialist_id=specialist.id)
+    now = datetime(2026, 2, 17, 12, 0, tzinfo=timezone.utc)
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "get_provider_health",
+        return_value=SimpleNamespace(ready=True, reason=None),
+    ), patch.object(
+        tool_registry_service,
+        "_resolve_specialist_for_booking",
+        return_value=(specialist, "service_default", None),
+    ), patch.object(
+        tool_registry_service,
+        "_book_slot",
+        return_value=(appointment, None),
+    ) as book_slot_mock, patch.object(
+        tool_registry_service, "enqueue_appointment_sync", return_value=None
+    ), patch.object(
+        tool_registry_service, "schedule_default_reminders", return_value=[]
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.book_slot",
+            tool_args={"start_at": "11:00", "service_query": "Маникюр"},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+            user_name="Лена",
+            user_phone="+77011112233",
+            now=now,
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    _, kwargs = book_slot_mock.call_args
+    parsed_start_at = kwargs["start_at"]
+    assert isinstance(parsed_start_at, datetime)
+    assert parsed_start_at.year == 2026
+    assert parsed_start_at.month == 2
+    assert parsed_start_at.day == 18
+    assert parsed_start_at.hour == 11
+
+
 def test_tool_registry_list_slots_allows_sync_stale_provider_health():
     db = Mock()
     branch = SimpleNamespace(

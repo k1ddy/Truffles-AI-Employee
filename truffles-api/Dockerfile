@@ -18,6 +18,7 @@ COPY truffles-api/app/ ./app/
 COPY truffles-api/tests/ ./tests/
 COPY truffles-api/migrations/ ./migrations/
 COPY truffles-api/scripts/ ./scripts/
+COPY prompts/ ./prompts/
 COPY contracts/ ./contracts/
 COPY ops/ /ops/
 
