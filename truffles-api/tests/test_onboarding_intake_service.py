@@ -1,7 +1,12 @@
 from types import SimpleNamespace
 
 from app.routers import console as console_router
-from app.services.onboarding_intake_service import build_intake_payload, evaluate_intake_payload
+from app.services.onboarding_intake_service import (
+    build_intake_field_states,
+    build_intake_payload,
+    build_intake_question_queue,
+    evaluate_intake_payload,
+)
 
 
 def test_build_intake_payload_parses_text_into_pack_fields():
@@ -80,6 +85,47 @@ def test_build_intake_payload_keeps_salon_compatibility_aliases():
     assert salon.get("address", {}).get("full") == "Abay 10"
 
 
+def test_build_intake_payload_ignores_markdown_noise_blocks():
+    payload = build_intake_payload(
+        client_data_json=None,
+        client_data_text="""
+        ## Demo package
+        Название: Demo Salon
+        Город: Алматы
+        Адрес: Абая 10
+        График: Пн-Вс 09:00-21:00
+        Языки: ru, kk
+        - Маникюр 12000 тг 60 мин
+
+        ```json
+        {
+          "city": "Шымкент",
+          "name": "Noise"
+        }
+        ```
+
+        | field | value |
+        | --- | --- |
+        | city | Astana |
+        """,
+    )
+
+    business = payload.get("client_pack", {}).get("business", {})
+    location = payload.get("client_pack", {}).get("location", {})
+    operations = payload.get("client_pack", {}).get("operations", {})
+    services = payload.get("client_pack", {}).get("services_catalog", {}).get("services", [])
+
+    assert business.get("name") == "Demo Salon"
+    assert location.get("city") == "Алматы"
+    assert location.get("address", {}).get("full") == "Абая 10"
+    assert operations.get("hours", {}).get("open") == "09:00"
+    assert operations.get("hours", {}).get("close") == "21:00"
+    assert len(services) == 1
+    assert services[0].get("name") == "Маникюр"
+    assert services[0].get("price") == 12000
+    assert services[0].get("duration_minutes") == 60
+
+
 def test_evaluate_intake_payload_returns_missing_questions():
     payload = {"client_pack": {"salon": {"name": "Demo Salon"}}}
     missing, questions = evaluate_intake_payload(payload)
@@ -122,6 +168,52 @@ def test_evaluate_intake_payload_skips_booking_for_non_booking_domain():
     assert "client_pack.booking.bot_can_confirm" not in missing
     assert "client_pack.service_duration_estimates" not in missing
     assert all("записи" not in question.casefold() for question in questions)
+
+
+def test_build_intake_field_states_marks_confirmed_assumed_unknown():
+    client_data_json = {
+        "client_pack": {
+            "business": {"name": "Demo Legal"},
+            "communication": {"languages": ["ru", "kk"]},
+            "catalog": {"summary": "Legal consultations"},
+        }
+    }
+    payload = build_intake_payload(
+        client_data_json=client_data_json,
+        client_data_text=None,
+    )
+
+    states = build_intake_field_states(
+        payload,
+        domain_slug="legal",
+        client_data_json=client_data_json,
+    )
+    by_field = {item.field: item for item in states}
+
+    assert by_field["client_pack.business.name"].status == "confirmed"
+    assert by_field["client_pack.communication.languages"].status == "confirmed"
+    assert by_field["client_pack.location.city"].status == "unknown"
+    assert by_field["client_pack.policy.hard_law"].status == "unknown"
+
+
+def test_build_intake_question_queue_prioritizes_blockers():
+    missing_fields = [
+        "client_pack.business.name",
+        "client_pack.policy.hard_law",
+        "client_pack.location.city",
+    ]
+
+    queue = build_intake_question_queue(missing_fields)
+
+    assert [item.field for item in queue] == [
+        "client_pack.policy.hard_law",
+        "client_pack.location.city",
+        "client_pack.business.name",
+    ]
+    assert queue[0].priority == "critical"
+    assert queue[0].blocking_go_live is True
+    assert queue[1].priority == "high"
+    assert queue[2].priority == "medium"
 
 
 def test_build_capabilities_from_purchased_services_maps_flags():

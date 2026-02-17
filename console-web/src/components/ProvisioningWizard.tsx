@@ -32,6 +32,9 @@ type OnboardingStatus = components["schemas"]["OnboardingStatusResponse"];
 type OnboardingStepStatus = components["schemas"]["OnboardingStepStatus"];
 type OnboardingScorecard = components["schemas"]["OnboardingScorecardResponse"];
 type OnboardingScorecardCheck = components["schemas"]["OnboardingScorecardCheck"];
+type OnboardingDocumentIngestion = components["schemas"]["OnboardingDocumentIngestion"];
+type OnboardingIntakeFieldState = components["schemas"]["OnboardingIntakeFieldState"];
+type OnboardingIntakeQuestion = components["schemas"]["OnboardingIntakeQuestion"];
 
 type AgentRole = ConsoleRole;
 type OnboardingMode = "autopilot" | "manual";
@@ -103,6 +106,7 @@ const MISSING_LABELS: Record<string, string> = {
     "provider_binding.whatsapp.rebind_required": "Provider binding: rebind required",
     "provider_binding.whatsapp.alert_state": "Provider binding: capability check (alert_state)",
     "provider_binding.whatsapp.capability_check_failed": "Provider binding: capability check failed (alert_state=critical)",
+    document_ingestion_invalid: "Document ingestion gate",
     "client_pack.business.name": "Профиль бизнеса: название",
     "client_pack.location.city": "Локация: город",
     "client_pack.location.address.full": "Локация: адрес",
@@ -457,6 +461,52 @@ function onboardingStepStatusClass(status: "complete" | "available" | "locked" |
         return "border-border/60 bg-muted/40 text-muted-foreground";
     }
     return "border-amber-200 bg-amber-50 text-amber-800";
+}
+
+function intakePriorityLabel(value?: string): string {
+    if (value === "critical") {
+        return "critical";
+    }
+    if (value === "high") {
+        return "high";
+    }
+    if (value === "medium") {
+        return "medium";
+    }
+    return "low";
+}
+
+function intakePriorityClass(value?: string): string {
+    if (value === "critical") {
+        return "border-destructive/30 bg-destructive/10 text-destructive";
+    }
+    if (value === "high") {
+        return "border-amber-300/60 bg-amber-50 text-amber-800";
+    }
+    if (value === "medium") {
+        return "border-blue-300/60 bg-blue-50 text-blue-800";
+    }
+    return "border-border/60 bg-muted/40 text-muted-foreground";
+}
+
+function intakeStatusLabel(value?: string): string {
+    if (value === "confirmed") {
+        return "confirmed";
+    }
+    if (value === "assumed") {
+        return "assumed";
+    }
+    return "unknown";
+}
+
+function intakeStatusClass(value?: string): string {
+    if (value === "confirmed") {
+        return "border-green-200 bg-green-50 text-green-800";
+    }
+    if (value === "assumed") {
+        return "border-blue-300/60 bg-blue-50 text-blue-800";
+    }
+    return "border-border/60 bg-muted/40 text-muted-foreground";
 }
 
 function normalizeCapabilities(payload?: CapabilitiesPayload | null): CapabilitiesPayload {
@@ -1657,6 +1707,8 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const hasWorkingHours = isNonEmptyRecord(branchData?.working_hours);
     const hasBookingSettings = isNonEmptyRecord(branchData?.booking_settings);
     const bookingEnabled = capabilitiesPreview.features?.booking_mode != null;
+    const knowledgeUploadEnabled = capabilitiesPreview.features?.knowledge_upload === true;
+    const documentIngestionGate: OnboardingDocumentIngestion | null = onboardingScorecard?.document_ingestion ?? null;
 
     const readinessItems = useMemo(() => {
         return [
@@ -1681,8 +1733,14 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             {
                 id: "knowledge_tag",
                 label: "Knowledge tag",
-                required: capabilitiesPreview.features?.knowledge_upload === true,
+                required: knowledgeUploadEnabled,
                 ok: !!branchData?.knowledge_tag,
+            },
+            {
+                id: "document_ingestion",
+                label: "Document ingestion gate",
+                required: knowledgeUploadEnabled,
+                ok: knowledgeUploadEnabled ? Boolean(documentIngestionGate?.valid) : true,
             },
             {
                 id: "booking_hours",
@@ -1725,6 +1783,8 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         branchData,
         capabilitiesPreview,
         bookingEnabled,
+        knowledgeUploadEnabled,
+        documentIngestionGate?.valid,
         hasOnboardingContractRecord,
         paymentStatusEffective,
         referencePackDomainSlug,
@@ -1748,6 +1808,14 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             ) ?? []
         ),
         [onboardingScorecard?.checks],
+    );
+    const documentIngestionMissing = useMemo(
+        () => documentIngestionGate?.missing_fields ?? [],
+        [documentIngestionGate?.missing_fields],
+    );
+    const documentIngestionCriticalMissing = useMemo(
+        () => documentIngestionGate?.critical_missing_fields ?? [],
+        [documentIngestionGate?.critical_missing_fields],
     );
     const goNoGoMissing = useMemo(
         () => (scorecardMissing.length > 0 ? scorecardMissing : (stepStateById.go_no_go?.missing ?? [])),
@@ -2813,6 +2881,59 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                         {autopilotResult.intake.missing_questions.length > 0 && (
                             <div>
                                 Вопросы для дозаполнения: {autopilotResult.intake.missing_questions.join(" | ")}
+                            </div>
+                        )}
+                        {(autopilotResult.intake.field_states?.length ?? 0) > 0 && (
+                            <div className="rounded-lg border border-border/60 bg-muted/10 p-2">
+                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                    Intake field states
+                                </div>
+                                <div className="mt-2 space-y-1">
+                                    {(autopilotResult.intake.field_states ?? []).map((item: OnboardingIntakeFieldState) => (
+                                        <div
+                                            key={`${item.field}-${item.status}`}
+                                            className="grid grid-cols-1 gap-1 rounded-md border border-border/60 bg-background px-2 py-2 md:grid-cols-[1fr_auto_auto]"
+                                        >
+                                            <div className="font-mono text-[11px]">
+                                                {formatMissingRequirement(item.field)}
+                                            </div>
+                                            <div className={`inline-flex rounded px-2 py-0.5 text-[10px] font-semibold ${intakeStatusClass(item.status)}`}>
+                                                {intakeStatusLabel(item.status)}
+                                            </div>
+                                            <div className={`inline-flex rounded px-2 py-0.5 text-[10px] font-semibold ${intakePriorityClass(item.priority)}`}>
+                                                {intakePriorityLabel(item.priority)}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        {(autopilotResult.intake.question_queue?.length ?? 0) > 0 && (
+                            <div className="rounded-lg border border-border/60 bg-muted/10 p-2">
+                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                    Prioritized question queue
+                                </div>
+                                <div className="mt-2 space-y-1">
+                                    {(autopilotResult.intake.question_queue ?? []).map((item: OnboardingIntakeQuestion, index: number) => (
+                                        <div
+                                            key={`${item.field}-${index}`}
+                                            className="rounded-md border border-border/60 bg-background px-2 py-2"
+                                        >
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="font-mono text-[11px]">{formatMissingRequirement(item.field)}</span>
+                                                <span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-semibold ${intakePriorityClass(item.priority)}`}>
+                                                    {intakePriorityLabel(item.priority)}
+                                                </span>
+                                                {item.blocking_go_live && (
+                                                    <span className="inline-flex rounded bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold text-destructive">
+                                                        blocking go-live
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="mt-1 text-[11px] text-muted-foreground">{item.question}</div>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         )}
                         <div className="pt-1">
@@ -3967,6 +4088,36 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                     {scorecardFailedChecks.length > 0 && (
                                         <div className="mt-2">
                                             failed checks: {scorecardFailedChecks.map((item) => item.id).join(", ")}
+                                        </div>
+                                    )}
+                                    {documentIngestionGate && (
+                                        <div
+                                            className={`mt-2 rounded-md border px-2 py-2 ${
+                                                documentIngestionGate.status === "pass"
+                                                    ? "border-green-200 bg-green-50 text-green-800"
+                                                    : documentIngestionGate.status === "fail"
+                                                        ? "border-destructive/30 bg-destructive/10 text-destructive"
+                                                        : "border-border/60 bg-muted/40 text-muted-foreground"
+                                            }`}
+                                            data-testid="onboarding-document-ingestion"
+                                        >
+                                            <div className="font-semibold">
+                                                Document ingestion: {documentIngestionGate.status}
+                                            </div>
+                                            <div className="mt-1 text-[11px]">
+                                                source: <span className="font-mono">{documentIngestionGate.source}</span> · valid:{" "}
+                                                <span className="font-mono">{documentIngestionGate.valid ? "true" : "false"}</span>
+                                            </div>
+                                            {documentIngestionMissing.length > 0 && (
+                                                <div className="mt-1 text-[11px]">
+                                                    missing_fields: {documentIngestionMissing.map((item) => formatMissingRequirement(item)).join(", ")}
+                                                </div>
+                                            )}
+                                            {documentIngestionCriticalMissing.length > 0 && (
+                                                <div className="mt-1 text-[11px] font-semibold">
+                                                    critical_missing: {documentIngestionCriticalMissing.map((item) => formatMissingRequirement(item)).join(", ")}
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>

@@ -1,17 +1,36 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
 import yaml
 
-from app.services.knowledge_validation import get_missing_required_fields
+from app.services.knowledge_validation import get_missing_required_fields, get_required_fields_for_domain
 
 _TIME_RANGE_RE = re.compile(r"(?P<start>\d{1,2}:\d{2})\s*[-–]\s*(?P<end>\d{1,2}:\d{2})")
 _PRICE_RE = re.compile(r"(?P<price>\d[\d\s]{1,10})\s*(?:₸|тенге|kzt|тг)?", re.IGNORECASE)
 _DURATION_RE = re.compile(r"(?P<minutes>\d{1,3})\s*(?:мин|min|minutes?)", re.IGNORECASE)
 _KEY_VALUE_SPLIT_RE = re.compile(r"\s*[:=]\s*")
 _BULLET_PREFIX_RE = re.compile(r"^[\-\*\u2022]\s*")
+_FENCED_BLOCK_RE = re.compile(r"```(?P<lang>[^\n`]*)\n(?P<body>.*?)```", re.DOTALL)
+_INTAKE_TOP_LEVEL_HINTS = {
+    "business",
+    "salon",
+    "location",
+    "operations",
+    "communication",
+    "catalog",
+    "services_catalog",
+    "service_duration_estimates",
+    "booking",
+    "guest_policy",
+    "safety",
+    "pricing",
+    "quality",
+    "price_list",
+    "policy",
+}
 
 _DAY_ALIASES: dict[str, tuple[str, ...]] = {
     "mon": ("mon", "monday", "пн", "понедельник"),
@@ -91,6 +110,81 @@ _MISSING_QUESTIONS: dict[str, str] = {
     "client_pack.policy.guard_topics.refund": "Добавьте ключевые слова/правила по возврату.",
 }
 
+_PRIORITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+_CRITICAL_FIELDS = {
+    "client_pack.booking.collect_fields",
+    "client_pack.booking.bot_can_confirm",
+    "client_pack.policy.hard_law",
+    "client_pack.policy.payment_info",
+    "client_pack.policy.reschedule",
+    "client_pack.policy.cancel",
+    "client_pack.policy.medical",
+    "client_pack.policy.legal",
+    "client_pack.policy.complaint",
+    "client_pack.policy.discounts",
+    "client_pack.policy.guard_topics.refund",
+}
+_HIGH_FIELDS = {
+    "client_pack.location.city",
+    "client_pack.location.address.full",
+    "client_pack.operations.hours.days",
+    "client_pack.operations.hours.open",
+    "client_pack.operations.hours.close",
+    "client_pack.communication.languages",
+    "client_pack.services_catalog.services",
+    "client_pack.price_list",
+    "client_pack.service_duration_estimates",
+}
+_MEDIUM_FIELDS = {
+    "client_pack.business.name",
+    "client_pack.catalog.summary",
+    "client_pack.guest_policy",
+    "client_pack.safety.medical_note",
+    "client_pack.pricing.price_from_reason",
+    "client_pack.quality.expectations_photo",
+}
+_CONFIRMED_ALIASES: dict[str, tuple[str, ...]] = {
+    "client_pack.business.name": (
+        "client_pack.salon.name",
+    ),
+    "client_pack.location.city": (
+        "client_pack.salon.city",
+    ),
+    "client_pack.location.address.full": (
+        "client_pack.salon.address.full",
+    ),
+    "client_pack.operations.hours.days": (
+        "client_pack.salon.hours.days",
+    ),
+    "client_pack.operations.hours.open": (
+        "client_pack.salon.hours.open",
+    ),
+    "client_pack.operations.hours.close": (
+        "client_pack.salon.hours.close",
+    ),
+    "client_pack.catalog.summary": (
+        "client_pack.salon.services_summary",
+    ),
+    "client_pack.communication.languages": (
+        "client_pack.salon.communication.languages",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class IntakeFieldState:
+    field: str
+    status: str
+    priority: str
+
+
+@dataclass(frozen=True)
+class IntakeQuestionItem:
+    field: str
+    question: str
+    priority: str
+    blocking_go_live: bool
+
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     result = dict(base)
@@ -119,6 +213,46 @@ def _set_nested_value(payload: dict[str, Any], path: str, value: Any) -> None:
             cursor[key] = existing
         cursor = existing
     cursor[keys[-1]] = value
+
+
+def _get_nested_value(payload: dict[str, Any], path: str) -> Any:
+    current: Any = payload
+    for key in path.split("."):
+        if not isinstance(current, dict) or key not in current:
+            return None
+        current = current[key]
+    return current
+
+
+def _is_present(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, dict)):
+        return bool(value)
+    return True
+
+
+def _field_priority(field: str) -> str:
+    if field in _CRITICAL_FIELDS:
+        return "critical"
+    if field in _HIGH_FIELDS:
+        return "high"
+    if field in _MEDIUM_FIELDS:
+        return "medium"
+    return "low"
+
+
+def _is_field_confirmed_by_json(field: str, client_data_json: dict[str, Any] | None) -> bool:
+    if not isinstance(client_data_json, dict):
+        return False
+    normalized = _normalize_payload(client_data_json)
+    candidates = (field, *_CONFIRMED_ALIASES.get(field, ()))
+    for path in candidates:
+        if _is_present(_get_nested_value(normalized, path)):
+            return True
+    return False
 
 
 def _append_service(payload: dict[str, Any], service: dict[str, Any]) -> None:
@@ -221,7 +355,10 @@ def _parse_hours_value(value: str) -> dict[str, Any] | None:
 def _parse_services_from_text(text: str) -> list[dict[str, Any]]:
     services: list[dict[str, Any]] = []
     for raw_line in text.splitlines():
-        line = _BULLET_PREFIX_RE.sub("", raw_line).strip()
+        stripped_line = raw_line.strip()
+        if not _BULLET_PREFIX_RE.match(stripped_line):
+            continue
+        line = _BULLET_PREFIX_RE.sub("", stripped_line).strip()
         if not line:
             continue
         if _KEY_VALUE_SPLIT_RE.search(line):
@@ -271,6 +408,9 @@ def _parse_key_value_text(text: str) -> dict[str, Any]:
         key, value = chunks[0].strip(), chunks[1].strip()
         if not key or not value:
             continue
+        # Heuristic guard: markdown docs may contain long pseudo-key lines in tables/examples.
+        if len(key) > 80 or len(value) > 500:
+            continue
         field = _match_alias(key)
         if not field:
             continue
@@ -298,14 +438,48 @@ def _parse_key_value_text(text: str) -> dict[str, Any]:
     return payload
 
 
+def _markdown_to_intake_text(text: str) -> str:
+    if not text:
+        return ""
+    in_fence = False
+    lines: list[str] = []
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if stripped.startswith("#") or stripped.startswith(">"):
+            continue
+        if stripped.startswith("|"):
+            continue
+        lines.append(raw_line)
+    return "\n".join(lines).strip()
+
+
 def _extract_yaml_payload(text: str) -> dict[str, Any] | None:
-    try:
-        parsed = yaml.safe_load(text)
-    except Exception:
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    return _normalize_payload(parsed)
+    def _looks_like_intake_payload(parsed: dict[str, Any]) -> bool:
+        if isinstance(parsed.get("client_pack"), dict):
+            return True
+        return any(key in parsed for key in _INTAKE_TOP_LEVEL_HINTS)
+
+    candidates = [text]
+    for match in _FENCED_BLOCK_RE.finditer(text):
+        lang = (match.group("lang") or "").strip().casefold()
+        if lang and lang not in {"yaml", "yml", "json"}:
+            continue
+        body = (match.group("body") or "").strip()
+        if body:
+            candidates.append(body)
+    for candidate in candidates:
+        try:
+            parsed = yaml.safe_load(candidate)
+        except Exception:
+            continue
+        if isinstance(parsed, dict) and _looks_like_intake_payload(parsed):
+            return _normalize_payload(parsed)
+    return None
 
 
 def build_intake_payload(
@@ -324,14 +498,15 @@ def build_intake_payload(
         _apply_salon_compatibility_aliases(payload)
         return payload
 
+    cleaned_text = _markdown_to_intake_text(normalized_text)
     yaml_payload = _extract_yaml_payload(normalized_text)
     if yaml_payload:
         payload = _deep_merge(payload, yaml_payload)
     else:
-        kv_payload = _parse_key_value_text(normalized_text)
+        kv_payload = _parse_key_value_text(cleaned_text)
         payload = _deep_merge(payload, kv_payload)
 
-    detected_languages = _detect_languages(normalized_text)
+    detected_languages = _detect_languages(cleaned_text)
     if detected_languages:
         existing_languages = (
             payload.get("client_pack", {})
@@ -341,7 +516,7 @@ def build_intake_payload(
         if not isinstance(existing_languages, list) or not existing_languages:
             _set_nested_value(payload, "client_pack.communication.languages", detected_languages)
 
-    parsed_services = _parse_services_from_text(normalized_text)
+    parsed_services = _parse_services_from_text(cleaned_text)
     for service in parsed_services:
         _append_service(payload, service)
 
@@ -385,3 +560,56 @@ def evaluate_intake_payload(
     )
     questions = build_missing_questions(missing)
     return missing, questions
+
+
+def build_intake_field_states(
+    payload: dict[str, Any],
+    *,
+    domain_slug: str | None = None,
+    require_booking: bool | None = None,
+    missing_fields: list[str] | None = None,
+    client_data_json: dict[str, Any] | None = None,
+) -> list[IntakeFieldState]:
+    required_fields = get_required_fields_for_domain(
+        domain_slug=domain_slug,
+        require_booking=require_booking,
+    )
+    missing = (
+        list(missing_fields)
+        if missing_fields is not None
+        else get_missing_required_fields(
+            payload,
+            domain_slug=domain_slug,
+            require_booking=require_booking,
+        )
+    )
+    missing_set = set(missing)
+    states: list[IntakeFieldState] = []
+    for field in required_fields:
+        priority = _field_priority(field)
+        if field in missing_set:
+            states.append(IntakeFieldState(field=field, status="unknown", priority=priority))
+            continue
+        status = "confirmed" if _is_field_confirmed_by_json(field, client_data_json) else "assumed"
+        states.append(IntakeFieldState(field=field, status=status, priority=priority))
+    return states
+
+
+def build_intake_question_queue(
+    missing_fields: list[str],
+) -> list[IntakeQuestionItem]:
+    queue: list[IntakeQuestionItem] = []
+    for field in missing_fields:
+        priority = _field_priority(field)
+        queue.append(
+            IntakeQuestionItem(
+                field=field,
+                question=_MISSING_QUESTIONS.get(field, f"Уточните значение поля: {field}"),
+                priority=priority,
+                blocking_go_live=priority == "critical",
+            )
+        )
+    return sorted(
+        queue,
+        key=lambda item: (_PRIORITY_ORDER.get(item.priority, 99), item.field),
+    )

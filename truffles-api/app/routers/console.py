@@ -145,6 +145,7 @@ from app.schemas.console import (
     ConsoleOnboardingContractPatchRequest,
     ConsoleOnboardingContractRecord,
     ConsoleOnboardingContractResponse,
+    ConsoleOnboardingDocumentIngestion,
     ConsoleOnboardingScorecardCheck,
     ConsoleOnboardingScorecardResponse,
     ConsoleOnboardingStatusResponse,
@@ -294,7 +295,12 @@ from app.services.onboarding_contract_service import (
     onboarding_contract_payload_to_dict,
     validate_onboarding_contract_payload,
 )
-from app.services.onboarding_intake_service import build_intake_payload, evaluate_intake_payload
+from app.services.onboarding_intake_service import (
+    build_intake_field_states,
+    build_intake_payload,
+    build_intake_question_queue,
+    evaluate_intake_payload,
+)
 from app.services.onboarding_state import (
     OnboardingStep,
     advance_onboarding_step,
@@ -918,6 +924,16 @@ def _serialize_onboarding_scorecard(
     branch: Branch,
     scorecard,
 ) -> ConsoleOnboardingScorecardResponse:
+    document_ingestion = getattr(scorecard, "document_ingestion", None)
+    document_ingestion_payload = None
+    if document_ingestion is not None:
+        document_ingestion_payload = ConsoleOnboardingDocumentIngestion(
+            status=document_ingestion.status,
+            valid=document_ingestion.valid,
+            source=document_ingestion.source,
+            missing_fields=document_ingestion.missing_fields,
+            critical_missing_fields=document_ingestion.critical_missing_fields,
+        )
     return ConsoleOnboardingScorecardResponse(
         branch_id=branch.id,
         status="pass" if scorecard.ready else "fail",
@@ -932,6 +948,7 @@ def _serialize_onboarding_scorecard(
             for check in scorecard.checks
         ],
         missing=scorecard.missing,
+        document_ingestion=document_ingestion_payload,
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -14725,6 +14742,7 @@ async def run_onboarding_autopilot(
 
     published = False
     published_version_id: Optional[UUID] = None
+    effective_intake_payload = intake_payload
     if body.auto_publish_knowledge and not missing_fields:
         try:
             published_version = publish_version(
@@ -14763,6 +14781,7 @@ async def run_onboarding_autopilot(
                 )
             published = True
             published_version_id = published_version.id
+            effective_intake_payload = published_version.payload_json
             missing_fields, missing_questions = evaluate_intake_payload(
                 published_version.payload_json,
                 domain_slug=effective_domain_slug,
@@ -14771,6 +14790,15 @@ async def run_onboarding_autopilot(
             actions.append("knowledge_published")
         except Exception:
             actions.append("knowledge_publish_failed")
+
+    field_states = build_intake_field_states(
+        effective_intake_payload,
+        domain_slug=effective_domain_slug,
+        require_booking=booking_required,
+        missing_fields=missing_fields,
+        client_data_json=body.client_data_json or {},
+    )
+    question_queue = build_intake_question_queue(missing_fields)
 
     inputs = build_onboarding_inputs(db, branch)
     scorecard = build_onboarding_scorecard(db, branch)
@@ -14838,6 +14866,23 @@ async def run_onboarding_autopilot(
             published_version_id=published_version_id,
             missing_fields=missing_fields,
             missing_questions=missing_questions,
+            field_states=[
+                {
+                    "field": item.field,
+                    "status": item.status,
+                    "priority": item.priority,
+                }
+                for item in field_states
+            ],
+            question_queue=[
+                {
+                    "field": item.field,
+                    "question": item.question,
+                    "priority": item.priority,
+                    "blocking_go_live": item.blocking_go_live,
+                }
+                for item in question_queue
+            ],
             payload=intake_payload,
         ),
         actions=actions,
