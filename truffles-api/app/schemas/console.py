@@ -553,6 +553,7 @@ class ConsoleCase(BaseModel):
     customer_remote_jid: Optional[str] = None
     handover_meta: Optional[dict] = None
     handover_media_refs: Optional[list[dict]] = None
+    handover_messages: Optional[list[dict]] = None
     # Decision trace
     decision_trace: Optional[list[dict]] = None
     # Inbox health

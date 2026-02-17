@@ -3512,6 +3512,45 @@ TOOL_VERIFIER_SLOT_BY_FIELD: dict[str, str] = {
     "customer_name": "name",
     "appointment_id": "booking_reference",
 }
+SPECIALIST_HINT_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"(?:\bк\b|\bко\b)\s+(?P<candidate>[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё'\-]{1,}(?:\s+[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё'\-]{1,})?)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bмастер(?:у|а|ом)?\s+(?P<candidate>[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё'\-]{1,}(?:\s+[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё'\-]{1,})?)",
+        re.IGNORECASE,
+    ),
+)
+SPECIALIST_HINT_STOPWORDS = {
+    "на",
+    "в",
+    "к",
+    "ко",
+    "по",
+    "маникюр",
+    "маникюру",
+    "педикюр",
+    "педикюру",
+    "стрижка",
+    "стрижку",
+    "услуга",
+    "сегодня",
+    "завтра",
+    "послезавтра",
+    "утром",
+    "днем",
+    "вечером",
+    "ночью",
+    "время",
+    "слот",
+    "слоты",
+    "дата",
+    "даты",
+    "имя",
+    "мастер",
+    "мастеру",
+}
 
 
 def _is_booking_verification_handoff_intent(policy_intent: str | None, policy_tool_action: str | None) -> bool:
@@ -3783,6 +3822,37 @@ def _merge_booking_plan_slots(
         if isinstance(value, str) and value.strip():
             merged[slot_key] = value.strip()
     return merged
+
+
+def _extract_specialist_name_hint(message_text: str | None) -> str | None:
+    if not isinstance(message_text, str) or not message_text.strip():
+        return None
+
+    def _normalize_candidate(raw_value: str | None) -> str | None:
+        if not isinstance(raw_value, str):
+            return None
+        cleaned = re.sub(r"\s+", " ", raw_value).strip(" ,.!?:;\"'()[]{}")
+        if not cleaned or any(char.isdigit() for char in cleaned):
+            return None
+        lowered_tokens = [normalize_for_matching(token) for token in cleaned.split()]
+        lowered_tokens = [token for token in lowered_tokens if token]
+        if not lowered_tokens:
+            return None
+        if len(lowered_tokens) >= 2 and lowered_tokens[1] in SPECIALIST_HINT_STOPWORDS:
+            cleaned = cleaned.split()[0]
+            lowered_tokens = lowered_tokens[:1]
+        if any(token in SPECIALIST_HINT_STOPWORDS for token in lowered_tokens):
+            return None
+        return cleaned
+
+    for pattern in SPECIALIST_HINT_PATTERNS:
+        match = pattern.search(message_text)
+        if not match:
+            continue
+        specialist_name = _normalize_candidate(match.group("candidate"))
+        if specialist_name:
+            return specialist_name
+    return None
 
 
 def _plan_has_complete_booking_slots(slot_state: dict[str, str]) -> bool:
@@ -9659,6 +9729,7 @@ async def _handle_webhook_payload(
                     booking_state=booking if isinstance(booking, dict) else None,
                     plan_slots=policy_slot_state_validated,
                 )
+                specialist_name_hint = _extract_specialist_name_hint(message_text)
                 if (
                     isinstance(policy_service_query, str)
                     and policy_service_query.strip()
@@ -9691,11 +9762,25 @@ async def _handle_webhook_payload(
                     # Drop hallucinated list-slots date/start_at when user did not provide time/date in this turn.
                     policy_tool_args.pop("date", None)
                     policy_tool_args.pop("start_at", None)
+                if (
+                    isinstance(specialist_name_hint, str)
+                    and specialist_name_hint.strip()
+                    and not (
+                        isinstance(policy_tool_args.get("specialist_id"), str)
+                        and policy_tool_args.get("specialist_id").strip()
+                    )
+                    and not (
+                        isinstance(policy_tool_args.get("specialist_name"), str)
+                        and policy_tool_args.get("specialist_name").strip()
+                    )
+                ):
+                    policy_tool_args["specialist_name"] = specialist_name_hint.strip()
             elif policy_tool_action == "calendar.book_slot":
                 merged_slots_for_tool = _merge_booking_plan_slots(
                     booking_state=booking if isinstance(booking, dict) else None,
                     plan_slots=policy_slot_state_validated,
                 )
+                specialist_name_hint = _extract_specialist_name_hint(message_text)
                 if (
                     "service_query" not in policy_tool_args
                     and isinstance(policy_service_query, str)
@@ -9708,6 +9793,37 @@ async def _handle_webhook_payload(
                     and merged_slots_for_tool.get("service").strip()
                 ):
                     policy_tool_args["service_query"] = merged_slots_for_tool["service"].strip()
+                if (
+                    not (
+                        isinstance(policy_tool_args.get("start_at"), str)
+                        and policy_tool_args.get("start_at").strip()
+                    )
+                    and isinstance(merged_slots_for_tool.get("datetime"), str)
+                    and merged_slots_for_tool.get("datetime").strip()
+                ):
+                    policy_tool_args["start_at"] = merged_slots_for_tool["datetime"].strip()
+                if (
+                    not (
+                        isinstance(policy_tool_args.get("customer_name"), str)
+                        and policy_tool_args.get("customer_name").strip()
+                    )
+                    and isinstance(merged_slots_for_tool.get("name"), str)
+                    and merged_slots_for_tool.get("name").strip()
+                ):
+                    policy_tool_args["customer_name"] = merged_slots_for_tool["name"].strip()
+                if (
+                    isinstance(specialist_name_hint, str)
+                    and specialist_name_hint.strip()
+                    and not (
+                        isinstance(policy_tool_args.get("specialist_id"), str)
+                        and policy_tool_args.get("specialist_id").strip()
+                    )
+                    and not (
+                        isinstance(policy_tool_args.get("specialist_name"), str)
+                        and policy_tool_args.get("specialist_name").strip()
+                    )
+                ):
+                    policy_tool_args["specialist_name"] = specialist_name_hint.strip()
             elif policy_tool_action in TOOL_VERIFIER_REFERENCE_ACTIONS:
                 has_appointment_id = (
                     isinstance(policy_tool_args.get("appointment_id"), str)

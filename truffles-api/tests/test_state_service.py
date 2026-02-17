@@ -375,6 +375,99 @@ class TestEscalateToPending:
         assert media_refs
         assert media_refs[0].get("source") == "recent_message_history"
         assert media_refs[0].get("public_url") == "https://example.com/recent-photo.jpg"
+
+    @patch("app.services.state_service.TelegramService")
+    @patch("app.services.state_service.resolve_telegram_routing")
+    def test_handover_context_summary_and_messages_saved(self, mock_routing, mock_telegram_class):
+        mock_routing.return_value = {"bot_token": "token", "chat_id": "chat_id"}
+        mock_telegram = Mock()
+        mock_telegram.create_forum_topic.return_value = 12345
+        mock_telegram_class.return_value = mock_telegram
+
+        db = Mock()
+        user = Mock(name="Test User", phone="77015705555")
+        user.telegram_topic_id = None
+        user.remote_jid = "77015705555@s.whatsapp.net"
+        user_query = Mock()
+        user_query.filter.return_value = user_query
+        user_query.first.return_value = user
+
+        base_time = datetime.now(timezone.utc)
+        history_user = SimpleNamespace(
+            id="msg-1",
+            message_id="inbound-1",
+            role="user",
+            content="Нужен маникюр к Айгерим завтра в 12:00",
+            created_at=base_time - timedelta(minutes=2),
+            message_metadata={},
+        )
+        history_assistant = SimpleNamespace(
+            id="msg-2",
+            message_id=None,
+            role="assistant",
+            content="Свободно у Айгерим в 12:00 и 14:00. Какое время бронируем?",
+            created_at=base_time - timedelta(minutes=1),
+            message_metadata={},
+        )
+        trigger_message = SimpleNamespace(
+            id="msg-3",
+            message_id="inbound-2",
+            role="user",
+            content="Бронируй на 12:00 и передай менеджеру фото референса",
+            created_at=base_time,
+            message_metadata={},
+        )
+        message_query = Mock()
+        message_query.filter.return_value = message_query
+        message_query.order_by.return_value = message_query
+        message_query.limit.return_value = message_query
+        message_query.first.return_value = trigger_message
+        message_query.all.return_value = [history_user, history_assistant, trigger_message]
+
+        handover_query = Mock()
+        handover_query.filter.return_value = handover_query
+        handover_query.order_by.return_value = handover_query
+        handover_query.first.return_value = None
+
+        def query_side_effect(model):
+            if model is User:
+                return user_query
+            if model is Message:
+                return message_query
+            if model is Handover:
+                return handover_query
+            return Mock()
+
+        db.query.side_effect = query_side_effect
+
+        conversation = Mock()
+        conversation.state = ConversationState.BOT_ACTIVE.value
+        conversation.id = "conv-123"
+        conversation.client_id = "client-123"
+        conversation.user_id = "user-123"
+        conversation.telegram_topic_id = None
+        conversation.retry_offered_at = None
+        conversation.context = {}
+
+        result = escalate_to_pending(
+            db,
+            conversation,
+            "Бронируй и передай менеджеру",
+            "intent",
+            "human_request",
+        )
+
+        assert result.ok is True
+        handover = result.value
+        assert isinstance(handover.context_summary, str)
+        assert "client: Нужен маникюр к Айгерим завтра в 12:00" in handover.context_summary
+        assert "assistant: Свободно у Айгерим в 12:00 и 14:00." in handover.context_summary
+        assert isinstance(handover.messages, list)
+        assert len(handover.messages) == 3
+        assert handover.messages[0]["role"] == "user"
+        assert handover.messages[1]["role"] == "assistant"
+        assert handover.messages[2]["message_id"] == "inbound-2"
+
     def test_fails_from_wrong_state(self):
         db = Mock()
         conversation = Mock()

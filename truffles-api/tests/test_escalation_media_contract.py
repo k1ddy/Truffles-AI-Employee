@@ -190,3 +190,54 @@ def test_send_telegram_notification_retries_media_as_local_upload(
     telegram_delivery = delivery.get("telegram") or {}
     assert telegram_delivery.get("status") == "sent"
     assert telegram_delivery.get("sent_count") == 1
+
+
+@patch("app.services.escalation_service._refresh_handover_media_contract")
+@patch("app.services.escalation_service.get_or_create_topic")
+@patch("app.services.escalation_service.TelegramService")
+def test_send_telegram_notification_includes_context_summary(
+    mock_telegram_class,
+    mock_get_or_create_topic,
+    mock_refresh_contract,
+):
+    mock_refresh_contract.return_value = None
+    mock_get_or_create_topic.return_value = 555
+
+    mock_telegram = Mock()
+    mock_telegram.send_message.return_value = {"ok": True, "result": {"message_id": 321}}
+    mock_telegram.pin_message.return_value = {"ok": True}
+    mock_telegram_class.return_value = mock_telegram
+
+    db = Mock()
+    handover = SimpleNamespace(
+        id="handover-ctx-1",
+        client_id="client-ctx-1",
+        trigger_type="intent",
+        trigger_value="human_request",
+        user_message="Передайте менеджеру",
+        context_summary="client: Хочу маникюр\nassistant: Есть слот в 12:00",
+        telegram_message_id=None,
+        notified_at=None,
+        meta={},
+    )
+    conversation = SimpleNamespace(
+        id="conv-ctx-1",
+        client_id="client-ctx-1",
+        telegram_topic_id=555,
+        context={},
+    )
+    user = SimpleNamespace(name="Aigerim", phone="77015705555", telegram_topic_id=555)
+
+    ok = send_telegram_notification(
+        db=db,
+        handover=handover,
+        conversation=conversation,
+        user=user,
+        message="Передайте менеджеру",
+        routing_meta={"bot_token": "token", "chat_id": "chat-id"},
+    )
+
+    assert ok is True
+    text = mock_telegram.send_message.call_args.kwargs["text"]
+    assert "Контекст диалога:" in text
+    assert "assistant: Есть слот в 12:00" in text

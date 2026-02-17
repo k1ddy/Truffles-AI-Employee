@@ -1,0 +1,22 @@
+# SESSION 2026-02-17-consultant-e2e-chain-a88 — consultant end-to-end chain fix
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-17-consultant-e2e-chain-a88.md
+- branch: fix/2026-02-17-consultant-e2e-chain-a88
+- worktree: /tmp/consultant-e2e-chain-a88
+- base_ref: origin/main
+- scope: Fix and prove consultant chain for specialist slots, booking confirmation contract, and media handoff context in Console/Telegram.
+- done:
+  - Synced branch to merged origin/main state.
+  - Added policy-core arg backfill for `start_at/customer_name/specialist_name`.
+  - Added handover context kernel (`context_summary`, `messages`) and Telegram context composition.
+  - Added Console API schema exposure for handover messages.
+  - Ran targeted tests and llm-quality + manual SQL/trace checks.
+- next:
+  - Run `scripts/session_check.sh`, commit, push branch, open PR.
+  - Attach evidence in PR description and answer open product gaps.
+- evidence:
+  - `/tmp/booking_quality/claim-full-chain-2026-02-17-a88-v1/summary.json`
+  - `/tmp/booking_quality/claim-booking-confirm-v2-2026-02-17-a88/summary.json`
+- last_updated: 2026-02-17

@@ -16,6 +16,7 @@ class Handover(Base):
     trigger_type = Column(Text, nullable=False)  # intent, keyword, manual, timeout
     trigger_value = Column(Text)
     context_summary = Column(Text)
+    messages = Column(JSONB, default=list)
     meta = Column(JSONB)
     adapter_type = Column(Text)  # telegram, webhook, bitrix, email, whatsapp_web
     adapter_response = Column(JSONB)
