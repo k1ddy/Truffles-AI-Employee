@@ -8159,7 +8159,6 @@ def _run_llm_quality(args):
             telegram_chat_id = None
     owner_id, owner_username = _parse_owner_identity((client_meta or {}).get("owner_telegram_id"))
     manager_id = owner_id if owner_id is not None else 10001
-    manager_username = owner_username or "llm_quality"
     console_token = None
     console_headers = {}
     console_base_url = (args.console_base_url or base_url).rstrip("/")
@@ -10056,7 +10055,6 @@ def _run_llm_quality(args):
     baseline_updated_at = None
     baseline_canonical = None
     baseline_canonical_reason = None
-    baseline_history = []
     if args.baseline_summary:
         baseline_source = os.path.abspath(os.path.expanduser(args.baseline_summary))
         if not os.path.exists(baseline_source):
@@ -10088,7 +10086,6 @@ def _run_llm_quality(args):
             baseline_canonical, baseline_canonical_reason = _llm_quality_baseline_is_canonical(
                 baseline_payload
             )
-            baseline_history = (baseline_payload or {}).get("history") or []
         except Exception:
             baseline_metrics = None
             baseline_canonical = None
@@ -10489,19 +10486,20 @@ def _run_webhook_fuzz(args):
     webhook_url = f"{base_url}/webhook/{client_slug}"
     mode = args.mode
     skip_outbox = args.skip_outbox or mode == "logic"
+    continue_on_infra = not args.fail_on_infra
 
     container_name, _ = resolve_container_name()
     if not args.skip_preflight:
         preflight = _chaos_preflight(base_url, args.timeout)
-        preflight_path = os.path.join(output_dir, "preflight.json")
-        with open(preflight_path, "w", encoding="utf-8") as handle:
-            json.dump(preflight, handle, ensure_ascii=False, indent=2)
-        _record_event(
-            {
-                "event": "preflight",
-                "ok": preflight.get("ok"),
-                "checks": preflight.get("checks"),
-            }
+        print(
+            json.dumps(
+                {
+                    "event": "preflight",
+                    "ok": preflight.get("ok"),
+                    "checks": preflight.get("checks"),
+                },
+                ensure_ascii=False,
+            )
         )
         if not preflight.get("ok") and not continue_on_infra:
             raise SystemExit("chaos-sim: preflight failed")
@@ -14121,7 +14119,7 @@ def _run_livecheck_auto(args):
                     "ack_text": ack_text,
                     "ack_status": ack_status,
                     "trace_policy_type": (trace_entry or {}).get("policy_type") if trace_entry else None,
-                    "trace_source": (trace_entry or {}).get("source") if trace_entry else None,
+                    "trace_policy_source": (trace_entry or {}).get("source") if trace_entry else None,
                     "trace_policy_gate": (trace_entry or {}).get("policy_gate") if trace_entry else None,
                     "trace_policy_section": (trace_entry or {}).get("policy_section") if trace_entry else None,
                     "trace_risk_level": (trace_entry or {}).get("risk_level") if trace_entry else None,
@@ -14515,6 +14513,8 @@ try:
 
         scorecard = build_onboarding_scorecard(session, branch)
         missing = list(scorecard.missing or [])
+        sla_loop = getattr(scorecard, "sla_control_loop", None)
+        pipeline = getattr(scorecard, "operational_pipeline", None)
         for code in missing:
             missing_counts[code] = int(missing_counts.get(code, 0)) + 1
 
@@ -14527,6 +14527,15 @@ try:
                 "is_active": bool(branch.is_active),
                 "scorecard_ready": bool(scorecard.ready),
                 "scorecard_missing": missing,
+                "sla_status": getattr(sla_loop, "status", None),
+                "sla_pending_total": getattr(sla_loop, "pending_total", None),
+                "sla_warning_total": getattr(sla_loop, "warning_total", None),
+                "sla_breached_total": getattr(sla_loop, "breached_total", None),
+                "sla_incidents": list(getattr(sla_loop, "active_incidents", []) or []),
+                "pipeline_status": getattr(pipeline, "status", None),
+                "pipeline_blocked": bool(getattr(pipeline, "blocked", False)) if pipeline is not None else None,
+                "pipeline_current_stage_id": getattr(pipeline, "current_stage_id", None),
+                "pipeline_blockers": list(getattr(pipeline, "blockers", []) or []),
                 "cap_domain": cap_domain,
                 "contract_domain": contract_domain,
                 "resolved_domain": effective_domain,
@@ -14547,12 +14556,24 @@ try:
 
     active_rows = [row for row in report_rows if row.get("is_active")]
     active_not_ready = [row for row in active_rows if not row.get("scorecard_ready")]
+    active_sla_fail = [
+        row
+        for row in active_rows
+        if row.get("sla_status") == "fail"
+    ]
+    active_pipeline_blocked = [
+        row
+        for row in active_rows
+        if row.get("pipeline_blocked") is True
+    ]
     summary = {{
         "mode": mode,
         "active_only": active_only,
         "total_branches": len(report_rows),
         "active_branches": len(active_rows),
         "active_not_ready": len(active_not_ready),
+        "active_sla_fail": len(active_sla_fail),
+        "active_pipeline_blocked": len(active_pipeline_blocked),
         "active_missing_codes": missing_counts,
         "changed_branches": len(actions),
         "unresolved_branches": len(unresolved),
@@ -14570,6 +14591,8 @@ try:
                 "summary": summary,
                 "rows": report_rows,
                 "active_not_ready_rows": active_not_ready,
+                "active_sla_fail_rows": active_sla_fail,
+                "active_pipeline_blocked_rows": active_pipeline_blocked,
                 "actions": actions,
                 "unresolved": unresolved,
             }},

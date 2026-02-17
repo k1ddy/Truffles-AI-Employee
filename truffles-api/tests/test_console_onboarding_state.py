@@ -10,6 +10,7 @@ from app.schemas.onboarding_contract import OnboardingContractPayload
 from app.services.console_errors import ConsoleAPIError
 from app.services.onboarding_state import (
     OnboardingInputs,
+    OnboardingSlaControlLoop,
     OnboardingStep,
     build_onboarding_scorecard_from_inputs,
     can_advance_to_step,
@@ -424,6 +425,9 @@ def test_onboarding_scorecard_passes_when_go_no_go_requirements_are_satisfied():
     assert scorecard.document_ingestion is not None
     assert scorecard.document_ingestion.status == "pass"
     assert scorecard.document_ingestion.valid is True
+    assert scorecard.operational_pipeline is not None
+    assert scorecard.operational_pipeline.status == "pass"
+    assert scorecard.operational_pipeline.blocked is False
 
 
 def test_onboarding_scorecard_fails_when_go_no_go_requirements_missing():
@@ -442,6 +446,10 @@ def test_onboarding_scorecard_fails_when_go_no_go_requirements_missing():
     assert "payment_confirmed" in scorecard.missing
     assert "instance_id" in scorecard.missing
     assert "phone" in scorecard.missing
+    assert scorecard.operational_pipeline is not None
+    assert scorecard.operational_pipeline.status == "fail"
+    assert "payment_confirmed" in scorecard.operational_pipeline.blockers
+    assert scorecard.operational_pipeline.current_stage_id == "contract_alignment"
 
 
 def test_onboarding_scorecard_skips_document_ingestion_when_knowledge_feature_disabled():
@@ -460,3 +468,75 @@ def test_onboarding_scorecard_skips_document_ingestion_when_knowledge_feature_di
     assert scorecard.document_ingestion is not None
     assert scorecard.document_ingestion.status == "skipped"
     assert scorecard.document_ingestion.valid is True
+
+
+def test_onboarding_scorecard_pipeline_reflects_sla_warning_status():
+    capabilities = CapabilitiesPayload.model_validate(
+        {
+            "channels": {"whatsapp": True, "telegram": True},
+            "features": {"knowledge_upload": True, "booking_mode": "confirm_slots"},
+        }
+    )
+    inputs = _make_inputs(
+        capabilities=capabilities,
+        has_capabilities=True,
+        has_onboarding_contract=True,
+        payment_confirmed=True,
+        has_webhook_secret=True,
+        has_reference_pack=True,
+        reference_pack_domain_slug="beauty",
+        has_instance_id=True,
+        instance_id="instance-123",
+        has_phone=True,
+        branch_is_active=True,
+        onboarding_contract=OnboardingContractPayload.model_validate(
+            {
+                "purchased": {"channels": {"whatsapp": True, "telegram": True}},
+                "provider_binding": {
+                    "whatsapp": {
+                        "provider": "chatflow",
+                        "instance_id": "instance-123",
+                        "webhook_status": "configured",
+                        "paid_until": (date.today() + timedelta(days=30)).isoformat(),
+                        "owner": "platform-admin",
+                        "next_renewal_at": (date.today() + timedelta(days=30)).isoformat(),
+                        "alert_state": "ok",
+                    }
+                },
+            }
+        ),
+        has_team=True,
+        has_telegram_chat=True,
+        has_knowledge_tag=True,
+        has_published_knowledge=True,
+        has_working_hours=True,
+        has_booking_settings=True,
+        has_specialists=True,
+    )
+    sla_warning = OnboardingSlaControlLoop(
+        status="warn",
+        reminder_1_minutes=10,
+        reminder_2_minutes=45,
+        escalation_timeout_minutes=120,
+        pending_total=2,
+        warning_total=1,
+        breached_total=0,
+        provider_status="configured",
+        provider_paid_until=(date.today() + timedelta(days=30)).isoformat(),
+        provider_days_to_renewal=30,
+        provider_alert_state="ok",
+        active_incidents=["handover_sla_warning"],
+        recommended_actions=["review_pending_handovers"],
+    )
+
+    scorecard = build_onboarding_scorecard_from_inputs(inputs, sla_control_loop=sla_warning)
+    assert scorecard.sla_control_loop is not None
+    assert scorecard.operational_pipeline is not None
+    assert scorecard.operational_pipeline.status == "warn"
+    assert scorecard.operational_pipeline.current_stage_id == "sla_escalation_loop"
+    sla_stage = next(
+        stage for stage in scorecard.operational_pipeline.stages if stage.id == "sla_escalation_loop"
+    )
+    assert sla_stage.status == "warn"
+    assert "handover_sla_warning" in sla_stage.blockers
+    assert "review_pending_handovers" in scorecard.operational_pipeline.next_actions

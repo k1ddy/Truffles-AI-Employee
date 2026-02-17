@@ -360,6 +360,19 @@ OnboardingStepStatusValue = Literal["complete", "available", "locked", "skipped"
 OnboardingScorecardStatusValue = Literal["pass", "fail"]
 OnboardingDocumentIngestionStatusValue = Literal["pass", "fail", "skipped"]
 OnboardingDocumentIngestionSourceValue = Literal["published", "draft", "none"]
+OnboardingSlaControlLoopStatusValue = Literal["pass", "warn", "fail"]
+OnboardingSlaProviderStatusValue = Literal[
+    "configured",
+    "missing",
+    "webhook_not_configured",
+    "rebind_required",
+    "billing_expired",
+    "renewal_due",
+    "not_required",
+    "unknown",
+]
+OnboardingOperationalPipelineStatusValue = Literal["pass", "warn", "fail"]
+OnboardingOperationalStageStatusValue = Literal["pass", "warn", "fail", "skip"]
 
 
 class ConsoleOnboardingStepStatus(BaseModel):
@@ -391,6 +404,41 @@ class ConsoleOnboardingDocumentIngestion(BaseModel):
     critical_missing_fields: list[str] = []
 
 
+class ConsoleOnboardingSlaControlLoop(BaseModel):
+    status: OnboardingSlaControlLoopStatusValue
+    reminder_1_minutes: int
+    reminder_2_minutes: int
+    escalation_timeout_minutes: int
+    pending_total: int
+    warning_total: int
+    breached_total: int
+    provider_status: OnboardingSlaProviderStatusValue
+    provider_paid_until: Optional[str] = None
+    provider_days_to_renewal: Optional[int] = None
+    provider_alert_state: str = "unknown"
+    active_incidents: list[str] = []
+    recommended_actions: list[str] = []
+
+
+class ConsoleOnboardingOperationalStage(BaseModel):
+    id: str
+    label: str
+    owner_lane: str
+    required: bool
+    status: OnboardingOperationalStageStatusValue
+    blockers: list[str] = []
+    next_action: Optional[str] = None
+
+
+class ConsoleOnboardingOperationalPipeline(BaseModel):
+    status: OnboardingOperationalPipelineStatusValue
+    blocked: bool
+    current_stage_id: Optional[str] = None
+    blockers: list[str] = []
+    next_actions: list[str] = []
+    stages: list[ConsoleOnboardingOperationalStage] = []
+
+
 class ConsoleOnboardingScorecardResponse(BaseModel):
     branch_id: UUID
     status: OnboardingScorecardStatusValue
@@ -398,6 +446,8 @@ class ConsoleOnboardingScorecardResponse(BaseModel):
     checks: list[ConsoleOnboardingScorecardCheck]
     missing: list[str] = []
     document_ingestion: Optional[ConsoleOnboardingDocumentIngestion] = None
+    sla_control_loop: Optional[ConsoleOnboardingSlaControlLoop] = None
+    operational_pipeline: Optional[ConsoleOnboardingOperationalPipeline] = None
     generated_at: str
 
 

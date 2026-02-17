@@ -4889,6 +4889,110 @@ components:
           items:
             type: string
 
+    OnboardingSlaControlLoop:
+      type: object
+      required:
+        - status
+        - reminder_1_minutes
+        - reminder_2_minutes
+        - escalation_timeout_minutes
+        - pending_total
+        - warning_total
+        - breached_total
+        - provider_status
+      properties:
+        status:
+          type: string
+          enum: [pass, warn, fail]
+        reminder_1_minutes:
+          type: integer
+        reminder_2_minutes:
+          type: integer
+        escalation_timeout_minutes:
+          type: integer
+        pending_total:
+          type: integer
+        warning_total:
+          type: integer
+        breached_total:
+          type: integer
+        provider_status:
+          type: string
+          enum:
+            - configured
+            - missing
+            - webhook_not_configured
+            - rebind_required
+            - billing_expired
+            - renewal_due
+            - not_required
+            - unknown
+        provider_paid_until:
+          type: string
+          nullable: true
+        provider_days_to_renewal:
+          type: integer
+          nullable: true
+        provider_alert_state:
+          type: string
+          nullable: true
+        active_incidents:
+          type: array
+          items:
+            type: string
+        recommended_actions:
+          type: array
+          items:
+            type: string
+
+    OnboardingOperationalStage:
+      type: object
+      required: [id, label, owner_lane, required, status, blockers]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        owner_lane:
+          type: string
+        required:
+          type: boolean
+        status:
+          type: string
+          enum: [pass, warn, fail, skip]
+        blockers:
+          type: array
+          items:
+            type: string
+        next_action:
+          type: string
+          nullable: true
+
+    OnboardingOperationalPipeline:
+      type: object
+      required: [status, blocked, blockers, next_actions, stages]
+      properties:
+        status:
+          type: string
+          enum: [pass, warn, fail]
+        blocked:
+          type: boolean
+        current_stage_id:
+          type: string
+          nullable: true
+        blockers:
+          type: array
+          items:
+            type: string
+        next_actions:
+          type: array
+          items:
+            type: string
+        stages:
+          type: array
+          items:
+            $ref: "#/components/schemas/OnboardingOperationalStage"
+
     OnboardingScorecardResponse:
       type: object
       required: [branch_id, status, ready, checks, missing, generated_at]
@@ -4912,6 +5016,14 @@ components:
         document_ingestion:
           allOf:
             - $ref: "#/components/schemas/OnboardingDocumentIngestion"
+          nullable: true
+        sla_control_loop:
+          allOf:
+            - $ref: "#/components/schemas/OnboardingSlaControlLoop"
+          nullable: true
+        operational_pipeline:
+          allOf:
+            - $ref: "#/components/schemas/OnboardingOperationalPipeline"
           nullable: true
         generated_at:
           type: string

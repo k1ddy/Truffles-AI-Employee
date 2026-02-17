@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import toast from "react-hot-toast";
+import type { components } from "@/types/api.generated";
 
 import AccessDenied from "@/components/AccessDenied";
 import {
@@ -278,6 +279,10 @@ export default function CompanyWorkspacePage() {
     const canReadTenants = canAccessConsole(role, "tenants", "read");
     const canWriteTenants = canAccessConsole(role, "tenants", "write");
     const canReadIntegrations = canAccessConsole(role, "integrations", "read");
+    const companyOptions = useMemo<components["schemas"]["Company"][]>(
+        () => meData?.companies ?? [],
+        [meData?.companies],
+    );
 
     const syncScopeFromContext = () => {
         syncFromRuntime();
@@ -319,7 +324,10 @@ export default function CompanyWorkspacePage() {
         },
         enabled: !!session && canReadTenants,
     });
-    const clientOptions = useMemo(() => clientsData?.items ?? [], [clientsData?.items]);
+    const clientOptions = useMemo<components["schemas"]["Client"][]>(
+        () => clientsData?.items ?? [],
+        [clientsData?.items],
+    );
 
     const { data: branchesData } = useQuery({
         queryKey: ["company-workspace-branches", scopeClientId],
@@ -333,7 +341,10 @@ export default function CompanyWorkspacePage() {
         },
         enabled: !!session && canReadTenants && !!scopeClientId,
     });
-    const branchOptions = useMemo(() => branchesData?.items ?? [], [branchesData?.items]);
+    const branchOptions = useMemo<components["schemas"]["Branch"][]>(
+        () => branchesData?.items ?? [],
+        [branchesData?.items],
+    );
 
     const {
         data: integrationsData,
@@ -433,15 +444,15 @@ export default function CompanyWorkspacePage() {
         [branchOptions, scopeBranchId],
     );
 
-    const selectedIntegration = useMemo(() => {
-        const items = integrationsData?.items ?? [];
+    const selectedIntegration = useMemo<components["schemas"]["BranchIntegrationStatus"] | null>(() => {
+        const items: components["schemas"]["BranchIntegrationStatus"][] = integrationsData?.items ?? [];
         if (!scopeBranchId) {
             return items[0] ?? null;
         }
         return items.find((item) => item.branch_id === scopeBranchId) ?? null;
     }, [integrationsData?.items, scopeBranchId]);
 
-    const lifecycleTodayFact = useMemo(() => {
+    const lifecycleTodayFact = useMemo<components["schemas"]["ProviderLifecycleItem"] | null>(() => {
         return providerLifecycleData?.items?.[0] ?? null;
     }, [providerLifecycleData?.items]);
 
@@ -734,10 +745,10 @@ export default function CompanyWorkspacePage() {
 
     const selectedCompanyName = useMemo(() => {
         return (
-            (meData?.companies ?? []).find((company) => company.id === scopeCompanyId)?.name
+            companyOptions.find((company) => company.id === scopeCompanyId)?.name
             ?? shortId(scopeCompanyId)
         );
-    }, [meData?.companies, scopeCompanyId]);
+    }, [companyOptions, scopeCompanyId]);
 
     const selectedClientName = useMemo(() => {
         return (
@@ -1065,7 +1076,7 @@ export default function CompanyWorkspacePage() {
                             data-testid="workspace-scope-company"
                         >
                             <option value="">выберите</option>
-                            {(meData?.companies ?? []).map((company) => (
+                            {companyOptions.map((company) => (
                                 <option key={company.id} value={company.id ?? ""}>
                                     {company.name ?? company.id}
                                 </option>

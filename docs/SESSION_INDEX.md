@@ -470,3 +470,4 @@
 | 2026-02-17-platform-ux-wave123-a88 | active | feat/2026-02-17-platform-ux-wave123-a88 | /tmp/truffles-main-platform-ux-wave123 | docs/TASK_PACKAGES/TP-2026-02-17-platform-ux-wave123-a88.md | 2026-02-17T07:46:00Z |
 | 2026-02-17-console-onboarding-wave12-a88 | active | feat/2026-02-17-console-onboarding-wave12-a88 | /home/zhan/worktrees/2026-02-17-console-onboarding-wave12-a88 | docs/TASK_PACKAGES/TP-2026-02-17-console-onboarding-wave12-a88.md | 2026-02-17 |
 | 2026-02-17-onboarding-p4p5-a88 | active | feat/2026-02-17-onboarding-p4p5-a88 | /home/zhan/worktrees/2026-02-17-onboarding-p4p5-a88 | docs/TASK_PACKAGES/TP-2026-02-17-onboarding-p4p5-a88.md | 2026-02-17 |
+| 2026-02-17-onboarding-p6p7-enterprise-loop-a88 | active | feat/2026-02-17-onboarding-p6p7-enterprise-loop-a88 | /home/zhan/worktrees/worktrees/2026-02-17-onboarding-p6p7-enterprise-loop-a88 | docs/TASK_PACKAGES/TP-2026-02-17-onboarding-p6p7-enterprise-loop-a88.md | 2026-02-17 |
