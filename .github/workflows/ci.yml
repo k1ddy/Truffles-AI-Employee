@@ -269,6 +269,28 @@ jobs:
         run: |
           python scripts/generate_openapi.py --check
 
+      - name: Workflow env export guard
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          workflow = Path("../.github/workflows/ci.yml")
+          pattern = re.compile(r'env_file\.write\(f".*\\\\n"\)')
+          violations = []
+          for line_no, line in enumerate(workflow.read_text(encoding="utf-8").splitlines(), start=1):
+              if pattern.search(line):
+                  violations.append((line_no, line.strip()))
+
+          if violations:
+              print("Invalid GITHUB_ENV export detected (literal \\\\n found):")
+              for line_no, text in violations:
+                  print(f"  line {line_no}: {text}")
+              raise SystemExit(1)
+
+          print("Workflow env export guard OK")
+          PY
+
   unit-tests:
     runs-on: ubuntu-latest
     services:
