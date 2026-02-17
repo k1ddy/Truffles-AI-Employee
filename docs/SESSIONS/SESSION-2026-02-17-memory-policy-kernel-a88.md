@@ -1,0 +1,34 @@
+# SESSION 2026-02-17-memory-policy-kernel-a88 — Memory Policy Kernel
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-17-memory-policy-kernel-a88.md
+- branch: feat/2026-02-17-memory-policy-kernel-a88
+- worktree: /home/zhan/worktrees/2026-02-17-memory-policy-kernel-a88
+- base_ref: origin/main
+- scope: PR2 memory-kernel: deterministic retrieval from profile memory into policy-core + strict payload normalization + meta/trace observability.
+- done:
+  - Added bounded memory retrieval in `truffles-api/app/routers/webhook/decision.py`:
+    - relevance scoring by message tokens + expected_reply hints + booking goal + recency/confidence,
+    - hard caps/sanitization and blocked keys,
+    - injection into `memory_profile.retrieved_items` for `route_llm_policy_core`,
+    - llm_policy_core observability (`memory_profile_retrieved_keys`/count) in decision meta/trace.
+  - Added compact summary refresh hook after meaningful memory stores (`name/preferred_service/preferred_time/language`).
+  - Extended memory profile normalization in `truffles-api/app/services/intent_service.py` to allow bounded `retrieved_items`.
+  - Extended contract tests:
+    - `truffles-api/tests/test_intent.py` verifies normalized `retrieved_items` in policy input.
+    - `truffles-api/tests/test_message_endpoint.py` verifies runtime passes retrieved memory and writes retrieval observability.
+  - Validation checks:
+    - `pytest -q truffles-api/tests/test_intent.py -k "policy_core_includes_memory_payload_when_provided"` (`1 passed`)
+    - `pytest -q truffles-api/tests/test_message_endpoint.py -k "llm_policy_core_receives_memory_hints_and_writes_meta"` (`1 passed`)
+    - `pytest -q truffles-api/tests/test_message_endpoint.py -k "catalog_tool_decision_mismatch_escalates or llm_policy_core_catalog_service_reply_keeps_info_answer_for_info_query or llm_policy_core_book_slot_missing_start_at_blocked_by_policy_verifier"` (`3 passed`)
+    - `ruff check truffles-api/app/routers/webhook/decision.py truffles-api/app/services/intent_service.py truffles-api/tests/test_intent.py truffles-api/tests/test_message_endpoint.py` (`All checks passed`)
+    - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/app/services/intent_service.py`
+- next:
+  - Open PR and request merge.
+  - Separate follow-up TP for stable canonical replay infra (quality run hangs without final summary in this environment).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-17-memory-policy-kernel-a88.md
+  - /tmp/booking_quality/memory-policy-kernel-a88/ (partial artifacts; no summary.json)
+  - /tmp/booking_quality/memory-policy-kernel-a88-r10-skipoutbox/ (partial artifacts; no summary.json)
+- last_updated: 2026-02-17T05:35:00Z
