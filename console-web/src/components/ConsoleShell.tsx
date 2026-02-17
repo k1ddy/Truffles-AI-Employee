@@ -1067,7 +1067,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         }
         navFallbackTimeoutRef.current = window.setTimeout(() => {
             navFallbackTimeoutRef.current = null;
-            if (window.location.pathname === previousPathname) {
+            if (window.location.pathname === previousPathname && href.startsWith("/")) {
                 window.location.assign(href);
             }
         }, 800);
