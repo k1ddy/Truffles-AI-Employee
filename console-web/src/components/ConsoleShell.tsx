@@ -1007,6 +1007,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [contextNotice, setContextNotice] = useState<string | null>(null);
     const [navTransitioning, setNavTransitioning] = useState(false);
+    const navFallbackTimeoutRef = useRef<number | null>(null);
     const [navCollapsed, setNavCollapsed] = useState(
         () => readBrowserStorage(NAV_COLLAPSED_STORAGE_KEY) === "1"
     );
@@ -1056,8 +1057,20 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         if (href === pathname) {
             return;
         }
+        const previousPathname = pathname;
         setNavTransitioning(true);
         router.push(href);
+        // Guard against rare App Router no-op transitions: fall back to hard navigation.
+        if (navFallbackTimeoutRef.current !== null) {
+            window.clearTimeout(navFallbackTimeoutRef.current);
+            navFallbackTimeoutRef.current = null;
+        }
+        navFallbackTimeoutRef.current = window.setTimeout(() => {
+            navFallbackTimeoutRef.current = null;
+            if (window.location.pathname === previousPathname && href.startsWith("/")) {
+                window.location.assign(href);
+            }
+        }, 800);
     };
 
     useEffect(() => {
@@ -1070,6 +1083,10 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
 
     useEffect(() => {
         setNavTransitioning(false);
+        if (navFallbackTimeoutRef.current !== null) {
+            window.clearTimeout(navFallbackTimeoutRef.current);
+            navFallbackTimeoutRef.current = null;
+        }
     }, [pathname]);
 
     useEffect(() => {

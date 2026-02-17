@@ -147,6 +147,7 @@
 | `docs/REPORTS/2026-02-15-owner-admin-wave8-incident-control-v1.md` | Report: Owner/Admin + Platform Admin wave-8 (incident control loop + safe remediation actions) | Brain/Architect |
 | `docs/REPORTS/2026-02-16-owner-admin-wave9-subscription-contract-v1.md` | Report: Owner/Admin wave-9 (subscription contract = plan + fact + action) | Brain/Architect |
 | `docs/REPORTS/2026-02-16-owner-admin-wave10-subscription-truth-v1.md` | Report: Owner/Admin wave-10 (subscription truth mode: fail-closed contract + diagnostics) | Brain/Architect |
+| `docs/REPORTS/2026-02-17-console-postmerge-acceptance-p95-wave123-v1.md` | Report: Post-merge acceptance + p95 timing audit (platform_admin/owner_admin) with nav reliability findings | Brain/Architect |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 

@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test';
 const consoleHostPattern = /localhost:3000|192\.168\.5\.27:3000|console\.truffles\.kz/;
 const keycloakHostPattern = /localhost:8080|192\.168\.5\.27:8080|auth\.truffles\.kz/;
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
+const stayOnBaseOrigin = /localhost|127\.0\.0\.1/.test(baseURL);
 let resolvedBaseURL = baseURL;
 const loginUser = process.env.E2E_USERNAME ?? 'admin';
 const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
@@ -22,8 +23,12 @@ function matchesPath(url: string, paths: string[]) {
     }
 }
 
-function buildSignInUrl(origin: string) {
-    return `${origin}/api/auth/signin?callbackUrl=${encodeURIComponent(origin)}`;
+function buildSignInUrl(origin: string, callbackOrigin = origin) {
+    return `${origin}/api/auth/signin?callbackUrl=${encodeURIComponent(callbackOrigin)}`;
+}
+
+function resolvePreferredOrigin(actionOrigin: string) {
+    return stayOnBaseOrigin ? baseURL : actionOrigin;
 }
 
 function urlPathPattern(path: string) {
@@ -101,7 +106,7 @@ async function resolveAuthOrigin(page: import('@playwright/test').Page) {
     const providerForm = page.locator('form[action*="keycloak"]').first();
     const action = await providerForm.getAttribute('action');
     const actionOrigin = action ? new URL(action).origin : baseURL;
-    resolvedBaseURL = actionOrigin;
+    resolvedBaseURL = resolvePreferredOrigin(actionOrigin);
 }
 
 async function gotoConsoleRoot(page: import('@playwright/test').Page) {
@@ -290,10 +295,11 @@ async function startKeycloakLogin(page: import('@playwright/test').Page) {
     const action = await providerForm.getAttribute('action');
     const actionOrigin = action ? new URL(action).origin : baseURL;
     if (actionOrigin !== baseURL) {
-        await page.goto(buildSignInUrl(actionOrigin), { waitUntil: 'domcontentloaded' });
+        const callbackOrigin = stayOnBaseOrigin ? baseURL : actionOrigin;
+        await page.goto(buildSignInUrl(actionOrigin, callbackOrigin), { waitUntil: 'domcontentloaded' });
         providerForm = page.locator('form[action*="keycloak"]').first();
     }
-    resolvedBaseURL = actionOrigin;
+    resolvedBaseURL = resolvePreferredOrigin(actionOrigin);
     const providerButton = page.getByRole('button', { name: /sign in with keycloak/i });
     if (await providerButton.isVisible().catch(() => false)) {
         await providerButton.click();

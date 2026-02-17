@@ -13,6 +13,9 @@
   - Added shared performance/query profile primitives (`query-profiles`, `PageStates`) and applied on Business/Subscription/Data Trust/Team Performance/Ops pages.
   - Added shared provider error taxonomy contract (`provider-error-contract`) and applied to Business/Ops incident rendering.
   - Local checks passed: `npm run lint`, `npm run build` in `console-web`.
+  - Completed post-merge role acceptance + p95 capture artifacts (`platform_admin`/`owner_admin` runtime snapshots + Playwright evidence + UI timing probes).
+  - Added nav transition fail-safe in `ConsoleShell` (`router.push` no-op fallback to hard navigation).
+  - Stabilized E2E auth origin handling for local base URL in `auth.setup/login/platform-admin/owner-admin/smoke`.
 - next:
   - Prepare commit and open PR.
 - evidence:
@@ -21,4 +24,9 @@
   - `console-web/src/components/ConsoleShell.tsx`
   - `console-web/src/components/OpsPage.tsx`
   - `console-web/src/app/business/page.tsx`
+  - `docs/REPORTS/2026-02-17-console-postmerge-acceptance-p95-wave123-v1.md`
+  - `/tmp/platform_admin_kpi_20260217_postmerge_wave123.json`
+  - `/tmp/owner_admin_kpi_20260217_postmerge_wave123_t0.json`
+  - `/tmp/console_ui_p95_postmerge_wave123_20260217.json`
+  - `/tmp/console_ui_direct_nav_p95_postmerge_wave123_20260217.json`
 - last_updated: 2026-02-17
