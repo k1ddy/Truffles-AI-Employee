@@ -7,6 +7,7 @@ import { useState } from "react";
 import toast from "react-hot-toast";
 
 import AccessDenied from "@/components/AccessDenied";
+import { ConsolePageError, ConsolePageSkeleton } from "@/components/PageStates";
 import {
     authApi,
     businessApi,
@@ -14,6 +15,7 @@ import {
     type MetricFactMeta,
     type OwnerOperationApplyResponse,
 } from "@/lib/api-client";
+import { QUERY_PROFILE_CONTEXT, QUERY_PROFILE_DASHBOARD, keepPreviousData } from "@/lib/query-profiles";
 
 function formatNumber(value?: number | null): string {
     if (value === null || value === undefined || Number.isNaN(value)) {
@@ -85,6 +87,7 @@ export default function BusinessTeamPerformancePage() {
             return response.data;
         },
         enabled: !!session,
+        ...QUERY_PROFILE_CONTEXT,
     });
 
     const role = meData?.agent?.role ?? "manager";
@@ -99,6 +102,8 @@ export default function BusinessTeamPerformancePage() {
         },
         enabled: !!session && canReadBusiness,
         refetchInterval: 45000,
+        placeholderData: keepPreviousData,
+        ...QUERY_PROFILE_DASHBOARD,
     });
 
     const quickProfileMutation = useMutation({
@@ -203,34 +208,29 @@ export default function BusinessTeamPerformancePage() {
 
     if (isLoading) {
         return (
-            <div className="mx-auto max-w-6xl p-6" data-testid="team-performance-page">
-                <h1 className="mb-6 text-2xl font-bold" data-testid="team-performance-title">Эффективность команды</h1>
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                    <div className="h-24 animate-pulse rounded-lg bg-muted/70" />
-                    <div className="h-24 animate-pulse rounded-lg bg-muted/70" />
-                    <div className="h-24 animate-pulse rounded-lg bg-muted/70" />
-                </div>
-            </div>
+            <ConsolePageSkeleton
+                pageTestId="team-performance-page"
+                title="Эффективность команды"
+                titleTestId="team-performance-title"
+                columns={3}
+                cardCount={3}
+            />
         );
     }
 
     if (error || !data) {
         return (
-            <div className="mx-auto max-w-6xl p-6" data-testid="team-performance-page">
-                <h1 className="mb-6 text-2xl font-bold" data-testid="team-performance-title">Эффективность команды</h1>
-                <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-6 text-center" data-testid="team-performance-error">
-                    <p className="mb-4 text-destructive">Не удалось загрузить Team Performance сводку</p>
-                    <button
-                        onClick={() => {
-                            refetch();
-                        }}
-                        className="rounded-full bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition hover:bg-destructive/90"
-                        data-testid="team-performance-retry"
-                    >
-                        Повторить
-                    </button>
-                </div>
-            </div>
+            <ConsolePageError
+                pageTestId="team-performance-page"
+                title="Эффективность команды"
+                titleTestId="team-performance-title"
+                errorTestId="team-performance-error"
+                retryTestId="team-performance-retry"
+                errorMessage="Не удалось загрузить Team Performance сводку"
+                onRetry={() => {
+                    refetch();
+                }}
+            />
         );
     }
 

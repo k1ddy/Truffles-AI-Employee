@@ -16,6 +16,9 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import AccessDenied from "@/components/AccessDenied";
+import { ConsolePageSkeleton } from "@/components/PageStates";
+import { getProviderErrorContract } from "@/lib/provider-error-contract";
+import { QUERY_PROFILE_CONTEXT, QUERY_PROFILE_DASHBOARD, keepPreviousData } from "@/lib/query-profiles";
 
 interface HealthData {
     status: string;
@@ -225,6 +228,7 @@ export default function OpsPage() {
             return response.data;
         },
         enabled: !!session,
+        ...QUERY_PROFILE_CONTEXT,
     });
 
     const role = meData?.agent?.role ?? "manager";
@@ -238,6 +242,8 @@ export default function OpsPage() {
         queryFn: fetchHealth,
         enabled: !!session && canReadOps,
         refetchInterval: 30000,
+        placeholderData: keepPreviousData,
+        ...QUERY_PROFILE_DASHBOARD,
     });
 
     const { data: metrics, isLoading: metricsLoading, error: metricsError } = useQuery({
@@ -245,6 +251,8 @@ export default function OpsPage() {
         queryFn: fetchMetrics,
         enabled: !!session && canReadOps && isFullOps,
         refetchInterval: 60000,
+        placeholderData: keepPreviousData,
+        ...QUERY_PROFILE_DASHBOARD,
     });
 
     // TG-03: Telegram Health
@@ -253,6 +261,8 @@ export default function OpsPage() {
         queryFn: fetchTelegramHealth,
         enabled: !!session && canReadOps,
         refetchInterval: 30000,
+        placeholderData: keepPreviousData,
+        ...QUERY_PROFILE_DASHBOARD,
     });
 
     const { data: outboxData, isLoading: outboxLoading, error: outboxError, refetch: refetchOutbox } = useQuery({
@@ -260,6 +270,8 @@ export default function OpsPage() {
         queryFn: () => fetchOutbox(outboxStatus),
         enabled: !!session && canReadOps && isFullOps,
         refetchInterval: 30000,
+        placeholderData: keepPreviousData,
+        ...QUERY_PROFILE_DASHBOARD,
     });
 
     const { data: opsJobsCatalog } = useQuery({
@@ -269,6 +281,7 @@ export default function OpsPage() {
             return response.data as OpsJobCatalogResponse;
         },
         enabled: !!session && canReadOps && isFullOps,
+        ...QUERY_PROFILE_DASHBOARD,
     });
 
     const { data: opsJobs, isLoading: opsJobsLoading, error: opsJobsError, refetch: refetchOpsJobs } = useQuery({
@@ -279,6 +292,8 @@ export default function OpsPage() {
         },
         enabled: !!session && canReadOps && isFullOps,
         refetchInterval: 30000,
+        placeholderData: keepPreviousData,
+        ...QUERY_PROFILE_DASHBOARD,
     });
 
     const {
@@ -294,6 +309,8 @@ export default function OpsPage() {
         },
         enabled: !!session && canReadOps && isFullOps,
         refetchInterval: 30000,
+        placeholderData: keepPreviousData,
+        ...QUERY_PROFILE_DASHBOARD,
     });
 
     useEffect(() => {
@@ -470,13 +487,15 @@ export default function OpsPage() {
 
     if (isLoading) {
         return (
-            <div className="max-w-4xl mx-auto p-6" data-testid="ops-page">
-                <h1 className="text-2xl font-bold mb-6" data-testid="ops-title">Статус системы</h1>
-                <div className="animate-pulse space-y-4">
-                    <div className="h-32 bg-muted/70 rounded-lg"></div>
-                    <div className="h-32 bg-muted/70 rounded-lg"></div>
-                </div>
-            </div>
+            <ConsolePageSkeleton
+                pageTestId="ops-page"
+                title="Статус системы"
+                titleTestId="ops-title"
+                columns={1}
+                cardCount={2}
+                cardHeightClass="h-32"
+                maxWidthClass="max-w-4xl"
+            />
         );
     }
 
@@ -524,38 +543,54 @@ export default function OpsPage() {
                         <p className="text-sm text-muted-foreground">Критичных инцидентов не обнаружено.</p>
                     ) : (
                         <div className="space-y-3">
-                            {incidentsData.items.map((item) => (
-                                <article
-                                    key={item.id}
-                                    className="rounded-lg border border-border/60 bg-muted/20 p-3"
-                                    data-testid={`ops-incident-${item.id}`}
-                                >
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <p className="text-sm font-semibold">{item.title}</p>
-                                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${incidentChipClass(item.severity)}`}>
-                                            {incidentSeverityLabel(item.severity)}
-                                        </span>
-                                    </div>
-                                    <p className="mt-1 text-xs text-muted-foreground">{item.reason_label}</p>
-                                    <p className="mt-1 text-xs text-muted-foreground">{item.summary}</p>
-                                    <p className="mt-1 text-[11px] text-muted-foreground">
-                                        client: {item.client_slug || "n/a"} · detected: {new Date(item.detected_at).toLocaleString("ru-RU")}
-                                    </p>
-                                    <div className="mt-2 flex flex-wrap gap-2">
-                                        {item.actions.map((action) => (
-                                            action.href ? (
-                                                <Link key={action.id} href={action.href} className="btn-ghost text-xs">
-                                                    {action.title}
-                                                </Link>
-                                            ) : (
-                                                <span key={action.id} className="rounded-full border border-border/60 px-2 py-1 text-[11px] text-muted-foreground">
-                                                    {action.title} {action.job_type ? `(${action.job_type}:${action.mode})` : ""}
-                                                </span>
-                                            )
-                                        ))}
-                                    </div>
-                                </article>
-                            ))}
+                            {incidentsData.items.map((item) => {
+                                const providerContract = getProviderErrorContract(item.reason_code);
+                                return (
+                                    <article
+                                        key={item.id}
+                                        className="rounded-lg border border-border/60 bg-muted/20 p-3"
+                                        data-testid={`ops-incident-${item.id}`}
+                                    >
+                                        {providerContract && (
+                                            <div className="mb-2 rounded-md border border-border/60 bg-background px-2 py-1 text-[11px] text-muted-foreground">
+                                                <p className="font-semibold text-foreground">{providerContract.shortLabel}</p>
+                                                <p className="mt-0.5">{providerContract.operatorMeaning}</p>
+                                            </div>
+                                        )}
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <p className="text-sm font-semibold">{item.title}</p>
+                                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${incidentChipClass(item.severity)}`}>
+                                                {incidentSeverityLabel(item.severity)}
+                                            </span>
+                                        </div>
+                                        <p className="mt-1 text-xs text-muted-foreground">{item.reason_label}</p>
+                                        <p className="mt-1 text-xs text-muted-foreground">{item.summary}</p>
+                                        <p className="mt-1 text-[11px] text-muted-foreground">
+                                            client: {item.client_slug || "n/a"} · detected: {new Date(item.detected_at).toLocaleString("ru-RU")}
+                                        </p>
+                                        {providerContract && (
+                                            <ol className="mt-2 list-decimal space-y-0.5 pl-4 text-[11px] text-muted-foreground" data-testid={`ops-provider-runbook-${item.id}`}>
+                                                {providerContract.runbook.map((step) => (
+                                                    <li key={step}>{step}</li>
+                                                ))}
+                                            </ol>
+                                        )}
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                            {item.actions.map((action) => (
+                                                action.href ? (
+                                                    <Link key={action.id} href={action.href} className="btn-ghost text-xs">
+                                                        {action.title}
+                                                    </Link>
+                                                ) : (
+                                                    <span key={action.id} className="rounded-full border border-border/60 px-2 py-1 text-[11px] text-muted-foreground">
+                                                        {action.title} {action.job_type ? `(${action.job_type}:${action.mode})` : ""}
+                                                    </span>
+                                                )
+                                            ))}
+                                        </div>
+                                    </article>
+                                );
+                            })}
                         </div>
                     )}
                 </div>

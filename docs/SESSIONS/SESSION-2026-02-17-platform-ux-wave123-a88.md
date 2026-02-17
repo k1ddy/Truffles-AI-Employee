@@ -1,0 +1,24 @@
+# SESSION 2026-02-17-platform-ux-wave123-a88 — Platform UX Wave 1/2/3
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-17-platform-ux-wave123-a88.md
+- branch: feat/2026-02-17-platform-ux-wave123-a88
+- worktree: /tmp/truffles-main-platform-ux-wave123
+- base_ref: origin/main
+- scope: Context Health + Performance Profile + Provider Error Contract for cross-niche Console Plane UX.
+- done:
+  - Session initialized.
+  - Added unified `Context Health` strip in `ConsoleShell` with role-aware guidance and actions.
+  - Added shared performance/query profile primitives (`query-profiles`, `PageStates`) and applied on Business/Subscription/Data Trust/Team Performance/Ops pages.
+  - Added shared provider error taxonomy contract (`provider-error-contract`) and applied to Business/Ops incident rendering.
+  - Local checks passed: `npm run lint`, `npm run build` in `console-web`.
+- next:
+  - Prepare commit and open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-17-platform-ux-wave123-a88.md
+  - console-web lint/build logs (local)
+  - `console-web/src/components/ConsoleShell.tsx`
+  - `console-web/src/components/OpsPage.tsx`
+  - `console-web/src/app/business/page.tsx`
+- last_updated: 2026-02-17
