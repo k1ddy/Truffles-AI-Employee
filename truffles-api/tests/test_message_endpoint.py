@@ -13685,6 +13685,248 @@ def test_llm_policy_core_degraded_booking_guard_uses_safe_collect(monkeypatch):
     assert meta.get("action") == "booking_prompt"
 
 
+def test_llm_policy_core_degraded_booking_guard_retries_with_llm_rescue_then_uses_calendar_tool(
+    monkeypatch,
+):
+    monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
+
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={"booking": {"active": True, "service": "Стрижка"}},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="У вас есть свободные слоты на завтра?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-llm-policy-core-degraded-slot-lookup",
+                timestamp=1234567898,
+            ),
+        ),
+    )
+
+    expected_reply_state = ExpectedReplyState(
+        context=conversation.context,
+        context_manager={},
+        expected_reply_type=None,
+        intent_queue=None,
+        expected_reply_matched=None,
+        expected_reply_shortcircuit=False,
+        expected_reply_blocked_by_info=False,
+        memory_expected_reply_type=None,
+        current_goal="booking",
+    )
+    intent_decomp_state = IntentDecompositionState(
+        intent_decomp_payload={"intents": ["booking"]},
+        intent_decomp_intents=["booking"],
+        intent_decomp_primary="booking",
+        intent_decomp_secondary=[],
+        intent_decomp_service_query="Стрижка",
+        intent_decomp_multi=False,
+        intent_decomp_used=True,
+        intent_decomp_set={"booking"},
+        consult_intent=False,
+        consult_topic=None,
+        consult_question=None,
+        intent_queue_choice=None,
+        pending_intent_queue=None,
+        pending_expected_reply_type=None,
+        intent_queue_expected_next=None,
+        intent_queue_event=None,
+        info_class_intents=set(),
+        info_class_meta={},
+        basic_info_message=False,
+        allow_service_carryover=False,
+        consult_return_pending=False,
+        consult_return_reason=None,
+        consult_return_prompt=None,
+        booking_signal=True,
+        booking_block_meta=None,
+        booking_wants_flow=True,
+        booking_blocked=False,
+        booking_active=True,
+        booking_context={"active": True, "service": "Стрижка"},
+        booking={"active": True, "service": "Стрижка"},
+        class_carryover=None,
+        context=conversation.context,
+        context_manager={},
+        current_goal="booking",
+    )
+    primary_policy_result = {
+        "ok": False,
+        "payload": None,
+        "error": "invalid_schema",
+        "raw": "{\"action\":\"collect\"}",
+        "attempted": True,
+        "elapsed_ms": 9.0,
+    }
+    rescue_policy_payload = {
+        "intent": "booking",
+        "action": "fact",
+        "tool_action": "calendar.list_slots",
+        "tool_args": {
+            "service_query": "Стрижка",
+            "start_at": "2026-02-18T10:00:00",
+        },
+        "pack_refs": [],
+        "language": "ru",
+        "confidence": 0.95,
+        "reason": "slots_lookup",
+        "goal": "booking",
+        "slots": {
+            "service": "Стрижка",
+            "datetime": "2026-02-18T10:00:00",
+        },
+        "next_question": None,
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+    }
+    rescue_policy_result = {
+        "ok": True,
+        "payload": rescue_policy_payload,
+        "error": None,
+        "raw": json.dumps(rescue_policy_payload, ensure_ascii=False),
+        "attempted": True,
+        "elapsed_ms": 13.0,
+    }
+
+    route_policy_calls = []
+
+    def _route_policy_core(*_args, **kwargs):
+        route_policy_calls.append(kwargs)
+        if len(route_policy_calls) == 1:
+            return primary_policy_result
+        return rescue_policy_result
+
+    captured_tool_call = {}
+
+    def _fake_execute_tool_action(*_args, **kwargs):
+        captured_tool_call.update(kwargs)
+        return SimpleNamespace(
+            handled=True,
+            ok=True,
+            response_text="Свободные слоты: Айгерим 10:00, 11:00",
+            error_code=None,
+            decision_meta={"tool_action": "calendar.list_slots", "tool_decision": "ok"},
+            trace={"stage": "tool_registry", "decision": "ok", "tool_action": "calendar.list_slots"},
+            expected_reply_type=webhook_router.EXPECTED_REPLY_TIME,
+        )
+
+    with patch(
+        "app.routers.webhook.decision._apply_expected_reply_contract",
+        return_value=expected_reply_state,
+    ), patch(
+        "app.routers.webhook.decision._run_intent_decomposition",
+        return_value=intent_decomp_state,
+    ), patch(
+        "app.routers.webhook.decision.route_llm_policy_core",
+        side_effect=_route_policy_core,
+    ), patch(
+        "app.routers.webhook.decision._collect_plan_consult_refs",
+        return_value=([], None),
+    ), patch(
+        "app.routers.webhook.decision._handle_policy_escalation_gate",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.decision._handle_knowledge_safe_mode_gate",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.decision._handle_minimum_data_safe_mode_gate",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.decision.POLICY_CORE_RESCUE_TIMEOUT_SECONDS",
+        1.5,
+    ), patch(
+        "app.services.tool_registry_service.execute_tool_action",
+        side_effect=_fake_execute_tool_action,
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._legacy.semantic_service_match", return_value=None
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert "Свободные слоты" in (response.bot_response or "")
+    assert len(route_policy_calls) == 2
+    rescue_timing_context = route_policy_calls[1].get("timing_context")
+    assert isinstance(rescue_timing_context, dict)
+    assert rescue_timing_context.get("pipeline_budget_ms") == 1500
+    assert captured_tool_call.get("tool_action") == "calendar.list_slots"
+    assert (captured_tool_call.get("tool_args", {}).get("service_query") or "").casefold() == "стрижка"
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("action") == "reply"
+    assert meta.get("intent") == "calendar.list_slots"
+    assert meta.get("policy_core_mode") == "policy_core"
+    assert meta.get("tool_action") == "calendar.list_slots"
+    llm_policy = meta.get("llm_policy_core", {})
+    assert llm_policy.get("rescue_attempted") is True
+    assert llm_policy.get("rescue_applied") is True
+    assert llm_policy.get("rescue_trigger_error") == "invalid_schema"
+
+
 def test_policy_core_reason_supports_info_rescue_prefixes():
     assert _policy_core_reason_supports_info_rescue("policy_error:invalid_schema") is True
     assert _policy_core_reason_supports_info_rescue("policy_validation:low_confidence") is True
