@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { signOut, useSession } from "next-auth/react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Image from "next/image";
 import Link from "next/link";
@@ -276,12 +276,57 @@ function formatCompanyLabel(companyName?: string | null, companyId?: string | nu
     return "—";
 }
 
-function findBranchName(branches: BranchSummary[] | undefined, branchId: string | null | undefined): string {
-    if (!branchId || !branches?.length) {
-        return "—";
+function formatContextLabel(name?: string | null, fallbackId?: string | null): string {
+    if (name && name !== "—") {
+        return name;
     }
-    const match = branches.find((branch) => branch.id === branchId);
-    return match?.name ?? "—";
+    if (fallbackId) {
+        return fallbackId;
+    }
+    return "—";
+}
+
+function findClientName(
+    clients: ClientSummary[] | undefined,
+    clientId: string | null | undefined,
+    fallbackName: string | null | undefined,
+): string {
+    if (clientId && clients?.length) {
+        const match = clients.find((client) => client.id === clientId);
+        if (match?.name) {
+            return match.name;
+        }
+    }
+    if (fallbackName) {
+        return fallbackName;
+    }
+    if (clients?.length === 1) {
+        return clients[0].name ?? clients[0].id ?? "—";
+    }
+    return clients?.length ? "Выберите клиента" : "Нет активных клиентов";
+}
+
+function findBranchName(
+    branches: BranchSummary[] | undefined,
+    branchId: string | null | undefined,
+    allowAllBranches = false,
+): string {
+    if (!branches?.length) {
+        return "Нет активных филиалов";
+    }
+    if (branchId) {
+        const match = branches.find((branch) => branch.id === branchId);
+        if (match?.name) {
+            return match.name;
+        }
+    }
+    if (branches.length === 1) {
+        return branches[0].name ?? branches[0].id ?? "—";
+    }
+    if (allowAllBranches) {
+        return "Все филиалы";
+    }
+    return "Выберите филиал";
 }
 
 function isNavItemCurrent(pathname: string, href: string): boolean {
@@ -531,6 +576,9 @@ function SelectionGate({
                         </option>
                     ))}
                 </select>
+                <p className="mt-2 text-xs text-muted-foreground">
+                    Доступно компаний: {(me.companies ?? []).length}
+                </p>
                 <div className="mt-6 flex justify-end">
                     <button
                         className="btn-primary"
@@ -566,6 +614,9 @@ function SelectionGate({
                         </option>
                     ))}
                 </select>
+                <p className="mt-2 text-xs text-muted-foreground">
+                    Доступно клиентов: {clients.length}
+                </p>
                 <div className="mt-6 flex justify-end">
                     <button
                         className="btn-primary"
@@ -601,6 +652,9 @@ function SelectionGate({
                         </option>
                     ))}
                 </select>
+                <p className="mt-2 text-xs text-muted-foreground">
+                    Доступно филиалов: {(me.branches ?? []).length}
+                </p>
                 <div className="mt-6 flex justify-end">
                     <button
                         className="btn-primary"
@@ -641,6 +695,9 @@ function ContextBar({
     const branchId = me.selected_branch_id ?? "";
     const allowAllBranches = !me.branch_selection_required;
     const companyName = companies.find((company) => company.id === companyId)?.name ?? me.client?.company_name;
+    const clientName = findClientName(clients, clientId, me.client?.name);
+    const branchName = findBranchName(branches, branchId, allowAllBranches);
+    const showPlatformScopeHint = me.agent?.role === "platform_admin";
 
     return (
         <div className="flex flex-wrap items-center gap-6 text-sm" data-testid="context-bar">
@@ -662,7 +719,7 @@ function ContextBar({
                         ))}
                     </select>
                 ) : (
-                    <span className="text-sm font-semibold">
+                    <span className="text-sm font-semibold" data-testid="context-company-value">
                         {formatCompanyLabel(companyName, companyId)}
                     </span>
                 )}
@@ -684,7 +741,7 @@ function ContextBar({
                         ))}
                     </select>
                 ) : (
-                    <span className="text-sm font-semibold">{me.client?.name ?? "—"}</span>
+                    <span className="text-sm font-semibold" data-testid="context-client-value">{clientName}</span>
                 )}
             </div>
             <div className="flex flex-col gap-1 min-w-[180px]">
@@ -705,11 +762,20 @@ function ContextBar({
                         ))}
                     </select>
                 ) : (
-                    <span className="text-sm font-semibold">
-                        {findBranchName(branches, branchId)}
+                    <span className="text-sm font-semibold" data-testid="context-branch-value">
+                        {branchName}
                     </span>
                 )}
             </div>
+            {showPlatformScopeHint && (
+                <p
+                    className="w-full rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
+                    data-testid="context-active-filter-hint"
+                >
+                    Показаны только активные компании, клиенты и филиалы. Архивные и деактивированные сущности доступны в
+                    разделе Тенанты.
+                </p>
+            )}
         </div>
     );
 }
@@ -749,6 +815,7 @@ function PublicLanding() {
 export default function ConsoleShell({ children }: { children: React.ReactNode }) {
     const { status, data: session } = useSession();
     const pathname = usePathname();
+    const router = useRouter();
     const sessionAuth = session as SessionAuth | null;
     const sessionError = sessionAuth?.error;
     const accessToken = sessionAuth?.accessToken;
@@ -765,6 +832,8 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             return response.data as ConsoleMe;
         },
         enabled: hasSession,
+        staleTime: 15000,
+        refetchOnWindowFocus: false,
     });
 
     useEffect(() => {
@@ -843,7 +912,6 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [contextNotice, setContextNotice] = useState<string | null>(null);
-    const contextBusy = isSubmitting || isFetching;
     const [navCollapsed, setNavCollapsed] = useState(
         () => readBrowserStorage(NAV_COLLAPSED_STORAGE_KEY) === "1"
     );
@@ -859,9 +927,19 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         ? healthIncidentUiState.hiddenUntilByFingerprint[healthIncidentFingerprint] ?? 0
         : 0;
 
-    const invalidateContextAwareQueries = async () => {
+    const markContextAwareQueriesStale = async () => {
+        await queryClient.cancelQueries({
+            predicate: (query) => isContextAwareQueryKey(query.queryKey),
+        });
         await queryClient.invalidateQueries({
             predicate: (query) => isContextAwareQueryKey(query.queryKey),
+            refetchType: "none",
+        });
+    };
+    const refetchActiveContextAwareQueries = () => {
+        void queryClient.refetchQueries({
+            predicate: (query) => isContextAwareQueryKey(query.queryKey),
+            type: "active",
         });
     };
     const healthIncidentHidden = !!healthIncidentFingerprint && healthIncidentHiddenUntil > Date.now();
@@ -880,7 +958,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             return;
         }
         event.preventDefault();
-        window.location.assign(href);
+        router.push(href);
     };
 
     useEffect(() => {
@@ -957,6 +1035,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const selectionRequired = !!data?.selection_required;
     const branchSelectionRequired = !!data?.branch_selection_required;
     const showGate = companySelectionRequired || selectionRequired || branchSelectionRequired;
+    const contextBusy = isSubmitting || (showGate && isFetching);
 
     const storedScope = readConsoleContextScopeFromStorage();
     const storedCompanyId = storedScope.companyId;
@@ -975,10 +1054,12 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         }
         setIsSubmitting(true);
         try {
+            const companyName = companies.find((company) => company.id === companyId)?.name;
             setConsoleCompanyContext(companyId);
             await refetch();
-            await invalidateContextAwareQueries();
-            setContextNotice("Контекст применён");
+            await markContextAwareQueriesStale();
+            refetchActiveContextAwareQueries();
+            setContextNotice(`Контекст: компания ${formatContextLabel(companyName, companyId)}`);
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -992,11 +1073,13 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         }
         setIsSubmitting(true);
         try {
+            const clientName = visibleClients.find((client) => client.id === clientId)?.name;
             const selectedClientCompanyId = visibleClients.find((client) => client.id === clientId)?.company_id;
             setConsoleClientContext(clientId, selectedClientCompanyId ?? companyId ?? null);
             await refetch();
-            await invalidateContextAwareQueries();
-            setContextNotice("Контекст применён");
+            await markContextAwareQueriesStale();
+            refetchActiveContextAwareQueries();
+            setContextNotice(`Контекст: клиент ${formatContextLabel(clientName, clientId)}`);
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -1010,10 +1093,12 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         }
         setIsSubmitting(true);
         try {
+            const branchName = (data?.branches ?? []).find((branch) => branch.id === branchId)?.name;
             setConsoleBranchContext(branchId);
             await refetch();
-            await invalidateContextAwareQueries();
-            setContextNotice("Контекст применён");
+            await markContextAwareQueriesStale();
+            refetchActiveContextAwareQueries();
+            setContextNotice(`Контекст: филиал ${formatContextLabel(branchName, branchId)}`);
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -1044,8 +1129,14 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         try {
             setConsoleBranchContext(nextBranchId);
             await refetch();
-            await invalidateContextAwareQueries();
-            setContextNotice("Контекст применён");
+            await markContextAwareQueriesStale();
+            refetchActiveContextAwareQueries();
+            if (!nextBranchId) {
+                setContextNotice("Контекст: все филиалы");
+            } else {
+                const nextBranchName = findBranchName(data?.branches, nextBranchId);
+                setContextNotice(`Контекст: филиал ${formatContextLabel(nextBranchName, nextBranchId)}`);
+            }
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -1218,7 +1309,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                         </span>
                                         {" "}·{" "}
                                         <span className="font-semibold text-foreground">
-                                            {findBranchName(data.branches, data.selected_branch_id)}
+                                            {findBranchName(data.branches, data.selected_branch_id, !data.branch_selection_required)}
                                         </span>
                                         <Link href="/company-workspace" className="ml-2 underline">
                                             изменить

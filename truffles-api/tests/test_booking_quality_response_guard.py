@@ -629,6 +629,38 @@ def test_calendar_contract_miss_not_reported_for_booking_verification_handoff_in
     assert "calendar_tool_contract_miss" not in reasons
 
 
+def test_calendar_contract_miss_not_reported_for_check_booking_prompt():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={
+            "action": "check_booking_prompt",
+            "intent": "check_booking",
+            "source": "llm_policy_core",
+        },
+        trace_entries=[{"stage": "llm_policy_core"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=False,
+        booking_progress_expected=False,
+        booking_progressed=None,
+        allow_booking_stall=False,
+        outbox_text="Чтобы проверить запись, подскажите номер телефона и дату.",
+        tool_signals={"calendar": {"outcome": "pending"}},
+    )
+    assert "calendar_tool_contract_miss" not in reasons
+
+
 def test_state_fallback_allows_pending_when_expected_bot_active():
     helpers = _load_expectation_helpers()
     fn = helpers["_llm_quality_state_matches_expected"]

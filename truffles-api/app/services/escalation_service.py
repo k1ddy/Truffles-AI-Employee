@@ -166,7 +166,6 @@ def _extract_handover_media_refs(
         )
         if media_ref:
             refs.append(media_ref)
-
     deduped: list[dict] = []
     seen: set[tuple[str | None, ...]] = set()
     for ref in refs:

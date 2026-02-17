@@ -5241,8 +5241,15 @@ def _llm_quality_evaluate_turn(
         and meta_intent_value == "check_booking"
         and meta_source_value in {"booking_verification", "tool_registry"}
     )
+    # `check_booking_prompt` is a collection step (request booking reference),
+    # so calendar success is not expected yet.
+    booking_verification_collect_prompt = bool(
+        meta_action_value == "check_booking_prompt"
+        and meta_intent_value in {"check_booking", "check_record"}
+    )
     requires_calendar_contract = bool(
         not booking_verification_handoff
+        and not booking_verification_collect_prompt
         and (
             appointment_id
             or appointment_status in LLM_QUALITY_BOOKING_CONFIRM_STATUS_HINTS
