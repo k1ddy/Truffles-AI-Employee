@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 from uuid import UUID
 
@@ -14,6 +14,8 @@ from app.services.telegram_service import TelegramService, build_handover_button
 logger = get_logger("escalation_service")
 
 SIMULATION_CONTEXT_KEY = "simulation"
+HANDOVER_MEDIA_LOOKBACK_LIMIT = 12
+HANDOVER_MEDIA_HISTORY_WINDOW = timedelta(minutes=30)
 
 
 def _normalize_slot_value(value: object) -> str | None:
@@ -83,9 +85,20 @@ def _media_ref_fingerprint(ref: dict) -> tuple[str | None, ...]:
     )
 
 
-def _extract_handover_media_refs(conversation: Conversation, message: Message | None) -> tuple[list[dict], bool]:
+def _extract_handover_media_refs(
+    conversation: Conversation,
+    message: Message | None,
+    *,
+    recent_messages: list[Message] | None = None,
+) -> tuple[list[dict], bool]:
     refs: list[dict] = []
     required = False
+    reference_time = datetime.now(timezone.utc)
+    trigger_created_at = getattr(message, "created_at", None) if message is not None else None
+    if isinstance(trigger_created_at, datetime):
+        if trigger_created_at.tzinfo is None:
+            trigger_created_at = trigger_created_at.replace(tzinfo=timezone.utc)
+        reference_time = trigger_created_at
 
     message_meta = message.message_metadata if message and isinstance(message.message_metadata, dict) else {}
     message_media = message_meta.get("media") if isinstance(message_meta, dict) else None
@@ -125,6 +138,35 @@ def _extract_handover_media_refs(conversation: Conversation, message: Message | 
             if media_ref:
                 refs.append(media_ref)
 
+    for recent_message in recent_messages or []:
+        if recent_message is None:
+            continue
+        created_at = getattr(recent_message, "created_at", None)
+        if isinstance(created_at, datetime):
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            if reference_time - created_at > HANDOVER_MEDIA_HISTORY_WINDOW:
+                continue
+        if message is not None and getattr(recent_message, "id", None) == getattr(message, "id", None):
+            continue
+        recent_meta = (
+            recent_message.message_metadata
+            if isinstance(recent_message.message_metadata, dict)
+            else {}
+        )
+        recent_media = recent_meta.get("media") if isinstance(recent_meta, dict) else None
+        if not isinstance(recent_media, dict):
+            continue
+        required = True
+        recent_inbound_id = _normalize_slot_value(getattr(recent_message, "message_id", None))
+        media_ref = _normalize_media_ref(
+            recent_media,
+            source="recent_message_history",
+            inbound_message_id=recent_inbound_id,
+        )
+        if media_ref:
+            refs.append(media_ref)
+
     deduped: list[dict] = []
     seen: set[tuple[str | None, ...]] = set()
     for ref in refs:
@@ -144,7 +186,13 @@ def _extract_decision_meta(message: Message | None) -> dict:
     return decision_meta if isinstance(decision_meta, dict) else {}
 
 
-def _build_handover_meta(conversation: Conversation, message: Message | None, user: User | None) -> dict | None:
+def _build_handover_meta(
+    conversation: Conversation,
+    message: Message | None,
+    user: User | None,
+    *,
+    recent_messages: list[Message] | None = None,
+) -> dict | None:
     decision_meta = _extract_decision_meta(message)
     meta: dict = {}
     intent = decision_meta.get("intent")
@@ -187,7 +235,11 @@ def _build_handover_meta(conversation: Conversation, message: Message | None, us
     if slots:
         meta["slots"] = slots
 
-    media_refs, media_required = _extract_handover_media_refs(conversation, message)
+    media_refs, media_required = _extract_handover_media_refs(
+        conversation,
+        message,
+        recent_messages=recent_messages,
+    )
     if media_refs:
         meta["media_refs"] = media_refs
     if media_required or media_refs:
@@ -213,6 +265,30 @@ def _get_latest_user_message(db: Session, conversation_id: UUID) -> Message | No
         .order_by(Message.created_at.desc())
         .first()
     )
+
+
+def _get_recent_user_messages(
+    db: Session,
+    conversation_id: UUID,
+    *,
+    limit: int = HANDOVER_MEDIA_LOOKBACK_LIMIT,
+) -> list[Message]:
+    safe_limit = max(1, int(limit or HANDOVER_MEDIA_LOOKBACK_LIMIT))
+    try:
+        rows = (
+            db.query(Message)
+            .filter(Message.conversation_id == conversation_id, Message.role == "user")
+            .order_by(Message.created_at.desc())
+            .limit(safe_limit)
+            .all()
+        )
+    except Exception:
+        return []
+    if isinstance(rows, list):
+        return rows
+    if isinstance(rows, tuple):
+        return list(rows)
+    return []
 
 
 def _is_simulation_context(conversation: Conversation | None) -> bool:
@@ -295,7 +371,13 @@ def create_handover(
     """Create handover record in database."""
     now = datetime.now(timezone.utc)
     trigger_message = _get_latest_user_message(db, conversation.id)
-    handover_meta = _build_handover_meta(conversation, trigger_message, user)
+    recent_messages = _get_recent_user_messages(db, conversation.id)
+    handover_meta = _build_handover_meta(
+        conversation,
+        trigger_message,
+        user,
+        recent_messages=recent_messages,
+    )
 
     handover = Handover(
         conversation_id=conversation.id,
@@ -380,6 +462,161 @@ def get_or_create_topic(
     return topic_id
 
 
+def _extract_media_contract_state(handover: Handover) -> tuple[list[dict], bool]:
+    meta = handover.meta if isinstance(handover.meta, dict) else {}
+    media_refs = meta.get("media_refs") if isinstance(meta.get("media_refs"), list) else []
+    media_refs = [item for item in media_refs if isinstance(item, dict)]
+    contract = meta.get("media_handoff_contract") if isinstance(meta.get("media_handoff_contract"), dict) else {}
+    required = bool(contract.get("required"))
+    if not required and media_refs:
+        required = bool(contract.get("bound")) or False
+    return media_refs, required
+
+
+def _apply_media_delivery_meta(
+    handover: Handover,
+    *,
+    status: str,
+    media_refs_count: int,
+    required: bool,
+    sent_count: int = 0,
+    failed: list[dict] | None = None,
+    reason: str | None = None,
+) -> None:
+    meta = dict(handover.meta or {})
+    delivery = dict(meta.get("media_handoff_delivery") or {})
+    telegram_payload = {
+        "status": status,
+        "required": bool(required),
+        "media_refs_count": int(media_refs_count),
+        "sent_count": int(sent_count),
+        "failed_count": len(failed or []),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if reason:
+        telegram_payload["reason"] = reason
+    if failed:
+        telegram_payload["failed"] = failed[:5]
+    delivery["telegram"] = telegram_payload
+    meta["media_handoff_delivery"] = delivery
+    handover.meta = meta
+
+
+def _refresh_handover_media_contract(
+    db: Session,
+    *,
+    handover: Handover,
+    conversation: Conversation,
+    user: User | None,
+) -> None:
+    existing_refs, required = _extract_media_contract_state(handover)
+    if existing_refs:
+        return
+
+    trigger_message = _get_latest_user_message(db, conversation.id)
+    recent_messages = _get_recent_user_messages(db, conversation.id)
+    refreshed_meta = _build_handover_meta(
+        conversation,
+        trigger_message,
+        user,
+        recent_messages=recent_messages,
+    )
+    if not isinstance(refreshed_meta, dict):
+        return
+
+    refreshed_refs = refreshed_meta.get("media_refs")
+    refreshed_contract = refreshed_meta.get("media_handoff_contract")
+    if not isinstance(refreshed_refs, list) and not isinstance(refreshed_contract, dict):
+        return
+
+    merged = dict(handover.meta or {})
+    if isinstance(refreshed_refs, list):
+        merged["media_refs"] = [item for item in refreshed_refs if isinstance(item, dict)]
+    if isinstance(refreshed_contract, dict):
+        merged["media_handoff_contract"] = refreshed_contract
+    handover.meta = merged
+
+
+def _send_handover_media_to_topic(
+    telegram: TelegramService,
+    *,
+    chat_id: str,
+    topic_id: int,
+    reply_to_message_id: int,
+    media_refs: list[dict],
+) -> tuple[int, list[dict]]:
+    sent_count = 0
+    failed: list[dict] = []
+
+    for index, ref in enumerate(media_refs, start=1):
+        media_url = (
+            _normalize_slot_value(ref.get("public_url"))
+            or _normalize_slot_value(ref.get("url"))
+            or _normalize_slot_value(ref.get("storage_path"))
+        )
+        if not media_url:
+            failed.append(
+                {
+                    "index": index,
+                    "reason": "media_url_missing",
+                }
+            )
+            continue
+
+        media_type = (_normalize_slot_value(ref.get("media_type")) or "").lower()
+        caption = _normalize_slot_value(ref.get("caption")) or f"Референс клиента #{index}"
+
+        try:
+            if media_type in {"photo", "image"}:
+                result = telegram.send_photo(
+                    chat_id=chat_id,
+                    photo=media_url,
+                    caption=caption,
+                    message_thread_id=topic_id,
+                    reply_to_message_id=reply_to_message_id,
+                )
+            elif media_type in {"voice"} or bool(ref.get("ptt")):
+                result = telegram.send_voice(
+                    chat_id=chat_id,
+                    voice=media_url,
+                    caption=caption,
+                    message_thread_id=topic_id,
+                    reply_to_message_id=reply_to_message_id,
+                )
+            elif media_type in {"audio"}:
+                result = telegram.send_audio(
+                    chat_id=chat_id,
+                    audio=media_url,
+                    caption=caption,
+                    message_thread_id=topic_id,
+                    reply_to_message_id=reply_to_message_id,
+                )
+            else:
+                result = telegram.send_document(
+                    chat_id=chat_id,
+                    document=media_url,
+                    caption=caption,
+                    message_thread_id=topic_id,
+                    reply_to_message_id=reply_to_message_id,
+                )
+        except Exception as exc:
+            result = {"ok": False, "error": str(exc)}
+
+        if result.get("ok"):
+            sent_count += 1
+            continue
+        failed.append(
+            {
+                "index": index,
+                "reason": "telegram_media_send_failed",
+                "description": _normalize_slot_value(result.get("description"))
+                or _normalize_slot_value(result.get("error")),
+            }
+        )
+
+    return sent_count, failed
+
+
 def send_telegram_notification(
     db: Session,
     handover: Handover,
@@ -389,11 +626,44 @@ def send_telegram_notification(
     routing_meta: dict | None = None,
 ) -> bool:
     """Send handover notification to Telegram topic with buttons and pin."""
+    _refresh_handover_media_contract(
+        db,
+        handover=handover,
+        conversation=conversation,
+        user=user,
+    )
+    media_refs, media_required = _extract_media_contract_state(handover)
+    if media_required and not media_refs:
+        _apply_media_delivery_meta(
+            handover,
+            status="failed",
+            media_refs_count=0,
+            required=True,
+            reason="media_refs_missing",
+        )
+        db.flush()
+        logger.error(
+            "Media handoff contract violation: required media refs missing for handover %s",
+            handover.id,
+        )
+        alert_error(
+            "Media handoff contract violation",
+            {"handover_id": str(handover.id), "reason": "media_refs_missing"},
+        )
+        return False
+
     if _is_simulation_context(conversation):
         topic_id = get_or_create_topic(db, None, "", conversation, user)
         handover.notified_at = datetime.now(timezone.utc)
         if topic_id and not handover.telegram_message_id:
             handover.telegram_message_id = -abs(int(topic_id))
+        _apply_media_delivery_meta(
+            handover,
+            status="simulated",
+            media_refs_count=len(media_refs),
+            required=media_required,
+            sent_count=len(media_refs),
+        )
         db.flush()
         logger.info(
             "Simulation mode: skipping telegram notification for handover %s",
@@ -428,6 +698,8 @@ def send_telegram_notification(
         message=message,
         trigger_type=handover.trigger_value or handover.trigger_type,
     )
+    if media_refs:
+        text = f"{text}\n\n<b>Медиа:</b> {len(media_refs)} файл(а) отправляю ниже."
 
     # 3. Build buttons
     buttons = build_handover_buttons(handover.id)
@@ -471,9 +743,53 @@ def send_telegram_notification(
         # 6. Pin message
         telegram.pin_message(chat_id, message_id)
 
+        sent_media = 0
+        media_failed: list[dict] = []
+        if media_refs:
+            sent_media, media_failed = _send_handover_media_to_topic(
+                telegram,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                reply_to_message_id=message_id,
+                media_refs=media_refs,
+            )
+
+        media_status = "sent"
+        if media_failed:
+            media_status = "partial" if sent_media > 0 else "failed"
+        _apply_media_delivery_meta(
+            handover,
+            status=media_status,
+            media_refs_count=len(media_refs),
+            required=media_required,
+            sent_count=sent_media,
+            failed=media_failed,
+            reason="telegram_media_send_failed" if media_failed else None,
+        )
+        db.flush()
+        if media_required and media_failed:
+            logger.error(
+                "Media handoff delivery failed for handover %s: %s",
+                handover.id,
+                media_failed,
+            )
+            alert_error(
+                "Media handoff delivery failed",
+                {"handover_id": str(handover.id), "failed": media_failed[:3]},
+            )
+            return False
+
         logger.info(f"Sent to Telegram: topic={topic_id}, message_id={message_id}")
         return True
     else:
+        _apply_media_delivery_meta(
+            handover,
+            status="failed",
+            media_refs_count=len(media_refs),
+            required=media_required,
+            reason="telegram_message_send_failed",
+        )
+        db.flush()
         logger.error(f"Telegram send error: {result}")
         alert_error("Telegram notification failed", {"handover_id": str(handover.id), "result": str(result)})
         return False
