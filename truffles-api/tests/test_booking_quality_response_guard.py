@@ -597,6 +597,62 @@ def test_calendar_contract_miss_reported_for_get_booking_without_success():
     assert "calendar_tool_contract_miss" in reasons
 
 
+def test_calendar_contract_miss_not_reported_for_slot_confirmation_prompt_without_calendar_outcome():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "booking_confirm", "intent": "booking", "slot_confirmation_required": True},
+        trace_entries=[{"stage": "booking_confirm", "decision": "prompt"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=True,
+        booking_progressed=True,
+        allow_booking_stall=False,
+        outbox_text="Я понял дату и время: 18:30. Верно?",
+        tool_signals={"confirm": {"required": True, "outcome": "pending"}},
+    )
+    assert "calendar_tool_contract_miss" not in reasons
+
+
+def test_calendar_contract_miss_reported_for_booking_confirm_without_slot_confirmation_flag():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "booking_confirm", "intent": "booking", "slot_confirmation_required": False},
+        trace_entries=[{"stage": "booking_confirm", "decision": "confirmed"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type=None,
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=True,
+        booking_progressed=True,
+        allow_booking_stall=False,
+        outbox_text="Подтвердите, пожалуйста, запись.",
+        tool_signals={"confirm": {"required": True, "outcome": "success"}},
+    )
+    assert "calendar_tool_contract_miss" in reasons
+
+
 def test_calendar_contract_miss_not_reported_for_booking_verification_handoff_in_pending():
     evaluate_turn = _load_evaluate_turn()
     reasons = evaluate_turn(

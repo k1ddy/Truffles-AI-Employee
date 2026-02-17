@@ -217,14 +217,9 @@ class TestAnswerInterpreterSchema:
 
 
 class TestPolicyCoreTimeoutRetry:
-    def test_retries_once_after_timeout_and_succeeds(self, monkeypatch):
-        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        monkeypatch.setattr(
-            "app.services.intent_service.POLICY_CORE_RETRY_ON_TIMEOUT",
-            "1",
-        )
-
-        payload = {
+    @staticmethod
+    def _policy_payload() -> dict:
+        return {
             "intent": "booking",
             "action": "collect",
             "tool_action": "calendar.list_slots",
@@ -238,6 +233,15 @@ class TestPolicyCoreTimeoutRetry:
             "open_questions": ["datetime"],
             "expected_reply_type": "time",
         }
+
+    def test_retries_once_after_timeout_and_succeeds(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_RETRY_ON_TIMEOUT",
+            "1",
+        )
+
+        payload = self._policy_payload()
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
             mock_llm.return_value.generate.side_effect = [
                 httpx.TimeoutException("timeout"),
@@ -264,20 +268,7 @@ class TestPolicyCoreTimeoutRetry:
             "gpt-fallback",
         )
 
-        payload = {
-            "intent": "booking",
-            "action": "collect",
-            "tool_action": "calendar.list_slots",
-            "tool_args": {},
-            "pack_refs": [],
-            "language": "ru",
-            "confidence": 0.8,
-            "reason": "ask_time",
-            "goal": "booking",
-            "slots": {},
-            "open_questions": ["datetime"],
-            "expected_reply_type": "time",
-        }
+        payload = self._policy_payload()
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
             mock_llm.return_value.generate.side_effect = [
                 httpx.TimeoutException("timeout-1"),
@@ -304,20 +295,7 @@ class TestPolicyCoreTimeoutRetry:
             "1",
         )
 
-        payload = {
-            "intent": "booking",
-            "action": "collect",
-            "tool_action": "calendar.list_slots",
-            "tool_args": {},
-            "pack_refs": [],
-            "language": "ru",
-            "confidence": 0.8,
-            "reason": "ask_time",
-            "goal": "booking",
-            "slots": {},
-            "open_questions": ["datetime"],
-            "expected_reply_type": "time",
-        }
+        payload = self._policy_payload()
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
             mock_llm.return_value.generate.side_effect = [
                 Exception("Connection refused while calling upstream provider"),
@@ -335,20 +313,7 @@ class TestPolicyCoreTimeoutRetry:
             "app.services.intent_service.POLICY_CORE_RETRY_ON_TIMEOUT",
             "0",
         )
-        payload = {
-            "intent": "booking",
-            "action": "collect",
-            "tool_action": "calendar.list_slots",
-            "tool_args": {},
-            "pack_refs": [],
-            "language": "ru",
-            "confidence": 0.8,
-            "reason": "ask_time",
-            "goal": "booking",
-            "slots": {},
-            "open_questions": ["datetime"],
-            "expected_reply_type": "time",
-        }
+        payload = self._policy_payload()
         timing_context = {
             "pipeline_deadline": time.monotonic() + 2.2,
             "pipeline_budget_ms": 2200,
@@ -366,6 +331,30 @@ class TestPolicyCoreTimeoutRetry:
         kwargs = mock_llm.return_value.generate.call_args.kwargs
         assert kwargs["timeout_seconds"] < 5.0
         assert kwargs["timeout_seconds"] >= 1.0
+
+    def test_uses_micro_deadline_attempt_when_budget_below_min_timeout(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_RETRY_ON_TIMEOUT",
+            "0",
+        )
+        payload = self._policy_payload()
+        timing_context = {
+            "pipeline_deadline": time.monotonic() + 0.9,
+            "pipeline_budget_ms": 900,
+        }
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(
+                "Нужно время",
+                expected_reply_type="time",
+                timing_context=timing_context,
+            )
+
+        assert result["ok"] is True
+        kwargs = mock_llm.return_value.generate.call_args.kwargs
+        assert kwargs["timeout_seconds"] < 1.2
+        assert kwargs["timeout_seconds"] >= 0.3
 
     def test_returns_deadline_when_budget_below_min_policy_timeout(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -386,20 +375,7 @@ class TestPolicyCoreTimeoutRetry:
 
     def test_policy_core_includes_memory_payload_when_provided(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        payload = {
-            "intent": "booking",
-            "action": "collect",
-            "tool_action": "calendar.list_slots",
-            "tool_args": {},
-            "pack_refs": [],
-            "language": "ru",
-            "confidence": 0.8,
-            "reason": "ask_time",
-            "goal": "booking",
-            "slots": {},
-            "open_questions": ["datetime"],
-            "expected_reply_type": "time",
-        }
+        payload = self._policy_payload()
         with patch("app.services.intent_service.get_llm_provider") as mock_llm:
             mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
             result = route_llm_policy_core(
@@ -450,6 +426,23 @@ class TestPolicyCoreTimeoutRetry:
             {"key": "preferred_master", "value": "Алия"},
             {"key": "parking_note", "value": "Рядом со входом", "source": "booking_slot"},
         ]
+
+    def test_retries_without_response_format_when_provider_rejects_it(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        payload = self._policy_payload()
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                Exception("OpenAI API error: 400 - response_format json_schema is not supported"),
+                DummyResponse(json.dumps(payload)),
+            ]
+            result = route_llm_policy_core("нужна запись")
+
+        assert result["ok"] is True
+        assert mock_llm.return_value.generate.call_count == 2
+        first_kwargs = mock_llm.return_value.generate.call_args_list[0].kwargs
+        second_kwargs = mock_llm.return_value.generate.call_args_list[1].kwargs
+        assert isinstance(first_kwargs.get("response_format"), dict)
+        assert "response_format" not in second_kwargs or second_kwargs.get("response_format") is None
 
 
 class TestPolicyCoreErrorClassification:

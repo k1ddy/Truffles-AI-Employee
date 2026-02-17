@@ -1,8 +1,12 @@
 import uuid
+import os
+import tempfile
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional, Tuple
 from uuid import UUID
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
@@ -16,6 +20,15 @@ logger = get_logger("escalation_service")
 SIMULATION_CONTEXT_KEY = "simulation"
 HANDOVER_MEDIA_LOOKBACK_LIMIT = 12
 HANDOVER_MEDIA_HISTORY_WINDOW = timedelta(minutes=30)
+HANDOVER_MEDIA_DOWNLOAD_TIMEOUT_SECONDS = max(
+    float(os.environ.get("HANDOVER_MEDIA_DOWNLOAD_TIMEOUT_SECONDS", "12.0")),
+    1.0,
+)
+HANDOVER_MEDIA_MAX_DOWNLOAD_BYTES = max(
+    int(os.environ.get("HANDOVER_MEDIA_MAX_DOWNLOAD_BYTES", str(20 * 1024 * 1024))),
+    1 * 1024 * 1024,
+)
+MEDIA_STORAGE_BASE_DIR = Path(os.environ.get("MEDIA_STORAGE_DIR", "/home/zhan/truffles-media"))
 
 
 def _normalize_slot_value(value: object) -> str | None:
@@ -536,6 +549,110 @@ def _refresh_handover_media_contract(
     handover.meta = merged
 
 
+def _resolve_handover_media_locator(raw_value: str) -> str:
+    locator = (raw_value or "").strip()
+    if not locator:
+        return locator
+    if locator.startswith("http://") or locator.startswith("https://"):
+        return locator
+    candidate = Path(locator)
+    if candidate.is_absolute():
+        return str(candidate)
+    normalized = locator.lstrip("/").replace("\\", "/")
+    resolved = MEDIA_STORAGE_BASE_DIR / normalized
+    if resolved.exists():
+        return str(resolved)
+    return locator
+
+
+def _is_telegram_url_fetch_failure(description: str | None) -> bool:
+    text = (description or "").strip().casefold()
+    if not text:
+        return False
+    return "failed to get http url content" in text or "wrong file identifier/http url specified" in text
+
+
+def _download_remote_media_to_tempfile(
+    media_url: str,
+    *,
+    media_type: str,
+) -> tuple[str | None, str | None]:
+    if not media_url.startswith(("http://", "https://")):
+        return None, "unsupported_media_locator"
+    suffix_map = {
+        "photo": ".jpg",
+        "image": ".jpg",
+        "voice": ".ogg",
+        "audio": ".mp3",
+    }
+    suffix = suffix_map.get(media_type, ".bin")
+    fd, tmp_path = tempfile.mkstemp(prefix="handover-media-", suffix=suffix)
+    os.close(fd)
+    target = Path(tmp_path)
+    size_bytes = 0
+    try:
+        with httpx.Client(timeout=HANDOVER_MEDIA_DOWNLOAD_TIMEOUT_SECONDS, follow_redirects=True) as client:
+            with client.stream("GET", media_url) as response:
+                response.raise_for_status()
+                with target.open("wb") as handle:
+                    for chunk in response.iter_bytes():
+                        if not chunk:
+                            continue
+                        size_bytes += len(chunk)
+                        if size_bytes > HANDOVER_MEDIA_MAX_DOWNLOAD_BYTES:
+                            raise ValueError("media_too_large")
+                        handle.write(chunk)
+    except Exception as exc:
+        if target.exists():
+            target.unlink()
+        return None, str(exc)
+    return str(target), None
+
+
+def _send_handover_media_item(
+    telegram: TelegramService,
+    *,
+    chat_id: str,
+    topic_id: int,
+    reply_to_message_id: int,
+    locator: str,
+    media_type: str,
+    caption: str,
+    ptt: bool = False,
+) -> dict:
+    if media_type in {"photo", "image"}:
+        return telegram.send_photo(
+            chat_id=chat_id,
+            photo=locator,
+            caption=caption,
+            message_thread_id=topic_id,
+            reply_to_message_id=reply_to_message_id,
+        )
+    if media_type in {"voice"} or ptt:
+        return telegram.send_voice(
+            chat_id=chat_id,
+            voice=locator,
+            caption=caption,
+            message_thread_id=topic_id,
+            reply_to_message_id=reply_to_message_id,
+        )
+    if media_type in {"audio"}:
+        return telegram.send_audio(
+            chat_id=chat_id,
+            audio=locator,
+            caption=caption,
+            message_thread_id=topic_id,
+            reply_to_message_id=reply_to_message_id,
+        )
+    return telegram.send_document(
+        chat_id=chat_id,
+        document=locator,
+        caption=caption,
+        message_thread_id=topic_id,
+        reply_to_message_id=reply_to_message_id,
+    )
+
+
 def _send_handover_media_to_topic(
     telegram: TelegramService,
     *,
@@ -548,12 +665,12 @@ def _send_handover_media_to_topic(
     failed: list[dict] = []
 
     for index, ref in enumerate(media_refs, start=1):
-        media_url = (
+        media_locator_raw = (
             _normalize_slot_value(ref.get("public_url"))
             or _normalize_slot_value(ref.get("url"))
             or _normalize_slot_value(ref.get("storage_path"))
         )
-        if not media_url:
+        if not media_locator_raw:
             failed.append(
                 {
                     "index": index,
@@ -562,56 +679,75 @@ def _send_handover_media_to_topic(
             )
             continue
 
+        media_locator = _resolve_handover_media_locator(media_locator_raw)
         media_type = (_normalize_slot_value(ref.get("media_type")) or "").lower()
         caption = _normalize_slot_value(ref.get("caption")) or f"Референс клиента #{index}"
+        ptt = bool(ref.get("ptt"))
 
         try:
-            if media_type in {"photo", "image"}:
-                result = telegram.send_photo(
-                    chat_id=chat_id,
-                    photo=media_url,
-                    caption=caption,
-                    message_thread_id=topic_id,
-                    reply_to_message_id=reply_to_message_id,
-                )
-            elif media_type in {"voice"} or bool(ref.get("ptt")):
-                result = telegram.send_voice(
-                    chat_id=chat_id,
-                    voice=media_url,
-                    caption=caption,
-                    message_thread_id=topic_id,
-                    reply_to_message_id=reply_to_message_id,
-                )
-            elif media_type in {"audio"}:
-                result = telegram.send_audio(
-                    chat_id=chat_id,
-                    audio=media_url,
-                    caption=caption,
-                    message_thread_id=topic_id,
-                    reply_to_message_id=reply_to_message_id,
-                )
-            else:
-                result = telegram.send_document(
-                    chat_id=chat_id,
-                    document=media_url,
-                    caption=caption,
-                    message_thread_id=topic_id,
-                    reply_to_message_id=reply_to_message_id,
-                )
+            result = _send_handover_media_item(
+                telegram,
+                chat_id=chat_id,
+                topic_id=topic_id,
+                reply_to_message_id=reply_to_message_id,
+                locator=media_locator,
+                media_type=media_type,
+                caption=caption,
+                ptt=ptt,
+            )
         except Exception as exc:
             result = {"ok": False, "error": str(exc)}
+
+        fallback_error = None
+        fallback_attempted = False
+        description = _normalize_slot_value(result.get("description")) or _normalize_slot_value(
+            result.get("error")
+        )
+        if (
+            not result.get("ok")
+            and media_locator_raw.startswith(("http://", "https://"))
+            and _is_telegram_url_fetch_failure(description)
+        ):
+            fallback_attempted = True
+            local_path, fallback_error = _download_remote_media_to_tempfile(
+                media_locator_raw,
+                media_type=media_type,
+            )
+            if local_path:
+                try:
+                    result = _send_handover_media_item(
+                        telegram,
+                        chat_id=chat_id,
+                        topic_id=topic_id,
+                        reply_to_message_id=reply_to_message_id,
+                        locator=local_path,
+                        media_type=media_type,
+                        caption=caption,
+                        ptt=ptt,
+                    )
+                except Exception as exc:
+                    result = {"ok": False, "error": str(exc)}
+                finally:
+                    local_file = Path(local_path)
+                    if local_file.exists():
+                        local_file.unlink()
+            description = _normalize_slot_value(result.get("description")) or _normalize_slot_value(
+                result.get("error")
+            )
 
         if result.get("ok"):
             sent_count += 1
             continue
-        failed.append(
-            {
-                "index": index,
-                "reason": "telegram_media_send_failed",
-                "description": _normalize_slot_value(result.get("description"))
-                or _normalize_slot_value(result.get("error")),
-            }
-        )
+        failure_payload = {
+            "index": index,
+            "reason": "telegram_media_send_failed",
+            "description": description,
+        }
+        if fallback_attempted:
+            failure_payload["fallback_attempted"] = True
+        if fallback_error:
+            failure_payload["fallback_error"] = fallback_error
+        failed.append(failure_payload)
 
     return sent_count, failed
 
