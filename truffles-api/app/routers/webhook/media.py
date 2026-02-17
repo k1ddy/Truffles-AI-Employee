@@ -91,6 +91,35 @@ def _coerce_int(value: object, default: int, *, min_value: int | None = None) ->
     return result
 
 
+def _default_allowed_media_hosts() -> list[str]:
+    hosts: list[str] = []
+    candidates = [
+        "https://app.chatflow.kz",
+        os.environ.get("PUBLIC_BASE_URL"),
+        os.environ.get("CHATFLOW_MEDIA_BASE_URL"),
+        os.environ.get("CHATFLOW_API_URL"),
+    ]
+    for raw in candidates:
+        if not raw:
+            continue
+        value = str(raw).strip()
+        if not value:
+            continue
+        if "://" not in value:
+            value = f"https://{value}"
+        try:
+            parsed = urlparse(value)
+        except Exception:
+            continue
+        host = (parsed.hostname or "").strip().lower()
+        if not host or host in hosts:
+            continue
+        hosts.append(host)
+    if not hosts:
+        return ["app.chatflow.kz"]
+    return hosts
+
+
 def _get_media_policy(client: Client | None) -> dict:
     from . import _legacy as legacy
 
@@ -134,11 +163,14 @@ def _get_media_policy(client: Client | None) -> dict:
     }
 
     storage_dir = overrides.get("storage_dir") or legacy.MEDIA_STORAGE_DEFAULT_DIR
-    allowed_hosts = overrides.get("allowed_hosts")
-    if isinstance(allowed_hosts, str):
-        allowed_hosts = [host.strip() for host in allowed_hosts.split(",") if host.strip()]
-    if not isinstance(allowed_hosts, list) or not allowed_hosts:
-        allowed_hosts = ["app.chatflow.kz"]
+    allowed_hosts_raw = overrides.get("allowed_hosts")
+    allowed_hosts: list[str] = []
+    if isinstance(allowed_hosts_raw, str):
+        allowed_hosts = [host.strip().lower() for host in allowed_hosts_raw.split(",") if host.strip()]
+    elif isinstance(allowed_hosts_raw, list):
+        allowed_hosts = [str(host).strip().lower() for host in allowed_hosts_raw if str(host).strip()]
+    if not allowed_hosts:
+        allowed_hosts = _default_allowed_media_hosts()
 
     return {
         "enabled": _coerce_bool(overrides.get("enabled"), True),
@@ -341,7 +373,11 @@ def _read_media_bytes_from_storage(storage_path: str | None, max_bytes: int) -> 
 async def _download_media_bytes(media: MediaInfo, policy: dict, max_bytes: int) -> tuple[bytes | None, str | None]:
     if not media.url:
         return None, "missing_url"
-    allowed_hosts = policy.get("allowed_hosts") if isinstance(policy.get("allowed_hosts"), list) else ["app.chatflow.kz"]
+    allowed_hosts = (
+        policy.get("allowed_hosts")
+        if isinstance(policy.get("allowed_hosts"), list)
+        else _default_allowed_media_hosts()
+    )
     if not _is_allowed_media_url(media.url, allowed_hosts):
         return None, "blocked_host"
 
@@ -671,8 +707,9 @@ def _is_allowed_media_url(url: str, allowed_hosts: list[str]) -> bool:
         return False
     if parsed.scheme not in {"http", "https"}:
         return False
-    host = parsed.hostname or ""
-    return host in allowed_hosts
+    host = (parsed.hostname or "").strip().lower()
+    allowed = {str(item).strip().lower() for item in allowed_hosts if str(item).strip()}
+    return host in allowed
 
 
 def _safe_media_id(value: str | None) -> str:
@@ -722,7 +759,11 @@ async def _store_media_locally(
 
     if not media.url:
         return {"stored": False, "error": "missing_url"}
-    allowed_hosts = policy.get("allowed_hosts") if isinstance(policy.get("allowed_hosts"), list) else ["app.chatflow.kz"]
+    allowed_hosts = (
+        policy.get("allowed_hosts")
+        if isinstance(policy.get("allowed_hosts"), list)
+        else _default_allowed_media_hosts()
+    )
     if not _is_allowed_media_url(media.url, allowed_hosts):
         return {"stored": False, "error": "blocked_host"}
 

@@ -43,6 +43,7 @@ services:
       - .env
     environment:
       - DEBUG=false
+      - OUTBOX_WORKER_UNSAFE_ALLOW=${OUTBOX_WORKER_UNSAFE_ALLOW:-0}
     networks:
       - truffles_internal-net
     restart: unless-stopped
