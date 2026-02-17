@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import httpx
 
@@ -24,6 +24,7 @@ class OpenAIProvider(LLMProvider):
         temperature: float = 0.7,
         max_tokens: int = 1000,
         timeout_seconds: Optional[float] = None,
+        response_format: Optional[dict[str, Any]] = None,
     ) -> LLMResponse:
         """Generate response from OpenAI."""
 
@@ -37,6 +38,8 @@ class OpenAIProvider(LLMProvider):
                 "temperature": temperature,
                 "max_completion_tokens": max_tokens,
             }
+            if isinstance(response_format, dict) and response_format:
+                payload["response_format"] = response_format
             logger.debug(f"OpenAI request: model={model}, messages_count={len(messages)}")
 
             response = client.post(

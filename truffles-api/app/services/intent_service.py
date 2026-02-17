@@ -189,6 +189,15 @@ POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS = max(
     int(os.environ.get("LLM_POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS", "8")),
     1,
 )
+POLICY_CORE_STRUCTURED_OUTPUT = os.environ.get("LLM_POLICY_CORE_STRUCTURED_OUTPUT")
+POLICY_CORE_MICRO_TIMEOUT_SECONDS = max(
+    float(os.environ.get("LLM_POLICY_CORE_MICRO_TIMEOUT_SECONDS", "0.8")),
+    0.2,
+)
+POLICY_CORE_MICRO_MIN_REMAINING_MS = max(
+    float(os.environ.get("LLM_POLICY_CORE_MICRO_MIN_REMAINING_MS", "350")),
+    0.0,
+)
 ANSWER_INTERPRETER_TIMEOUT_SECONDS = float(
     os.environ.get("ANSWER_INTERPRETER_TIMEOUT_SECONDS", "2.5")
 )
@@ -206,6 +215,17 @@ def _resolve_policy_core_timeout_seconds(timing_context: dict | None) -> float:
     return min(max(POLICY_CORE_TIMEOUT_SECONDS, 0.0), available_ms / 1000.0)
 
 
+def _resolve_policy_core_micro_timeout_seconds(timing_context: dict | None) -> float:
+    remaining_ms = _remaining_pipeline_budget_ms(timing_context)
+    if remaining_ms is None:
+        return 0.0
+    soft_guard_ms = max(POLICY_CORE_BUDGET_GUARD_MS * 0.5, 0.0)
+    available_ms = max(0.0, remaining_ms - soft_guard_ms)
+    if available_ms < POLICY_CORE_MICRO_MIN_REMAINING_MS:
+        return 0.0
+    return min(POLICY_CORE_MICRO_TIMEOUT_SECONDS, max(available_ms / 1000.0, 0.0))
+
+
 def _resolve_policy_core_max_tokens(timeout_seconds: float) -> int:
     if timeout_seconds <= 0:
         return min(POLICY_CORE_MAX_TOKENS, 120)
@@ -216,6 +236,71 @@ def _resolve_policy_core_max_tokens(timeout_seconds: float) -> int:
     if timeout_seconds < 3.0:
         return min(POLICY_CORE_MAX_TOKENS, 200)
     return POLICY_CORE_MAX_TOKENS
+
+
+def _policy_core_structured_output_enabled() -> bool:
+    return _is_env_enabled(POLICY_CORE_STRUCTURED_OUTPUT, default=True)
+
+
+def _policy_core_uses_response_format(error: Exception) -> bool:
+    message = normalize_for_matching(str(error or ""))
+    if not message:
+        return False
+    return any(
+        marker in message
+        for marker in (
+            "response format",
+            "response_format",
+            "json_schema",
+            "json schema",
+        )
+    )
+
+
+def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[str, Any]:
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "intent",
+            "action",
+            "tool_action",
+            "tool_args",
+            "pack_refs",
+            "slots",
+            "open_questions",
+            "needs_manager",
+            "risk_signals",
+            "confidence",
+        ],
+        "properties": {
+            "intent": {"type": "string", "minLength": 1},
+            "action": {"type": "string", "enum": ["fact", "collect", "handoff"]},
+            "tool_action": {"type": "string", "enum": allowed_tool_actions},
+            "tool_args": {"type": "object", "additionalProperties": True},
+            "pack_refs": {"type": "array", "items": {"type": "string"}},
+            "slots": {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+            },
+            "next_question": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "open_questions": {"type": "array", "items": {"type": "string"}},
+            "needs_manager": {"type": "boolean"},
+            "risk_signals": {"type": "array", "items": {"type": "string"}},
+            "language": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "reason": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "goal": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        },
+    }
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "llm_policy_core_output",
+            "strict": True,
+            "schema": schema,
+        },
+    }
 
 
 def _normalize_policy_core_memory_summary(summary: str | None) -> str | None:
@@ -1190,17 +1275,23 @@ def route_llm_policy_core(
         result["error"] = "no_api_key"
         return result
     policy_timeout_seconds = _resolve_policy_core_timeout_seconds(timing_context)
+    micro_deadline_mode = False
     if policy_timeout_seconds < POLICY_CORE_MIN_TIMEOUT_SECONDS:
-        remaining_ms = _remaining_pipeline_budget_ms(timing_context)
-        if remaining_ms is not None:
-            _record_pipeline_budget_skip(
-                timing_context=timing_context,
-                stage="policy_core_llm",
-                required_ms=(POLICY_CORE_MIN_TIMEOUT_SECONDS * 1000) + POLICY_CORE_BUDGET_GUARD_MS,
-                remaining_ms=remaining_ms,
-            )
-        result["error"] = "deadline_exceeded"
-        return result
+        micro_timeout_seconds = _resolve_policy_core_micro_timeout_seconds(timing_context)
+        if micro_timeout_seconds >= 0.2:
+            policy_timeout_seconds = micro_timeout_seconds
+            micro_deadline_mode = True
+        else:
+            remaining_ms = _remaining_pipeline_budget_ms(timing_context)
+            if remaining_ms is not None:
+                _record_pipeline_budget_skip(
+                    timing_context=timing_context,
+                    stage="policy_core_llm",
+                    required_ms=(POLICY_CORE_MIN_TIMEOUT_SECONDS * 1000) + POLICY_CORE_BUDGET_GUARD_MS,
+                    remaining_ms=remaining_ms,
+                )
+            result["error"] = "deadline_exceeded"
+            return result
     if not _should_attempt_llm(
         timing_context,
         timeout_seconds=policy_timeout_seconds,
@@ -1219,6 +1310,21 @@ def route_llm_policy_core(
         result["error"] = "budget_exceeded"
         return result
 
+    allowed_tool_actions = [
+        "info",
+        "consult",
+        "booking",
+        "handoff",
+        "collect",
+        "calendar.list_slots",
+        "calendar.book_slot",
+        "calendar.get_booking",
+        "calendar.reschedule",
+        "calendar.cancel",
+        "catalog.service_query",
+        "catalog.location",
+        "catalog.portfolio",
+    ]
     policy_input: dict[str, Any] = {
         "task": "llm_policy_core",
         "message": message,
@@ -1226,21 +1332,7 @@ def route_llm_policy_core(
         "current_goal": current_goal,
         "slot_state": slot_state or {},
         "allowed": {
-            "tool_actions": [
-                "info",
-                "consult",
-                "booking",
-                "handoff",
-                "collect",
-                "calendar.list_slots",
-                "calendar.book_slot",
-                "calendar.get_booking",
-                "calendar.reschedule",
-                "calendar.cancel",
-                "catalog.service_query",
-                "catalog.location",
-                "catalog.portfolio",
-            ],
+            "tool_actions": list(allowed_tool_actions),
             "info_refs": list(info_refs or []),
             "consult_refs": list(consult_refs or []),
         },
@@ -1273,8 +1365,17 @@ def route_llm_policy_core(
         {"role": "system", "content": prompt},
         {"role": "user", "content": json.dumps(policy_input, ensure_ascii=False)},
     ]
+    structured_output_enabled = _policy_core_structured_output_enabled()
+    policy_response_format = (
+        _build_policy_core_response_format(allowed_tool_actions)
+        if structured_output_enabled
+        else None
+    )
     retry_on_timeout = _is_env_enabled(POLICY_CORE_RETRY_ON_TIMEOUT, default=True)
     retry_on_transient = _is_env_enabled(POLICY_CORE_RETRY_ON_TRANSIENT, default=True)
+    if micro_deadline_mode:
+        retry_on_timeout = False
+        retry_on_transient = False
     timeout_attempts = [policy_timeout_seconds]
     if retry_on_timeout:
         retry_timeout = min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds)
@@ -1295,6 +1396,7 @@ def route_llm_policy_core(
     timeout_seconds_used = policy_timeout_seconds
     max_tokens_used = _resolve_policy_core_max_tokens(policy_timeout_seconds)
     transient_retry_used = False
+    structured_output_fallback_used = False
     for attempt_idx, timeout_seconds in enumerate(timeout_attempts):
         attempt_count = attempt_idx + 1
         timeout_seconds_used = timeout_seconds
@@ -1313,6 +1415,7 @@ def route_llm_policy_core(
                 model=POLICY_CORE_MODEL,
                 timeout_seconds=timeout_seconds,
                 temperature=temperature,
+                response_format=policy_response_format,
             )
             model_name_used = POLICY_CORE_MODEL
             error = None
@@ -1335,6 +1438,66 @@ def route_llm_policy_core(
         except Exception as exc:
             classified_error = _classify_llm_error(exc)
             logger.warning(f"LLM policy core failed: {exc}")
+            if (
+                policy_response_format is not None
+                and classified_error == "invalid_request"
+                and _policy_core_uses_response_format(exc)
+            ):
+                try:
+                    response = llm.generate(
+                        messages=messages,
+                        max_tokens=max_tokens_used,
+                        model=POLICY_CORE_MODEL,
+                        timeout_seconds=timeout_seconds,
+                        temperature=temperature,
+                    )
+                    model_name_used = POLICY_CORE_MODEL
+                    error = None
+                    structured_output_fallback_used = True
+                    break
+                except httpx.TimeoutException:
+                    error = "timeout"
+                    if not retry_on_timeout:
+                        break
+                    if attempt_idx + 1 < len(timeout_attempts):
+                        logger.warning(
+                            "LLM policy core timeout after response_format fallback; retrying",
+                            extra={
+                                "context": {
+                                    "attempt": attempt_count,
+                                    "retry_timeout_seconds": POLICY_CORE_RETRY_TIMEOUT_SECONDS,
+                                }
+                            },
+                        )
+                    continue
+                except Exception as plain_exc:
+                    classified_error = _classify_llm_error(plain_exc)
+                    logger.warning(
+                        "LLM policy core fallback without response_format failed: %s",
+                        plain_exc,
+                    )
+                    if classified_error == "exception":
+                        raise
+                    error = classified_error
+                    if (
+                        retry_on_transient
+                        and not transient_retry_used
+                        and classified_error
+                        in {"connection_error", "provider_unavailable", "service_unavailable"}
+                        and attempt_idx + 1 < len(timeout_attempts)
+                    ):
+                        transient_retry_used = True
+                        logger.warning(
+                            "LLM policy core transient error after response_format fallback; retrying",
+                            extra={
+                                "context": {
+                                    "attempt": attempt_count,
+                                    "error": classified_error,
+                                }
+                            },
+                        )
+                        continue
+                    break
             error = classified_error
             if (
                 retry_on_transient
@@ -1373,14 +1536,41 @@ def route_llm_policy_core(
                     model=fallback_model,
                     timeout_seconds=fallback_timeout_seconds,
                     temperature=temperature,
+                    response_format=policy_response_format,
                 )
                 model_name_used = fallback_model
                 error = None
             except httpx.TimeoutException:
                 error = "timeout"
             except Exception as exc:
+                classified_error = _classify_llm_error(exc)
                 logger.warning(f"LLM policy core fallback model failed: {exc}")
-                error = _classify_llm_error(exc)
+                if (
+                    policy_response_format is not None
+                    and classified_error == "invalid_request"
+                    and _policy_core_uses_response_format(exc)
+                ):
+                    try:
+                        response = llm.generate(
+                            messages=messages,
+                            max_tokens=max_tokens_used,
+                            model=fallback_model,
+                            timeout_seconds=fallback_timeout_seconds,
+                            temperature=temperature,
+                        )
+                        model_name_used = fallback_model
+                        error = None
+                        structured_output_fallback_used = True
+                    except httpx.TimeoutException:
+                        error = "timeout"
+                    except Exception as plain_exc:
+                        logger.warning(
+                            "LLM policy core fallback model without response_format failed: %s",
+                            plain_exc,
+                        )
+                        error = _classify_llm_error(plain_exc)
+                else:
+                    error = classified_error
         else:
             error = "deadline_exceeded"
 
@@ -1405,6 +1595,9 @@ def route_llm_policy_core(
             "max_tokens": max_tokens_used,
             "timeout_budgeted": policy_timeout_seconds,
             "temperature": temperature,
+            "micro_deadline_mode": micro_deadline_mode,
+            "structured_output_enabled": structured_output_enabled,
+            "structured_output_fallback_used": structured_output_fallback_used,
         },
     )
     record_llm_time(client_slug, "policy_core_llm_ms", elapsed_ms)
