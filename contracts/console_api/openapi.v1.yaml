@@ -4868,6 +4868,27 @@ components:
           items:
             type: string
 
+    OnboardingDocumentIngestion:
+      type: object
+      required: [status, valid, source]
+      properties:
+        status:
+          type: string
+          enum: [pass, fail, skipped]
+        valid:
+          type: boolean
+        source:
+          type: string
+          enum: [published, draft, none]
+        missing_fields:
+          type: array
+          items:
+            type: string
+        critical_missing_fields:
+          type: array
+          items:
+            type: string
+
     OnboardingScorecardResponse:
       type: object
       required: [branch_id, status, ready, checks, missing, generated_at]
@@ -4888,6 +4909,10 @@ components:
           type: array
           items:
             type: string
+        document_ingestion:
+          allOf:
+            - $ref: "#/components/schemas/OnboardingDocumentIngestion"
+          nullable: true
         generated_at:
           type: string
           format: date-time
@@ -7104,6 +7129,34 @@ components:
           type: boolean
           nullable: true
 
+    OnboardingIntakeFieldState:
+      type: object
+      required: [field, status, priority]
+      properties:
+        field:
+          type: string
+        status:
+          type: string
+          enum: [unknown, assumed, confirmed]
+        priority:
+          type: string
+          enum: [critical, high, medium, low]
+
+    OnboardingIntakeQuestion:
+      type: object
+      required: [field, question, priority]
+      properties:
+        field:
+          type: string
+        question:
+          type: string
+        priority:
+          type: string
+          enum: [critical, high, medium, low]
+        blocking_go_live:
+          type: boolean
+          default: false
+
     OnboardingAutopilotIntake:
       type: object
       required: [knowledge_tag, draft_saved, published, missing_fields, missing_questions, payload]
@@ -7126,6 +7179,14 @@ components:
           type: array
           items:
             type: string
+        field_states:
+          type: array
+          items:
+            $ref: "#/components/schemas/OnboardingIntakeFieldState"
+        question_queue:
+          type: array
+          items:
+            $ref: "#/components/schemas/OnboardingIntakeQuestion"
         payload:
           type: object
           additionalProperties: true
