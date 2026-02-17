@@ -7157,6 +7157,112 @@ components:
           type: boolean
           default: false
 
+    OnboardingIntakeCompile:
+      type: object
+      required:
+        - status
+        - infra_valid
+        - signal_graph_present
+        - policy_bundle_present
+        - errors
+      properties:
+        status:
+          type: string
+          enum: [pass, fail]
+        infra_valid:
+          type: boolean
+        schema_version:
+          type: string
+          nullable: true
+        hash:
+          type: string
+          nullable: true
+        pack_index_hash:
+          type: string
+          nullable: true
+        signal_graph_present:
+          type: boolean
+        policy_bundle_present:
+          type: boolean
+        errors:
+          type: array
+          items:
+            type: string
+
+    OnboardingIntakeQualityDimension:
+      type: object
+      required: [id, status, required, details]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [pass, fail, warn, skip]
+        required:
+          type: boolean
+        details:
+          type: array
+          items:
+            type: string
+
+    OnboardingIntakeQualityMatrix:
+      type: object
+      required:
+        - status
+        - infra_valid
+        - semantic_valid
+        - required_fields_count
+        - missing_fields_count
+        - critical_missing_fields_count
+        - integrity_missing_count
+        - missing_fields
+        - critical_missing_fields
+        - integrity_missing
+        - dimensions
+        - regressions
+        - comparison_blocked
+      properties:
+        status:
+          type: string
+          enum: [pass, fail]
+        infra_valid:
+          type: boolean
+        semantic_valid:
+          type: boolean
+        required_fields_count:
+          type: integer
+        missing_fields_count:
+          type: integer
+        critical_missing_fields_count:
+          type: integer
+        integrity_missing_count:
+          type: integer
+        missing_fields:
+          type: array
+          items:
+            type: string
+        critical_missing_fields:
+          type: array
+          items:
+            type: string
+        integrity_missing:
+          type: array
+          items:
+            type: string
+        dimensions:
+          type: array
+          items:
+            $ref: "#/components/schemas/OnboardingIntakeQualityDimension"
+        regressions:
+          type: array
+          items:
+            type: string
+        comparison_blocked:
+          type: boolean
+        comparison_block_reason:
+          type: string
+          nullable: true
+
     OnboardingAutopilotIntake:
       type: object
       required: [knowledge_tag, draft_saved, published, missing_fields, missing_questions, payload]
@@ -7187,6 +7293,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/OnboardingIntakeQuestion"
+        compile:
+          $ref: "#/components/schemas/OnboardingIntakeCompile"
+          nullable: true
+        quality_matrix:
+          $ref: "#/components/schemas/OnboardingIntakeQualityMatrix"
+          nullable: true
         payload:
           type: object
           additionalProperties: true

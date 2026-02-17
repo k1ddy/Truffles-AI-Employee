@@ -1,5 +1,6 @@
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -79,3 +80,98 @@ def test_onboarding_quality_compare_baseline_detects_regression():
     assert "beauty:status" in regressions
     assert "beauty:required_fields_checksum" in regressions
     assert "beauty:missing_required_fields" in regressions
+
+
+def _complete_beauty_payload() -> dict:
+    return {
+        "client_pack": {
+            "business": {"name": "Demo Salon"},
+            "location": {"city": "Almaty", "address": {"full": "Abay 10"}},
+            "operations": {"hours": {"days": ["mon", "tue"], "open": "09:00", "close": "21:00"}},
+            "catalog": {"summary": "Nails and lashes"},
+            "communication": {"languages": ["ru", "kk"]},
+            "services_catalog": {
+                "services": [{"name": "Маникюр", "price": 12000, "duration_minutes": 60}]
+            },
+            "service_duration_estimates": [{"service": "Маникюр", "duration_minutes": 60}],
+            "booking": {
+                "collect_fields": ["service", "time", "name", "phone"],
+                "bot_can_confirm": True,
+            },
+            "guest_policy": {"allowed": "yes"},
+            "safety": {"medical_note": "consult specialist"},
+            "pricing": {"price_from_reason": "depends on scope"},
+            "quality": {"expectations_photo": "reference required"},
+            "price_list": [{"category": "Nails", "items": [{"name": "Маникюр", "price": 12000}]}],
+            "policy": {
+                "hard_law": {"intent": "hard_law", "keywords": ["law"]},
+                "payment_info": {"intent": "payment", "keywords": ["pay"]},
+                "reschedule": {"intent": "reschedule", "keywords": ["move"]},
+                "cancel": {"intent": "cancel", "keywords": ["cancel"]},
+                "medical": {"intent": "medical", "keywords": ["medical"]},
+                "legal": {"intent": "legal", "keywords": ["legal"]},
+                "complaint": {"intent": "complaint", "keywords": ["complaint"]},
+                "discounts": {"intent": "discounts", "keywords": ["discount"]},
+                "guard_topics": {"refund": ["refund", "возврат"]},
+            },
+        },
+        "domain_pack": {
+            "ood_anchors": {
+                "in_domain": ["маникюр"],
+                "out_of_domain": ["кредит"],
+                "strict_in": ["салон"],
+            }
+        },
+    }
+
+
+def test_onboarding_pack_quality_resolve_require_booking_modes():
+    assert _module._onboarding_pack_quality_resolve_require_booking("auto") is None
+    assert _module._onboarding_pack_quality_resolve_require_booking("true") is True
+    assert _module._onboarding_pack_quality_resolve_require_booking("false") is False
+
+
+def test_onboarding_pack_quality_matrix_to_dict_includes_dimensions_and_regressions():
+    matrix = SimpleNamespace(
+        status="fail",
+        infra_valid=True,
+        semantic_valid=False,
+        required_fields_count=10,
+        missing_fields_count=2,
+        critical_missing_fields_count=1,
+        integrity_missing_count=1,
+        missing_fields=["a", "b"],
+        critical_missing_fields=["a"],
+        integrity_missing=["reference_pack_domain"],
+        dimensions=[SimpleNamespace(id="pack_compile", status="fail", required=True, details=["error"])],
+        regressions=["status"],
+        comparison_blocked=False,
+        comparison_block_reason=None,
+    )
+
+    result = _module._onboarding_pack_quality_matrix_to_dict(matrix)
+
+    assert result["status"] == "fail"
+    assert result["missing_fields_count"] == 2
+    assert result["dimensions"][0]["id"] == "pack_compile"
+    assert result["regressions"] == ["status"]
+
+
+def test_onboarding_pack_quality_helpers_produce_pass_for_complete_payload():
+    imports = _module._onboarding_quality_imports()
+    payload = imports["build_intake_payload"](
+        client_data_json=_complete_beauty_payload(),
+        client_data_text=None,
+    )
+    summary = imports["build_intake_pack_quality_summary"](
+        payload,
+        domain_slug="beauty",
+        require_booking=True,
+    )
+
+    compile_data = _module._onboarding_pack_quality_compile_to_dict(summary.compile)
+    quality_data = _module._onboarding_pack_quality_matrix_to_dict(summary.quality_matrix)
+
+    assert compile_data["status"] == "pass"
+    assert quality_data["status"] == "pass"
+    assert quality_data["missing_fields_count"] == 0

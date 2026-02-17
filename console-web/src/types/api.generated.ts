@@ -3524,6 +3524,41 @@ export interface components {
             /** @default false */
             blocking_go_live: boolean;
         };
+        OnboardingIntakeCompile: {
+            /** @enum {string} */
+            status: "pass" | "fail";
+            infra_valid: boolean;
+            schema_version?: string | null;
+            hash?: string | null;
+            pack_index_hash?: string | null;
+            signal_graph_present: boolean;
+            policy_bundle_present: boolean;
+            errors: string[];
+        };
+        OnboardingIntakeQualityDimension: {
+            id: string;
+            /** @enum {string} */
+            status: "pass" | "fail" | "warn" | "skip";
+            required: boolean;
+            details: string[];
+        };
+        OnboardingIntakeQualityMatrix: {
+            /** @enum {string} */
+            status: "pass" | "fail";
+            infra_valid: boolean;
+            semantic_valid: boolean;
+            required_fields_count: number;
+            missing_fields_count: number;
+            critical_missing_fields_count: number;
+            integrity_missing_count: number;
+            missing_fields: string[];
+            critical_missing_fields: string[];
+            integrity_missing: string[];
+            dimensions: components["schemas"]["OnboardingIntakeQualityDimension"][];
+            regressions: string[];
+            comparison_blocked: boolean;
+            comparison_block_reason?: string | null;
+        };
         OnboardingAutopilotIntake: {
             knowledge_tag: string;
             draft_saved: boolean;
@@ -3534,6 +3569,8 @@ export interface components {
             missing_questions: string[];
             field_states?: components["schemas"]["OnboardingIntakeFieldState"][];
             question_queue?: components["schemas"]["OnboardingIntakeQuestion"][];
+            compile?: components["schemas"]["OnboardingIntakeCompile"];
+            quality_matrix?: components["schemas"]["OnboardingIntakeQualityMatrix"];
             payload: {
                 [key: string]: unknown;
             };

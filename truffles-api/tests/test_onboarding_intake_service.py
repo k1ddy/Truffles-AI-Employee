@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from app.routers import console as console_router
 from app.services.onboarding_intake_service import (
     build_intake_field_states,
+    build_intake_pack_quality_summary,
     build_intake_payload,
     build_intake_question_queue,
     evaluate_intake_payload,
@@ -261,3 +262,126 @@ def test_ensure_webhook_secret_updates_branch_record(monkeypatch):
     assert changed is True
     assert branch.webhook_secret == secret
     assert webhook_url.endswith(f"webhook_secret={secret}")
+
+
+def _build_complete_beauty_payload() -> dict:
+    return {
+        "client_pack": {
+            "business": {"name": "Demo Salon"},
+            "location": {"city": "Almaty", "address": {"full": "Abay 10"}},
+            "operations": {"hours": {"days": ["mon", "tue"], "open": "09:00", "close": "21:00"}},
+            "catalog": {"summary": "Nails and lashes"},
+            "communication": {"languages": ["ru", "kk"]},
+            "services_catalog": {
+                "services": [{"name": "Маникюр", "price": 12000, "duration_minutes": 60}]
+            },
+            "service_duration_estimates": [{"service": "Маникюр", "duration_minutes": 60}],
+            "booking": {
+                "collect_fields": ["service", "time", "name", "phone"],
+                "bot_can_confirm": True,
+            },
+            "guest_policy": {"allowed": "yes"},
+            "safety": {"medical_note": "consult specialist"},
+            "pricing": {"price_from_reason": "depends on scope"},
+            "quality": {"expectations_photo": "reference required"},
+            "price_list": [{"category": "Nails", "items": [{"name": "Маникюр", "price": 12000}]}],
+            "policy": {
+                "hard_law": {"intent": "hard_law", "keywords": ["law"]},
+                "payment_info": {"intent": "payment", "keywords": ["pay"]},
+                "reschedule": {"intent": "reschedule", "keywords": ["move"]},
+                "cancel": {"intent": "cancel", "keywords": ["cancel"]},
+                "medical": {"intent": "medical", "keywords": ["medical"]},
+                "legal": {"intent": "legal", "keywords": ["legal"]},
+                "complaint": {"intent": "complaint", "keywords": ["complaint"]},
+                "discounts": {"intent": "discounts", "keywords": ["discount"]},
+                "guard_topics": {"refund": ["refund", "возврат"]},
+            },
+        },
+        "domain_pack": {
+            "version": "1.0.0",
+            "ood_anchors": {
+                "in_domain": ["маникюр", "педикюр"],
+                "out_of_domain": ["кредит"],
+                "strict_in": ["салон"],
+            },
+        },
+    }
+
+
+def _baseline_from_quality(summary) -> dict:
+    return {
+        "compile": {
+            "status": summary.compile.status,
+            "infra_valid": summary.compile.infra_valid,
+            "policy_bundle_present": summary.compile.policy_bundle_present,
+            "signal_graph_present": summary.compile.signal_graph_present,
+        },
+        "quality_matrix": {
+            "status": summary.quality_matrix.status,
+            "infra_valid": summary.quality_matrix.infra_valid,
+            "semantic_valid": summary.quality_matrix.semantic_valid,
+            "missing_fields_count": summary.quality_matrix.missing_fields_count,
+            "critical_missing_fields_count": summary.quality_matrix.critical_missing_fields_count,
+            "dimensions": [
+                {"id": item.id, "status": item.status}
+                for item in summary.quality_matrix.dimensions
+            ],
+        },
+    }
+
+
+def test_build_intake_pack_quality_summary_passes_for_complete_payload():
+    payload = _build_complete_beauty_payload()
+
+    summary = build_intake_pack_quality_summary(
+        payload,
+        domain_slug="beauty",
+        require_booking=True,
+    )
+
+    assert summary.compile.status == "pass"
+    assert summary.compile.policy_bundle_present is True
+    assert summary.compile.signal_graph_present is True
+    assert summary.quality_matrix.status == "pass"
+    assert summary.quality_matrix.semantic_valid is True
+    assert summary.quality_matrix.missing_fields_count == 0
+    assert summary.quality_matrix.critical_missing_fields_count == 0
+    assert summary.quality_matrix.regressions == []
+
+
+def test_build_intake_pack_quality_summary_fails_when_policy_schema_is_invalid():
+    payload = _build_complete_beauty_payload()
+    payload["client_pack"]["policy"]["hard_law"] = "invalid"
+
+    summary = build_intake_pack_quality_summary(
+        payload,
+        domain_slug="beauty",
+        require_booking=True,
+    )
+
+    assert summary.compile.status == "fail"
+    assert summary.compile.infra_valid is True
+    assert summary.quality_matrix.status == "fail"
+    assert any(item.id == "pack_compile" and item.status == "fail" for item in summary.quality_matrix.dimensions)
+
+
+def test_build_intake_pack_quality_summary_marks_regression_vs_baseline():
+    baseline_payload = _build_complete_beauty_payload()
+    baseline_summary = build_intake_pack_quality_summary(
+        baseline_payload,
+        domain_slug="beauty",
+        require_booking=True,
+    )
+    current_payload = _build_complete_beauty_payload()
+    current_payload["client_pack"]["booking"].pop("collect_fields")
+
+    summary = build_intake_pack_quality_summary(
+        current_payload,
+        domain_slug="beauty",
+        require_booking=True,
+        baseline_summary=_baseline_from_quality(baseline_summary),
+    )
+
+    assert summary.quality_matrix.status == "fail"
+    assert "missing_fields_count" in summary.quality_matrix.regressions
+    assert "dimension:intake_required_fields" in summary.quality_matrix.regressions

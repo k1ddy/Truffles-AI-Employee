@@ -1261,6 +1261,7 @@ class ConsoleOnboardingAutopilotRequest(ConsoleRequestModel):
 
 IntakeFieldStatus = Literal["unknown", "assumed", "confirmed"]
 IntakeFieldPriority = Literal["critical", "high", "medium", "low"]
+IntakeQualityStatus = Literal["pass", "fail", "warn", "skip"]
 
 
 class ConsoleOnboardingIntakeFieldState(BaseModel):
@@ -1276,6 +1277,41 @@ class ConsoleOnboardingIntakeQuestion(BaseModel):
     blocking_go_live: bool = False
 
 
+class ConsoleOnboardingIntakeCompile(BaseModel):
+    status: Literal["pass", "fail"]
+    infra_valid: bool
+    schema_version: Optional[str] = None
+    hash: Optional[str] = None
+    pack_index_hash: Optional[str] = None
+    signal_graph_present: bool = False
+    policy_bundle_present: bool = False
+    errors: list[str] = []
+
+
+class ConsoleOnboardingIntakeQualityDimension(BaseModel):
+    id: str
+    status: IntakeQualityStatus
+    required: bool = True
+    details: list[str] = []
+
+
+class ConsoleOnboardingIntakeQualityMatrix(BaseModel):
+    status: Literal["pass", "fail"]
+    infra_valid: bool
+    semantic_valid: bool
+    required_fields_count: int
+    missing_fields_count: int
+    critical_missing_fields_count: int
+    integrity_missing_count: int
+    missing_fields: list[str] = []
+    critical_missing_fields: list[str] = []
+    integrity_missing: list[str] = []
+    dimensions: list[ConsoleOnboardingIntakeQualityDimension] = []
+    regressions: list[str] = []
+    comparison_blocked: bool = False
+    comparison_block_reason: Optional[str] = None
+
+
 class ConsoleOnboardingAutopilotIntake(BaseModel):
     knowledge_tag: str
     draft_saved: bool
@@ -1285,6 +1321,8 @@ class ConsoleOnboardingAutopilotIntake(BaseModel):
     missing_questions: list[str] = []
     field_states: list[ConsoleOnboardingIntakeFieldState] = []
     question_queue: list[ConsoleOnboardingIntakeQuestion] = []
+    compile: Optional[ConsoleOnboardingIntakeCompile] = None
+    quality_matrix: Optional[ConsoleOnboardingIntakeQualityMatrix] = None
     payload: dict
 
 
