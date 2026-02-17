@@ -2743,6 +2743,9 @@ MEMORY_PROFILE_ENABLED = os.environ.get("MEMORY_PROFILE_ENABLED", "").strip().lo
 MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться?"
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
 MSG_BOOKING_ASK_NAME = "Отлично, время подходит. Как вас зовут?"
+MSG_BOOKING_ASK_REFERENCE = (
+    "Чтобы проверить, перенести или отменить запись, подскажите номер телефона и примерную дату/время записи."
+)
 MSG_BOOKING_ASK_ALL = "Чтобы записать, пожалуйста, напишите: услуга, точная дата, точное время, имя, контактный номер."
 MSG_BOOKING_SLOT_LOCK_STUB = "Я помогаю только по вопросам салона и записи."
 MSG_BOOKING_CANCELLED = "Хорошо, если передумаете — пишите."
@@ -3443,6 +3446,11 @@ TOOL_VERIFIER_APPOINTMENT_ID_ACTIONS = {
     "calendar.reschedule",
     "calendar.cancel",
 }
+TOOL_VERIFIER_REFERENCE_ACTIONS = {
+    "calendar.get_booking",
+    "calendar.reschedule",
+    "calendar.cancel",
+}
 TOOL_VERIFIER_STRICT_DECISION_ACTIONS = {
     "calendar.list_slots",
     "calendar.book_slot",
@@ -3475,6 +3483,7 @@ TOOL_VERIFIER_SLOT_BY_FIELD: dict[str, str] = {
     "service_query": "service",
     "start_at": "datetime",
     "customer_name": "name",
+    "appointment_id": "booking_reference",
 }
 
 
@@ -3761,6 +3770,31 @@ def _booking_has_reference(booking_state: dict[str, Any] | None) -> bool:
         if isinstance(value, str) and value.strip():
             return True
     return False
+
+
+def _extract_booking_reference_id(booking_state: dict[str, Any] | None) -> str | None:
+    if not isinstance(booking_state, dict):
+        return None
+    for key in ("appointment_id", "booking_id", "external_booking_id"):
+        raw_value = booking_state.get(key)
+        if not isinstance(raw_value, str) or not raw_value.strip():
+            continue
+        reference_uuid = _coerce_uuid(raw_value.strip())
+        if reference_uuid:
+            return str(reference_uuid)
+    return None
+
+
+def _extract_tool_result_appointment_id(decision_meta: dict[str, Any] | None) -> str | None:
+    if not isinstance(decision_meta, dict):
+        return None
+    raw_value = decision_meta.get("appointment_id")
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return None
+    appointment_uuid = _coerce_uuid(raw_value.strip())
+    if not appointment_uuid:
+        return None
+    return str(appointment_uuid)
 
 
 def _collect_plan_consult_refs(client_slug: str | None) -> tuple[list[str], str | None]:
@@ -9316,6 +9350,17 @@ async def _handle_webhook_payload(
                     and merged_slots_for_tool.get("service").strip()
                 ):
                     policy_tool_args["service_query"] = merged_slots_for_tool["service"].strip()
+            elif policy_tool_action in TOOL_VERIFIER_REFERENCE_ACTIONS:
+                has_appointment_id = (
+                    isinstance(policy_tool_args.get("appointment_id"), str)
+                    and policy_tool_args.get("appointment_id").strip()
+                )
+                if not has_appointment_id:
+                    booking_reference = _extract_booking_reference_id(
+                        booking if isinstance(booking, dict) else None
+                    )
+                    if booking_reference:
+                        policy_tool_args["appointment_id"] = booking_reference
             verifier_error, verifier_error_field = _verify_policy_tool_args_contract(
                 tool_action=policy_tool_action,
                 tool_args=policy_tool_args,
@@ -9338,7 +9383,11 @@ async def _handle_webhook_payload(
                     verifier_prompt = MSG_BOOKING_ASK_NAME
                     verifier_action = "booking_prompt"
                     verifier_intent = "booking"
-                if verifier_slot:
+                elif verifier_slot == "booking_reference":
+                    verifier_prompt = MSG_BOOKING_ASK_REFERENCE
+                    verifier_action = "check_booking_prompt"
+                    verifier_intent = "check_booking"
+                if verifier_slot in BOOKING_SLOT_ORDER:
                     context = _get_conversation_context(conversation)
                     booking_state = dict(booking) if isinstance(booking, dict) else {}
                     if not booking_state.get("active"):
@@ -9591,6 +9640,7 @@ async def _handle_webhook_payload(
                     and raw_start_at.strip()
                 ):
                     slot_snapshot["datetime"] = raw_start_at.strip()
+                tool_appointment_id = _extract_tool_result_appointment_id(tool_result.decision_meta)
                 merged_slots: dict[str, str] = {}
                 context = _get_conversation_context(conversation)
                 booking_state = _get_booking_context(context)
@@ -9625,6 +9675,11 @@ async def _handle_webhook_payload(
                     for key, value in merged_slots.items():
                         if not booking_state.get(key):
                             booking_state[key] = value
+                    context = _set_booking_context(context, booking_state)
+                    _set_conversation_context(conversation, context)
+                if tool_appointment_id and policy_tool_action.startswith("calendar."):
+                    booking_state = dict(booking_state) if isinstance(booking_state, dict) else {}
+                    booking_state["appointment_id"] = tool_appointment_id
                     context = _set_booking_context(context, booking_state)
                     _set_conversation_context(conversation, context)
                 trace_payload = dict(tool_result.trace)
