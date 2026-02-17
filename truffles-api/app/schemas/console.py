@@ -358,6 +358,8 @@ OnboardingStepId = Literal[
 
 OnboardingStepStatusValue = Literal["complete", "available", "locked", "skipped"]
 OnboardingScorecardStatusValue = Literal["pass", "fail"]
+OnboardingDocumentIngestionStatusValue = Literal["pass", "fail", "skipped"]
+OnboardingDocumentIngestionSourceValue = Literal["published", "draft", "none"]
 
 
 class ConsoleOnboardingStepStatus(BaseModel):
@@ -381,12 +383,21 @@ class ConsoleOnboardingScorecardCheck(BaseModel):
     missing: list[str] = []
 
 
+class ConsoleOnboardingDocumentIngestion(BaseModel):
+    status: OnboardingDocumentIngestionStatusValue
+    valid: bool
+    source: OnboardingDocumentIngestionSourceValue
+    missing_fields: list[str] = []
+    critical_missing_fields: list[str] = []
+
+
 class ConsoleOnboardingScorecardResponse(BaseModel):
     branch_id: UUID
     status: OnboardingScorecardStatusValue
     ready: bool
     checks: list[ConsoleOnboardingScorecardCheck]
     missing: list[str] = []
+    document_ingestion: Optional[ConsoleOnboardingDocumentIngestion] = None
     generated_at: str
 
 
@@ -1248,6 +1259,23 @@ class ConsoleOnboardingAutopilotRequest(ConsoleRequestModel):
     auto_publish_knowledge: Optional[bool] = False
 
 
+IntakeFieldStatus = Literal["unknown", "assumed", "confirmed"]
+IntakeFieldPriority = Literal["critical", "high", "medium", "low"]
+
+
+class ConsoleOnboardingIntakeFieldState(BaseModel):
+    field: str
+    status: IntakeFieldStatus
+    priority: IntakeFieldPriority
+
+
+class ConsoleOnboardingIntakeQuestion(BaseModel):
+    field: str
+    question: str
+    priority: IntakeFieldPriority
+    blocking_go_live: bool = False
+
+
 class ConsoleOnboardingAutopilotIntake(BaseModel):
     knowledge_tag: str
     draft_saved: bool
@@ -1255,6 +1283,8 @@ class ConsoleOnboardingAutopilotIntake(BaseModel):
     published_version_id: Optional[UUID] = None
     missing_fields: list[str] = []
     missing_questions: list[str] = []
+    field_states: list[ConsoleOnboardingIntakeFieldState] = []
+    question_queue: list[ConsoleOnboardingIntakeQuestion] = []
     payload: dict
 
 

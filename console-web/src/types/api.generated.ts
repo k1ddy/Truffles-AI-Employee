@@ -2513,6 +2513,15 @@ export interface components {
             passed: boolean;
             missing?: string[];
         };
+        OnboardingDocumentIngestion: {
+            /** @enum {string} */
+            status: "pass" | "fail" | "skipped";
+            valid: boolean;
+            /** @enum {string} */
+            source: "published" | "draft" | "none";
+            missing_fields?: string[];
+            critical_missing_fields?: string[];
+        };
         OnboardingScorecardResponse: {
             /** Format: uuid */
             branch_id: string;
@@ -2521,6 +2530,7 @@ export interface components {
             ready: boolean;
             checks: components["schemas"]["OnboardingScorecardCheck"][];
             missing: string[];
+            document_ingestion?: components["schemas"]["OnboardingDocumentIngestion"] | null;
             /** Format: date-time */
             generated_at: string;
         };
@@ -3499,6 +3509,21 @@ export interface components {
             auto_create_reference_pack?: boolean | null;
             auto_publish_knowledge?: boolean | null;
         };
+        OnboardingIntakeFieldState: {
+            field: string;
+            /** @enum {string} */
+            status: "unknown" | "assumed" | "confirmed";
+            /** @enum {string} */
+            priority: "critical" | "high" | "medium" | "low";
+        };
+        OnboardingIntakeQuestion: {
+            field: string;
+            question: string;
+            /** @enum {string} */
+            priority: "critical" | "high" | "medium" | "low";
+            /** @default false */
+            blocking_go_live: boolean;
+        };
         OnboardingAutopilotIntake: {
             knowledge_tag: string;
             draft_saved: boolean;
@@ -3507,6 +3532,8 @@ export interface components {
             published_version_id?: string | null;
             missing_fields: string[];
             missing_questions: string[];
+            field_states?: components["schemas"]["OnboardingIntakeFieldState"][];
+            question_queue?: components["schemas"]["OnboardingIntakeQuestion"][];
             payload: {
                 [key: string]: unknown;
             };

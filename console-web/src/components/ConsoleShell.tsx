@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { signOut, useSession } from "next-auth/react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Image from "next/image";
 import Link from "next/link";
@@ -28,6 +28,7 @@ import {
     writeConsoleContextScopeToStorage,
 } from "@/lib/console-context-storage";
 import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
+import { QUERY_PROFILE_CONTEXT } from "@/lib/query-profiles";
 
 const NAV_COLLAPSED_STORAGE_KEY = "console:nav_collapsed";
 const OWNER_ADMIN_ADVANCED_NAV_STORAGE_KEY = "console:owner_admin_advanced_nav";
@@ -276,12 +277,57 @@ function formatCompanyLabel(companyName?: string | null, companyId?: string | nu
     return "—";
 }
 
-function findBranchName(branches: BranchSummary[] | undefined, branchId: string | null | undefined): string {
-    if (!branchId || !branches?.length) {
-        return "—";
+function formatContextLabel(name?: string | null, fallbackId?: string | null): string {
+    if (name && name !== "—") {
+        return name;
     }
-    const match = branches.find((branch) => branch.id === branchId);
-    return match?.name ?? "—";
+    if (fallbackId) {
+        return fallbackId;
+    }
+    return "—";
+}
+
+function findClientName(
+    clients: ClientSummary[] | undefined,
+    clientId: string | null | undefined,
+    fallbackName: string | null | undefined,
+): string {
+    if (clientId && clients?.length) {
+        const match = clients.find((client) => client.id === clientId);
+        if (match?.name) {
+            return match.name;
+        }
+    }
+    if (fallbackName) {
+        return fallbackName;
+    }
+    if (clients?.length === 1) {
+        return clients[0].name ?? clients[0].id ?? "—";
+    }
+    return clients?.length ? "Выберите клиента" : "Нет активных клиентов";
+}
+
+function findBranchName(
+    branches: BranchSummary[] | undefined,
+    branchId: string | null | undefined,
+    allowAllBranches = false,
+): string {
+    if (!branches?.length) {
+        return "Нет активных филиалов";
+    }
+    if (branchId) {
+        const match = branches.find((branch) => branch.id === branchId);
+        if (match?.name) {
+            return match.name;
+        }
+    }
+    if (branches.length === 1) {
+        return branches[0].name ?? branches[0].id ?? "—";
+    }
+    if (allowAllBranches) {
+        return "Все филиалы";
+    }
+    return "Выберите филиал";
 }
 
 function isNavItemCurrent(pathname: string, href: string): boolean {
@@ -306,6 +352,14 @@ type HealthIncident = {
 type HealthIncidentUiState = {
     compactByFingerprint: Record<string, boolean>;
     hiddenUntilByFingerprint: Record<string, number>;
+};
+
+type ContextHealthTone = "ok" | "info" | "warn";
+
+type ContextHealthMessage = {
+    id: string;
+    tone: ContextHealthTone;
+    text: string;
 };
 
 function formatRelativeAgeLabel(timestampMs: number): string {
@@ -368,6 +422,16 @@ function formatAbsoluteTimeLabel(timestampMs: number): string {
         hour: "2-digit",
         minute: "2-digit",
     });
+}
+
+function contextHealthToneClass(tone: ContextHealthTone): string {
+    if (tone === "warn") {
+        return "border-amber-300/80 bg-amber-50 text-amber-900";
+    }
+    if (tone === "info") {
+        return "border-sky-300/80 bg-sky-50 text-sky-900";
+    }
+    return "border-emerald-300/80 bg-emerald-50 text-emerald-900";
 }
 
 function deriveHealthIncident(
@@ -531,6 +595,9 @@ function SelectionGate({
                         </option>
                     ))}
                 </select>
+                <p className="mt-2 text-xs text-muted-foreground">
+                    Доступно компаний: {(me.companies ?? []).length}
+                </p>
                 <div className="mt-6 flex justify-end">
                     <button
                         className="btn-primary"
@@ -566,6 +633,9 @@ function SelectionGate({
                         </option>
                     ))}
                 </select>
+                <p className="mt-2 text-xs text-muted-foreground">
+                    Доступно клиентов: {clients.length}
+                </p>
                 <div className="mt-6 flex justify-end">
                     <button
                         className="btn-primary"
@@ -601,6 +671,9 @@ function SelectionGate({
                         </option>
                     ))}
                 </select>
+                <p className="mt-2 text-xs text-muted-foreground">
+                    Доступно филиалов: {(me.branches ?? []).length}
+                </p>
                 <div className="mt-6 flex justify-end">
                     <button
                         className="btn-primary"
@@ -641,6 +714,8 @@ function ContextBar({
     const branchId = me.selected_branch_id ?? "";
     const allowAllBranches = !me.branch_selection_required;
     const companyName = companies.find((company) => company.id === companyId)?.name ?? me.client?.company_name;
+    const clientName = findClientName(clients, clientId, me.client?.name);
+    const branchName = findBranchName(branches, branchId, allowAllBranches);
 
     return (
         <div className="flex flex-wrap items-center gap-6 text-sm" data-testid="context-bar">
@@ -662,7 +737,7 @@ function ContextBar({
                         ))}
                     </select>
                 ) : (
-                    <span className="text-sm font-semibold">
+                    <span className="text-sm font-semibold" data-testid="context-company-value">
                         {formatCompanyLabel(companyName, companyId)}
                     </span>
                 )}
@@ -684,7 +759,7 @@ function ContextBar({
                         ))}
                     </select>
                 ) : (
-                    <span className="text-sm font-semibold">{me.client?.name ?? "—"}</span>
+                    <span className="text-sm font-semibold" data-testid="context-client-value">{clientName}</span>
                 )}
             </div>
             <div className="flex flex-col gap-1 min-w-[180px]">
@@ -705,11 +780,97 @@ function ContextBar({
                         ))}
                     </select>
                 ) : (
-                    <span className="text-sm font-semibold">
-                        {findBranchName(branches, branchId)}
+                    <span className="text-sm font-semibold" data-testid="context-branch-value">
+                        {branchName}
                     </span>
                 )}
             </div>
+        </div>
+    );
+}
+
+function ContextHealthStrip({
+    me,
+    companyId,
+    visibleClients,
+    canReadOps,
+    canReadTenants,
+}: {
+    me: ConsoleMe;
+    companyId: string;
+    visibleClients: ClientSummary[];
+    canReadOps: boolean;
+    canReadTenants: boolean;
+}) {
+    const companies = me.companies ?? [];
+    const clients = me.clients ?? [];
+    const branches = me.branches ?? [];
+    const role = me.agent?.role ?? null;
+    const messages: ContextHealthMessage[] = [];
+
+    if (companies.length > 1 && !companyId) {
+        messages.push({
+            id: "company_missing",
+            tone: "warn",
+            text: "Контекст компании не выбран. Данные могут выглядеть неполными.",
+        });
+    }
+    if (companyId && clients.length > 0 && visibleClients.length === 0) {
+        messages.push({
+            id: "no_clients_for_company",
+            tone: "warn",
+            text: "Для выбранной компании нет активных клиентов.",
+        });
+    }
+    if (branches.length === 0) {
+        messages.push({
+            id: "no_active_branches",
+            tone: "warn",
+            text: "В текущем контексте нет активных филиалов.",
+        });
+    } else if (!me.branch_selection_required && !me.selected_branch_id && branches.length > 1) {
+        messages.push({
+            id: "all_branches_mode",
+            tone: "info",
+            text: "Режим контекста: все активные филиалы.",
+        });
+    }
+    if (role === "platform_admin") {
+        messages.push({
+            id: "platform_active_filter",
+            tone: "info",
+            text: "Контекст показывает только активные сущности. Архивные и деактивированные доступны в Тенанты.",
+        });
+    }
+    if (messages.length === 0) {
+        messages.push({
+            id: "context_ok",
+            tone: "ok",
+            text: "Контекст согласован: компания, клиент и филиалы отображаются корректно.",
+        });
+    }
+
+    return (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]" data-testid="context-health-strip">
+            {messages.map((message) => (
+                <span
+                    key={message.id}
+                    className={`rounded-full border px-2 py-1 ${contextHealthToneClass(message.tone)}`}
+                    data-testid={`context-health-${message.id}`}
+                >
+                    {message.text}
+                </span>
+            ))}
+            {canReadOps && (
+                <Link href="/ops" className="btn-ghost text-[11px]" data-testid="context-health-open-ops">
+                    Открыть Ops
+                </Link>
+            )}
+            {canReadTenants && (
+                <Link href="/tenants" className="btn-ghost text-[11px]" data-testid="context-health-open-tenants">
+                    Открыть Тенанты
+                </Link>
+            )}
         </div>
     );
 }
@@ -749,6 +910,7 @@ function PublicLanding() {
 export default function ConsoleShell({ children }: { children: React.ReactNode }) {
     const { status, data: session } = useSession();
     const pathname = usePathname();
+    const router = useRouter();
     const sessionAuth = session as SessionAuth | null;
     const sessionError = sessionAuth?.error;
     const accessToken = sessionAuth?.accessToken;
@@ -765,6 +927,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             return response.data as ConsoleMe;
         },
         enabled: hasSession,
+        ...QUERY_PROFILE_CONTEXT,
     });
 
     useEffect(() => {
@@ -843,7 +1006,8 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [contextNotice, setContextNotice] = useState<string | null>(null);
-    const contextBusy = isSubmitting || isFetching;
+    const [navTransitioning, setNavTransitioning] = useState(false);
+    const navFallbackTimeoutRef = useRef<number | null>(null);
     const [navCollapsed, setNavCollapsed] = useState(
         () => readBrowserStorage(NAV_COLLAPSED_STORAGE_KEY) === "1"
     );
@@ -859,9 +1023,19 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         ? healthIncidentUiState.hiddenUntilByFingerprint[healthIncidentFingerprint] ?? 0
         : 0;
 
-    const invalidateContextAwareQueries = async () => {
+    const markContextAwareQueriesStale = async () => {
+        await queryClient.cancelQueries({
+            predicate: (query) => isContextAwareQueryKey(query.queryKey),
+        });
         await queryClient.invalidateQueries({
             predicate: (query) => isContextAwareQueryKey(query.queryKey),
+            refetchType: "none",
+        });
+    };
+    const refetchActiveContextAwareQueries = () => {
+        void queryClient.refetchQueries({
+            predicate: (query) => isContextAwareQueryKey(query.queryKey),
+            type: "active",
         });
     };
     const healthIncidentHidden = !!healthIncidentFingerprint && healthIncidentHiddenUntil > Date.now();
@@ -880,7 +1054,23 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             return;
         }
         event.preventDefault();
-        window.location.assign(href);
+        if (href === pathname) {
+            return;
+        }
+        const previousPathname = pathname;
+        setNavTransitioning(true);
+        router.push(href);
+        // Guard against rare App Router no-op transitions: fall back to hard navigation.
+        if (navFallbackTimeoutRef.current !== null) {
+            window.clearTimeout(navFallbackTimeoutRef.current);
+            navFallbackTimeoutRef.current = null;
+        }
+        navFallbackTimeoutRef.current = window.setTimeout(() => {
+            navFallbackTimeoutRef.current = null;
+            if (window.location.pathname === previousPathname && href.startsWith("/")) {
+                window.location.assign(href);
+            }
+        }, 800);
     };
 
     useEffect(() => {
@@ -890,6 +1080,14 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         const timeout = window.setTimeout(() => setContextNotice(null), 2500);
         return () => window.clearTimeout(timeout);
     }, [contextNotice]);
+
+    useEffect(() => {
+        setNavTransitioning(false);
+        if (navFallbackTimeoutRef.current !== null) {
+            window.clearTimeout(navFallbackTimeoutRef.current);
+            navFallbackTimeoutRef.current = null;
+        }
+    }, [pathname]);
 
     useEffect(() => {
         writeBrowserStorage(NAV_COLLAPSED_STORAGE_KEY, navCollapsed ? "1" : null);
@@ -957,6 +1155,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const selectionRequired = !!data?.selection_required;
     const branchSelectionRequired = !!data?.branch_selection_required;
     const showGate = companySelectionRequired || selectionRequired || branchSelectionRequired;
+    const contextBusy = isSubmitting || (showGate && isFetching);
 
     const storedScope = readConsoleContextScopeFromStorage();
     const storedCompanyId = storedScope.companyId;
@@ -975,10 +1174,12 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         }
         setIsSubmitting(true);
         try {
+            const companyName = companies.find((company) => company.id === companyId)?.name;
             setConsoleCompanyContext(companyId);
             await refetch();
-            await invalidateContextAwareQueries();
-            setContextNotice("Контекст применён");
+            await markContextAwareQueriesStale();
+            refetchActiveContextAwareQueries();
+            setContextNotice(`Контекст: компания ${formatContextLabel(companyName, companyId)}`);
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -992,11 +1193,13 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         }
         setIsSubmitting(true);
         try {
+            const clientName = visibleClients.find((client) => client.id === clientId)?.name;
             const selectedClientCompanyId = visibleClients.find((client) => client.id === clientId)?.company_id;
             setConsoleClientContext(clientId, selectedClientCompanyId ?? companyId ?? null);
             await refetch();
-            await invalidateContextAwareQueries();
-            setContextNotice("Контекст применён");
+            await markContextAwareQueriesStale();
+            refetchActiveContextAwareQueries();
+            setContextNotice(`Контекст: клиент ${formatContextLabel(clientName, clientId)}`);
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -1010,10 +1213,12 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         }
         setIsSubmitting(true);
         try {
+            const branchName = (data?.branches ?? []).find((branch) => branch.id === branchId)?.name;
             setConsoleBranchContext(branchId);
             await refetch();
-            await invalidateContextAwareQueries();
-            setContextNotice("Контекст применён");
+            await markContextAwareQueriesStale();
+            refetchActiveContextAwareQueries();
+            setContextNotice(`Контекст: филиал ${formatContextLabel(branchName, branchId)}`);
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -1044,8 +1249,14 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         try {
             setConsoleBranchContext(nextBranchId);
             await refetch();
-            await invalidateContextAwareQueries();
-            setContextNotice("Контекст применён");
+            await markContextAwareQueriesStale();
+            refetchActiveContextAwareQueries();
+            if (!nextBranchId) {
+                setContextNotice("Контекст: все филиалы");
+            } else {
+                const nextBranchName = findBranchName(data?.branches, nextBranchId);
+                setContextNotice(`Контекст: филиал ${formatContextLabel(nextBranchName, nextBranchId)}`);
+            }
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -1206,7 +1417,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                 </span>
                             </div>
                             {data && (
-                                <>
+                                <div className="w-full lg:w-auto lg:flex-1">
                                     <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground md:hidden">
                                         Контекст:{" "}
                                         <span className="font-semibold text-foreground">
@@ -1218,7 +1429,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                         </span>
                                         {" "}·{" "}
                                         <span className="font-semibold text-foreground">
-                                            {findBranchName(data.branches, data.selected_branch_id)}
+                                            {findBranchName(data.branches, data.selected_branch_id, !data.branch_selection_required)}
                                         </span>
                                         <Link href="/company-workspace" className="ml-2 underline">
                                             изменить
@@ -1235,9 +1446,24 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                             isBusy={contextBusy}
                                         />
                                     </div>
-                                </>
+                                    <ContextHealthStrip
+                                        me={data}
+                                        companyId={companyId}
+                                        visibleClients={visibleClients}
+                                        canReadOps={canReadOps}
+                                        canReadTenants={canReadTenants}
+                                    />
+                                </div>
                             )}
                             <div className="flex items-center justify-between gap-4">
+                                {navTransitioning && (
+                                    <span
+                                        className="rounded-full bg-sky-50 px-3 py-1 text-xs text-sky-700"
+                                        data-testid="nav-transitioning"
+                                    >
+                                        Переход...
+                                    </span>
+                                )}
                                 {contextBusy && (
                                     <span
                                         className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground"

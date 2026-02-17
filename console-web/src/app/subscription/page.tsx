@@ -5,7 +5,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 
 import AccessDenied from "@/components/AccessDenied";
+import { ConsolePageError, ConsolePageSkeleton } from "@/components/PageStates";
 import { authApi, businessApi, canAccessConsole, type MetricFactMeta } from "@/lib/api-client";
+import { QUERY_PROFILE_CONTEXT, QUERY_PROFILE_DASHBOARD, keepPreviousData } from "@/lib/query-profiles";
 
 function formatNumber(value?: number | null): string {
     if (value === null || value === undefined || Number.isNaN(value)) {
@@ -178,6 +180,7 @@ export default function SubscriptionPage() {
             return response.data;
         },
         enabled: !!session,
+        ...QUERY_PROFILE_CONTEXT,
     });
 
     const role = meData?.agent?.role ?? "manager";
@@ -191,6 +194,8 @@ export default function SubscriptionPage() {
         },
         enabled: !!session && canReadSubscription,
         refetchInterval: 60000,
+        placeholderData: keepPreviousData,
+        ...QUERY_PROFILE_DASHBOARD,
     });
 
     if (!session) {
@@ -215,35 +220,29 @@ export default function SubscriptionPage() {
 
     if (isLoading) {
         return (
-            <div className="mx-auto max-w-6xl p-6" data-testid="subscription-page">
-                <h1 className="mb-6 text-2xl font-bold" data-testid="subscription-title">Подписка</h1>
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-                    <div className="h-24 animate-pulse rounded-lg bg-muted/70" />
-                    <div className="h-24 animate-pulse rounded-lg bg-muted/70" />
-                    <div className="h-24 animate-pulse rounded-lg bg-muted/70" />
-                    <div className="h-24 animate-pulse rounded-lg bg-muted/70" />
-                </div>
-            </div>
+            <ConsolePageSkeleton
+                pageTestId="subscription-page"
+                title="Подписка"
+                titleTestId="subscription-title"
+                columns={4}
+                cardCount={4}
+            />
         );
     }
 
     if (error || !data) {
         return (
-            <div className="mx-auto max-w-6xl p-6" data-testid="subscription-page">
-                <h1 className="mb-6 text-2xl font-bold" data-testid="subscription-title">Подписка</h1>
-                <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-6 text-center" data-testid="subscription-error">
-                    <p className="mb-4 text-destructive">Не удалось загрузить сводку подписки</p>
-                    <button
-                        onClick={() => {
-                            refetch();
-                        }}
-                        className="rounded-full bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition hover:bg-destructive/90"
-                        data-testid="subscription-retry"
-                    >
-                        Повторить
-                    </button>
-                </div>
-            </div>
+            <ConsolePageError
+                pageTestId="subscription-page"
+                title="Подписка"
+                titleTestId="subscription-title"
+                errorTestId="subscription-error"
+                retryTestId="subscription-retry"
+                errorMessage="Не удалось загрузить сводку подписки"
+                onRetry={() => {
+                    refetch();
+                }}
+            />
         );
     }
 

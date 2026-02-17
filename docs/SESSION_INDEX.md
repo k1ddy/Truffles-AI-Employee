@@ -4,12 +4,11 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
-<<<<<<< feat/2026-02-16-expected-reply-controller-a88
+| 2026-02-17-console-ux-bugfix-a88 | active | feat/2026-02-17-console-ux-bugfix-a88 | /tmp/truffles-main-console-ux | docs/TASK_PACKAGES/TP-2026-02-17-console-ux-bugfix-a88.md | 2026-02-17T03:08:20Z |
+| 2026-02-16-console-contract-live-root-a88 | done | fix/2026-02-16-console-contract-live-root-a88 | /tmp/fix-console-contract-live-root-1771285761 | docs/TASK_PACKAGES/TP-2026-02-16-console-contract-live-root-a88.md | 2026-02-16T23:56:00Z |
 | 2026-02-16-expected-reply-controller-a88 | active | feat/2026-02-16-expected-reply-controller-a88 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-16-expected-reply-controller-a88.md | 2026-02-16T23:30:00Z |
-=======
 | 2026-02-16-console-contract-live-auth-fallback-a88 | done | fix/2026-02-16-console-contract-live-auth-fallback-a88 | /tmp/fix-console-contract-live-1771283493 | docs/TASK_PACKAGES/TP-2026-02-16-console-contract-live-auth-fallback-a88.md | 2026-02-16T22:34:00Z |
 | 2026-02-16-expected-reply-controller-a88 | done | feat/2026-02-16-expected-reply-controller-a88 | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-16-expected-reply-controller-a88.md | 2026-02-16T22:05:00Z |
->>>>>>> main
 | 2026-02-16-hierarchical-memory-a88 | active | feat/2026-02-16-hierarchical-memory-a88 | /home/zhan/worktrees/2026-02-16-wave123-a88 | docs/TASK_PACKAGES/TP-2026-02-16-hierarchical-memory-a88.md | 2026-02-16 |
 | 2026-02-16-timeout-resilience-a88 | active | feat/2026-02-16-timeout-resilience-a88 | /home/zhan/worktrees/2026-02-16-wave123-a88 | docs/TASK_PACKAGES/TP-2026-02-16-timeout-resilience-a88.md | 2026-02-16 |
 | 2026-02-16-tool-args-typed-a88 | active | feat/2026-02-16-tool-args-typed-a88 | /home/zhan/worktrees/2026-02-16-verifier-timeout-kernel-a88 | docs/TASK_PACKAGES/TP-2026-02-16-tool-args-typed-a88.md | 2026-02-16 |
@@ -466,3 +465,8 @@
 | 2026-02-16-reliability-followup-a88 | done | feat/2026-02-16-reliability-followup-a88 | /home/zhan/worktrees/2026-02-16-reliability-followup-a88 | docs/TASK_PACKAGES/TP-2026-02-16-verifier-timeout-kernel-a88.md | 2026-02-16 |
 | 2026-02-16-console-cases-index-wave-a88 | done | feat/2026-02-16-console-cases-index-wave-a88 | /home/zhan/worktrees/2026-02-16-console-cases-index-wave-a88 | docs/TASK_PACKAGES/TP-2026-02-16-console-cases-index-wave-a88.md | 2026-02-16 |
 | 2026-02-16-owner-admin-ux-simplify-a88 | done | feat/2026-02-16-owner-admin-ux-simplify-a88 | /home/zhan/worktrees/2026-02-16-owner-admin-ux-simplify-a88 | docs/TASK_PACKAGES/TP-2026-02-16-owner-admin-ux-simplify-a88.md | 2026-02-16 |
+| 2026-02-17-memory-policy-kernel-a88 | done | feat/2026-02-17-memory-policy-kernel-a88 | /home/zhan/worktrees/2026-02-17-memory-policy-kernel-a88 | docs/TASK_PACKAGES/TP-2026-02-17-memory-policy-kernel-a88.md | 2026-02-17T02:31:00Z |
+| 2026-02-17-platform-ux-root-a88 | active | fix/2026-02-17-platform-ux-root-a88 | /tmp/truffles-main-platform-ux-root | docs/TASK_PACKAGES/TP-2026-02-17-platform-ux-root-a88.md | 2026-02-17 |
+| 2026-02-17-platform-ux-wave123-a88 | active | feat/2026-02-17-platform-ux-wave123-a88 | /tmp/truffles-main-platform-ux-wave123 | docs/TASK_PACKAGES/TP-2026-02-17-platform-ux-wave123-a88.md | 2026-02-17T07:46:00Z |
+| 2026-02-17-console-onboarding-wave12-a88 | active | feat/2026-02-17-console-onboarding-wave12-a88 | /home/zhan/worktrees/2026-02-17-console-onboarding-wave12-a88 | docs/TASK_PACKAGES/TP-2026-02-17-console-onboarding-wave12-a88.md | 2026-02-17 |
+| 2026-02-17-policy-core-media-relay-a88 | active | fix/2026-02-17-policy-core-media-relay-a88 | /tmp/pr724-resolve-a88 | docs/TASK_PACKAGES/TP-2026-02-17-memory-policy-kernel-a88.md | 2026-02-17 |

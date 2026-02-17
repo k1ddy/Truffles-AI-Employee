@@ -392,6 +392,17 @@ class TestPolicyCoreTimeoutRetry:
                         "preferred_master",
                         "parking_near",
                     ],
+                    "retrieved_items": [
+                        {"key": "preferred_master", "value": "Алия"},
+                        {"key": "preferred_master", "value": "Алия"},
+                        {
+                            "key": "parking_note",
+                            "value": "Рядом со входом",
+                            "source": "booking_slot",
+                        },
+                        {"key": "", "value": "skip"},
+                        {"value": "skip"},
+                    ],
                 },
             )
 
@@ -410,6 +421,10 @@ class TestPolicyCoreTimeoutRetry:
         assert memory_payload.get("profile", {}).get("stored_keys") == [
             "preferred_master",
             "parking_near",
+        ]
+        assert memory_payload.get("profile", {}).get("retrieved_items") == [
+            {"key": "preferred_master", "value": "Алия"},
+            {"key": "parking_note", "value": "Рядом со входом", "source": "booking_slot"},
         ]
 
     def test_retries_without_response_format_when_provider_rejects_it(self, monkeypatch):
