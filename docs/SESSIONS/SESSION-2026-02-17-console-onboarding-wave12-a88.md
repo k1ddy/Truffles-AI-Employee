@@ -1,0 +1,21 @@
+# SESSION 2026-02-17-console-onboarding-wave12-a88 — Console Onboarding Wave 1+2
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-17-console-onboarding-wave12-a88.md
+- branch: feat/2026-02-17-console-onboarding-wave12-a88
+- worktree: /home/zhan/worktrees/2026-02-17-console-onboarding-wave12-a88
+- base_ref: origin/main
+- scope: Implement Wave 1+2 onboarding contract for Console Plane with intake guidance UI and server-side document ingestion gate for go/no-go.
+- done:
+  - Added onboarding scorecard `document_ingestion` model and API serialization.
+  - Added ingestion gate logic in onboarding state and go/no-go prerequisites (`document_ingestion_invalid`).
+  - Synced OpenAPI contract + regenerated frontend API types.
+  - Updated `ProvisioningWizard` to render `field_states`, `question_queue`, and `document_ingestion` readiness.
+  - Ran backend and frontend checks from Task Package with passing results.
+- next:
+  - Push branch and open PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-17-console-onboarding-wave12-a88.md
+  - docs/REPORTS/2026-02-17-console-onboarding-wave12-a88.md
+- last_updated: 2026-02-17

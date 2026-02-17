@@ -49,7 +49,7 @@
 - Evidence:
   - `docs/REPORTS/2026-02-17-console-onboarding-wave12-a88.md`
 - Rollback:
-  - `git revert <commit>`
+  - `git revert 0a792a84`
 - No-go:
   - Не вводить go-live bypass при `document_ingestion_invalid`.
   - Не оставлять backend/frontend contract drift.
