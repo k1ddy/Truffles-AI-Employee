@@ -276,6 +276,16 @@ function formatCompanyLabel(companyName?: string | null, companyId?: string | nu
     return "—";
 }
 
+function formatContextLabel(name?: string | null, fallbackId?: string | null): string {
+    if (name && name !== "—") {
+        return name;
+    }
+    if (fallbackId) {
+        return fallbackId;
+    }
+    return "—";
+}
+
 function findBranchName(branches: BranchSummary[] | undefined, branchId: string | null | undefined): string {
     if (!branchId || !branches?.length) {
         return "—";
@@ -531,6 +541,9 @@ function SelectionGate({
                         </option>
                     ))}
                 </select>
+                <p className="mt-2 text-xs text-muted-foreground">
+                    Доступно компаний: {(me.companies ?? []).length}
+                </p>
                 <div className="mt-6 flex justify-end">
                     <button
                         className="btn-primary"
@@ -566,6 +579,9 @@ function SelectionGate({
                         </option>
                     ))}
                 </select>
+                <p className="mt-2 text-xs text-muted-foreground">
+                    Доступно клиентов: {clients.length}
+                </p>
                 <div className="mt-6 flex justify-end">
                     <button
                         className="btn-primary"
@@ -601,6 +617,9 @@ function SelectionGate({
                         </option>
                     ))}
                 </select>
+                <p className="mt-2 text-xs text-muted-foreground">
+                    Доступно филиалов: {(me.branches ?? []).length}
+                </p>
                 <div className="mt-6 flex justify-end">
                     <button
                         className="btn-primary"
@@ -843,7 +862,6 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [contextNotice, setContextNotice] = useState<string | null>(null);
-    const contextBusy = isSubmitting || isFetching;
     const [navCollapsed, setNavCollapsed] = useState(
         () => readBrowserStorage(NAV_COLLAPSED_STORAGE_KEY) === "1"
     );
@@ -859,9 +877,19 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         ? healthIncidentUiState.hiddenUntilByFingerprint[healthIncidentFingerprint] ?? 0
         : 0;
 
-    const invalidateContextAwareQueries = async () => {
+    const markContextAwareQueriesStale = async () => {
+        await queryClient.cancelQueries({
+            predicate: (query) => isContextAwareQueryKey(query.queryKey),
+        });
         await queryClient.invalidateQueries({
             predicate: (query) => isContextAwareQueryKey(query.queryKey),
+            refetchType: "none",
+        });
+    };
+    const refetchActiveContextAwareQueries = () => {
+        void queryClient.refetchQueries({
+            predicate: (query) => isContextAwareQueryKey(query.queryKey),
+            type: "active",
         });
     };
     const healthIncidentHidden = !!healthIncidentFingerprint && healthIncidentHiddenUntil > Date.now();
@@ -957,6 +985,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const selectionRequired = !!data?.selection_required;
     const branchSelectionRequired = !!data?.branch_selection_required;
     const showGate = companySelectionRequired || selectionRequired || branchSelectionRequired;
+    const contextBusy = isSubmitting || (showGate && isFetching);
 
     const storedScope = readConsoleContextScopeFromStorage();
     const storedCompanyId = storedScope.companyId;
@@ -975,10 +1004,12 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         }
         setIsSubmitting(true);
         try {
+            const companyName = companies.find((company) => company.id === companyId)?.name;
             setConsoleCompanyContext(companyId);
             await refetch();
-            await invalidateContextAwareQueries();
-            setContextNotice("Контекст применён");
+            await markContextAwareQueriesStale();
+            refetchActiveContextAwareQueries();
+            setContextNotice(`Контекст: компания ${formatContextLabel(companyName, companyId)}`);
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -992,11 +1023,13 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         }
         setIsSubmitting(true);
         try {
+            const clientName = visibleClients.find((client) => client.id === clientId)?.name;
             const selectedClientCompanyId = visibleClients.find((client) => client.id === clientId)?.company_id;
             setConsoleClientContext(clientId, selectedClientCompanyId ?? companyId ?? null);
             await refetch();
-            await invalidateContextAwareQueries();
-            setContextNotice("Контекст применён");
+            await markContextAwareQueriesStale();
+            refetchActiveContextAwareQueries();
+            setContextNotice(`Контекст: клиент ${formatContextLabel(clientName, clientId)}`);
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -1010,10 +1043,12 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         }
         setIsSubmitting(true);
         try {
+            const branchName = (data?.branches ?? []).find((branch) => branch.id === branchId)?.name;
             setConsoleBranchContext(branchId);
             await refetch();
-            await invalidateContextAwareQueries();
-            setContextNotice("Контекст применён");
+            await markContextAwareQueriesStale();
+            refetchActiveContextAwareQueries();
+            setContextNotice(`Контекст: филиал ${formatContextLabel(branchName, branchId)}`);
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
@@ -1044,8 +1079,14 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         try {
             setConsoleBranchContext(nextBranchId);
             await refetch();
-            await invalidateContextAwareQueries();
-            setContextNotice("Контекст применён");
+            await markContextAwareQueriesStale();
+            refetchActiveContextAwareQueries();
+            if (!nextBranchId) {
+                setContextNotice("Контекст: все филиалы");
+            } else {
+                const nextBranchName = findBranchName(data?.branches, nextBranchId);
+                setContextNotice(`Контекст: филиал ${formatContextLabel(nextBranchName, nextBranchId)}`);
+            }
         } catch {
             toast.error("Не удалось обновить контекст");
         } finally {
