@@ -1767,8 +1767,6 @@ def _run_intent_decomposition(
             booking_state = dict(booking_state)
             booking_state["active"] = False
             booking_state["last_question"] = None
-            booking_state["service"] = None
-            booking_state["datetime"] = None
             context = legacy._set_booking_context(context, booking_state)
             legacy._set_conversation_context(conversation, context)
             booking_active = False
@@ -2356,7 +2354,7 @@ ROUTER_SIGNAL_CONFIDENCE_FLOOR = 0.2
 CONTROLLER_CONFIDENCE_THRESHOLD = float(
     os.getenv("CONTROLLER_CONFIDENCE_THRESHOLD", "0.3") or 0.3
 )
-WEBHOOK_PIPELINE_BUDGET_DEFAULT_MS = 12000
+WEBHOOK_PIPELINE_BUDGET_DEFAULT_MS = 18000
 WEBHOOK_BOOKING_CRITICAL_PATH_RESERVE_DEFAULT_MS = 4500.0
 WEBHOOK_MULTI_INTENT_MIN_BUDGET_DEFAULT_MS = 2200.0
 
@@ -3098,6 +3096,43 @@ def _expected_reply_slot_key(expected_reply_type: str | None) -> str | None:
     if expected_reply_type == EXPECTED_REPLY_NAME:
         return "name"
     return None
+
+
+def _booking_prompt_for_expected_reply_type(expected_reply_type: str | None) -> str | None:
+    if expected_reply_type == EXPECTED_REPLY_SERVICE:
+        return MSG_BOOKING_ASK_SERVICE
+    if expected_reply_type == EXPECTED_REPLY_TIME:
+        return MSG_BOOKING_ASK_DATETIME
+    if expected_reply_type == EXPECTED_REPLY_NAME:
+        return MSG_BOOKING_ASK_NAME
+    return None
+
+
+def _derive_booking_followup_prompt(
+    *,
+    expected_reply_type: str | None,
+    booking_state: dict | None,
+    merged_slots: dict[str, str] | None,
+    client_slug: str | None,
+) -> tuple[str | None, str | None]:
+    if expected_reply_type not in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}:
+        return None, None
+    followup_state = dict(booking_state) if isinstance(booking_state, dict) else {}
+    if followup_state.get("active") is not True:
+        followup_state["active"] = True
+    if isinstance(merged_slots, dict):
+        for slot_key in BOOKING_SLOT_ORDER:
+            slot_value = merged_slots.get(slot_key)
+            if isinstance(slot_value, str) and slot_value.strip() and not followup_state.get(slot_key):
+                followup_state[slot_key] = slot_value.strip()
+    followup_state, prompt = _next_booking_prompt(
+        followup_state,
+        client_slug=client_slug,
+    )
+    derived_expected = _expected_reply_for_booking_question(followup_state.get("last_question"))
+    if derived_expected not in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}:
+        return None, None
+    return derived_expected, (prompt or _booking_prompt_for_expected_reply_type(derived_expected))
 
 
 def _validate_expected_reply_value(
@@ -4827,6 +4862,16 @@ def _append_followup(primary: str, followup: str | None) -> str:
     if not followup:
         return primary
     return f"{primary}\n\n{followup}"
+
+
+def _should_append_followup_prompt(primary: str | None, followup: str | None) -> bool:
+    if not followup:
+        return False
+    followup_normalized = normalize_for_matching(followup)
+    if not followup_normalized:
+        return False
+    primary_normalized = normalize_for_matching(primary or "")
+    return followup_normalized not in primary_normalized
 
 
 MULTI_INTENT_LABELS = {
@@ -10324,7 +10369,7 @@ async def _handle_webhook_payload(
                 if verifier_post_error:
                     tool_response_text = (
                         "Не удалось подтвердить действие автоматически. "
-                        "Передам менеджеру, чтобы проверить вручную."
+                        "Уточните, пожалуйста, детали, и я попробую еще раз."
                     )
                     if isinstance(tool_result.decision_meta, dict):
                         tool_result.decision_meta.update(
@@ -10646,7 +10691,7 @@ async def _handle_webhook_payload(
                     booking_followup_expected = EXPECTED_REPLY_TIME
                 suppress_booking_lookup_followup = bool(
                     policy_tool_action == "calendar.get_booking"
-                    and tool_decision in {"not_found", "time_mismatch"}
+                    and tool_decision in {"not_found", "time_mismatch", "contract_invalid"}
                 )
                 suppress_redundant_followup_prompt = bool(
                     (
@@ -10667,21 +10712,25 @@ async def _handle_webhook_payload(
                     and not suppress_booking_lookup_followup
                     and not suppress_redundant_followup_prompt
                 ):
-                    if booking_followup_expected == EXPECTED_REPLY_SERVICE:
-                        booking_interrupt_prompt = MSG_BOOKING_ASK_SERVICE
-                    elif booking_followup_expected == EXPECTED_REPLY_TIME:
-                        booking_interrupt_prompt = MSG_BOOKING_ASK_DATETIME
-                    elif booking_followup_expected == EXPECTED_REPLY_NAME:
-                        booking_interrupt_prompt = MSG_BOOKING_ASK_NAME
-                    context = _get_conversation_context(conversation)
-                    context = _set_expected_reply_context(
-                        conversation=conversation,
-                        saved_message=saved_message,
-                        context=context,
+                    (
+                        booking_followup_expected,
+                        booking_interrupt_prompt,
+                    ) = _derive_booking_followup_prompt(
                         expected_reply_type=booking_followup_expected,
-                        reason="booking_interrupt",
-                        now=now,
+                        booking_state=booking_state if isinstance(booking_state, dict) else booking,
+                        merged_slots=merged_slots,
+                        client_slug=payload.client_slug,
                     )
+                    context = _get_conversation_context(conversation)
+                    if booking_followup_expected:
+                        context = _set_expected_reply_context(
+                            conversation=conversation,
+                            saved_message=saved_message,
+                            context=context,
+                            expected_reply_type=booking_followup_expected,
+                            reason="booking_interrupt",
+                            now=now,
+                        )
                 active_handover_exists = get_active_handover(db, conversation.id) is not None
                 has_booking_reference = _booking_has_reference(booking_state)
                 policy_appointment_id = policy_tool_args.get("appointment_id")
@@ -10722,10 +10771,6 @@ async def _handle_webhook_payload(
                         and tool_decision == "missing_slot"
                         and _looks_like_booking_reschedule_request(message_text)
                         and explicit_manager_request_signal
-                    )
-                    or (
-                        policy_tool_action.startswith("calendar.")
-                        and tool_decision == "contract_invalid"
                     )
                 )
                 if booking_verification_handoff:
@@ -10860,11 +10905,11 @@ async def _handle_webhook_payload(
                             MSG_STYLE_REFERENCE_NEED_MEDIA,
                             bot_response,
                         )
-                if booking_interrupt_prompt:
-                    if policy_tool_action == "catalog.service_query" and info_sections:
-                        bot_response = _append_followup(bot_response, booking_interrupt_prompt)
-                    else:
-                        bot_response = _combine_sidecar(bot_response, booking_interrupt_prompt)
+                if booking_interrupt_prompt and _should_append_followup_prompt(
+                    bot_response,
+                    booking_interrupt_prompt,
+                ):
+                    bot_response = _append_followup(bot_response, booking_interrupt_prompt)
                 _record_message_decision_meta(
                     saved_message,
                     action="reply",
@@ -10918,12 +10963,15 @@ async def _handle_webhook_payload(
                             }
                             else EXPECTED_REPLY_TIME
                         )
-                        if booking_followup_expected == EXPECTED_REPLY_SERVICE:
-                            booking_followup_prompt = MSG_BOOKING_ASK_SERVICE
-                        elif booking_followup_expected == EXPECTED_REPLY_TIME:
-                            booking_followup_prompt = MSG_BOOKING_ASK_DATETIME
-                        elif booking_followup_expected == EXPECTED_REPLY_NAME:
-                            booking_followup_prompt = MSG_BOOKING_ASK_NAME
+                        (
+                            booking_followup_expected,
+                            booking_followup_prompt,
+                        ) = _derive_booking_followup_prompt(
+                            expected_reply_type=booking_followup_expected,
+                            booking_state=booking if isinstance(booking, dict) else None,
+                            merged_slots=policy_slot_state_validated,
+                            client_slug=payload.client_slug,
+                        )
                         if booking_followup_expected:
                             context = _get_conversation_context(conversation)
                             _set_expected_reply_context(
@@ -10934,10 +10982,12 @@ async def _handle_webhook_payload(
                                 reason="booking_interrupt",
                                 now=now,
                             )
-                    bot_response = _combine_sidecar(
-                        booking_followup_prompt or "",
-                        lateness_reply,
-                    ).strip()
+                    bot_response = lateness_reply
+                    if booking_followup_prompt and _should_append_followup_prompt(
+                        bot_response,
+                        booking_followup_prompt,
+                    ):
+                        bot_response = _append_followup(bot_response, booking_followup_prompt)
                     trace_payload = {
                         "stage": "truth_gate",
                         "decision": "reply",

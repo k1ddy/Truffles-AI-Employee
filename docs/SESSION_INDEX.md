@@ -4,6 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-02-18-booking-core-quality-a88 | active | feat/2026-02-18-booking-core-quality-a88 | /home/zhan/worktrees/2026-02-18-booking-core-quality-a88 | docs/TASK_PACKAGES/TP-2026-02-18-booking-core-quality-a88.md | 2026-02-18 |
 | 2026-02-17-consultant-e2e-chain-a88 | active | fix/2026-02-17-consultant-e2e-chain-a88 | /tmp/consultant-e2e-chain-a88 | docs/TASK_PACKAGES/TP-2026-02-17-consultant-e2e-chain-a88.md | 2026-02-17T11:01:00Z |
 | 2026-02-17-console-ux-bugfix-a88 | active | feat/2026-02-17-console-ux-bugfix-a88 | /tmp/truffles-main-console-ux | docs/TASK_PACKAGES/TP-2026-02-17-console-ux-bugfix-a88.md | 2026-02-17T03:08:20Z |
 | 2026-02-16-console-contract-live-root-a88 | done | fix/2026-02-16-console-contract-live-root-a88 | /tmp/fix-console-contract-live-root-1771285761 | docs/TASK_PACKAGES/TP-2026-02-16-console-contract-live-root-a88.md | 2026-02-16T23:56:00Z |
