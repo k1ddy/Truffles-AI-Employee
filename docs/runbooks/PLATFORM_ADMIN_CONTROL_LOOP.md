@@ -8,6 +8,30 @@ Prerequisites
 - Network access to Console/API endpoints.
 - Python 3.11+.
 
+## 0) Integrity preflight (Wave 0.1 gate)
+
+Run:
+
+```bash
+python3 ops/diagnose.py integrity-gate \
+  --client-slug demo_salon \
+  --pretty \
+  --output /tmp/integrity_gate_$(date +%Y%m%d_%H%M%S).json
+```
+
+Hard gate mode:
+
+```bash
+python3 ops/diagnose.py integrity-gate \
+  --client-slug demo_salon \
+  --fail-on-critical \
+  --output /tmp/integrity_gate_gate.json
+```
+
+Interpretation
+- `summary.status=PASS|WARN|FAIL`, `summary.critical_failures[]`.
+- При `FAIL` для critical checks rollout/remediation wave блокируется до отдельного remediation TP или явного waiver.
+
 ## 1) Capture KPI snapshot
 
 Run:
@@ -26,6 +50,11 @@ Expected output
 - `runtime.console_health` and `runtime.admin_version` payloads.
 - Derived outbox hints (`outbox_pending_hint`, `outbox_failed_hint`).
 - Outbox guard severity (`runtime.guards.outbox.status`: `ok|warning|critical|unknown`).
+- Outbox reason classes in guard:
+  - `runtime.guards.outbox.incident_class` (`runtime_incident|external_block_only|unknown_failure_mix|none`)
+  - `runtime.guards.outbox.failed_reason_classes.expected_external_block`
+  - `runtime.guards.outbox.failed_reason_classes.unexpected_failure`
+  - `runtime.guards.outbox.reason_breakdown` (top `last_error` rows + class totals).
 - LOC heatmap for Platform Admin-critical files.
 - `toast.error` surface counts.
 - e2e concentration metrics (`smoke_lines`, `platform_admin_lines`, share).
@@ -84,4 +113,6 @@ Include:
 
 Stop-the-line
 - If runtime health is `unhealthy` with growing outbox backlog, mark as P0 and do not present as stable.
+- If outbox guard is `critical` and `incident_class=runtime_incident`, platform rollout remains blocked.
+- If outbox guard is `critical` but `incident_class=external_block_only`, classify as external billing/provider block (operational limit), not runtime defect.
 - If lint/test/session gates fail, keep session open and fix before merge.

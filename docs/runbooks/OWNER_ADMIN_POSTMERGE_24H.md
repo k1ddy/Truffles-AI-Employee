@@ -20,6 +20,29 @@ Required evidence
 - Impact compare against baseline (`--baseline`).
 - Session/report запись с абсолютными timestamp.
 
+## 0) Integrity preflight (Wave 0.1 gate)
+
+Перед `T+0` запуском зафиксировать data-integrity precondition:
+
+```bash
+python3 ops/diagnose.py integrity-gate \
+  --client-slug demo_salon \
+  --pretty \
+  --output /tmp/integrity_gate_owner_t0.json
+```
+
+Gate mode:
+
+```bash
+python3 ops/diagnose.py integrity-gate \
+  --client-slug demo_salon \
+  --fail-on-critical \
+  --output /tmp/integrity_gate_owner_t0_gate.json
+```
+
+Правило
+- `summary.status=FAIL` или non-empty `summary.critical_failures` => stop-the-line до remediation/waiver.
+
 ## 1) T+0: runtime signal + baseline KPI
 
 ### 1.1 Live-check + explain
@@ -77,6 +100,8 @@ python3 ops/console_owner_admin_kpi_snapshot.py \
 
 Interpretation
 - `kpi.guard.status=critical` => stop-the-line для owner/admin rollout решений.
+- `kpi.guard.incident_class=runtime_incident` => это продуктовый/runtime инцидент.
+- `kpi.guard.incident_class=external_block_only` => это внешний billing/provider block (например ChatFlow unpaid), фиксируется отдельно от runtime defects.
 - Baseline path `/tmp/owner_admin_wave5_t0.json` обязателен для шага `T+24`.
 
 ## 2) T+24: replay + impact compare
