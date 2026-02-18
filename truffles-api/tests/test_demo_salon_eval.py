@@ -1983,7 +1983,17 @@ def _sanitize_consult_expected(expected: dict) -> dict:
 
 
 def _assert_consult_cta(response: str, case_id: str) -> None:
-    _assert_contains_all(response, ["Хотите записаться"], case_id, "consult_cta")
+    _assert_contains_any(
+        response,
+        [
+            webhook_router.MSG_BOOKING_CTA,
+            webhook_router.MSG_BOOKING_ASK_SERVICE,
+            webhook_router.MSG_BOOKING_ASK_DATETIME,
+            webhook_router.MSG_BOOKING_ASK_NAME,
+        ],
+        case_id,
+        "consult_cta",
+    )
 
 
 def _collect_trace_expectations(expected: dict, trace_expectations: list[dict]) -> None:

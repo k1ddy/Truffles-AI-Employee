@@ -8327,6 +8327,19 @@ async def _handle_webhook_payload(
                     {"policy_core_guard_info_hints": degraded_guard_info_hints},
                 )
     booking_verification_request = bool(message_text and _looks_like_booking_verification_request(message_text))
+    explicit_manager_request_signal = bool(
+        message_text
+        and (
+            is_human_request_message(message_text)
+            or is_frustration_message(message_text)
+        )
+    )
+    booking_slots_complete = _plan_has_complete_booking_slots(
+        _merge_booking_plan_slots(
+            booking_state=booking if isinstance(booking, dict) else None,
+            plan_slots=policy_slot_state_validated,
+        )
+    )
     degraded_policy_core_critical = bool(
         POLICY_CORE_RESCUE_MATRIX_ENABLED
         and
@@ -8346,15 +8359,12 @@ async def _handle_webhook_payload(
                 and _is_booking_request(message_text, client_slug=payload.client_slug)
                 and not (intent_decomp_set & INFO_INTENTS)
                 and not consult_intent
+                and not booking_slots_complete
             )
         )
     )
     if degraded_policy_core_critical:
-        if message_text and (
-            is_human_request_message(message_text)
-            or is_frustration_message(message_text)
-            or booking_verification_request
-        ):
+        if explicit_manager_request_signal:
             handover_message = message_text or "Клиент запросил менеджера."
             _, reused, telegram_sent = _reuse_active_handover(
                 db=db,
@@ -8584,6 +8594,7 @@ async def _handle_webhook_payload(
     booking_has_reference = _booking_has_reference(booking)
     if (
         booking_verification_request
+        and explicit_manager_request_signal
         and conversation.state == ConversationState.BOT_ACTIVE.value
         and routing.get("allow_handover_create", False)
         and (not booking_active and not booking_has_reference)
@@ -10022,6 +10033,16 @@ async def _handle_webhook_payload(
                     policy_tool_action == "calendar.get_booking"
                     and tool_decision in {"not_found", "time_mismatch"}
                 )
+                suppress_redundant_followup_prompt = bool(
+                    (
+                        policy_tool_action == "calendar.list_slots"
+                        and tool_decision in {"ok", "specialist_missing"}
+                    )
+                    or (
+                        policy_tool_action == "calendar.book_slot"
+                        and tool_decision == "conflict"
+                    )
+                )
                 if (
                     (booking_wants_flow or policy_tool_action.startswith("calendar."))
                     and booking_followup_expected
@@ -10029,6 +10050,7 @@ async def _handle_webhook_payload(
                     and booking_followup_allowed
                     and not tool_expected_reply_type
                     and not suppress_booking_lookup_followup
+                    and not suppress_redundant_followup_prompt
                 ):
                     if booking_followup_expected == EXPECTED_REPLY_SERVICE:
                         booking_interrupt_prompt = MSG_BOOKING_ASK_SERVICE
@@ -10058,13 +10080,16 @@ async def _handle_webhook_payload(
                             or _looks_like_booking_verification_request(message_text)
                         )
                         and has_booking_reference
+                        and explicit_manager_request_signal
                     )
                     or (
                         policy_tool_action == "calendar.reschedule"
                         and tool_decision == "not_found"
+                        and explicit_manager_request_signal
                     )
                     or (
                         booking_verification_text_signal
+                        and explicit_manager_request_signal
                         and (
                             conversation.state == ConversationState.PENDING.value
                             or has_booking_reference
@@ -10075,6 +10100,7 @@ async def _handle_webhook_payload(
                         policy_tool_action == "calendar.list_slots"
                         and tool_decision == "missing_slot"
                         and _looks_like_booking_reschedule_request(message_text)
+                        and explicit_manager_request_signal
                     )
                     or (
                         policy_tool_action.startswith("calendar.")
