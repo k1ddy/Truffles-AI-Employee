@@ -35,6 +35,8 @@ PHONES = [
 DAYS = ["в пятницу", "в субботу", "в воскресенье", "завтра", "на выходных"]
 TIME_RANGES = ["после 18", "после 19", "вечером", "в районе 17:30"]
 TIME_EXACT = ["на 19:00", "на 18:30", "на 20:00", "на 17:45"]
+REFERENCE_MEDIA_IMAGE_PATH = "/home/zhan/TrufflesLogoClear.png"
+REFERENCE_MEDIA_IMAGE_NAME = "TrufflesLogoClear.png"
 
 GREETINGS = ["Привет", "Здравствуйте", "Добрый день", "Салеметсиз бе"]
 EXPECT_INFO_SECTIONS = {
@@ -523,8 +525,8 @@ def _media_turn(ctx: dict[str, str], *, mode: str, kind: str) -> dict[str, Any]:
             "mediaData": {
                 "type": "image",
                 "mimetype": "image/jpeg",
-                "url": "https://app.chatflow.kz/static/demo/reference.jpg",
-                "fileName": "reference.jpg",
+                "url": REFERENCE_MEDIA_IMAGE_PATH,
+                "fileName": REFERENCE_MEDIA_IMAGE_NAME,
                 "caption": caption,
             },
         }

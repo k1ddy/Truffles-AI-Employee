@@ -5,10 +5,16 @@ hooks_path_expected=".githooks"
 
 repo_root=$(git rev-parse --show-toplevel)
 branch=$(git rev-parse --abbrev-ref HEAD)
+canonical_repo_root="${TRUFFLES_CANONICAL_REPO_ROOT:-/home/zhan/truffles-main}"
 allowed_doc_regex='^(docs/|STATE.md$|STRUCTURE.md$|AGENTS.md$)'
 
 if [[ "$branch" == "HEAD" ]]; then
   echo "ERROR: Detached HEAD; session check requires a named branch." >&2
+  exit 1
+fi
+
+if [[ "$repo_root" == "$canonical_repo_root" && "$branch" != "main" && "$branch" != "master" ]]; then
+  echo "ERROR: Canonical repo root must stay on main/master. Use a worktree branch under /home/zhan/worktrees." >&2
   exit 1
 fi
 

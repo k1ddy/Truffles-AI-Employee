@@ -67,6 +67,7 @@
 
 ## Rollback
 - `git revert <commit_sha>` для отката PR.
+- `git revert HEAD` для отката последнего merge-коммита PR.
 - Если деградация runtime: вернуть предыдущий commit в ветку и повторить deterministic + replay checks.
 
 ## No-go
