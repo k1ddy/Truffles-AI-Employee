@@ -38,6 +38,10 @@ interface Booking {
     service_type: string | null;
     status: string;
     no_show_followup_done?: boolean;
+    no_show_followup_result?: "contacted" | "rebooked" | null;
+    no_show_followup_closed_at?: string | null;
+    no_show_followup_closed_by?: string | null;
+    no_show_followup_rebooked_appointment_id?: string | null;
     created_at: string;
 }
 
@@ -58,6 +62,8 @@ interface BookingStatusUpdateRequest {
 }
 
 interface BookingNoShowFollowUpRequest {
+    result?: "contacted" | "rebooked";
+    rebooked_appointment_id?: string;
     note?: string;
 }
 
@@ -225,12 +231,23 @@ export default function CalendarPage() {
     });
 
     const followUpMutation = useMutation({
-        mutationFn: async (payload: { bookingId: string }) => {
+        mutationFn: async (payload: {
+            bookingId: string;
+            result: "contacted" | "rebooked";
+            rebookedAppointmentId?: string;
+        }) => {
             setFollowUpBookingId(payload.bookingId);
-            return registerNoShowFollowUp(payload.bookingId, {});
+            return registerNoShowFollowUp(payload.bookingId, {
+                result: payload.result,
+                rebooked_appointment_id: payload.rebookedAppointmentId,
+            });
         },
-        onSuccess: () => {
-            toast.success("Follow-up по неявке закрыт");
+        onSuccess: (_data, variables) => {
+            if (variables.result === "rebooked") {
+                toast.success("Follow-up закрыт: клиент перезаписан");
+            } else {
+                toast.success("Follow-up закрыт: с клиентом связались");
+            }
             queryClient.invalidateQueries({ queryKey: ["bookings"] });
         },
         onError: (error: unknown) => {
@@ -629,20 +646,49 @@ export default function CalendarPage() {
                                         {canWriteCalendar && booking.status.toUpperCase() === "NO_SHOW" && (
                                             <div className="mt-2 flex flex-wrap gap-2">
                                                 {booking.no_show_followup_done ? (
-                                                    <span className="px-2.5 py-1.5 rounded-md bg-green-100 text-green-800 text-xs font-medium">
-                                                        follow-up закрыт
-                                                    </span>
+                                                    <>
+                                                        <span className="px-2.5 py-1.5 rounded-md bg-green-100 text-green-800 text-xs font-medium">
+                                                            {booking.no_show_followup_result === "rebooked"
+                                                                ? "follow-up закрыт: перезаписан"
+                                                                : "follow-up закрыт: связались"}
+                                                        </span>
+                                                        {booking.no_show_followup_rebooked_appointment_id && (
+                                                            <span className="px-2.5 py-1.5 rounded-md bg-muted text-muted-foreground text-xs font-medium">
+                                                                новая запись: {booking.no_show_followup_rebooked_appointment_id.slice(0, 8)}
+                                                            </span>
+                                                        )}
+                                                    </>
                                                 ) : (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => followUpMutation.mutate({ bookingId: booking.id })}
-                                                        disabled={followUpMutation.isPending && followUpBookingId === booking.id}
-                                                        className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
-                                                    >
-                                                        {followUpMutation.isPending && followUpBookingId === booking.id
-                                                            ? "Фиксируем..."
-                                                            : "Связались / перезаписали"}
-                                                    </button>
+                                                    <>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() =>
+                                                                followUpMutation.mutate({
+                                                                    bookingId: booking.id,
+                                                                    result: "contacted",
+                                                                })
+                                                            }
+                                                            disabled={followUpMutation.isPending && followUpBookingId === booking.id}
+                                                            className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
+                                                        >
+                                                            {followUpMutation.isPending && followUpBookingId === booking.id
+                                                                ? "Фиксируем..."
+                                                                : "Связались"}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() =>
+                                                                followUpMutation.mutate({
+                                                                    bookingId: booking.id,
+                                                                    result: "rebooked",
+                                                                })
+                                                            }
+                                                            disabled={followUpMutation.isPending && followUpBookingId === booking.id}
+                                                            className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
+                                                        >
+                                                            Перезаписали
+                                                        </button>
+                                                    </>
                                                 )}
                                             </div>
                                         )}

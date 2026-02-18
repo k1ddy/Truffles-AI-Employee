@@ -8157,6 +8157,13 @@ components:
     BookingNoShowFollowUpRequest:
       type: object
       properties:
+        result:
+          type: string
+          enum: [contacted, rebooked]
+          default: contacted
+        rebooked_appointment_id:
+          type: string
+          nullable: true
         note:
           type: string
           nullable: true
@@ -8194,6 +8201,18 @@ components:
           type: string
         no_show_followup_done:
           type: boolean
+        no_show_followup_result:
+          type: string
+          nullable: true
+        no_show_followup_closed_at:
+          type: string
+          nullable: true
+        no_show_followup_closed_by:
+          type: string
+          nullable: true
+        no_show_followup_rebooked_appointment_id:
+          type: string
+          nullable: true
         google_event_id:
           type: string
           nullable: true
