@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.logging_config import get_logger
+from app.models.appointment import Appointment
 from app.models.appointment_service import AppointmentService as AppointmentServiceModel
 from app.models.appointment_sync_state import AppointmentSyncState
 from app.models.branch import Branch
@@ -22,6 +23,8 @@ from app.services.appointment_reminder_service import schedule_default_reminders
 from app.services.appointment_service import (
     AppointmentConflictError,
     AppointmentNotFoundError,
+    AppointmentStatusValidationError,
+    InvalidAppointmentTransitionError,
     SchedulingService,
     SpecialistNotFoundError,
 )
@@ -111,6 +114,11 @@ class BookingCreate(BaseModel):
     service_type: Optional[str] = None
     notes: Optional[str] = None
     conversation_id: Optional[str] = None
+
+
+class BookingStatusUpdateRequest(BaseModel):
+    status: str = Field(min_length=3, max_length=32)
+    reason: Optional[str] = Field(default=None, max_length=500)
 
 
 class BookingResponse(BaseModel):
@@ -227,6 +235,54 @@ def _resolve_specialist(
 def _set_specialist_active(*, specialist: Specialist, is_active: bool) -> None:
     specialist.is_active = is_active
     specialist.updated_at = datetime.now(timezone.utc)
+
+
+def _resolve_booking_for_context(
+    context: ConsoleAuthContext,
+    db: Session,
+    booking_id: UUID,
+) -> Appointment:
+    booking = db.query(Appointment).filter(
+        Appointment.id == booking_id,
+        Appointment.client_id == context.client.id,
+    ).first()
+    if not booking:
+        raise ConsoleAPIError(404, "BOOKING_NOT_FOUND", "Booking not found")
+    if context.branch_restricted and booking.branch_id not in context.allowed_branch_ids:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Access to this branch denied")
+    return booking
+
+
+def _build_booking_response(db: Session, booking: Appointment) -> BookingResponse:
+    specialist = None
+    if booking.specialist_id:
+        specialist = db.query(Specialist).filter(Specialist.id == booking.specialist_id).first()
+    service_name = (
+        db.query(AppointmentServiceModel.service_name)
+        .filter(AppointmentServiceModel.appointment_id == booking.id)
+        .scalar()
+    )
+    google_event_id = (
+        db.query(AppointmentSyncState.external_id)
+        .filter(
+            AppointmentSyncState.appointment_id == booking.id,
+            AppointmentSyncState.provider == "google_calendar",
+        )
+        .scalar()
+    )
+    return BookingResponse(
+        id=str(booking.id),
+        specialist_id=str(booking.specialist_id),
+        specialist_name=specialist.name if specialist else "Unknown",
+        start_at=booking.start_at.isoformat(),
+        end_at=booking.end_at.isoformat(),
+        customer_name=booking.customer_name,
+        customer_phone=booking.customer_phone,
+        service_type=service_name,
+        status=booking.status,
+        google_event_id=google_event_id,
+        created_at=booking.created_at.isoformat(),
+    )
 
 
 @router.get("/specialists", response_model=SpecialistsResponse)
@@ -677,37 +733,21 @@ async def cancel_booking(
     """Cancel a booking."""
     context = get_console_context(request, db)
     require_console_permission(context, "calendar", "write")
-    
+
     service = SchedulingService(db)
-    
+
     try:
+        booking_uuid = _parse_uuid(booking_id, field_name="booking_id")
+        _resolve_booking_for_context(context, db, booking_uuid)
         booking = service.cancel_appointment(
-            booking_id=UUID(booking_id),
+            appointment_id=booking_uuid,
             client_id=context.client.id,
             reason=reason
         )
-        
-        specialist = db.query(Specialist).filter(
-            Specialist.id == booking.specialist_id
-        ).first()
-        
+
         logger.info(
             f"Booking cancelled: {booking_id}",
             extra={"context": {"agent": context.agent.name, "reason": reason}}
-        )
-
-        service_name = (
-            db.query(AppointmentServiceModel.service_name)
-            .filter(AppointmentServiceModel.appointment_id == booking.id)
-            .scalar()
-        )
-        google_event_id = (
-            db.query(AppointmentSyncState.external_id)
-            .filter(
-                AppointmentSyncState.appointment_id == booking.id,
-                AppointmentSyncState.provider == "google_calendar"
-            )
-            .scalar()
         )
 
         if booking.branch and isinstance(booking.branch.booking_settings, dict):
@@ -719,26 +759,74 @@ async def cancel_booking(
                     action="cancel",
                     commit=True,
                 )
-        
+
         return BookingActionResponse(
             success=True,
-            booking=BookingResponse(
-                id=str(booking.id),
-                specialist_id=str(booking.specialist_id),
-                specialist_name=specialist.name if specialist else "Unknown",
-                start_at=booking.start_at.isoformat(),
-                end_at=booking.end_at.isoformat(),
-                customer_name=booking.customer_name,
-                customer_phone=booking.customer_phone,
-                service_type=service_name,
-                status=booking.status,
-                google_event_id=google_event_id,
-                created_at=booking.created_at.isoformat()
-            )
+            booking=_build_booking_response(db, booking),
         )
-        
+
     except AppointmentNotFoundError:
         raise ConsoleAPIError(404, "BOOKING_NOT_FOUND", "Booking not found")
+
+
+@router.post("/bookings/{booking_id}/status", response_model=BookingActionResponse)
+async def update_booking_status(
+    request: Request,
+    booking_id: str,
+    data: BookingStatusUpdateRequest,
+    db: Session = Depends(get_db)
+):
+    """Update booking visit status (checked_in/completed/no_show)."""
+    context = get_console_context(request, db)
+    require_console_permission(context, "calendar", "write")
+
+    service = SchedulingService(db)
+
+    booking_uuid = _parse_uuid(booking_id, field_name="booking_id")
+    _resolve_booking_for_context(context, db, booking_uuid)
+    reason = _normalize_optional_text(data.reason)
+
+    try:
+        booking = service.update_appointment_status(
+            appointment_id=booking_uuid,
+            client_id=context.client.id,
+            target_status=data.status,
+            actor_id=context.agent.id,
+            actor_type="agent",
+            channel="console",
+            reason=reason,
+        )
+    except AppointmentNotFoundError:
+        raise ConsoleAPIError(404, "BOOKING_NOT_FOUND", "Booking not found")
+    except AppointmentStatusValidationError as exc:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_STATUS",
+            "Status must be one of: checked_in, completed, no_show",
+            details={"status": exc.status},
+        )
+    except InvalidAppointmentTransitionError as exc:
+        raise ConsoleAPIError(
+            409,
+            "BOOKING_STATUS_TRANSITION_DENIED",
+            "Booking status transition is not allowed",
+            details={
+                "from": exc.current_status,
+                "to": exc.target_status,
+            },
+        )
+
+    logger.info(
+        "Booking status updated",
+        extra={
+            "context": {
+                "agent": context.agent.name,
+                "booking_id": booking_id,
+                "target_status": booking.status,
+            }
+        },
+    )
+    return BookingActionResponse(success=True, booking=_build_booking_response(db, booking))
 
 
 # ==================== Google Calendar OAuth ====================

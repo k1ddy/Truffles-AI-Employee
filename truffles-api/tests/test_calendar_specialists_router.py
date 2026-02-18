@@ -8,7 +8,7 @@ from app.routers import calendar as calendar_router
 from app.services.console_errors import ConsoleAPIError
 
 
-def _context(*, client_id=None, branch_ids=None, role="owner"):
+def _context(*, client_id=None, branch_ids=None, role="owner", branch_restricted=False):
     resolved_client_id = client_id or uuid4()
     resolved_branch_ids = list(branch_ids or [uuid4()])
     branches = [SimpleNamespace(id=branch_id) for branch_id in resolved_branch_ids]
@@ -18,7 +18,7 @@ def _context(*, client_id=None, branch_ids=None, role="owner"):
         branches=branches,
         effective_branch_id=resolved_branch_ids[0] if len(resolved_branch_ids) == 1 else None,
         allowed_branch_ids=set(resolved_branch_ids),
-        branch_restricted=False,
+        branch_restricted=branch_restricted,
     )
 
 
@@ -138,3 +138,47 @@ async def test_update_specialist_rejects_null_is_active(monkeypatch):
         )
 
     assert exc_info.value.code == "INVALID_PARAM"
+
+
+def test_resolve_booking_for_context_rejects_cross_branch():
+    client_id = uuid4()
+    allowed_branch = uuid4()
+    foreign_branch = uuid4()
+    context = _context(client_id=client_id, branch_ids=[allowed_branch], branch_restricted=True)
+    booking_id = uuid4()
+    booking = SimpleNamespace(id=booking_id, client_id=client_id, branch_id=foreign_branch)
+
+    db = Mock()
+    query = Mock()
+    query.filter.return_value.first.return_value = booking
+    db.query.return_value = query
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        calendar_router._resolve_booking_for_context(
+            context=context,
+            db=db,
+            booking_id=booking_id,
+        )
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+def test_resolve_booking_for_context_returns_booking():
+    client_id = uuid4()
+    branch_id = uuid4()
+    context = _context(client_id=client_id, branch_ids=[branch_id], branch_restricted=True)
+    booking_id = uuid4()
+    booking = SimpleNamespace(id=booking_id, client_id=client_id, branch_id=branch_id)
+
+    db = Mock()
+    query = Mock()
+    query.filter.return_value.first.return_value = booking
+    db.query.return_value = query
+
+    resolved = calendar_router._resolve_booking_for_context(
+        context=context,
+        db=db,
+        booking_id=booking_id,
+    )
+
+    assert resolved == booking
