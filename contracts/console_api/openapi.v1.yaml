@@ -8192,6 +8192,8 @@ components:
           nullable: true
         status:
           type: string
+        no_show_followup_done:
+          type: boolean
         google_event_id:
           type: string
           nullable: true

@@ -37,6 +37,7 @@ interface Booking {
     customer_phone: string | null;
     service_type: string | null;
     status: string;
+    no_show_followup_done?: boolean;
     created_at: string;
 }
 
@@ -229,7 +230,7 @@ export default function CalendarPage() {
             return registerNoShowFollowUp(payload.bookingId, {});
         },
         onSuccess: () => {
-            toast.success("Неявка передана менеджеру в follow-up");
+            toast.success("Follow-up по неявке закрыт");
             queryClient.invalidateQueries({ queryKey: ["bookings"] });
         },
         onError: (error: unknown) => {
@@ -627,16 +628,22 @@ export default function CalendarPage() {
                                         )}
                                         {canWriteCalendar && booking.status.toUpperCase() === "NO_SHOW" && (
                                             <div className="mt-2 flex flex-wrap gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => followUpMutation.mutate({ bookingId: booking.id })}
-                                                    disabled={followUpMutation.isPending && followUpBookingId === booking.id}
-                                                    className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
-                                                >
-                                                    {followUpMutation.isPending && followUpBookingId === booking.id
-                                                        ? "Фиксируем..."
-                                                        : "Связаться / перезаписать"}
-                                                </button>
+                                                {booking.no_show_followup_done ? (
+                                                    <span className="px-2.5 py-1.5 rounded-md bg-green-100 text-green-800 text-xs font-medium">
+                                                        follow-up закрыт
+                                                    </span>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => followUpMutation.mutate({ bookingId: booking.id })}
+                                                        disabled={followUpMutation.isPending && followUpBookingId === booking.id}
+                                                        className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
+                                                    >
+                                                        {followUpMutation.isPending && followUpBookingId === booking.id
+                                                            ? "Фиксируем..."
+                                                            : "Связались / перезаписали"}
+                                                    </button>
+                                                )}
                                             </div>
                                         )}
                                     </div>

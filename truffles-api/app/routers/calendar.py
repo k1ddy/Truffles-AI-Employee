@@ -136,6 +136,7 @@ class BookingResponse(BaseModel):
     customer_phone: Optional[str] = None
     service_type: Optional[str] = None
     status: str
+    no_show_followup_done: bool = False
     google_event_id: Optional[str] = None
     created_at: str
 
@@ -275,6 +276,15 @@ def _build_booking_response(db: Session, booking: Appointment) -> BookingRespons
         )
         .scalar()
     )
+    no_show_followup_done = (
+        db.query(AppointmentAudit.id)
+        .filter(
+            AppointmentAudit.appointment_id == booking.id,
+            AppointmentAudit.action == "no_show_followup",
+        )
+        .first()
+        is not None
+    )
     return BookingResponse(
         id=str(booking.id),
         specialist_id=str(booking.specialist_id),
@@ -285,6 +295,7 @@ def _build_booking_response(db: Session, booking: Appointment) -> BookingRespons
         customer_phone=booking.customer_phone,
         service_type=service_name,
         status=booking.status,
+        no_show_followup_done=no_show_followup_done,
         google_event_id=google_event_id,
         created_at=booking.created_at.isoformat(),
     )
@@ -608,19 +619,7 @@ async def create_booking(
         
         return BookingActionResponse(
             success=True,
-            booking=BookingResponse(
-                id=str(booking.id),
-                specialist_id=str(booking.specialist_id),
-                specialist_name=specialist.name,
-                start_at=booking.start_at.isoformat(),
-                end_at=booking.end_at.isoformat(),
-                customer_name=booking.customer_name,
-                customer_phone=booking.customer_phone,
-                service_type=data.service_type,
-                status=booking.status,
-                google_event_id=None,
-                created_at=booking.created_at.isoformat()
-            )
+            booking=_build_booking_response(db, booking),
         )
         
     except AppointmentConflictError as e:
@@ -707,6 +706,19 @@ async def list_bookings(
         ).all()
         for row in rows:
             sync_map[row.appointment_id] = row.external_id
+
+    no_show_followup_map: dict[UUID, bool] = {}
+    if appointment_ids:
+        rows = (
+            db.query(AppointmentAudit.appointment_id)
+            .filter(
+                AppointmentAudit.appointment_id.in_(appointment_ids),
+                AppointmentAudit.action == "no_show_followup",
+            )
+            .distinct()
+            .all()
+        )
+        no_show_followup_map = {row[0]: True for row in rows if row and row[0]}
     
     return BookingsListResponse(
         items=[
@@ -720,6 +732,7 @@ async def list_bookings(
                 customer_phone=b.customer_phone,
                 service_type=services_map.get(b.id),
                 status=b.status,
+                no_show_followup_done=bool(no_show_followup_map.get(b.id, False)),
                 google_event_id=sync_map.get(b.id),
                 created_at=b.created_at.isoformat()
             )

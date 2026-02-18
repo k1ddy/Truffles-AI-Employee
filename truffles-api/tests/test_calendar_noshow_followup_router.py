@@ -41,6 +41,7 @@ async def test_register_booking_no_show_followup_records_audit(monkeypatch):
             "customer_phone": "+77000000000",
             "service_type": "Маникюр",
             "status": "NO_SHOW",
+            "no_show_followup_done": True,
             "google_event_id": None,
             "created_at": "2026-02-18T09:00:00+00:00",
         },
@@ -55,6 +56,7 @@ async def test_register_booking_no_show_followup_records_audit(monkeypatch):
 
     assert response.success is True
     assert response.booking.status == "NO_SHOW"
+    assert response.booking.no_show_followup_done is True
 
     audit_row = db.add.call_args.args[0]
     assert audit_row.action == "no_show_followup"
