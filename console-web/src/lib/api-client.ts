@@ -542,6 +542,11 @@ export type BusinessSummaryResponse = {
     generated_at: string;
     status: "healthy" | "degraded" | "unhealthy";
     status_label: string;
+    scheduled_visits_today: number;
+    arrived_visits_today: number;
+    no_show_visits_today: number;
+    cancelled_visits_today: number;
+    arrival_rate_percent?: number | null;
     outbox_backlog: number;
     outbox_failed_24h: number;
     pending_cases: number;

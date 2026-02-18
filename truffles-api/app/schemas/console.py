@@ -752,6 +752,11 @@ class ConsoleBusinessSummaryResponse(BaseModel):
     generated_at: str
     status: ConsoleBusinessStatus
     status_label: str
+    scheduled_visits_today: int
+    arrived_visits_today: int
+    no_show_visits_today: int
+    cancelled_visits_today: int
+    arrival_rate_percent: Optional[float] = None
     outbox_backlog: int
     outbox_failed_24h: int
     pending_cases: int

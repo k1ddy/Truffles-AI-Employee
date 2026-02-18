@@ -46,6 +46,7 @@ from app.models import (
 from app.models import (
     ConsoleMacro as ConsoleMacroModel,
 )
+from app.models.appointment import Appointment
 from app.models.reminder_job import ReminderJob
 from app.schemas.capabilities import CAPABILITIES_SCHEMA_VERSION, CapabilitiesPayload
 from app.schemas.console import (
@@ -6522,6 +6523,33 @@ def _summarize_owner_operation_delta(metrics: dict[str, ConsoleOwnerOperationMet
     return "mixed_or_stable"
 
 
+def _summarize_daily_visit_outcomes(status_rows: list[object]) -> tuple[int, int, int, int, int, Optional[float]]:
+    status_counts: dict[str, int] = {}
+    for row in status_rows:
+        status_key = str(getattr(row, "status", "") or "").upper()
+        status_counts[status_key] = int(getattr(row, "count", 0) or 0)
+
+    scheduled_visits_today = int(sum(status_counts.values()))
+    cancelled_visits_today = int(status_counts.get("CANCELLED", 0))
+    no_show_visits_today = int(status_counts.get("NO_SHOW", 0))
+    # Treat legacy CHECKED_IN as arrived for backward-compatible KPI.
+    arrived_visits_today = int(status_counts.get("COMPLETED", 0) + status_counts.get("CHECKED_IN", 0))
+    effective_planned_today = max(0, scheduled_visits_today - cancelled_visits_today)
+    arrival_rate_percent = (
+        round((arrived_visits_today / effective_planned_today) * 100, 1)
+        if effective_planned_today > 0
+        else None
+    )
+    return (
+        scheduled_visits_today,
+        arrived_visits_today,
+        no_show_visits_today,
+        cancelled_visits_today,
+        effective_planned_today,
+        arrival_rate_percent,
+    )
+
+
 @router.get(
     "/business/summary",
     response_model=ConsoleBusinessSummaryResponse,
@@ -6608,6 +6636,36 @@ async def get_business_summary(
             OutboxMessage.created_at < day_end,
         ).count()
 
+    appointments_query = db.query(
+        Appointment.status,
+        func.count().label("count"),
+    ).filter(
+        Appointment.client_id == context.client.id,
+        Appointment.start_at >= day_start,
+        Appointment.start_at < day_end,
+    )
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            appointment_status_rows: list[object] = []
+        else:
+            appointment_status_rows = (
+                appointments_query
+                .filter(Appointment.branch_id.in_(allowed_branch_ids))
+                .group_by(Appointment.status)
+                .all()
+            )
+    else:
+        appointment_status_rows = appointments_query.group_by(Appointment.status).all()
+
+    (
+        scheduled_visits_today,
+        arrived_visits_today,
+        no_show_visits_today,
+        cancelled_visits_today,
+        effective_planned_today,
+        arrival_rate_percent,
+    ) = _summarize_daily_visit_outcomes(appointment_status_rows)
+
     analytics_row = db.execute(
         text(
             """
@@ -6643,6 +6701,22 @@ async def get_business_summary(
         unresolved_cases=unresolved_cases,
         first_response_p90_seconds=first_response_p90_seconds,
     )
+    if effective_planned_today >= 5 and no_show_visits_today > 0:
+        no_show_rate = no_show_visits_today / effective_planned_today
+        if no_show_rate >= 0.3:
+            actions.insert(
+                0,
+                ConsoleBusinessActionItem(
+                    id="reduce_no_show",
+                    severity="critical" if no_show_rate >= 0.5 else "warn",
+                    title="Снизьте неявки по записям",
+                    description=(
+                        f"Сегодня не пришли {no_show_visits_today} из {effective_planned_today} "
+                        "запланированных визитов. Проверьте календарь и напоминания."
+                    ),
+                    href="/calendar",
+                ),
+            )
     metric_meta = {
         "outbox_backlog": _build_metric_meta(
             kind="fact",
@@ -6694,12 +6768,53 @@ async def get_business_summary(
             scope=scope,
             sample_size=1 if first_response_p90_seconds is not None else None,
         ),
+        "scheduled_visits_today": _build_metric_meta(
+            kind="fact",
+            source="appointments",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=scheduled_visits_today,
+        ),
+        "arrived_visits_today": _build_metric_meta(
+            kind="fact",
+            source="appointments",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=arrived_visits_today,
+        ),
+        "no_show_visits_today": _build_metric_meta(
+            kind="fact",
+            source="appointments",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=no_show_visits_today,
+        ),
+        "cancelled_visits_today": _build_metric_meta(
+            kind="fact",
+            source="appointments",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=cancelled_visits_today,
+        ),
+        "arrival_rate_percent": _build_metric_meta(
+            kind="fact" if arrival_rate_percent is not None else "missing",
+            source="appointments",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=effective_planned_today if arrival_rate_percent is not None else None,
+            note="no planned visits today" if arrival_rate_percent is None else None,
+        ),
     }
 
     return ConsoleBusinessSummaryResponse(
         generated_at=now.isoformat(),
         status=status,
         status_label=status_label,
+        scheduled_visits_today=scheduled_visits_today,
+        arrived_visits_today=arrived_visits_today,
+        no_show_visits_today=no_show_visits_today,
+        cancelled_visits_today=cancelled_visits_today,
+        arrival_rate_percent=arrival_rate_percent,
         outbox_backlog=outbox_backlog,
         outbox_failed_24h=outbox_failed_24h,
         pending_cases=pending_cases,

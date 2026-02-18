@@ -52,7 +52,7 @@ interface BookingCreateRequest {
 }
 
 interface BookingStatusUpdateRequest {
-    status: "CHECKED_IN" | "COMPLETED" | "NO_SHOW";
+    status: "COMPLETED" | "NO_SHOW";
     reason?: string;
 }
 
@@ -89,14 +89,11 @@ async function updateBookingStatus(bookingId: string, data: BookingStatusUpdateR
 
 function getVisitActionOptions(status: string): Array<{ status: BookingStatusUpdateRequest["status"]; label: string }> {
     const normalized = status.toUpperCase();
-    if (normalized === "CONFIRMED" || normalized === "RESCHEDULE_REQUESTED") {
+    if (["HOLD", "PENDING_CONFIRMATION", "CONFIRMED", "RESCHEDULE_REQUESTED", "CHECKED_IN"].includes(normalized)) {
         return [
-            { status: "CHECKED_IN", label: "Клиент пришел" },
+            { status: "COMPLETED", label: "Пришел" },
             { status: "NO_SHOW", label: "Не пришел" },
         ];
-    }
-    if (normalized === "CHECKED_IN") {
-        return [{ status: "COMPLETED", label: "Завершить" }];
     }
     return [];
 }
@@ -192,8 +189,7 @@ export default function CalendarPage() {
         },
         onSuccess: (_data, variables) => {
             const labels: Record<BookingStatusUpdateRequest["status"], string> = {
-                CHECKED_IN: "Статус: клиент пришел",
-                COMPLETED: "Статус: визит завершен",
+                COMPLETED: "Статус: клиент пришел",
                 NO_SHOW: "Статус: клиент не пришел",
             };
             toast.success(labels[variables.status]);

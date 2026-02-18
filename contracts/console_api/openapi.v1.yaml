@@ -5877,6 +5877,10 @@ components:
         - generated_at
         - status
         - status_label
+        - scheduled_visits_today
+        - arrived_visits_today
+        - no_show_visits_today
+        - cancelled_visits_today
         - outbox_backlog
         - outbox_failed_24h
         - pending_cases
@@ -5892,6 +5896,17 @@ components:
           enum: [healthy, degraded, unhealthy]
         status_label:
           type: string
+        scheduled_visits_today:
+          type: integer
+        arrived_visits_today:
+          type: integer
+        no_show_visits_today:
+          type: integer
+        cancelled_visits_today:
+          type: integer
+        arrival_rate_percent:
+          type: number
+          nullable: true
         outbox_backlog:
           type: integer
         outbox_failed_24h:
@@ -8087,7 +8102,7 @@ components:
       properties:
         status:
           type: string
-          enum: [CHECKED_IN, COMPLETED, NO_SHOW]
+          enum: [COMPLETED, NO_SHOW]
         reason:
           type: string
           nullable: true

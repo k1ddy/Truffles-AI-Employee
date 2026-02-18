@@ -10,7 +10,7 @@ Roles
 - Read: `platform_admin`, `owner`, `admin`.
 
 Purpose
-- Owner/Admin one-screen business status: delivery risk, unresolved cases, response speed, and top actions.
+- Owner/Admin one-screen business status: delivery risk, unresolved cases, response speed, visit outcomes, and top actions.
 
 Sections
 - Header: generated timestamp + manual refresh.
@@ -18,6 +18,7 @@ Sections
   - status chip (`healthy|degraded|unhealthy`),
   - plain-language status label.
 - KPI cards:
+  - visits today: planned, arrived, no-show, cancelled, arrival rate.
   - outbox backlog + failed 24h,
   - unresolved cases (`pending` + `active`),
   - response speed (`first_response_p90_seconds`) + oldest unresolved age.
@@ -36,6 +37,7 @@ Backend handlers
   - `get_business_summary`
 
 Data sources
+- `appointments` (today outcomes: planned/arrived/no-show/cancelled + arrival rate).
 - `outbox_messages` (backlog, failed 24h).
 - `handovers` (+ `conversations` when branch scope is restricted).
 - `metrics_analytics_daily` (latest `first_response_p90_seconds`).
