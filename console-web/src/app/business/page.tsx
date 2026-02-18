@@ -186,6 +186,24 @@ export default function BusinessPage() {
         }
         const steps: BusinessNowStep[] = [];
         const effectivePlanned = Math.max(0, data.scheduled_visits_today - data.cancelled_visits_today);
+        if (data.no_show_followup_pending > 0) {
+            steps.push({
+                id: "no_show_followup_pending",
+                title: "Разберите неявки без follow-up",
+                summary: `По ${data.no_show_followup_pending} неявкам ещё нет действия менеджера.`,
+                href: "/calendar",
+                severity: data.no_show_followup_pending >= 5 ? "critical" : "warn",
+            });
+        }
+        if (data.reminder_delivery_failures_today > 0) {
+            steps.push({
+                id: "reminder_delivery_failures",
+                title: "Проверьте сбои напоминаний",
+                summary: `Сегодня ошибок доставки напоминаний: ${data.reminder_delivery_failures_today}.`,
+                href: "/ops",
+                severity: data.reminder_delivery_failures_today >= 10 ? "critical" : "warn",
+            });
+        }
         if (effectivePlanned >= 5 && data.no_show_visits_today > 0) {
             const noShowRate = data.no_show_visits_today / effectivePlanned;
             if (noShowRate >= 0.3) {
@@ -495,6 +513,19 @@ export default function BusinessPage() {
                     <p className="text-sm text-muted-foreground">% прихода</p>
                     <p className="mt-1 text-2xl font-semibold text-foreground">{formatPercent(data.arrival_rate_percent)}</p>
                     <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.arrival_rate_percent)}</p>
+                </div>
+            </section>
+
+            <section className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2" data-testid="business-ops-followup-kpi-grid">
+                <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
+                    <p className="text-sm text-muted-foreground">Сбои напоминаний сегодня</p>
+                    <p className="mt-1 text-2xl font-semibold text-foreground">{data.reminder_delivery_failures_today}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.reminder_delivery_failures_today)}</p>
+                </div>
+                <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
+                    <p className="text-sm text-muted-foreground">Неявки без follow-up</p>
+                    <p className="mt-1 text-2xl font-semibold text-foreground">{data.no_show_followup_pending}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.no_show_followup_pending)}</p>
                 </div>
             </section>
 

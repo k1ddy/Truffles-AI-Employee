@@ -757,6 +757,8 @@ class ConsoleBusinessSummaryResponse(BaseModel):
     no_show_visits_today: int
     cancelled_visits_today: int
     arrival_rate_percent: Optional[float] = None
+    reminder_delivery_failures_today: int
+    no_show_followup_pending: int
     outbox_backlog: int
     outbox_failed_24h: int
     pending_cases: int

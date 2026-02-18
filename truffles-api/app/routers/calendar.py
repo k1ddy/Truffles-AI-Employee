@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.logging_config import get_logger
 from app.models.appointment import Appointment
+from app.models.appointment_audit import AppointmentAudit
 from app.models.appointment_service import AppointmentService as AppointmentServiceModel
 from app.models.appointment_sync_state import AppointmentSyncState
 from app.models.branch import Branch
@@ -119,6 +120,10 @@ class BookingCreate(BaseModel):
 class BookingStatusUpdateRequest(BaseModel):
     status: str = Field(min_length=3, max_length=32)
     reason: Optional[str] = Field(default=None, max_length=500)
+
+
+class BookingNoShowFollowUpRequest(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=500)
 
 
 class BookingResponse(BaseModel):
@@ -823,6 +828,66 @@ async def update_booking_status(
                 "agent": context.agent.name,
                 "booking_id": booking_id,
                 "target_status": booking.status,
+            }
+        },
+    )
+    return BookingActionResponse(success=True, booking=_build_booking_response(db, booking))
+
+
+@router.post("/bookings/{booking_id}/no-show-followup", response_model=BookingActionResponse)
+async def register_booking_no_show_followup(
+    request: Request,
+    booking_id: str,
+    data: BookingNoShowFollowUpRequest,
+    db: Session = Depends(get_db),
+):
+    """Record manager follow-up for a no-show booking."""
+    context = get_console_context(request, db)
+    require_console_permission(context, "calendar", "write")
+
+    booking_uuid = _parse_uuid(booking_id, field_name="booking_id")
+    booking = _resolve_booking_for_context(context, db, booking_uuid)
+    if (booking.status or "").upper() != "NO_SHOW":
+        raise ConsoleAPIError(
+            409,
+            "BOOKING_STATUS_REQUIRED",
+            "Booking status must be NO_SHOW for follow-up",
+            details={"current_status": booking.status, "required_status": "NO_SHOW"},
+        )
+
+    note = _normalize_optional_text(data.note)
+    now = datetime.now(timezone.utc)
+    payload: dict[str, Any] = {
+        "action": "contact_rebook",
+        "source": "calendar_console",
+    }
+    if note:
+        payload["note"] = note
+
+    db.add(
+        AppointmentAudit(
+            appointment_id=booking.id,
+            actor_type="agent",
+            actor_id=context.agent.id,
+            channel="console",
+            action="no_show_followup",
+            prev_status=booking.status,
+            new_status=booking.status,
+            prev_version=int(booking.version or 0),
+            new_version=int(booking.version or 0),
+            payload=payload,
+            created_at=now,
+        )
+    )
+    db.commit()
+
+    logger.info(
+        "Booking no_show follow-up recorded",
+        extra={
+            "context": {
+                "agent": context.agent.name,
+                "booking_id": booking_id,
+                "action": "contact_rebook",
             }
         },
     )
