@@ -1,0 +1,26 @@
+# SESSION 2026-02-18-waveb-visit-fact-finish-a101 — Session 2026-02-18-waveb-visit-fact-finish-a101
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-18-waveb-visit-fact-finish-a101.md
+- branch: feat/2026-02-18-waveb-visit-fact-finish-a101
+- worktree: /home/zhan/worktrees/worktrees/2026-02-18-waveb-visit-fact-finish-a101
+- base_ref: origin/main
+- scope: Calendar no-show follow-up fact contract (idempotent API + response fields + simple manager UI + one-page operating contract doc).
+- done:
+  - Added idempotent `no_show_followup` flow in calendar router with structured follow-up payload (`result`, `follow_up_closed_at`, `follow_up_closed_by`, optional `rebooked_appointment_id`).
+  - Extended `BookingResponse` and bookings list serialization with follow-up state fields.
+  - Updated OpenAPI contract and contract tests for new request/response fields.
+  - Updated calendar UI for explicit no-show follow-up actions: `Связались` and `Перезаписали` without extra screens.
+  - Added one-page operating contract table to calendar audit doc (`role -> action -> fact -> KPI`).
+  - Passed targeted checks (`pytest`, `ruff`, `openapi --check`, calendar page lint).
+- next:
+  - Open PR with evidence and merge after review.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-18-waveb-visit-fact-finish-a101.md
+  - pytest -q truffles-api/tests/test_calendar_noshow_followup_router.py
+  - pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py
+  - ruff check truffles-api/app/routers/calendar.py truffles-api/tests/test_calendar_noshow_followup_router.py truffles-api/tests/test_console_openapi_calendar_contract.py
+  - python3 truffles-api/scripts/generate_openapi.py --check
+  - npm --prefix console-web run lint -- --file src/app/calendar/page.tsx
+- last_updated: 2026-02-18
