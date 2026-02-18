@@ -22,6 +22,9 @@ logger = get_logger("state_service")
 PENDING_RESUME_KEY = "pending_resume"
 DECISION_TRACE_KEY = "decision_trace"
 SIMULATION_CONTEXT_KEY = "simulation"
+PENDING_SLA_CONTEXT_KEY = "pending_sla"
+HANDOVER_CONFIRMATION_KEY = "handover_confirmation"
+RE_ENTRY_REQUIRED_KEY = "re_entry_required"
 PENDING_RESUME_SNAPSHOT_KEYS = {
     "context_manager",
     "expected_reply_type",
@@ -581,6 +584,73 @@ def _capture_pending_resume_context(context: dict | None) -> dict:
     return updated
 
 
+def _restore_pending_resume_context(context: dict | None, *, now: datetime) -> tuple[dict, bool]:
+    if not isinstance(context, dict):
+        return {}, False
+    pending_resume = context.get(PENDING_RESUME_KEY)
+    if not isinstance(pending_resume, dict):
+        return context, False
+
+    restored = dict(context)
+    restored.pop(PENDING_RESUME_KEY, None)
+    restored.pop(PENDING_SLA_CONTEXT_KEY, None)
+    restored.pop(HANDOVER_CONFIRMATION_KEY, None)
+    for key in PENDING_RESUME_CLEAR_KEYS:
+        restored.pop(key, None)
+
+    context_manager = pending_resume.get("context_manager")
+    if isinstance(context_manager, dict):
+        restored["context_manager"] = dict(context_manager)
+    else:
+        restored["context_manager"] = {}
+
+    expected_reply_type = pending_resume.get("expected_reply_type")
+    if isinstance(expected_reply_type, str) and expected_reply_type.strip():
+        restored["expected_reply_type"] = expected_reply_type.strip()
+
+    intent_queue = pending_resume.get("intent_queue")
+    if isinstance(intent_queue, list):
+        restored["intent_queue"] = list(intent_queue)
+    else:
+        restored["intent_queue"] = []
+
+    booking_context = pending_resume.get("booking")
+    if isinstance(booking_context, dict):
+        restored["booking"] = dict(booking_context)
+    else:
+        restored["booking"] = {"active": False}
+
+    session_memory = pending_resume.get("session_memory")
+    if isinstance(session_memory, dict) and session_memory:
+        session_memory_restored = dict(session_memory)
+        session_memory_restored["last_updated_at"] = now.isoformat()
+        restored["session_memory"] = session_memory_restored
+
+    # Backward-compatible restore for both old/new snapshot field names.
+    service_hint = None
+    if isinstance(pending_resume.get("last_service_hint"), str):
+        service_hint = pending_resume.get("last_service_hint")
+    elif isinstance(pending_resume.get("service_hint"), str):
+        service_hint = pending_resume.get("service_hint")
+    if isinstance(service_hint, str) and service_hint.strip():
+        restored["last_service_hint"] = service_hint.strip()
+
+    service_hint_at = None
+    if isinstance(pending_resume.get("last_service_hint_at"), str):
+        service_hint_at = pending_resume.get("last_service_hint_at")
+    elif isinstance(pending_resume.get("service_hint_at"), str):
+        service_hint_at = pending_resume.get("service_hint_at")
+    if isinstance(service_hint_at, str) and service_hint_at.strip():
+        restored["last_service_hint_at"] = service_hint_at.strip()
+
+    restored[RE_ENTRY_REQUIRED_KEY] = {
+        "required": True,
+        "reason": "pending_resume",
+        "set_at": now.isoformat(),
+    }
+    return restored, True
+
+
 def _find_recent_resolved_handover(
     db: Session,
     conversation: Conversation,
@@ -907,8 +977,9 @@ def manager_resolve(
         conversation.retry_offered_at = None
         if not preserve_context:
             _reset_context_preserving_trace(conversation)
-        elif not isinstance(conversation.context, dict):
-            conversation.context = {}
+        else:
+            restored_context, _ = _restore_pending_resume_context(conversation.context, now=now)
+            conversation.context = restored_context
 
         handover.status = "resolved"
         handover.resolved_at = now
@@ -943,6 +1014,7 @@ def manager_return(
         return Result.failure(f"Cannot return from state {conversation.state}", "invalid_state")
 
     try:
+        now = datetime.now(timezone.utc)
         transition_state(
             conversation,
             ConversationState.BOT_ACTIVE,
@@ -955,8 +1027,9 @@ def manager_return(
         conversation.retry_offered_at = None
         if not preserve_context:
             _reset_context_preserving_trace(conversation)
-        elif not isinstance(conversation.context, dict):
-            conversation.context = {}
+        else:
+            restored_context, _ = _restore_pending_resume_context(conversation.context, now=now)
+            conversation.context = restored_context
 
         handover.status = "bot_handling"
         handover.resolved_at = None
