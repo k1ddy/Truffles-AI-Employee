@@ -67,6 +67,7 @@ const TEAM_AGENT_ROLES: AgentRole[] = [
     "specialist",
     "viewer",
 ];
+const TEAM_ASSIGNABLE_AGENT_ROLES: AgentRole[] = ["owner", "admin", "manager", "viewer"];
 
 const TEAM_MEMBERSHIP_SCOPES: MembershipScope[] = ["company", "client", "branch"];
 
@@ -435,11 +436,11 @@ function UsersPanel({
         ? (companiesById.get(companyId)?.name ?? companyId.slice(0, 8))
         : null;
 
-    const isBranchRequiredRole = createAgentRole === "manager" || createAgentRole === "specialist";
+    const isBranchRequiredRole = createAgentRole === "manager";
     const canSelectBranchScope = createAgentRole !== "platform_admin";
     const canCreateAgent = canManage && Boolean(clientId);
     const agentBranchRequiredHint = isBranchRequiredRole
-        ? "Для роли manager/specialist нужно выбрать филиал."
+        ? "Для роли manager нужно выбрать филиал."
         : canSelectBranchScope
             ? "Выберите филиал для branch-only доступа или оставьте пустым для доступа ко всем филиалам клиента."
             : "platform_admin создается только как platform scope.";
@@ -754,7 +755,7 @@ function UsersPanel({
             return;
         }
         if (isBranchRequiredRole && !createAgentBranchId) {
-            toast.error("Для manager/specialist выберите филиал");
+            toast.error("Для manager выберите филиал");
             return;
         }
         const hasOidc = Boolean(createAgentOidcSubject.trim());
@@ -862,7 +863,7 @@ function UsersPanel({
                     <div>
                         <h3 className="text-base font-semibold">Создать учетную запись</h3>
                         <p className="text-sm text-muted-foreground mt-1">
-                            Быстрый выпуск owner/admin/manager/support/specialist/viewer для текущего клиента.
+                            Быстрый выпуск owner/admin/manager/viewer для текущего клиента.
                         </p>
                     </div>
                     <div className="text-xs text-muted-foreground">
@@ -882,8 +883,8 @@ function UsersPanel({
                         onChange={(event) => setCreateAgentRole(event.target.value as AgentRole)}
                         disabled={!canCreateAgent}
                     >
-                        {TEAM_AGENT_ROLES.map((roleValue) => (
-                            <option key={roleValue} value={roleValue} disabled={roleValue === "platform_admin"}>
+                        {TEAM_ASSIGNABLE_AGENT_ROLES.map((roleValue) => (
+                            <option key={roleValue} value={roleValue}>
                                 {roleValue}
                             </option>
                         ))}
@@ -1042,7 +1043,7 @@ function UsersPanel({
                         onChange={(event) => setMembershipRole(event.target.value as AgentRole)}
                         disabled={!canManage}
                     >
-                        {TEAM_AGENT_ROLES.map((roleValue) => (
+                        {TEAM_ASSIGNABLE_AGENT_ROLES.map((roleValue) => (
                             <option key={roleValue} value={roleValue}>{roleValue}</option>
                         ))}
                     </select>
@@ -1192,8 +1193,8 @@ function UsersPanel({
                                                 value={editingRole}
                                                 onChange={(event) => setEditingRole(event.target.value as AgentRole)}
                                             >
-                                                {TEAM_AGENT_ROLES.map((roleValue) => (
-                                                    <option key={roleValue} value={roleValue} disabled={roleValue === "platform_admin"}>
+                                                {TEAM_ASSIGNABLE_AGENT_ROLES.map((roleValue) => (
+                                                    <option key={roleValue} value={roleValue}>
                                                         {roleValue}
                                                     </option>
                                                 ))}

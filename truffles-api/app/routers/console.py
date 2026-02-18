@@ -1389,6 +1389,7 @@ _CLIENT_STATUS_ARCHIVED = "deleted"
 _CLIENT_LIFECYCLE_REASON_MAX_LEN = 500
 _ACCESS_REASON_MAX_LEN = 500
 _PRIVILEGED_ACCESS_ROLES = {"platform_admin", "owner", "admin"}
+_DEPRECATED_CONSOLE_ASSIGNMENT_ROLES = {"support", "specialist"}
 _CLIENT_ARCHIVE_SAMPLE_LIMIT = 20
 _BRANCH_BOOTSTRAP_ACCOUNTS_MAX = 20
 _BRANCH_GO_LIVE_STATES = {"pending", "approved", "rejected"}
@@ -2030,7 +2031,18 @@ def _assert_agent_matches_membership_target(
             raise ConsoleAPIError(400, "INVALID_PARAM", "Agent belongs to another company")
 
 
+def _ensure_role_not_deprecated_for_assignment(role: Optional[str]) -> None:
+    normalized_role = (role or "").strip().lower()
+    if normalized_role in _DEPRECATED_CONSOLE_ASSIGNMENT_ROLES:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"{normalized_role} role is deprecated for assignment; use owner/admin/manager/viewer",
+        )
+
+
 def _ensure_membership_role_is_assignable(role: Optional[str]) -> None:
+    _ensure_role_not_deprecated_for_assignment(role)
     if role == "platform_admin":
         raise ConsoleAPIError(
             400,
@@ -3965,7 +3977,7 @@ _OPS_JOB_DEFINITIONS = {
 
 
 def _require_ops_access(context: ConsoleAuthContext, *, action: str = "read") -> None:
-    message = "Only owner/admin/support can access ops"
+    message = "Only owner/admin can access ops"
     if action == "write":
         message = "Only owner/admin can manage ops"
     require_console_permission(
@@ -10142,7 +10154,7 @@ async def get_onboarding_status(
         context,
         "provisioning",
         "read",
-        message="Only owner/admin/support can access onboarding",
+        message="Only owner/admin can access onboarding",
     )
     branch = _resolve_branch_for_onboarding(context, branch_id=branch_id)
     status = build_onboarding_status(db, branch)
@@ -10164,7 +10176,7 @@ async def get_onboarding_scorecard(
         context,
         "provisioning",
         "read",
-        message="Only owner/admin/support can access onboarding",
+        message="Only owner/admin can access onboarding",
     )
     branch = _resolve_branch_for_onboarding(context, branch_id=branch_id)
     scorecard = build_onboarding_scorecard(db, branch)
@@ -12710,9 +12722,10 @@ async def create_branch(
 
     created_agents: list[Agent] = []
     for account in bootstrap_accounts:
+        _ensure_role_not_deprecated_for_assignment(account.role)
         if account.role == "platform_admin" and context.role != "platform_admin":
             raise ConsoleAPIError(403, "ACCESS_DENIED", "Only platform admin can assign platform_admin role")
-        membership_branch = branch if account.role in {"manager", "specialist"} else None
+        membership_branch = branch if account.role == "manager" else None
         created_agents.append(
             _create_agent_with_membership(
                 db,
@@ -12978,7 +12991,7 @@ async def list_branch_changes(
         context,
         "provisioning",
         "read",
-        message="Only owner/admin/support can access provisioning",
+        message="Only owner/admin can access provisioning",
     )
     _reject_unknown_query_params(request, {"branch_id", "status", "cursor", "limit"})
     _validate_limit(limit)
@@ -13034,7 +13047,7 @@ async def get_branch_change(
         context,
         "provisioning",
         "read",
-        message="Only owner/admin/support can access provisioning",
+        message="Only owner/admin can access provisioning",
     )
     change = _get_branch_change_for_context(db, context=context, change_id=change_id)
     branch = db.query(Branch).filter(Branch.id == change.branch_id).first()
@@ -13622,8 +13635,9 @@ async def create_agent(
         raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
     _require_client_access(context, client.id)
 
-    if body.role in {"manager", "specialist"} and not body.branch_id:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id required for manager/specialist role")
+    _ensure_role_not_deprecated_for_assignment(body.role)
+    if body.role == "manager" and not body.branch_id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id required for manager role")
     if body.role == "platform_admin" and context.role != "platform_admin":
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Only platform admin can assign platform_admin role")
 
@@ -14340,7 +14354,7 @@ async def get_capabilities(
         context,
         "provisioning",
         "read",
-        message="Only owner/admin/support can access provisioning",
+        message="Only owner/admin can access provisioning",
     )
 
     if branch_id:
@@ -14695,7 +14709,7 @@ async def get_onboarding_contract(
         context,
         "provisioning",
         "read",
-        message="Only owner/admin/support can access provisioning",
+        message="Only owner/admin can access provisioning",
     )
 
     if branch_id:
@@ -14906,7 +14920,7 @@ async def get_webhook_secret(
         context,
         "provisioning",
         "read",
-        message="Only owner/admin/support can access provisioning",
+        message="Only owner/admin can access provisioning",
     )
 
     branch = _resolve_branch_for_onboarding(context, branch_id=branch_id)
@@ -15523,7 +15537,7 @@ async def list_reference_packs(
         context,
         "provisioning",
         "read",
-        message="Only owner/admin/support can access provisioning",
+        message="Only owner/admin can access provisioning",
     )
 
     query = db.query(ReferencePack)

@@ -89,6 +89,7 @@ type DomainTemplatePreset = {
 };
 
 const DEFAULT_TIMEZONE = "Asia/Almaty";
+const PROVISIONING_ASSIGNABLE_AGENT_ROLES: AgentRole[] = ["owner", "admin", "manager", "viewer"];
 const DOMAIN_SLUG_RE = /^[a-z0-9_]+$/;
 const ISO_CURRENCY_RE = /^[A-Z]{3}$/;
 const WORKING_DAYS = [
@@ -2468,10 +2469,10 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             name: agentForm.name.trim() || undefined,
             oidc_subject: agentForm.oidcSubject.trim() || undefined,
         };
-        if (roleValue === "manager" || roleValue === "specialist") {
+        if (roleValue === "manager") {
             const branchId = agentForm.branchId || branchData?.id;
             if (!branchId) {
-                reportValidationError("branch_id обязателен для manager/specialist");
+                reportValidationError("branch_id обязателен для manager");
                 return;
             }
             payload.branch_id = branchId;
@@ -3722,7 +3723,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 {currentStep.id === "team" && (
                     <div className="space-y-4">
                         <p className="text-sm text-muted-foreground">
-                            Создайте owner/admin пользователей для доступа в Console. Manager/Specialist требуют branch_id.
+                            Создайте owner/admin пользователей для доступа в Console. Для manager обязателен branch_id.
                         </p>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
@@ -3743,12 +3744,9 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                     onChange={(event) => setAgentForm((prev) => ({ ...prev, role: event.target.value as AgentRole }))}
                                     disabled={!canEdit}
                                 >
-                                    <option value="owner">owner</option>
-                                    <option value="admin">admin</option>
-                                    <option value="manager">manager</option>
-                                    <option value="specialist">specialist</option>
-                                    <option value="support">support</option>
-                                    <option value="viewer">viewer</option>
+                                    {PROVISIONING_ASSIGNABLE_AGENT_ROLES.map((roleValue) => (
+                                        <option key={roleValue} value={roleValue}>{roleValue}</option>
+                                    ))}
                                 </select>
                             </div>
                             <div>
@@ -3768,7 +3766,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                     value={agentForm.branchId}
                                     onChange={(event) => setAgentForm((prev) => ({ ...prev, branchId: event.target.value }))}
                                     placeholder={branchData?.id || "UUID филиала"}
-                                    disabled={!canEdit || !["manager", "specialist"].includes(agentForm.role)}
+                                    disabled={!canEdit || agentForm.role !== "manager"}
                                 />
                             </div>
                         </div>
