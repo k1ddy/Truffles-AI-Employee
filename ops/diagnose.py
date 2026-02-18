@@ -3298,6 +3298,10 @@ def _llm_quality_extract_expectations(turn):
             expected_reply = None
     if not isinstance(expected_reply, bool):
         expected_reply = None
+    if "media" in tag_set:
+        # Media turns may move to pending and still produce an explicit ack.
+        # Keep reply expectation open to avoid brittle false mismatches.
+        expected_reply = None
     allow_booking_stall = expect.get("allow_booking_stall")
     if isinstance(allow_booking_stall, str):
         token = allow_booking_stall.strip().lower()
@@ -5048,10 +5052,23 @@ def _llm_quality_booking_active(conv_meta):
         return True
     return False
 
+
+def _llm_quality_trace_missing_soft(meta, trace_error):
+    if trace_error != "trace_stale":
+        return False
+    if not isinstance(meta, dict):
+        return False
+    timing = meta.get("timing")
+    if not isinstance(timing, dict) or not timing.get("pipeline_finished_at"):
+        return False
+    return bool(meta.get("action") or meta.get("pending_action"))
+
+
 def _llm_quality_evaluate_turn(
     *,
     meta,
     trace_entries,
+    trace_error=None,
     state,
     conv_meta,
     handover_meta,
@@ -5080,7 +5097,7 @@ def _llm_quality_evaluate_turn(
     meta_action = (meta or {}).get("action") if isinstance(meta, dict) else None
     if meta is None:
         reasons.append("decision_meta_missing")
-    if not trace_entries:
+    if not trace_entries and not _llm_quality_trace_missing_soft(meta, trace_error):
         reasons.append("decision_trace_missing")
     if state not in LLM_QUALITY_KNOWN_STATES:
         reasons.append("unknown_state")
@@ -9043,9 +9060,10 @@ def _run_llm_quality(args):
                             args.trace_interval,
                             min_recorded_at=_trace_min_recorded_at(meta),
                         )
-                        if trace_error:
+                        trace_missing_soft = _llm_quality_trace_missing_soft(meta, trace_error)
+                        if trace_error and not trace_missing_soft:
                             stats["decision_trace_errors"] += 1
-                        if not trace_entries:
+                        if not trace_entries and not trace_missing_soft:
                             stats["decision_trace_missing"] += 1
                         if (conv_meta or {}).get("state") in {"pending", "manager_active"}:
                             handover_meta, _ = _fetch_handover_meta(db_user, conversation_id)
@@ -9457,6 +9475,7 @@ def _run_llm_quality(args):
                 evaluation_reasons = _llm_quality_evaluate_turn(
                     meta=meta,
                     trace_entries=trace_entries,
+                    trace_error=trace_error,
                     state=state,
                     conv_meta=conv_meta,
                     handover_meta=handover_meta,

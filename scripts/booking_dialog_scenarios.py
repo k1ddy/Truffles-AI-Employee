@@ -788,6 +788,11 @@ def _sanitize_expect_action_by_tags(tags: list[str], action: Any) -> Any:
 
 def _merge_expectations(tags: list[str], override: Any) -> dict[str, Any]:
     expect = _default_expect()
+    tag_set = {
+        tag.strip().lower()
+        for tag in tags
+        if isinstance(tag, str) and tag.strip()
+    }
     for tag in tags:
         if tag in EXPECT_INFO_SECTIONS:
             expect["info_sections"].extend(EXPECT_INFO_SECTIONS[tag])
@@ -817,6 +822,10 @@ def _merge_expectations(tags: list[str], override: Any) -> dict[str, Any]:
                 expect["info_sections"].append(section)
     expect["state"] = _sanitize_expect_state_by_tags(tags, expect.get("state"))
     expect["action"] = _sanitize_expect_action_by_tags(tags, expect.get("action"))
+    if "media" in tag_set:
+        # Style/media turns can legally end in pending with an immediate ack.
+        # Keep reply expectation open in generated scenarios.
+        expect["expected_reply"] = None
     if not any(tag in EXPECT_INFO_SECTIONS for tag in tags):
         expect["info_sections"] = []
     return expect

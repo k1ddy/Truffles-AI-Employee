@@ -10952,6 +10952,16 @@ async def _handle_webhook_payload(
                     booking_interrupt_prompt,
                 ):
                     bot_response = _append_followup(bot_response, booking_interrupt_prompt)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "llm_policy_core_tool",
+                        "decision": "reply",
+                        "state": conversation.state,
+                        "tool_action": policy_tool_action,
+                        "tool_decision": tool_decision,
+                    },
+                )
                 _record_message_decision_meta(
                     saved_message,
                     action="reply",
