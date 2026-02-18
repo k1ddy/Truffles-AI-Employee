@@ -4,6 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-02-18-booking-context-style-handoff-r2-wt-a99 | active | fix/booking-context-style-handoff-2026-02-18-r2-wt | /home/zhan/worktrees/fix-booking-context-style-handoff-2026-02-18-r2-wt | docs/TASK_PACKAGES/TP-2026-02-18-booking-context-style-handoff-r2-wt-a99.md | 2026-02-18 |
 | 2026-02-18-booking-core-quality-a88 | active | feat/2026-02-18-booking-core-quality-a88 | /home/zhan/worktrees/2026-02-18-booking-core-quality-a88 | docs/TASK_PACKAGES/TP-2026-02-18-booking-core-quality-a88.md | 2026-02-18 |
 | 2026-02-17-consultant-e2e-chain-a88 | active | fix/2026-02-17-consultant-e2e-chain-a88 | /tmp/consultant-e2e-chain-a88 | docs/TASK_PACKAGES/TP-2026-02-17-consultant-e2e-chain-a88.md | 2026-02-17T11:01:00Z |
 | 2026-02-17-console-ux-bugfix-a88 | active | feat/2026-02-17-console-ux-bugfix-a88 | /tmp/truffles-main-console-ux | docs/TASK_PACKAGES/TP-2026-02-17-console-ux-bugfix-a88.md | 2026-02-17T03:08:20Z |

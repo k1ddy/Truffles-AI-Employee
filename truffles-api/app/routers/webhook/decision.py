@@ -3431,6 +3431,11 @@ def _looks_like_time_only_request(message_text: str | None) -> bool:
     normalized = normalize_for_matching(message_text)
     if not normalized:
         return False
+    if any(
+        phrase in normalized
+        for phrase in ("во сколько", "в какое время", "какое время", "которое время")
+    ):
+        return True
     tokens = _tokenize_for_matching(normalized)
     if not tokens:
         return False
@@ -7428,12 +7433,19 @@ async def _handle_webhook_payload(
         media_escalated = False
         media_text_placeholder = _is_placeholder_text(message_text)
         asr_failed = bool(asr_meta and asr_meta.get("asr_failed"))
+        is_photo_media = media_info.media_type in {"photo", "image"}
+        style_text_input = message_text or ""
+        if isinstance(media_info.caption, str) and media_info.caption.strip():
+            if media_text_placeholder:
+                style_text_input = media_info.caption.strip()
+            elif media_info.caption.strip() not in style_text_input:
+                style_text_input = f"{style_text_input} {media_info.caption.strip()}".strip()
         style_request = _is_style_reference_request(
-            message_text,
-            has_media=media_info.media_type == "photo",
+            style_text_input,
+            has_media=is_photo_media,
         )
         style_reference_pending = None
-        if conversation.state == ConversationState.BOT_ACTIVE.value and media_info.media_type == "photo":
+        if conversation.state == ConversationState.BOT_ACTIVE.value and is_photo_media:
             context = _get_conversation_context(conversation)
             style_reference_pending, style_pending_expired = _get_style_reference_pending(
                 context,
@@ -7457,52 +7469,10 @@ async def _handle_webhook_payload(
             }
             if media_text_placeholder and _is_voice_note(media_info) and asr_failed:
                 media_response = MSG_MEDIA_TRANSCRIPT_FAILED
-            elif (
-                style_request
-                and media_info.media_type == "photo"
-                and booking_media_active
-                and booking_media_expected_reply
-            ):
-                booking_prompt = None
-                if expected_reply_type == EXPECTED_REPLY_SERVICE:
-                    booking_prompt = MSG_BOOKING_ASK_SERVICE
-                elif expected_reply_type == EXPECTED_REPLY_TIME:
-                    booking_prompt = MSG_BOOKING_ASK_DATETIME
-                elif expected_reply_type == EXPECTED_REPLY_NAME:
-                    booking_prompt = MSG_BOOKING_ASK_NAME
-                media_response = _combine_sidecar(MSG_MEDIA_RECEIVED, booking_prompt)
-                if booking_prompt:
-                    context = _get_conversation_context(conversation)
-                    context = _set_expected_reply_context(
-                        conversation=conversation,
-                        saved_message=saved_message,
-                        context=context,
-                        expected_reply_type=expected_reply_type,
-                        reason="booking_prompt_media_ack",
-                        now=now,
-                    )
-                    _set_conversation_context(conversation, context)
-                _record_decision_trace(
-                    conversation,
-                    {
-                        "stage": "media",
-                        "decision": "booking_media_ack",
-                        "state": conversation.state,
-                        "expected_reply_type": expected_reply_type,
-                        "booking_active": True,
-                    },
-                )
-                _record_message_decision_meta(
-                    saved_message,
-                    action="booking_prompt" if booking_prompt else "reply",
-                    intent="booking" if booking_prompt else "media",
-                    source="media",
-                    fast_intent=False,
-                )
-            elif style_request and media_info.media_type == "photo":
+            elif style_request and is_photo_media:
                 handover_text = message_text.strip()
                 if media_text_placeholder:
-                    handover_text = "Клиент отправил фото/референс."
+                    handover_text = media_info.caption.strip() if isinstance(media_info.caption, str) and media_info.caption.strip() else "Клиент отправил фото/референс."
                 _, reused, telegram_sent = _reuse_active_handover(
                     db=db,
                     conversation=conversation,
@@ -7568,6 +7538,48 @@ async def _handle_webhook_payload(
                     context = _get_conversation_context(conversation)
                     context = _set_style_reference_pending(context, None)
                     _set_conversation_context(conversation, context)
+            elif (
+                is_photo_media
+                and booking_media_active
+                and booking_media_expected_reply
+                and not style_request
+            ):
+                booking_prompt = None
+                if expected_reply_type == EXPECTED_REPLY_SERVICE:
+                    booking_prompt = MSG_BOOKING_ASK_SERVICE
+                elif expected_reply_type == EXPECTED_REPLY_TIME:
+                    booking_prompt = MSG_BOOKING_ASK_DATETIME
+                elif expected_reply_type == EXPECTED_REPLY_NAME:
+                    booking_prompt = MSG_BOOKING_ASK_NAME
+                media_response = _combine_sidecar(MSG_MEDIA_RECEIVED, booking_prompt)
+                if booking_prompt:
+                    context = _get_conversation_context(conversation)
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=expected_reply_type,
+                        reason="booking_prompt_media_ack",
+                        now=now,
+                    )
+                    _set_conversation_context(conversation, context)
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "media",
+                        "decision": "booking_media_ack",
+                        "state": conversation.state,
+                        "expected_reply_type": expected_reply_type,
+                        "booking_active": True,
+                    },
+                )
+                _record_message_decision_meta(
+                    saved_message,
+                    action="booking_prompt" if booking_prompt else "reply",
+                    intent="booking" if booking_prompt else "media",
+                    source="media",
+                    fast_intent=False,
+                )
             elif style_request:
                 media_response = MSG_STYLE_REFERENCE_NEED_MEDIA
             elif media_text_placeholder:
@@ -7575,7 +7587,7 @@ async def _handle_webhook_payload(
                     media_response = MSG_MEDIA_DOC_RECEIVED
                 else:
                     media_response = MSG_MEDIA_RECEIVED
-                if media_info.media_type == "photo" and not style_request:
+                if is_photo_media and not style_request:
                     saved_media_meta = {}
                     if saved_message and isinstance(saved_message.message_metadata, dict):
                         raw_media_meta = saved_message.message_metadata.get("media")
@@ -10074,6 +10086,36 @@ async def _handle_webhook_payload(
                     # Drop hallucinated list-slots date/start_at when user did not provide time/date in this turn.
                     policy_tool_args.pop("date", None)
                     policy_tool_args.pop("start_at", None)
+                    preserved_datetime = None
+                    booking_last_question = None
+                    if isinstance(booking, dict):
+                        raw_last_question = booking.get("last_question")
+                        if isinstance(raw_last_question, str) and raw_last_question.strip():
+                            booking_last_question = raw_last_question.strip()
+                    allow_datetime_carryover = bool(
+                        expected_reply_type == EXPECTED_REPLY_TIME
+                        or booking_last_question == "datetime"
+                        or _looks_like_time_only_request(message_text)
+                    )
+                    if isinstance(booking, dict):
+                        booking_datetime = booking.get("datetime")
+                        if (
+                            isinstance(booking_datetime, str)
+                            and booking_datetime.strip()
+                            and allow_datetime_carryover
+                        ):
+                            preserved_datetime = booking_datetime.strip()
+                    if (
+                        preserved_datetime is None
+                        and expected_reply_type != EXPECTED_REPLY_NAME
+                        and allow_datetime_carryover
+                    ):
+                        merged_datetime = merged_slots_for_tool.get("datetime")
+                        if isinstance(merged_datetime, str) and merged_datetime.strip():
+                            preserved_datetime = merged_datetime.strip()
+                    if preserved_datetime and expected_reply_type != EXPECTED_REPLY_NAME:
+                        # Keep validated booking context date while collecting/confirming time.
+                        policy_tool_args["start_at"] = preserved_datetime
                 if (
                     isinstance(specialist_name_hint, str)
                     and specialist_name_hint.strip()

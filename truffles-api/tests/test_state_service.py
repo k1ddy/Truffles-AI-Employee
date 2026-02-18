@@ -574,6 +574,63 @@ class TestManagerResolve:
         assert result.ok is True
         assert conversation.state == ConversationState.BOT_ACTIVE.value
 
+    def test_preserve_context_restores_pending_resume_snapshot(self):
+        db = Mock()
+        now = datetime.now(timezone.utc)
+        conversation = Mock()
+        conversation.state = ConversationState.MANAGER_ACTIVE.value
+        conversation.id = "conv-123"
+        conversation.bot_muted_until = now
+        conversation.no_count = 3
+        conversation.retry_offered_at = now
+        conversation.context = {
+            "simulation": {"mode": True, "id": "sim-1"},
+            "decision_trace": [{"stage": "seed"}],
+            "pending_sla": {"ping_sent_at": now.isoformat()},
+            "handover_confirmation": {"required": True},
+            "pending_resume": {
+                "context_manager": {"current_goal": "booking"},
+                "expected_reply_type": "time",
+                "intent_queue": ["booking"],
+                "booking": {"active": True, "service": "Педикюр", "datetime": "послезавтра"},
+                "session_memory": {"active_goal": "booking"},
+                "last_service_hint": "Педикюр",
+                "last_service_hint_at": "2026-02-18T00:00:00+00:00",
+            },
+        }
+
+        handover = Mock()
+        handover.status = "active"
+        handover.created_at = now - timedelta(minutes=5)
+
+        result = manager_resolve(
+            db,
+            conversation,
+            handover,
+            "mgr-123",
+            "Manager Name",
+            preserve_context=True,
+        )
+
+        assert result.ok is True
+        assert conversation.state == ConversationState.BOT_ACTIVE.value
+        ctx = conversation.context
+        assert ctx.get("pending_resume") is None
+        assert ctx.get("pending_sla") is None
+        assert ctx.get("handover_confirmation") is None
+        assert ctx.get("context_manager", {}).get("current_goal") == "booking"
+        assert ctx.get("expected_reply_type") == "time"
+        assert ctx.get("intent_queue") == ["booking"]
+        assert ctx.get("booking", {}).get("datetime") == "послезавтра"
+        assert ctx.get("session_memory", {}).get("active_goal") == "booking"
+        assert isinstance(ctx.get("session_memory", {}).get("last_updated_at"), str)
+        assert ctx.get("last_service_hint") == "Педикюр"
+        assert ctx.get("last_service_hint_at") == "2026-02-18T00:00:00+00:00"
+        assert ctx.get("re_entry_required", {}).get("required") is True
+        assert ctx.get("re_entry_required", {}).get("reason") == "pending_resume"
+        assert ctx.get("simulation", {}).get("id") == "sim-1"
+        assert ctx.get("decision_trace")[0].get("stage") == "seed"
+
     def test_fails_from_bot_active(self):
         db = Mock()
         conversation = Mock()
@@ -631,6 +688,49 @@ class TestManagerReturn:
         assert result.ok is True
         assert conversation.state == ConversationState.BOT_ACTIVE.value
         assert handover.status == "bot_handling"
+
+    def test_preserve_context_restores_pending_resume_snapshot(self):
+        db = Mock()
+        now = datetime.now(timezone.utc)
+        conversation = Mock()
+        conversation.state = ConversationState.PENDING.value
+        conversation.id = "conv-123"
+        conversation.bot_muted_until = now
+        conversation.no_count = 1
+        conversation.retry_offered_at = now
+        conversation.context = {
+            "pending_resume": {
+                "context_manager": {"current_goal": "booking"},
+                "expected_reply_type": "name",
+                "intent_queue": ["booking", "check_booking"],
+                "booking": {"active": True, "service": "Маникюр"},
+                "session_memory": {"active_goal": "booking"},
+                "service_hint": "Маникюр",
+                "service_hint_at": "2026-02-18T01:00:00+00:00",
+            }
+        }
+
+        handover = Mock()
+        handover.status = "pending"
+
+        result = manager_return(
+            db,
+            conversation,
+            handover,
+            "mgr-123",
+            "Manager Name",
+            preserve_context=True,
+        )
+
+        assert result.ok is True
+        ctx = conversation.context
+        assert ctx.get("pending_resume") is None
+        assert ctx.get("expected_reply_type") == "name"
+        assert ctx.get("intent_queue") == ["booking", "check_booking"]
+        assert ctx.get("booking", {}).get("service") == "Маникюр"
+        assert ctx.get("last_service_hint") == "Маникюр"
+        assert ctx.get("last_service_hint_at") == "2026-02-18T01:00:00+00:00"
+        assert ctx.get("re_entry_required", {}).get("required") is True
 
     def test_fails_from_bot_active(self):
         db = Mock()

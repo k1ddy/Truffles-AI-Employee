@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import mimetypes
 import os
 import random
 import re
@@ -72,6 +73,8 @@ CANONICAL_EXPECT_INFO_SECTIONS = sorted(
 )
 REQUIRED_LLM_TAGS = ["booking", "time", "name"]
 REQUIRED_BOOKING_CONFIRM_TAGS = ["check_booking", "confirm"]
+DEFAULT_REFERENCE_IMAGE_PATH = "/home/zhan/TrufflesLogoClear.png"
+DEFAULT_REFERENCE_IMAGE_URL = "https://app.chatflow.kz/static/demo/reference.jpg"
 REQUIRED_LLM_TURNS = {
     "booking": {"text": "{greet}, хочу записаться на {service}.", "tags": ["booking"]},
     "time": {"text": "Можно {time_exact}?", "tags": ["time"]},
@@ -497,6 +500,19 @@ def _format_turn(turn: dict[str, Any], ctx: dict[str, str]) -> dict[str, Any]:
     }
 
 
+def _resolve_reference_photo_meta() -> tuple[str, str, str, str]:
+    raw_path = os.environ.get("TRUFFLES_REFERENCE_IMAGE_PATH", DEFAULT_REFERENCE_IMAGE_PATH)
+    local_path = os.path.abspath(os.path.expanduser(str(raw_path)))
+    resolved_path = os.path.realpath(local_path)
+    file_source = resolved_path if os.path.isfile(resolved_path) else local_path
+    file_name = os.path.basename(file_source)
+    if not file_name or "." not in file_name:
+        file_name = "reference.jpg"
+    mimetype = mimetypes.guess_type(file_source)[0] or "image/jpeg"
+    photo_url = os.environ.get("TRUFFLES_REFERENCE_IMAGE_URL", DEFAULT_REFERENCE_IMAGE_URL)
+    return local_path, file_name, mimetype, photo_url
+
+
 def _media_turn(ctx: dict[str, str], *, mode: str, kind: str) -> dict[str, Any]:
     caption = "Вот фото референса"
     if mode == "text":
@@ -520,13 +536,15 @@ def _media_turn(ctx: dict[str, str], *, mode: str, kind: str) -> dict[str, Any]:
             },
         }
     else:
+        photo_local_path, photo_file_name, photo_mimetype, photo_url = _resolve_reference_photo_meta()
         media_payload = {
             "messageType": "image",
             "mediaData": {
                 "type": "image",
-                "mimetype": "image/jpeg",
-                "url": REFERENCE_MEDIA_IMAGE_PATH,
-                "fileName": REFERENCE_MEDIA_IMAGE_NAME,
+                "mimetype": photo_mimetype,
+                "url": photo_url,
+                "fileName": photo_file_name,
+                "localPath": photo_local_path,
                 "caption": caption,
             },
         }

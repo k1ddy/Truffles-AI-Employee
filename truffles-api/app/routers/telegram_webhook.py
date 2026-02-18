@@ -789,7 +789,14 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
             db.commit()
             return TelegramWebhookResponse(success=True, message="Taken (simulation)", conversation_id=handover.conversation_id)
         if action in {"resolve", "return"}:
-            result = state_manager_resolve(db, conversation, handover, manager_id, manager_name)
+            result = state_manager_resolve(
+                db,
+                conversation,
+                handover,
+                manager_id,
+                manager_name,
+                preserve_context=True,
+            )
             if not result.ok:
                 return TelegramWebhookResponse(success=False, message=result.error)
             db.commit()
@@ -908,7 +915,14 @@ async def handle_callback_query(update: TelegramUpdate, db: Session) -> Telegram
 
     elif action == "resolve":
         # Resolve using state_service
-        result = state_manager_resolve(db, conversation, handover, manager_id, manager_name)
+        result = state_manager_resolve(
+            db,
+            conversation,
+            handover,
+            manager_id,
+            manager_name,
+            preserve_context=True,
+        )
 
         if not result.ok:
             telegram._make_request(
