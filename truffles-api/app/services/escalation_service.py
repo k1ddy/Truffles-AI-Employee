@@ -12,6 +12,11 @@ from sqlalchemy.orm import Session
 from app.logging_config import get_logger
 from app.models import Branch, ClientSettings, Conversation, Handover, Message, User
 from app.services.alert_service import alert_error
+from app.services.handover_context_service import (
+    build_handover_context_summary,
+    build_handover_messages,
+    get_recent_conversation_messages,
+)
 from app.services.state_machine import ConversationState
 from app.services.telegram_service import TelegramService, build_handover_buttons, format_handover_message
 
@@ -29,6 +34,7 @@ HANDOVER_MEDIA_MAX_DOWNLOAD_BYTES = max(
     1 * 1024 * 1024,
 )
 MEDIA_STORAGE_BASE_DIR = Path(os.environ.get("MEDIA_STORAGE_DIR", "/home/zhan/truffles-media"))
+HANDOVER_TELEGRAM_TEXT_MAX_CHARS = 3500
 
 
 def _normalize_slot_value(value: object) -> str | None:
@@ -384,6 +390,12 @@ def create_handover(
     now = datetime.now(timezone.utc)
     trigger_message = _get_latest_user_message(db, conversation.id)
     recent_messages = _get_recent_user_messages(db, conversation.id)
+    recent_conversation_messages = get_recent_conversation_messages(db, conversation.id)
+    handover_messages = build_handover_messages(recent_conversation_messages)
+    handover_context_summary = build_handover_context_summary(
+        handover_messages,
+        fallback=user_message,
+    )
     handover_meta = _build_handover_meta(
         conversation,
         trigger_message,
@@ -399,6 +411,8 @@ def create_handover(
         status="pending",
         user_message=user_message,
         created_at=now,
+        context_summary=handover_context_summary,
+        messages=handover_messages,
         adapter_type="telegram",
         channel="telegram",
         channel_ref=user.remote_jid if user else None,
@@ -547,6 +561,26 @@ def _refresh_handover_media_contract(
     if isinstance(refreshed_contract, dict):
         merged["media_handoff_contract"] = refreshed_contract
     handover.meta = merged
+
+
+def _compose_handover_notification_body(
+    handover: Handover,
+    message: str | None,
+) -> str:
+    primary_message = (message or getattr(handover, "user_message", None) or "").strip()
+    context_summary = (getattr(handover, "context_summary", None) or "").strip()
+    if context_summary:
+        if primary_message:
+            combined = f"{primary_message}\n\nКонтекст диалога:\n{context_summary}"
+        else:
+            combined = f"Контекст диалога:\n{context_summary}"
+    else:
+        combined = primary_message
+    if not combined:
+        return ""
+    if len(combined) <= HANDOVER_TELEGRAM_TEXT_MAX_CHARS:
+        return combined
+    return f"{combined[: HANDOVER_TELEGRAM_TEXT_MAX_CHARS - 1].rstrip()}…"
 
 
 def _resolve_handover_media_locator(raw_value: str) -> str:
@@ -827,10 +861,11 @@ def send_telegram_notification(
         return False
 
     # 2. Format message
+    message_body = _compose_handover_notification_body(handover, message)
     text = format_handover_message(
         user_name=user.name,
         user_phone=user.phone,
-        message=message,
+        message=message_body,
         trigger_type=handover.trigger_value or handover.trigger_type,
     )
     if media_refs:

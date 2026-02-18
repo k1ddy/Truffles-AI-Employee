@@ -314,6 +314,9 @@ from app.services.intent_service import (
     Intent,
     classify_domain_with_scores,
     classify_intent,
+    extract_customer_name_hint_llm,
+    extract_service_query_hint_llm,
+    extract_specialist_hint_llm,
     interpret_expected_reply,
     is_frustration_message,
     is_human_request_message,
@@ -1202,6 +1205,13 @@ def _run_intent_decomposition(
     consult_return_reason = None
     consult_return_prompt = None
 
+    remaining_budget_ms = _remaining_pipeline_budget_ms(timing_context)
+    critical_booking_turn = bool(
+        booking_signal or booking_active or expected_reply_shortcircuit or booking_slot_signal
+    )
+    intent_decomp_skipped_reason = None
+    intent_decomp_budget_required_ms = WEBHOOK_MULTI_INTENT_MIN_BUDGET_MS
+
     controller_reserve_ms = 0.0
     if (
         routing["allow_bot_reply"]
@@ -1218,8 +1228,46 @@ def _run_intent_decomposition(
             legacy.EXPECTED_REPLY_NAME,
         }:
             controller_reserve_ms += max(float(ANSWER_INTERPRETER_TIMEOUT_SECONDS) * 1000, 0.0)
+    if critical_booking_turn and _current_openai_api_key():
+        intent_decomp_budget_required_ms = max(
+            intent_decomp_budget_required_ms,
+            WEBHOOK_BOOKING_CRITICAL_PATH_RESERVE_MS,
+        )
+        controller_reserve_ms = max(
+            controller_reserve_ms,
+            WEBHOOK_BOOKING_CRITICAL_PATH_RESERVE_MS,
+        )
 
-    if routing["allow_bot_reply"] and not bypass_domain_flows and message_text:
+    allow_intent_decomp = bool(routing["allow_bot_reply"] and not bypass_domain_flows and message_text)
+    if (
+        allow_intent_decomp
+        and critical_booking_turn
+        and remaining_budget_ms is not None
+        and remaining_budget_ms <= intent_decomp_budget_required_ms
+    ):
+        allow_intent_decomp = False
+        intent_decomp_skipped_reason = "booking_critical_path_budget_reserved"
+        if saved_message:
+            legacy._update_message_decision_metadata(
+                saved_message,
+                {
+                    "intent_decomp_skipped_reason": intent_decomp_skipped_reason,
+                    "intent_decomp_budget_remaining_ms": round(remaining_budget_ms, 2),
+                    "intent_decomp_budget_required_ms": round(intent_decomp_budget_required_ms, 2),
+                },
+            )
+        legacy._record_decision_trace(
+            conversation,
+            {
+                "stage": "intent_decomposition",
+                "decision": "skipped",
+                "reason": intent_decomp_skipped_reason,
+                "budget_remaining_ms": round(remaining_budget_ms, 2),
+                "budget_required_ms": round(intent_decomp_budget_required_ms, 2),
+            },
+        )
+
+    if allow_intent_decomp:
         intent_decomp_payload = legacy.detect_multi_intent(
             message_text,
             client_slug=client_slug,
@@ -2309,6 +2357,8 @@ CONTROLLER_CONFIDENCE_THRESHOLD = float(
     os.getenv("CONTROLLER_CONFIDENCE_THRESHOLD", "0.3") or 0.3
 )
 WEBHOOK_PIPELINE_BUDGET_DEFAULT_MS = 12000
+WEBHOOK_BOOKING_CRITICAL_PATH_RESERVE_DEFAULT_MS = 4500.0
+WEBHOOK_MULTI_INTENT_MIN_BUDGET_DEFAULT_MS = 2200.0
 
 
 def _get_pipeline_budget_ms() -> int:
@@ -2322,6 +2372,42 @@ def _get_pipeline_budget_ms() -> int:
     if value <= 0:
         return WEBHOOK_PIPELINE_BUDGET_DEFAULT_MS
     return value
+
+
+def _get_positive_float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    if value <= 0:
+        return default
+    return value
+
+
+WEBHOOK_BOOKING_CRITICAL_PATH_RESERVE_MS = _get_positive_float_env(
+    "WEBHOOK_BOOKING_CRITICAL_PATH_RESERVE_MS",
+    WEBHOOK_BOOKING_CRITICAL_PATH_RESERVE_DEFAULT_MS,
+)
+WEBHOOK_MULTI_INTENT_MIN_BUDGET_MS = _get_positive_float_env(
+    "WEBHOOK_MULTI_INTENT_MIN_BUDGET_MS",
+    WEBHOOK_MULTI_INTENT_MIN_BUDGET_DEFAULT_MS,
+)
+
+
+def _remaining_pipeline_budget_ms(timing_context: dict | None) -> float | None:
+    if not isinstance(timing_context, dict):
+        return None
+    deadline = timing_context.get("pipeline_deadline")
+    if deadline is None:
+        return None
+    try:
+        remaining = (float(deadline) - time.monotonic()) * 1000.0
+    except (TypeError, ValueError):
+        return None
+    return max(remaining, 0.0)
 
 
 def _is_env_enabled(value: str | None, default: bool = True) -> bool:
@@ -3822,6 +3908,55 @@ def _extract_tool_result_appointment_id(decision_meta: dict[str, Any] | None) ->
     if not appointment_uuid:
         return None
     return str(appointment_uuid)
+
+
+def _normalize_specialist_tool_args(tool_args: dict[str, Any] | None) -> None:
+    if not isinstance(tool_args, dict):
+        return
+    raw_specialist_id = tool_args.get("specialist_id")
+    if not isinstance(raw_specialist_id, str) or not raw_specialist_id.strip():
+        return
+    if isinstance(tool_args.get("specialist_name"), str) and tool_args.get("specialist_name").strip():
+        return
+    specialist_token = raw_specialist_id.strip()
+    specialist_uuid = _coerce_uuid(specialist_token)
+    if specialist_uuid:
+        tool_args["specialist_id"] = str(specialist_uuid)
+        return
+    # LLM can place master name into specialist_id; preserve semantics by moving it to specialist_name.
+    tool_args["specialist_name"] = specialist_token
+    tool_args.pop("specialist_id", None)
+
+
+def _normalize_booking_start_at_tool_arg(
+    tool_args: dict[str, Any] | None,
+    *,
+    fallback_datetime: str | None,
+    now: datetime,
+) -> bool:
+    if not isinstance(tool_args, dict):
+        return False
+    raw_start_at = tool_args.get("start_at")
+    if not isinstance(raw_start_at, str) or not raw_start_at.strip():
+        return False
+    parsed_start_at = None
+    normalized_start_at = raw_start_at.strip()
+    try:
+        parsed_start_at = datetime.fromisoformat(normalized_start_at.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        parsed_start_at = None
+    if parsed_start_at is None:
+        return False
+    if parsed_start_at.tzinfo is None:
+        parsed_start_at = parsed_start_at.replace(tzinfo=timezone.utc)
+    now_ref = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    # Reject stale absolute datetimes emitted by the planner and rebase to current turn slot.
+    if parsed_start_at >= (now_ref - timedelta(hours=12)):
+        return False
+    if not isinstance(fallback_datetime, str) or not fallback_datetime.strip():
+        return False
+    tool_args["start_at"] = fallback_datetime.strip()
+    return True
 
 
 def _collect_plan_consult_refs(client_slug: str | None) -> tuple[list[str], str | None]:
@@ -8234,7 +8369,47 @@ async def _handle_webhook_payload(
                             and isinstance(merged_policy_slots.get("name"), str)
                             and merged_policy_slots.get("name").strip()
                         ):
-                            policy_tool_args["customer_name"] = merged_policy_slots["name"]
+                            merged_customer_name = merged_policy_slots["name"].strip()
+                            customer_hint = extract_customer_name_hint_llm(
+                                message_text or "",
+                                client_slug=payload.client_slug,
+                                timing_context=timing_context,
+                                specialist_name=merged_customer_name,
+                            )
+                            customer_name_candidate = None
+                            if isinstance(customer_hint, dict):
+                                hinted_name = customer_hint.get("customer_name")
+                                if isinstance(hinted_name, str) and hinted_name.strip():
+                                    customer_name_candidate = hinted_name.strip()
+                                hint_meta = {
+                                    "customer_name_hint_attempted": bool(customer_hint.get("attempted")),
+                                    "customer_name_hint_ok": bool(customer_hint.get("ok")),
+                                    "customer_name_hint_confidence": customer_hint.get("confidence"),
+                                    "customer_name_hint_error": customer_hint.get("error"),
+                                    "customer_name_hint_language": customer_hint.get("language"),
+                                }
+                                if saved_message:
+                                    _update_message_decision_metadata(saved_message, hint_meta)
+                                _record_decision_trace(
+                                    conversation,
+                                    {
+                                        "stage": "customer_name_hint",
+                                        "decision": "ok" if customer_name_candidate else "empty",
+                                        "tool_action": "calendar.book_slot",
+                                        "attempted": bool(customer_hint.get("attempted")),
+                                        "confidence": customer_hint.get("confidence"),
+                                        "error": customer_hint.get("error"),
+                                        "language": customer_hint.get("language"),
+                                    },
+                                )
+                            if customer_name_candidate:
+                                policy_tool_args["customer_name"] = customer_name_candidate
+                            elif (
+                                len(merged_customer_name.split()) <= 2
+                                and len((message_text or "").split()) <= 2
+                            ):
+                                # Safe short-reply fallback (e.g. user replies with only their name).
+                                policy_tool_args["customer_name"] = merged_customer_name
                         policy_collect_slot = None
                     elif (
                         policy_tool_action == "calendar.list_slots"
@@ -9654,6 +9829,151 @@ async def _handle_webhook_payload(
                             if "parking" not in info_sections_hint:
                                 info_sections_hint.append("parking")
                             break
+            specialist_name_hint = None
+            customer_name_hint = None
+            service_query_hint = None
+            service_query_hint_attempted = False
+
+            def _resolve_service_query_hint() -> str | None:
+                nonlocal service_query_hint, service_query_hint_attempted
+                if service_query_hint_attempted:
+                    return service_query_hint
+                service_query_hint_attempted = True
+                service_hint = extract_service_query_hint_llm(
+                    message_text or "",
+                    client_slug=payload.client_slug,
+                    timing_context=timing_context,
+                )
+                if isinstance(service_hint, dict):
+                    candidate = service_hint.get("service_query")
+                    if isinstance(candidate, str) and candidate.strip():
+                        service_query_hint = candidate.strip()
+                    hint_meta = {
+                        "service_query_hint_attempted": bool(service_hint.get("attempted")),
+                        "service_query_hint_ok": bool(service_hint.get("ok")),
+                        "service_query_hint_confidence": service_hint.get("confidence"),
+                        "service_query_hint_error": service_hint.get("error"),
+                        "service_query_hint_language": service_hint.get("language"),
+                    }
+                    if saved_message:
+                        _update_message_decision_metadata(saved_message, hint_meta)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "service_query_hint",
+                            "decision": "ok" if service_query_hint else "empty",
+                            "tool_action": policy_tool_action,
+                            "attempted": bool(service_hint.get("attempted")),
+                            "confidence": service_hint.get("confidence"),
+                            "error": service_hint.get("error"),
+                            "language": service_hint.get("language"),
+                        },
+                    )
+                return service_query_hint
+
+            if policy_tool_action in {"calendar.list_slots", "calendar.book_slot"}:
+                _normalize_specialist_tool_args(policy_tool_args)
+                specialist_missing = not (
+                    isinstance(policy_tool_args.get("specialist_id"), str)
+                    and policy_tool_args.get("specialist_id").strip()
+                ) and not (
+                    isinstance(policy_tool_args.get("specialist_name"), str)
+                    and policy_tool_args.get("specialist_name").strip()
+                )
+                if specialist_missing:
+                    specialist_hint = extract_specialist_hint_llm(
+                        message_text or "",
+                        client_slug=payload.client_slug,
+                        timing_context=timing_context,
+                    )
+                    if isinstance(specialist_hint, dict):
+                        candidate = specialist_hint.get("specialist_name")
+                        if isinstance(candidate, str) and candidate.strip():
+                            specialist_name_hint = candidate.strip()
+                        hint_meta = {
+                            "specialist_hint_attempted": bool(specialist_hint.get("attempted")),
+                            "specialist_hint_ok": bool(specialist_hint.get("ok")),
+                            "specialist_hint_confidence": specialist_hint.get("confidence"),
+                            "specialist_hint_error": specialist_hint.get("error"),
+                            "specialist_hint_language": specialist_hint.get("language"),
+                        }
+                        if saved_message:
+                            _update_message_decision_metadata(saved_message, hint_meta)
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "specialist_hint",
+                                "decision": "ok" if specialist_name_hint else "empty",
+                                "tool_action": policy_tool_action,
+                                "attempted": bool(specialist_hint.get("attempted")),
+                                "confidence": specialist_hint.get("confidence"),
+                                "error": specialist_hint.get("error"),
+                                "language": specialist_hint.get("language"),
+                            },
+                        )
+            if policy_tool_action == "calendar.book_slot":
+                specialist_name_for_customer_hint = None
+                if isinstance(policy_tool_args.get("specialist_name"), str) and policy_tool_args.get(
+                    "specialist_name"
+                ).strip():
+                    specialist_name_for_customer_hint = policy_tool_args.get("specialist_name").strip()
+                elif isinstance(specialist_name_hint, str) and specialist_name_hint.strip():
+                    specialist_name_for_customer_hint = specialist_name_hint.strip()
+                current_customer_name_hint_source = None
+                if isinstance(policy_tool_args.get("customer_name"), str) and policy_tool_args.get(
+                    "customer_name"
+                ).strip():
+                    current_customer_name_hint_source = policy_tool_args.get("customer_name").strip()
+                elif (
+                    isinstance(policy_slot_state_validated.get("name"), str)
+                    and policy_slot_state_validated.get("name").strip()
+                ):
+                    current_customer_name_hint_source = policy_slot_state_validated.get("name").strip()
+                customer_hint_needed = not (
+                    isinstance(current_customer_name_hint_source, str)
+                    and current_customer_name_hint_source.strip()
+                )
+                if (
+                    not customer_hint_needed
+                    and isinstance(specialist_name_for_customer_hint, str)
+                    and specialist_name_for_customer_hint.strip()
+                ):
+                    customer_hint_needed = normalize_for_matching(
+                        current_customer_name_hint_source
+                    ) == normalize_for_matching(specialist_name_for_customer_hint)
+                if customer_hint_needed:
+                    customer_hint = extract_customer_name_hint_llm(
+                        message_text or "",
+                        client_slug=payload.client_slug,
+                        timing_context=timing_context,
+                        specialist_name=specialist_name_for_customer_hint,
+                    )
+                    if isinstance(customer_hint, dict):
+                        candidate = customer_hint.get("customer_name")
+                        if isinstance(candidate, str) and candidate.strip():
+                            customer_name_hint = candidate.strip()
+                        hint_meta = {
+                            "customer_name_hint_attempted": bool(customer_hint.get("attempted")),
+                            "customer_name_hint_ok": bool(customer_hint.get("ok")),
+                            "customer_name_hint_confidence": customer_hint.get("confidence"),
+                            "customer_name_hint_error": customer_hint.get("error"),
+                            "customer_name_hint_language": customer_hint.get("language"),
+                        }
+                        if saved_message:
+                            _update_message_decision_metadata(saved_message, hint_meta)
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "customer_name_hint",
+                                "decision": "ok" if customer_name_hint else "empty",
+                                "tool_action": policy_tool_action,
+                                "attempted": bool(customer_hint.get("attempted")),
+                                "confidence": customer_hint.get("confidence"),
+                                "error": customer_hint.get("error"),
+                                "language": customer_hint.get("language"),
+                            },
+                        )
+
             if policy_tool_action == "calendar.list_slots":
                 merged_slots_for_tool = _merge_booking_plan_slots(
                     booking_state=booking if isinstance(booking, dict) else None,
@@ -9668,15 +9988,22 @@ async def _handle_webhook_payload(
                     )
                 ):
                     policy_tool_args["service_query"] = policy_service_query.strip()
+                turn_datetime_hint = _extract_datetime(
+                    message_text or "",
+                    client_slug=payload.client_slug,
+                    relative_base=now,
+                )
                 has_datetime_signal = bool(
-                    _extract_datetime(
-                        message_text or "",
-                        client_slug=payload.client_slug,
-                        relative_base=now,
-                    )
+                    isinstance(turn_datetime_hint, str) and turn_datetime_hint.strip()
                 )
                 if has_datetime_signal:
                     start_at_value = merged_slots_for_tool.get("datetime")
+                    if (
+                        (not isinstance(start_at_value, str) or not start_at_value.strip())
+                        and isinstance(turn_datetime_hint, str)
+                        and turn_datetime_hint.strip()
+                    ):
+                        start_at_value = turn_datetime_hint.strip()
                     if (
                         isinstance(start_at_value, str)
                         and start_at_value.strip()
@@ -9691,6 +10018,19 @@ async def _handle_webhook_payload(
                     # Drop hallucinated list-slots date/start_at when user did not provide time/date in this turn.
                     policy_tool_args.pop("date", None)
                     policy_tool_args.pop("start_at", None)
+                if (
+                    isinstance(specialist_name_hint, str)
+                    and specialist_name_hint.strip()
+                    and not (
+                        isinstance(policy_tool_args.get("specialist_id"), str)
+                        and policy_tool_args.get("specialist_id").strip()
+                    )
+                    and not (
+                        isinstance(policy_tool_args.get("specialist_name"), str)
+                        and policy_tool_args.get("specialist_name").strip()
+                    )
+                ):
+                    policy_tool_args["specialist_name"] = specialist_name_hint.strip()
             elif policy_tool_action == "calendar.book_slot":
                 merged_slots_for_tool = _merge_booking_plan_slots(
                     booking_state=booking if isinstance(booking, dict) else None,
@@ -9708,6 +10048,106 @@ async def _handle_webhook_payload(
                     and merged_slots_for_tool.get("service").strip()
                 ):
                     policy_tool_args["service_query"] = merged_slots_for_tool["service"].strip()
+                if not (
+                    isinstance(policy_tool_args.get("service_query"), str)
+                    and policy_tool_args.get("service_query").strip()
+                ):
+                    hinted_service_query = _resolve_service_query_hint()
+                    if isinstance(hinted_service_query, str) and hinted_service_query.strip():
+                        policy_tool_args["service_query"] = hinted_service_query.strip()
+                        policy_service_query = hinted_service_query.strip()
+                if (
+                    not (
+                        isinstance(policy_tool_args.get("start_at"), str)
+                        and policy_tool_args.get("start_at").strip()
+                    )
+                    and isinstance(merged_slots_for_tool.get("datetime"), str)
+                    and merged_slots_for_tool.get("datetime").strip()
+                ):
+                    policy_tool_args["start_at"] = merged_slots_for_tool["datetime"].strip()
+                booking_turn_datetime_hint = _extract_datetime(
+                    message_text or "",
+                    client_slug=payload.client_slug,
+                    relative_base=now,
+                )
+                rebase_fallback_datetime = None
+                if (
+                    isinstance(booking_turn_datetime_hint, str)
+                    and booking_turn_datetime_hint.strip()
+                ):
+                    rebase_fallback_datetime = booking_turn_datetime_hint.strip()
+                elif (
+                    isinstance(merged_slots_for_tool.get("datetime"), str)
+                    and merged_slots_for_tool.get("datetime").strip()
+                ):
+                    rebase_fallback_datetime = merged_slots_for_tool.get("datetime").strip()
+                rebased_start_at = _normalize_booking_start_at_tool_arg(
+                    policy_tool_args,
+                    fallback_datetime=rebase_fallback_datetime,
+                    now=now,
+                )
+                if rebased_start_at:
+                    if saved_message:
+                        _update_message_decision_metadata(
+                            saved_message,
+                            {"booking_start_at_rebased": True},
+                        )
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "booking_start_at_rebase",
+                            "decision": "applied",
+                            "tool_action": "calendar.book_slot",
+                        },
+                    )
+                if (
+                    isinstance(specialist_name_hint, str)
+                    and specialist_name_hint.strip()
+                    and not (
+                        isinstance(policy_tool_args.get("specialist_id"), str)
+                        and policy_tool_args.get("specialist_id").strip()
+                    )
+                    and not (
+                        isinstance(policy_tool_args.get("specialist_name"), str)
+                        and policy_tool_args.get("specialist_name").strip()
+                    )
+                ):
+                    policy_tool_args["specialist_name"] = specialist_name_hint.strip()
+                resolved_specialist_name = None
+                if (
+                    isinstance(policy_tool_args.get("specialist_name"), str)
+                    and policy_tool_args.get("specialist_name").strip()
+                ):
+                    resolved_specialist_name = policy_tool_args.get("specialist_name").strip()
+                elif isinstance(specialist_name_hint, str) and specialist_name_hint.strip():
+                    resolved_specialist_name = specialist_name_hint.strip()
+                existing_customer_name = None
+                if (
+                    isinstance(policy_tool_args.get("customer_name"), str)
+                    and policy_tool_args.get("customer_name").strip()
+                ):
+                    existing_customer_name = policy_tool_args.get("customer_name").strip()
+                if (
+                    isinstance(customer_name_hint, str)
+                    and customer_name_hint.strip()
+                    and (
+                        existing_customer_name is None
+                        or (
+                            isinstance(resolved_specialist_name, str)
+                            and resolved_specialist_name.strip()
+                            and normalize_for_matching(existing_customer_name)
+                            == normalize_for_matching(resolved_specialist_name)
+                        )
+                    )
+                ):
+                    policy_tool_args["customer_name"] = customer_name_hint.strip()
+                    existing_customer_name = customer_name_hint.strip()
+                if (
+                    existing_customer_name is None
+                    and isinstance(merged_slots_for_tool.get("name"), str)
+                    and merged_slots_for_tool.get("name").strip()
+                ):
+                    policy_tool_args["customer_name"] = merged_slots_for_tool["name"].strip()
             elif policy_tool_action in TOOL_VERIFIER_REFERENCE_ACTIONS:
                 has_appointment_id = (
                     isinstance(policy_tool_args.get("appointment_id"), str)
@@ -10225,15 +10665,17 @@ async def _handle_webhook_payload(
                 policy_appointment_id = policy_tool_args.get("appointment_id")
                 if isinstance(policy_appointment_id, str) and policy_appointment_id.strip():
                     has_booking_reference = True
-                booking_verification_handoff = (
-                    (
-                        policy_tool_action == "calendar.get_booking"
-                        and (
-                            _is_booking_verification_handoff_intent(policy_intent, policy_tool_action)
-                            or _looks_like_booking_verification_request(message_text)
-                        )
-                        and has_booking_reference
+                booking_verification_lookup_failed = (
+                    policy_tool_action == "calendar.get_booking"
+                    and (
+                        _is_booking_verification_handoff_intent(policy_intent, policy_tool_action)
+                        or _looks_like_booking_verification_request(message_text)
                     )
+                    and has_booking_reference
+                    and tool_decision in {"not_found", "time_mismatch", "provider_unavailable", "contract_invalid"}
+                )
+                booking_verification_handoff = (
+                    booking_verification_lookup_failed
                     or (
                         policy_tool_action == "calendar.reschedule"
                         and tool_decision == "not_found"
@@ -10244,6 +10686,10 @@ async def _handle_webhook_payload(
                             conversation.state == ConversationState.PENDING.value
                             or has_booking_reference
                             or active_handover_exists
+                        )
+                        and not (
+                            policy_tool_action == "calendar.get_booking"
+                            and tool_decision == "ok"
                         )
                     )
                     or (

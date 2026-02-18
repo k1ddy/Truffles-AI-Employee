@@ -138,7 +138,17 @@ RAG_BM25_TIMEOUT_SECONDS = float(os.environ.get("RAG_BM25_TIMEOUT_SECONDS", "0.8
 RAG_HYBRID_VECTOR_WEIGHT = float(os.environ.get("RAG_HYBRID_VECTOR_WEIGHT", "0.6"))
 RAG_HYBRID_BM25_WEIGHT = float(os.environ.get("RAG_HYBRID_BM25_WEIGHT", "0.4"))
 
-CONTROLLER_PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "intent_classifier.md"
+def _resolve_prompts_dir() -> Path:
+    module_path = Path(__file__).resolve()
+    for parent in module_path.parents:
+        candidate = parent / "prompts"
+        if candidate.is_dir():
+            return candidate
+    return module_path.parents[2] / "prompts"
+
+
+PROMPTS_DIR = _resolve_prompts_dir()
+CONTROLLER_PROMPT_PATH = PROMPTS_DIR / "intent_classifier.md"
 CONTROLLER_TIMEOUT_SECONDS = float(os.environ.get("ROUTER_TIMEOUT_SECONDS", "3.0"))
 CONTROLLER_MAX_TOKENS = int(os.environ.get("ROUTER_MAX_TOKENS", "140"))
 CONTROLLER_CONFIDENCE_THRESHOLD = float(os.environ.get("ROUTER_CONFIDENCE_THRESHOLD", "0.30"))
@@ -146,12 +156,12 @@ _DEFAULT_CONTROLLER_MODEL = (
     "gpt-4o-mini" if FAST_MODEL.strip().lower().startswith("gpt-5") else FAST_MODEL
 )
 CONTROLLER_MODEL = os.environ.get("ROUTER_MODEL", _DEFAULT_CONTROLLER_MODEL).strip()
-PLAN_PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "llm_plan.md"
+PLAN_PROMPT_PATH = PROMPTS_DIR / "llm_plan.md"
 PLAN_TIMEOUT_SECONDS = float(os.environ.get("LLM_PLAN_TIMEOUT_SECONDS", "3.0"))
 PLAN_MAX_TOKENS = int(os.environ.get("LLM_PLAN_MAX_TOKENS", "220"))
 PLAN_MODEL = os.environ.get("LLM_PLAN_MODEL", CONTROLLER_MODEL).strip()
 PLAN_CONFIDENCE_THRESHOLD = float(os.environ.get("LLM_PLAN_CONFIDENCE_THRESHOLD", "0.3"))
-POLICY_CORE_PROMPT_PATH = Path(__file__).resolve().parents[3] / "prompts" / "llm_policy_core.md"
+POLICY_CORE_PROMPT_PATH = PROMPTS_DIR / "llm_policy_core.md"
 POLICY_CORE_TIMEOUT_SECONDS = float(
     os.environ.get("LLM_POLICY_CORE_TIMEOUT_SECONDS", "5.0")
 )
@@ -202,6 +212,78 @@ POLICY_CORE_MICRO_MIN_REMAINING_MS = max(
     float(os.environ.get("LLM_POLICY_CORE_MICRO_MIN_REMAINING_MS", "350")),
     0.0,
 )
+SPECIALIST_HINT_TIMEOUT_SECONDS = max(
+    float(os.environ.get("LLM_SPECIALIST_HINT_TIMEOUT_SECONDS", "1.4")),
+    0.2,
+)
+SPECIALIST_HINT_MIN_TIMEOUT_SECONDS = max(
+    float(os.environ.get("LLM_SPECIALIST_HINT_MIN_TIMEOUT_SECONDS", "0.35")),
+    0.1,
+)
+SPECIALIST_HINT_BUDGET_GUARD_MS = max(
+    float(os.environ.get("LLM_SPECIALIST_HINT_BUDGET_GUARD_MS", "120")),
+    0.0,
+)
+SPECIALIST_HINT_MAX_TOKENS = max(
+    int(os.environ.get("LLM_SPECIALIST_HINT_MAX_TOKENS", "90")),
+    32,
+)
+SPECIALIST_HINT_CONFIDENCE_THRESHOLD = min(
+    max(float(os.environ.get("LLM_SPECIALIST_HINT_CONFIDENCE_THRESHOLD", "0.55")), 0.0),
+    1.0,
+)
+SPECIALIST_HINT_MODEL = os.environ.get(
+    "LLM_SPECIALIST_HINT_MODEL",
+    POLICY_CORE_MODEL,
+).strip()
+CUSTOMER_NAME_HINT_TIMEOUT_SECONDS = max(
+    float(os.environ.get("LLM_CUSTOMER_NAME_HINT_TIMEOUT_SECONDS", "1.4")),
+    0.2,
+)
+CUSTOMER_NAME_HINT_MIN_TIMEOUT_SECONDS = max(
+    float(os.environ.get("LLM_CUSTOMER_NAME_HINT_MIN_TIMEOUT_SECONDS", "0.35")),
+    0.1,
+)
+CUSTOMER_NAME_HINT_BUDGET_GUARD_MS = max(
+    float(os.environ.get("LLM_CUSTOMER_NAME_HINT_BUDGET_GUARD_MS", "120")),
+    0.0,
+)
+CUSTOMER_NAME_HINT_MAX_TOKENS = max(
+    int(os.environ.get("LLM_CUSTOMER_NAME_HINT_MAX_TOKENS", "90")),
+    32,
+)
+CUSTOMER_NAME_HINT_CONFIDENCE_THRESHOLD = min(
+    max(float(os.environ.get("LLM_CUSTOMER_NAME_HINT_CONFIDENCE_THRESHOLD", "0.55")), 0.0),
+    1.0,
+)
+CUSTOMER_NAME_HINT_MODEL = os.environ.get(
+    "LLM_CUSTOMER_NAME_HINT_MODEL",
+    POLICY_CORE_MODEL,
+).strip()
+SERVICE_QUERY_HINT_TIMEOUT_SECONDS = max(
+    float(os.environ.get("LLM_SERVICE_QUERY_HINT_TIMEOUT_SECONDS", "1.4")),
+    0.2,
+)
+SERVICE_QUERY_HINT_MIN_TIMEOUT_SECONDS = max(
+    float(os.environ.get("LLM_SERVICE_QUERY_HINT_MIN_TIMEOUT_SECONDS", "0.35")),
+    0.1,
+)
+SERVICE_QUERY_HINT_BUDGET_GUARD_MS = max(
+    float(os.environ.get("LLM_SERVICE_QUERY_HINT_BUDGET_GUARD_MS", "120")),
+    0.0,
+)
+SERVICE_QUERY_HINT_MAX_TOKENS = max(
+    int(os.environ.get("LLM_SERVICE_QUERY_HINT_MAX_TOKENS", "90")),
+    32,
+)
+SERVICE_QUERY_HINT_CONFIDENCE_THRESHOLD = min(
+    max(float(os.environ.get("LLM_SERVICE_QUERY_HINT_CONFIDENCE_THRESHOLD", "0.55")), 0.0),
+    1.0,
+)
+SERVICE_QUERY_HINT_MODEL = os.environ.get(
+    "LLM_SERVICE_QUERY_HINT_MODEL",
+    POLICY_CORE_MODEL,
+).strip()
 ANSWER_INTERPRETER_TIMEOUT_SECONDS = float(
     os.environ.get("ANSWER_INTERPRETER_TIMEOUT_SECONDS", "2.5")
 )
@@ -301,10 +383,595 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
         "type": "json_schema",
         "json_schema": {
             "name": "llm_policy_core_output",
+            # tool_args/slots are intentionally open-ended and validated later by contract validators.
+            # strict=False keeps schema guidance without forcing hard-fail on dynamic nested objects.
+            "strict": False,
+            "schema": schema,
+        },
+    }
+
+
+def _resolve_specialist_hint_timeout_seconds(timing_context: dict | None) -> float:
+    remaining_ms = _remaining_pipeline_budget_ms(timing_context)
+    if remaining_ms is None:
+        return SPECIALIST_HINT_TIMEOUT_SECONDS
+    available_ms = max(0.0, remaining_ms - SPECIALIST_HINT_BUDGET_GUARD_MS)
+    if available_ms <= 0:
+        return 0.0
+    return min(SPECIALIST_HINT_TIMEOUT_SECONDS, available_ms / 1000.0)
+
+
+def _build_specialist_hint_response_format() -> dict[str, Any]:
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["specialist_name", "confidence", "reason", "language"],
+        "properties": {
+            "specialist_name": {
+                "anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]
+            },
+            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "reason": {"type": "string"},
+            "language": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        },
+    }
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "specialist_hint_output",
             "strict": True,
             "schema": schema,
         },
     }
+
+
+def _resolve_customer_name_hint_timeout_seconds(timing_context: dict | None) -> float:
+    remaining_ms = _remaining_pipeline_budget_ms(timing_context)
+    if remaining_ms is None:
+        return CUSTOMER_NAME_HINT_TIMEOUT_SECONDS
+    available_ms = max(0.0, remaining_ms - CUSTOMER_NAME_HINT_BUDGET_GUARD_MS)
+    if available_ms <= 0:
+        return 0.0
+    return min(CUSTOMER_NAME_HINT_TIMEOUT_SECONDS, available_ms / 1000.0)
+
+
+def _build_customer_name_hint_response_format() -> dict[str, Any]:
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["customer_name", "confidence", "reason", "language"],
+        "properties": {
+            "customer_name": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "reason": {"type": "string"},
+            "language": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        },
+    }
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "customer_name_hint_output",
+            "strict": True,
+            "schema": schema,
+        },
+    }
+
+
+def _resolve_service_query_hint_timeout_seconds(timing_context: dict | None) -> float:
+    remaining_ms = _remaining_pipeline_budget_ms(timing_context)
+    if remaining_ms is None:
+        return SERVICE_QUERY_HINT_TIMEOUT_SECONDS
+    available_ms = max(0.0, remaining_ms - SERVICE_QUERY_HINT_BUDGET_GUARD_MS)
+    if available_ms <= 0:
+        return 0.0
+    return min(SERVICE_QUERY_HINT_TIMEOUT_SECONDS, available_ms / 1000.0)
+
+
+def _build_service_query_hint_response_format() -> dict[str, Any]:
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["service_query", "confidence", "reason", "language"],
+        "properties": {
+            "service_query": {
+                "anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]
+            },
+            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "reason": {"type": "string"},
+            "language": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        },
+    }
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "service_query_hint_output",
+            "strict": True,
+            "schema": schema,
+        },
+    }
+
+
+def extract_specialist_hint_llm(
+    message: str,
+    *,
+    client_slug: str | None = None,
+    timing_context: dict | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "ok": False,
+        "specialist_name": None,
+        "confidence": 0.0,
+        "reason": "",
+        "language": None,
+        "error": None,
+        "raw": None,
+        "attempted": False,
+        "elapsed_ms": 0.0,
+    }
+    if not isinstance(message, str) or not message.strip():
+        result["error"] = "empty_message"
+        return result
+
+    timeout_seconds = _resolve_specialist_hint_timeout_seconds(timing_context)
+    if timeout_seconds < SPECIALIST_HINT_MIN_TIMEOUT_SECONDS:
+        result["error"] = "deadline_exceeded"
+        return result
+
+    prompt = (
+        "Extract specialist (master) name from user text in any language (kk/ru/en/mixed). "
+        "Return specialist_name only if explicitly requested. If uncertain, return null. "
+        "Never infer a name from service words or time/date."
+    )
+    messages = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": message},
+    ]
+
+    try:
+        llm = get_llm_provider()
+    except RuntimeError as exc:
+        if "OPENAI_API_KEY missing" in str(exc):
+            result["error"] = "no_api_key"
+            return result
+        result["error"] = _classify_llm_error(exc)
+        return result
+
+    result["attempted"] = True
+    response_format = _build_specialist_hint_response_format()
+    llm_start = time.monotonic()
+    error = None
+    response = None
+    structured_output_fallback_used = False
+    try:
+        response = llm.generate(
+            messages=messages,
+            max_tokens=SPECIALIST_HINT_MAX_TOKENS,
+            model=SPECIALIST_HINT_MODEL,
+            timeout_seconds=timeout_seconds,
+            temperature=0.0,
+            response_format=response_format,
+        )
+    except httpx.TimeoutException:
+        error = "timeout"
+    except Exception as exc:
+        classified_error = _classify_llm_error(exc)
+        if (
+            classified_error == "invalid_request"
+            and _policy_core_uses_response_format(exc)
+        ):
+            try:
+                response = llm.generate(
+                    messages=messages,
+                    max_tokens=SPECIALIST_HINT_MAX_TOKENS,
+                    model=SPECIALIST_HINT_MODEL,
+                    timeout_seconds=timeout_seconds,
+                    temperature=0.0,
+                )
+                structured_output_fallback_used = True
+            except httpx.TimeoutException:
+                error = "timeout"
+            except Exception as plain_exc:
+                error = _classify_llm_error(plain_exc)
+        else:
+            error = classified_error
+
+    elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
+    result["elapsed_ms"] = elapsed_ms
+    _log_timing(
+        "specialist_hint_llm_ms",
+        elapsed_ms,
+        timing_context=timing_context,
+        extra={
+            "model_name": SPECIALIST_HINT_MODEL,
+            "model_tier": "fast",
+            "timeout": error == "timeout",
+            "timeout_seconds": timeout_seconds,
+            "max_tokens": SPECIALIST_HINT_MAX_TOKENS,
+            "structured_output_fallback_used": structured_output_fallback_used,
+        },
+    )
+    record_llm_time(client_slug, "specialist_hint_llm_ms", elapsed_ms)
+
+    if error:
+        result["error"] = error
+        return result
+
+    content = (response.content or "").strip() if response else ""
+    result["raw"] = content
+    if not content:
+        result["error"] = "empty_response"
+        return result
+
+    payload = None
+    try:
+        payload = json.loads(content)
+    except Exception:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            try:
+                payload = json.loads(match.group(0))
+            except Exception:
+                payload = None
+    if not isinstance(payload, dict):
+        result["error"] = "invalid_json"
+        return result
+
+    raw_name = payload.get("specialist_name")
+    specialist_name = None
+    if isinstance(raw_name, str):
+        candidate = re.sub(r"\s+", " ", raw_name).strip(" \t\n\r,.;:!?\"'()[]{}")
+        if candidate:
+            specialist_name = candidate
+    raw_confidence = payload.get("confidence")
+    confidence = 0.0
+    if isinstance(raw_confidence, (int, float)):
+        confidence = max(0.0, min(float(raw_confidence), 1.0))
+    reason = payload.get("reason")
+    if not isinstance(reason, str):
+        reason = ""
+    language = payload.get("language")
+    if not isinstance(language, str):
+        language = None
+    elif language.strip():
+        language = language.strip().lower()
+    else:
+        language = None
+
+    result["confidence"] = confidence
+    result["reason"] = reason
+    result["language"] = language
+    if specialist_name and confidence >= SPECIALIST_HINT_CONFIDENCE_THRESHOLD:
+        result["ok"] = True
+        result["specialist_name"] = specialist_name
+        return result
+
+    result["error"] = "low_confidence_or_empty"
+    return result
+
+
+def extract_customer_name_hint_llm(
+    message: str,
+    *,
+    client_slug: str | None = None,
+    timing_context: dict | None = None,
+    specialist_name: str | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "ok": False,
+        "customer_name": None,
+        "confidence": 0.0,
+        "reason": "",
+        "language": None,
+        "error": None,
+        "raw": None,
+        "attempted": False,
+        "elapsed_ms": 0.0,
+    }
+    if not isinstance(message, str) or not message.strip():
+        result["error"] = "empty_message"
+        return result
+
+    timeout_seconds = _resolve_customer_name_hint_timeout_seconds(timing_context)
+    if timeout_seconds < CUSTOMER_NAME_HINT_MIN_TIMEOUT_SECONDS:
+        result["error"] = "deadline_exceeded"
+        return result
+
+    specialist_clause = ""
+    if isinstance(specialist_name, str) and specialist_name.strip():
+        specialist_clause = f" Known specialist name: {specialist_name.strip()}."
+    prompt = (
+        "Extract customer's own name from user text in any language (kk/ru/en/mixed). "
+        "Return customer_name only if user explicitly provides own name "
+        "(e.g. 'меня зовут', 'имя', 'my name is'). "
+        "Do not return specialist/master name or inferred names."
+        f"{specialist_clause}"
+    )
+    messages = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": message},
+    ]
+
+    try:
+        llm = get_llm_provider()
+    except RuntimeError as exc:
+        if "OPENAI_API_KEY missing" in str(exc):
+            result["error"] = "no_api_key"
+            return result
+        result["error"] = _classify_llm_error(exc)
+        return result
+
+    result["attempted"] = True
+    response_format = _build_customer_name_hint_response_format()
+    llm_start = time.monotonic()
+    error = None
+    response = None
+    structured_output_fallback_used = False
+    try:
+        response = llm.generate(
+            messages=messages,
+            max_tokens=CUSTOMER_NAME_HINT_MAX_TOKENS,
+            model=CUSTOMER_NAME_HINT_MODEL,
+            timeout_seconds=timeout_seconds,
+            temperature=0.0,
+            response_format=response_format,
+        )
+    except httpx.TimeoutException:
+        error = "timeout"
+    except Exception as exc:
+        classified_error = _classify_llm_error(exc)
+        if classified_error == "invalid_request" and _policy_core_uses_response_format(exc):
+            try:
+                response = llm.generate(
+                    messages=messages,
+                    max_tokens=CUSTOMER_NAME_HINT_MAX_TOKENS,
+                    model=CUSTOMER_NAME_HINT_MODEL,
+                    timeout_seconds=timeout_seconds,
+                    temperature=0.0,
+                )
+                structured_output_fallback_used = True
+            except httpx.TimeoutException:
+                error = "timeout"
+            except Exception as plain_exc:
+                error = _classify_llm_error(plain_exc)
+        else:
+            error = classified_error
+
+    elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
+    result["elapsed_ms"] = elapsed_ms
+    _log_timing(
+        "customer_name_hint_llm_ms",
+        elapsed_ms,
+        timing_context=timing_context,
+        extra={
+            "model_name": CUSTOMER_NAME_HINT_MODEL,
+            "model_tier": "fast",
+            "timeout": error == "timeout",
+            "timeout_seconds": timeout_seconds,
+            "max_tokens": CUSTOMER_NAME_HINT_MAX_TOKENS,
+            "structured_output_fallback_used": structured_output_fallback_used,
+        },
+    )
+    record_llm_time(client_slug, "customer_name_hint_llm_ms", elapsed_ms)
+
+    if error:
+        result["error"] = error
+        return result
+
+    content = (response.content or "").strip() if response else ""
+    result["raw"] = content
+    if not content:
+        result["error"] = "empty_response"
+        return result
+
+    payload = None
+    try:
+        payload = json.loads(content)
+    except Exception:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            try:
+                payload = json.loads(match.group(0))
+            except Exception:
+                payload = None
+    if not isinstance(payload, dict):
+        result["error"] = "invalid_json"
+        return result
+
+    raw_name = payload.get("customer_name")
+    customer_name = None
+    if isinstance(raw_name, str):
+        candidate = re.sub(r"\s+", " ", raw_name).strip(" \t\n\r,.;:!?\"'()[]{}")
+        if candidate:
+            customer_name = candidate
+    raw_confidence = payload.get("confidence")
+    confidence = 0.0
+    if isinstance(raw_confidence, (int, float)):
+        confidence = max(0.0, min(float(raw_confidence), 1.0))
+    reason = payload.get("reason")
+    if not isinstance(reason, str):
+        reason = ""
+    language = payload.get("language")
+    if not isinstance(language, str):
+        language = None
+    elif language.strip():
+        language = language.strip().lower()
+    else:
+        language = None
+
+    result["confidence"] = confidence
+    result["reason"] = reason
+    result["language"] = language
+    if isinstance(customer_name, str) and customer_name.strip():
+        if isinstance(specialist_name, str) and specialist_name.strip():
+            if normalize_for_matching(customer_name) == normalize_for_matching(specialist_name):
+                result["error"] = "matches_specialist"
+                return result
+    if customer_name and confidence >= CUSTOMER_NAME_HINT_CONFIDENCE_THRESHOLD:
+        result["ok"] = True
+        result["customer_name"] = customer_name
+        return result
+
+    result["error"] = "low_confidence_or_empty"
+    return result
+
+
+def extract_service_query_hint_llm(
+    message: str,
+    *,
+    client_slug: str | None = None,
+    timing_context: dict | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "ok": False,
+        "service_query": None,
+        "confidence": 0.0,
+        "reason": "",
+        "language": None,
+        "error": None,
+        "raw": None,
+        "attempted": False,
+        "elapsed_ms": 0.0,
+    }
+    if not isinstance(message, str) or not message.strip():
+        result["error"] = "empty_message"
+        return result
+
+    timeout_seconds = _resolve_service_query_hint_timeout_seconds(timing_context)
+    if timeout_seconds < SERVICE_QUERY_HINT_MIN_TIMEOUT_SECONDS:
+        result["error"] = "deadline_exceeded"
+        return result
+
+    prompt = (
+        "Extract service/procedure name from user text in any language (kk/ru/en/mixed). "
+        "Return service_query only if service is explicitly present in user text. "
+        "Keep exact user wording, 1-6 words. If uncertain, return null. "
+        "Do not infer service from specialist names, date, time, or generic booking verbs."
+    )
+    messages = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": message},
+    ]
+
+    try:
+        llm = get_llm_provider()
+    except RuntimeError as exc:
+        if "OPENAI_API_KEY missing" in str(exc):
+            result["error"] = "no_api_key"
+            return result
+        result["error"] = _classify_llm_error(exc)
+        return result
+
+    result["attempted"] = True
+    response_format = _build_service_query_hint_response_format()
+    llm_start = time.monotonic()
+    error = None
+    response = None
+    structured_output_fallback_used = False
+    try:
+        response = llm.generate(
+            messages=messages,
+            max_tokens=SERVICE_QUERY_HINT_MAX_TOKENS,
+            model=SERVICE_QUERY_HINT_MODEL,
+            timeout_seconds=timeout_seconds,
+            temperature=0.0,
+            response_format=response_format,
+        )
+    except httpx.TimeoutException:
+        error = "timeout"
+    except Exception as exc:
+        classified_error = _classify_llm_error(exc)
+        if (
+            classified_error == "invalid_request"
+            and _policy_core_uses_response_format(exc)
+        ):
+            try:
+                response = llm.generate(
+                    messages=messages,
+                    max_tokens=SERVICE_QUERY_HINT_MAX_TOKENS,
+                    model=SERVICE_QUERY_HINT_MODEL,
+                    timeout_seconds=timeout_seconds,
+                    temperature=0.0,
+                )
+                structured_output_fallback_used = True
+            except httpx.TimeoutException:
+                error = "timeout"
+            except Exception as plain_exc:
+                error = _classify_llm_error(plain_exc)
+        else:
+            error = classified_error
+
+    elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
+    result["elapsed_ms"] = elapsed_ms
+    _log_timing(
+        "service_query_hint_llm_ms",
+        elapsed_ms,
+        timing_context=timing_context,
+        extra={
+            "model_name": SERVICE_QUERY_HINT_MODEL,
+            "model_tier": "fast",
+            "timeout": error == "timeout",
+            "timeout_seconds": timeout_seconds,
+            "max_tokens": SERVICE_QUERY_HINT_MAX_TOKENS,
+            "structured_output_fallback_used": structured_output_fallback_used,
+        },
+    )
+    record_llm_time(client_slug, "service_query_hint_llm_ms", elapsed_ms)
+
+    if error:
+        result["error"] = error
+        return result
+
+    content = (response.content or "").strip() if response else ""
+    result["raw"] = content
+    if not content:
+        result["error"] = "empty_response"
+        return result
+
+    payload = None
+    try:
+        payload = json.loads(content)
+    except Exception:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            try:
+                payload = json.loads(match.group(0))
+            except Exception:
+                payload = None
+    if not isinstance(payload, dict):
+        result["error"] = "invalid_json"
+        return result
+
+    raw_service = payload.get("service_query")
+    service_query = None
+    if isinstance(raw_service, str):
+        candidate = _clean_controller_service_query(raw_service)
+        if isinstance(candidate, str) and candidate.strip():
+            service_query = candidate.strip()
+    raw_confidence = payload.get("confidence")
+    confidence = 0.0
+    if isinstance(raw_confidence, (int, float)):
+        confidence = max(0.0, min(float(raw_confidence), 1.0))
+    reason = payload.get("reason")
+    if not isinstance(reason, str):
+        reason = ""
+    language = payload.get("language")
+    if not isinstance(language, str):
+        language = None
+    elif language.strip():
+        language = language.strip().lower()
+    else:
+        language = None
+
+    result["confidence"] = confidence
+    result["reason"] = reason
+    result["language"] = language
+    if service_query and confidence >= SERVICE_QUERY_HINT_CONFIDENCE_THRESHOLD:
+        result["ok"] = True
+        result["service_query"] = service_query
+        return result
+
+    result["error"] = "low_confidence_or_empty"
+    return result
 
 
 def _normalize_policy_core_memory_summary(summary: str | None) -> str | None:

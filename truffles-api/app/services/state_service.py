@@ -8,6 +8,11 @@ from sqlalchemy.orm import Session
 from app.logging_config import get_logger
 from app.models import Conversation, Handover, Message, User
 from app.services.escalation_service import get_or_create_topic, resolve_telegram_routing
+from app.services.handover_context_service import (
+    build_handover_context_summary,
+    build_handover_messages,
+    get_recent_conversation_messages,
+)
 from app.services.result import Result
 from app.services.state_machine import ConversationState, is_transition_allowed
 from app.services.telegram_service import TelegramService
@@ -607,13 +612,16 @@ def _reopen_handover(
     channel_ref: str | None,
     trigger_message_id: uuid.UUID | None = None,
     meta: dict | None = None,
+    context_summary: str | None = None,
+    messages: list[dict] | None = None,
 ) -> None:
     handover.status = "pending"
     handover.trigger_type = trigger_type
     handover.trigger_value = trigger_value
     handover.user_message = user_message
     handover.created_at = now
-    handover.context_summary = None
+    handover.context_summary = context_summary
+    handover.messages = list(messages or [])
     handover.notified_at = None
     handover.first_response_at = None
     handover.resolved_at = None
@@ -660,6 +668,12 @@ def escalate_to_pending(
             topic_id = _build_simulated_topic_id(conversation, user)
             trigger_message = _get_latest_user_message(db, conversation.id)
             recent_messages = _get_recent_user_messages(db, conversation.id)
+            recent_conversation_messages = get_recent_conversation_messages(db, conversation.id)
+            handover_messages = build_handover_messages(recent_conversation_messages)
+            handover_context_summary = build_handover_context_summary(
+                handover_messages,
+                fallback=user_message,
+            )
             handover_meta = _build_handover_meta(
                 conversation,
                 trigger_message,
@@ -680,6 +694,8 @@ def escalate_to_pending(
                     channel_ref=remote_jid,
                     trigger_message_id=trigger_message.id if trigger_message else None,
                     meta=handover_meta,
+                    context_summary=handover_context_summary,
+                    messages=handover_messages,
                 )
             else:
                 handover = Handover(
@@ -693,6 +709,8 @@ def escalate_to_pending(
                     channel="telegram",
                     channel_ref=remote_jid,
                     trigger_message_id=trigger_message.id if trigger_message else None,
+                    context_summary=handover_context_summary,
+                    messages=handover_messages,
                     meta=handover_meta,
                 )
                 db.add(handover)
@@ -736,6 +754,12 @@ def escalate_to_pending(
         remote_jid = user.remote_jid if user else None
         trigger_message = _get_latest_user_message(db, conversation.id)
         recent_messages = _get_recent_user_messages(db, conversation.id)
+        recent_conversation_messages = get_recent_conversation_messages(db, conversation.id)
+        handover_messages = build_handover_messages(recent_conversation_messages)
+        handover_context_summary = build_handover_context_summary(
+            handover_messages,
+            fallback=user_message,
+        )
         handover_meta = _build_handover_meta(
             conversation,
             trigger_message,
@@ -761,6 +785,8 @@ def escalate_to_pending(
                 channel_ref=remote_jid,
                 trigger_message_id=trigger_message.id if trigger_message else None,
                 meta=handover_meta,
+                context_summary=handover_context_summary,
+                messages=handover_messages,
             )
         else:
             handover = Handover(
@@ -774,6 +800,8 @@ def escalate_to_pending(
                 channel="telegram",
                 channel_ref=remote_jid,
                 trigger_message_id=trigger_message.id if trigger_message else None,
+                context_summary=handover_context_summary,
+                messages=handover_messages,
                 meta=handover_meta,
             )
             db.add(handover)
