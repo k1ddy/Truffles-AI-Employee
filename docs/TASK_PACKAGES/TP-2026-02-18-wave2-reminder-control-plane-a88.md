@@ -70,7 +70,7 @@
   - reminder jobs by status/error/age,
   - outbox linkage for retried jobs
 - UI evidence (ops panel with reminder diagnostics + retry flow)
-- `docs/REPORTS/<date>-wave2-reminder-control-plane-a88.md`
+- `docs/REPORTS/2026-02-18-wave2-reminder-control-plane-a88.md`
 - `STATE.md` FACT/GAP update
 
 ## Rollback

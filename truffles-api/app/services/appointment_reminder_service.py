@@ -187,6 +187,7 @@ def process_reminder_jobs(db: Session) -> dict[str, Any]:
     )
     results = {"total": len(jobs), "sent": 0, "failed": 0}
     for job in jobs:
+        job.attempt = int(getattr(job, "attempt", 0) or 0) + 1
         appointment = (
             db.query(Appointment)
             .filter(Appointment.id == job.appointment_id)

@@ -1,8 +1,12 @@
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
 
 from app.routers import console as console_router
+from app.schemas.console import ConsoleReminderRetryRequest
 from app.services.console_errors import ConsoleAPIError
 
 
@@ -57,3 +61,130 @@ def test_summarize_outbox_payload_fallback():
     assert summary["message_preview"] == "Fallback message"
     assert summary["remote_jid"] == "77000000000@s.whatsapp.net"
     assert summary["channel"] == "whatsapp"
+
+
+def test_parse_reminder_status_param_default_all():
+    assert console_router._parse_reminder_status_param(None) is None
+    assert console_router._parse_reminder_status_param("") is None
+    assert console_router._parse_reminder_status_param("all") is None
+
+
+def test_parse_reminder_status_param_invalid():
+    with pytest.raises(ConsoleAPIError):
+        console_router._parse_reminder_status_param("oops")
+
+
+def test_parse_reminder_retry_status_param():
+    assert console_router._parse_reminder_retry_status_param("failed") == ["FAILED"]
+    assert console_router._parse_reminder_retry_status_param("pending") == ["PENDING"]
+    assert console_router._parse_reminder_retry_status_param("all") == ["PENDING", "FAILED"]
+
+    with pytest.raises(ConsoleAPIError):
+        console_router._parse_reminder_retry_status_param("sent")
+
+
+@pytest.mark.asyncio
+async def test_retry_reminders_requires_confirm_for_bulk(monkeypatch):
+    request = SimpleNamespace(query_params={})
+    context = SimpleNamespace(
+        client=SimpleNamespace(id=uuid4()),
+        effective_branch_id=None,
+        branch_restricted=False,
+        branches=[],
+        agent=SimpleNamespace(id=uuid4(), role="platform_admin"),
+        role="platform_admin",
+    )
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "_require_ops_access", lambda _context, action="read": None)
+
+    now = datetime.now(timezone.utc)
+    row_a = SimpleNamespace(
+        id=uuid4(),
+        status="FAILED",
+        next_attempt_at=now,
+        last_error="outbox_duplicate",
+        updated_at=now,
+        run_at=now,
+    )
+    row_b = SimpleNamespace(
+        id=uuid4(),
+        status="FAILED",
+        next_attempt_at=now,
+        last_error="outbox_duplicate",
+        updated_at=now,
+        run_at=now,
+    )
+
+    db = Mock()
+    query = Mock()
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.limit.return_value = query
+    query.all.return_value = [row_a, row_b]
+    db.query.return_value = query
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.retry_reminders(
+            body=ConsoleReminderRetryRequest(limit=10, status="failed", confirm=False),
+            request=request,
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.code == "CONFIRMATION_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_retry_reminders_sets_pending_and_commits(monkeypatch):
+    request = SimpleNamespace(query_params={})
+    context = SimpleNamespace(
+        client=SimpleNamespace(id=uuid4()),
+        effective_branch_id=None,
+        branch_restricted=False,
+        branches=[],
+        agent=SimpleNamespace(id=uuid4(), role="platform_admin"),
+        role="platform_admin",
+    )
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "_require_ops_access", lambda _context, action="read": None)
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+
+    now = datetime.now(timezone.utc)
+    row_a = SimpleNamespace(
+        id=uuid4(),
+        status="FAILED",
+        next_attempt_at=now,
+        last_error="remote_jid_missing",
+        updated_at=now,
+        run_at=now,
+    )
+    row_b = SimpleNamespace(
+        id=uuid4(),
+        status="PENDING",
+        next_attempt_at=now,
+        last_error=None,
+        updated_at=now,
+        run_at=now,
+    )
+
+    db = Mock()
+    query = Mock()
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.limit.return_value = query
+    query.all.return_value = [row_a, row_b]
+    db.query.return_value = query
+
+    response = await console_router.retry_reminders(
+        body=ConsoleReminderRetryRequest(limit=10, status="all", confirm=True),
+        request=request,
+        db=db,
+    )
+
+    assert response.success is True
+    assert response.retried == 2
+    assert row_a.status == "PENDING"
+    assert row_b.status == "PENDING"
+    assert row_a.last_error is None
+    assert row_a.next_attempt_at is None
+    db.commit.assert_called_once()

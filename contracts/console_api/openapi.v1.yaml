@@ -945,6 +945,84 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /ops/reminders:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    get:
+      operationId: listReminders
+      tags: [ops]
+      summary: Reminder jobs queue diagnostics
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, sent, failed, all]
+          description: "Filter by reminder status (default: all)"
+        - name: template
+          in: query
+          schema:
+            type: string
+          description: Optional template filter
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: ISO timestamp cursor for pagination
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        "200":
+          description: Reminder jobs list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReminderListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /ops/reminders/retry:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+    post:
+      operationId: retryReminders
+      tags: [ops]
+      summary: Retry reminder jobs in failed/pending state
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReminderRetryRequest"
+      responses:
+        "200":
+          description: Retry result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReminderRetryResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ConfirmationRequired"
+
   /ops/jobs/catalog:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
@@ -6505,6 +6583,159 @@ components:
         retried:
           type: integer
         skipped:
+          type: integer
+
+    ReminderCounts:
+      type: object
+      properties:
+        pending:
+          type: integer
+        sent:
+          type: integer
+        failed:
+          type: integer
+        due_now:
+          type: integer
+        overdue_15m:
+          type: integer
+
+    ReminderErrorBucket:
+      type: object
+      required: [reason, count]
+      properties:
+        reason:
+          type: string
+        count:
+          type: integer
+
+    ReminderItem:
+      type: object
+      required:
+        [
+          id,
+          appointment_id,
+          branch_id,
+          channel,
+          template,
+          run_at,
+          status,
+          attempt,
+          max_attempts,
+          dedupe_key,
+          created_at,
+          updated_at,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        appointment_id:
+          type: string
+          format: uuid
+        branch_id:
+          type: string
+          format: uuid
+        channel:
+          type: string
+        template:
+          type: string
+        run_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [pending, sent, failed]
+        attempt:
+          type: integer
+        max_attempts:
+          type: integer
+        next_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_error:
+          type: string
+          nullable: true
+        dedupe_key:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        outbox_id:
+          type: string
+          format: uuid
+          nullable: true
+        outbox_status:
+          type: string
+          enum: [pending, processing, failed]
+          nullable: true
+        outbox_attempts:
+          type: integer
+          nullable: true
+        outbox_last_error:
+          type: string
+          nullable: true
+        outbox_updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ReminderListResponse:
+      type: object
+      required: [items, has_more, counts]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReminderItem"
+        cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
+        counts:
+          $ref: "#/components/schemas/ReminderCounts"
+        error_buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReminderErrorBucket"
+
+    ReminderRetryRequest:
+      type: object
+      properties:
+        ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          nullable: true
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+        status:
+          type: string
+          enum: [failed, pending, all]
+          default: failed
+        confirm:
+          type: boolean
+          default: false
+
+    ReminderRetryResponse:
+      type: object
+      required: [success, retried, skipped, matched]
+      properties:
+        success:
+          type: boolean
+        retried:
+          type: integer
+        skipped:
+          type: integer
+        matched:
           type: integer
 
     OpsJobDefinition:
