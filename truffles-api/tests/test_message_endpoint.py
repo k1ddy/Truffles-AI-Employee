@@ -528,7 +528,17 @@ def test_policy_gate_escalates_without_llm():
         telegram_topic_id=None,
         escalated_at=None,
         branch_id=None,
-        context={},
+        context={
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "datetime": "2026-02-18 10:00",
+                "name": "Лена",
+                "last_question": "name",
+            },
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_NAME,
+            "expected_reply_reason": "booking_prompt",
+        },
     )
     user = SimpleNamespace(id="user-123", context={}, user_metadata={})
 
@@ -1682,7 +1692,17 @@ def test_consult_pack_writes_decision_meta():
         telegram_topic_id=None,
         escalated_at=None,
         branch_id=None,
-        context={},
+        context={
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "datetime": "2026-02-18 10:00",
+                "name": "Лена",
+                "last_question": "name",
+            },
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_NAME,
+            "expected_reply_reason": "booking_prompt",
+        },
     )
     user = SimpleNamespace(id="user-123", context={}, user_metadata={})
 
@@ -10680,7 +10700,7 @@ def test_llm_policy_core_reschedule_uses_booking_context_appointment_id(monkeypa
     assert booking_context.get("appointment_id") == appointment_id
 
 
-def test_llm_policy_core_book_slot_contract_invalid_escalates(monkeypatch):
+def test_llm_policy_core_book_slot_contract_invalid_does_not_auto_escalate(monkeypatch):
     monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
@@ -10833,22 +10853,22 @@ def test_llm_policy_core_book_slot_contract_invalid_escalates(monkeypatch):
         )
 
     assert response.success is True
-    assert response.bot_response == webhook_router.MSG_ESCALATED
-    assert reuse_handover_mock.called
-    assert escalate_mock.called
-    assert telegram_mock.called
+    assert "Не удалось подтвердить действие автоматически" in (response.bot_response or "")
+    assert reuse_handover_mock.called is False
+    assert escalate_mock.called is False
+    assert telegram_mock.called is False
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("tool_decision") == "contract_invalid"
     assert meta.get("tool_contract") == "post_condition"
     assert meta.get("tool_contract_error") == "appointment_id_missing"
     assert meta.get("tool_verifier_post") == "invalid"
     assert meta.get("tool_verifier_guard") == "post_condition"
-    assert meta.get("action") == "escalate"
-    assert meta.get("intent") == "check_booking"
+    assert meta.get("action") == "reply"
+    assert meta.get("intent") == "calendar.book_slot"
     assert meta.get("source") == "tool_registry"
 
 
-def test_llm_policy_core_tool_decision_mismatch_escalates(monkeypatch):
+def test_llm_policy_core_tool_decision_mismatch_does_not_auto_escalate(monkeypatch):
     monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
@@ -11002,18 +11022,18 @@ def test_llm_policy_core_tool_decision_mismatch_escalates(monkeypatch):
         )
 
     assert response.success is True
-    assert response.bot_response == webhook_router.MSG_ESCALATED
-    assert reuse_handover_mock.called
-    assert escalate_mock.called
-    assert telegram_mock.called
+    assert "Не удалось подтвердить действие автоматически" in (response.bot_response or "")
+    assert reuse_handover_mock.called is False
+    assert escalate_mock.called is False
+    assert telegram_mock.called is False
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("tool_decision") == "contract_invalid"
     assert meta.get("tool_contract") == "post_condition"
     assert meta.get("tool_contract_error") == "tool_decision_mismatch"
     assert meta.get("tool_verifier_post") == "invalid"
     assert meta.get("tool_verifier_guard") == "post_condition"
-    assert meta.get("action") == "escalate"
-    assert meta.get("intent") == "check_booking"
+    assert meta.get("action") == "reply"
+    assert meta.get("intent") == "calendar.book_slot"
     assert meta.get("source") == "tool_registry"
 
 
@@ -16488,7 +16508,17 @@ def test_intent_decomp_blocks_booking_and_drives_multi_truth():
         telegram_topic_id=None,
         escalated_at=None,
         branch_id=None,
-        context={},
+        context={
+            "booking": {
+                "active": True,
+                "service": "Маникюр",
+                "datetime": "2026-02-18 10:00",
+                "name": "Лена",
+                "last_question": "name",
+            },
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_NAME,
+            "expected_reply_reason": "booking_prompt",
+        },
     )
     user = SimpleNamespace(id="user-123", user_metadata={})
 
@@ -16583,7 +16613,7 @@ def test_intent_decomp_blocks_booking_and_drives_multi_truth():
         "app.routers.webhook._legacy.escalate_to_pending"
     ) as mock_escalate:
         mock_reuse.return_value = (None, False, False)
-        mock_escalate.return_value = SimpleNamespace(ok=False, error="test")
+        mock_escalate.return_value = SimpleNamespace(ok=False, error="test", error_code="test")
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
                 payload,
@@ -16613,6 +16643,11 @@ def test_intent_decomp_blocks_booking_and_drives_multi_truth():
     assert meta.get("service_query_source") == "intent_decomp"
     assert meta.get("service_query_score") == 1.0
     assert meta.get("booking_blocked_reason") == "info_question"
+    booking_ctx = (conversation.context or {}).get("booking", {})
+    assert booking_ctx.get("service") == "Маникюр"
+    assert booking_ctx.get("datetime") == "2026-02-18 10:00"
+    assert booking_ctx.get("name") == "Лена"
+    assert booking_ctx.get("active") is False
 
     trace = conversation.context.get("decision_trace", [])
     assert any(
@@ -17107,8 +17142,8 @@ def test_style_reference_photo_keeps_booking_context_active():
             mediaData={
                 "type": "image",
                 "mimetype": "image/jpeg",
-                "url": "https://app.chatflow.kz/static/demo/reference.jpg",
-                "fileName": "reference.jpg",
+                "url": "/home/zhan/TrufflesLogoClear.png",
+                "fileName": "TrufflesLogoClear.png",
                 "caption": "Вот фото референса",
             },
         ),
