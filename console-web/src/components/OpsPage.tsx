@@ -49,6 +49,7 @@ interface TelegramHealthData {
 }
 
 type OutboxStatusFilter = "failed" | "pending" | "processing" | "all";
+type ReminderStatusFilter = "failed" | "pending" | "sent" | "all";
 
 interface OutboxCounts {
     pending: number;
@@ -86,6 +87,56 @@ interface OutboxRetryResponse {
     success: boolean;
     retried: number;
     skipped: number;
+}
+
+interface ReminderCounts {
+    pending: number;
+    sent: number;
+    failed: number;
+    due_now: number;
+    overdue_15m: number;
+}
+
+interface ReminderErrorBucket {
+    reason: string;
+    count: number;
+}
+
+interface ReminderItem {
+    id: string;
+    appointment_id: string;
+    branch_id: string;
+    channel: string;
+    template: string;
+    run_at: string;
+    status: "pending" | "sent" | "failed" | string;
+    attempt: number;
+    max_attempts: number;
+    next_attempt_at: string | null;
+    last_error: string | null;
+    dedupe_key: string;
+    created_at: string;
+    updated_at: string;
+    outbox_id: string | null;
+    outbox_status: string | null;
+    outbox_attempts: number | null;
+    outbox_last_error: string | null;
+    outbox_updated_at: string | null;
+}
+
+interface ReminderListResponse {
+    items: ReminderItem[];
+    cursor: string | null;
+    has_more: boolean;
+    counts: ReminderCounts;
+    error_buckets: ReminderErrorBucket[];
+}
+
+interface ReminderRetryResponse {
+    success: boolean;
+    retried: number;
+    skipped: number;
+    matched: number;
 }
 
 type OpsJobType = OpsJobRunRequest["job_type"];
@@ -143,6 +194,17 @@ async function fetchOutbox(status: OutboxStatusFilter): Promise<OutboxListRespon
     const response = await api.get("/ops/outbox", {
         params: {
             status,
+            limit: 50,
+        },
+    });
+    return response.data;
+}
+
+async function fetchReminders(status: ReminderStatusFilter, template?: string): Promise<ReminderListResponse> {
+    const response = await api.get("/ops/reminders", {
+        params: {
+            status,
+            template: template && template.trim() ? template.trim() : undefined,
             limit: 50,
         },
     });
@@ -214,6 +276,8 @@ export default function OpsPage() {
     const { handleError } = useErrorHandler();
     const [telegramAction, setTelegramAction] = useState<"verify" | "test" | null>(null);
     const [outboxStatus, setOutboxStatus] = useState<OutboxStatusFilter>("failed");
+    const [reminderStatus, setReminderStatus] = useState<ReminderStatusFilter>("failed");
+    const [reminderTemplate, setReminderTemplate] = useState<string>("");
     const [jobType, setJobType] = useState<OpsJobType>("outbox_process");
     const [outboxProcessLimit, setOutboxProcessLimit] = useState<number>(10);
     const [integrationReconcileLimit, setIntegrationReconcileLimit] = useState<number>(25);
@@ -274,6 +338,20 @@ export default function OpsPage() {
         ...QUERY_PROFILE_DASHBOARD,
     });
 
+    const {
+        data: remindersData,
+        isLoading: remindersLoading,
+        error: remindersError,
+        refetch: refetchReminders,
+    } = useQuery({
+        queryKey: ["ops-reminders", reminderStatus, reminderTemplate],
+        queryFn: () => fetchReminders(reminderStatus, reminderTemplate),
+        enabled: !!session && canReadOps && isFullOps,
+        refetchInterval: 30000,
+        placeholderData: keepPreviousData,
+        ...QUERY_PROFILE_DASHBOARD,
+    });
+
     const { data: opsJobsCatalog } = useQuery({
         queryKey: ["ops-jobs-catalog"],
         queryFn: async () => {
@@ -318,6 +396,12 @@ export default function OpsPage() {
             handleError(outboxError);
         }
     }, [outboxError, handleError]);
+
+    useEffect(() => {
+        if (remindersError) {
+            handleError(remindersError);
+        }
+    }, [remindersError, handleError]);
 
     useEffect(() => {
         if (opsJobsError) {
@@ -398,6 +482,29 @@ export default function OpsPage() {
         },
     });
 
+    const reminderRetry = useMutation({
+        mutationFn: async (payload: { ids?: string[]; confirm: boolean }) => {
+            const { data } = await api.post<ReminderRetryResponse>("/ops/reminders/retry", {
+                ids: payload.ids && payload.ids.length > 0 ? payload.ids : undefined,
+                limit: 100,
+                status: reminderStatus === "sent" ? "failed" : reminderStatus,
+                confirm: payload.confirm,
+            });
+            return data;
+        },
+        onSuccess: (data) => {
+            if (data.success) {
+                toast.success(`Retry reminders: ${data.retried}`);
+            } else {
+                toast.error("Не удалось выполнить retry reminders");
+            }
+            refetchReminders();
+        },
+        onError: (error) => {
+            handleError(error);
+        },
+    });
+
     const runOpsJob = useMutation({
         mutationFn: async (payload: OpsJobRunRequest) => {
             const response = await opsApi.runJob(payload);
@@ -427,6 +534,16 @@ export default function OpsPage() {
             total: pending + processing + failed,
         };
     }, [outboxData]);
+
+    const reminderCounts = useMemo(() => {
+        return {
+            pending: remindersData?.counts?.pending ?? 0,
+            sent: remindersData?.counts?.sent ?? 0,
+            failed: remindersData?.counts?.failed ?? 0,
+            dueNow: remindersData?.counts?.due_now ?? 0,
+            overdue: remindersData?.counts?.overdue_15m ?? 0,
+        };
+    }, [remindersData]);
 
     const selectedJob = useMemo(
         () => opsJobsCatalog?.items?.find((item) => item.job_type === jobType) ?? null,
@@ -510,6 +627,9 @@ export default function OpsPage() {
                             void refetchHealth();
                             if (isFullOps) {
                                 void refetchIncidents();
+                                void refetchOutbox();
+                                void refetchReminders();
+                                void refetchOpsJobs();
                             }
                         }}
                         className="text-sm text-primary hover:text-primary/80"
@@ -839,6 +959,168 @@ export default function OpsPage() {
                         </div>
                     ) : (
                         <div className="text-sm text-muted-foreground">Очередь пуста</div>
+                    )}
+                </div>
+            )}
+
+            {isFullOps && (
+                <div className="bg-card border border-border/60 rounded-lg p-6 mb-6" data-testid="ops-reminders-card">
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-semibold">Reminder Queue</h2>
+                        <button
+                            type="button"
+                            className="text-xs text-primary hover:text-primary/80"
+                            onClick={() => refetchReminders()}
+                        >
+                            Обновить reminders
+                        </button>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+                        <MetricCard label="Pending" value={reminderCounts.pending} />
+                        <MetricCard label="Sent" value={reminderCounts.sent} />
+                        <MetricCard label="Failed" value={reminderCounts.failed} />
+                        <MetricCard label="Due now" value={reminderCounts.dueNow} />
+                        <MetricCard label="Overdue 15m+" value={reminderCounts.overdue} />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                        {([
+                            { value: "failed", label: "Failed", count: reminderCounts.failed },
+                            { value: "pending", label: "Pending", count: reminderCounts.pending },
+                            { value: "sent", label: "Sent", count: reminderCounts.sent },
+                            { value: "all", label: "All", count: reminderCounts.pending + reminderCounts.sent + reminderCounts.failed },
+                        ] as const).map((item) => (
+                            <button
+                                key={item.value}
+                                type="button"
+                                onClick={() => setReminderStatus(item.value)}
+                                className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                                    reminderStatus === item.value
+                                        ? "border-primary text-primary"
+                                        : "border-border/60 text-muted-foreground hover:text-foreground"
+                                }`}
+                            >
+                                {item.label} · {item.count}
+                            </button>
+                        ))}
+                        {reminderStatus !== "sent" && (
+                            <button
+                                type="button"
+                                className="rounded-full border border-border/60 px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                                disabled={reminderRetry.isPending || !canWriteOps}
+                                onClick={() => {
+                                    if (!window.confirm("Retry reminders for current filter?")) {
+                                        return;
+                                    }
+                                    reminderRetry.mutate({ confirm: true });
+                                }}
+                            >
+                                {reminderRetry.isPending ? "Retry..." : "Retry filtered"}
+                            </button>
+                        )}
+                    </div>
+                    <div className="mb-3 flex items-center gap-2">
+                        <label className="text-xs text-muted-foreground">Template:</label>
+                        <input
+                            type="text"
+                            className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm"
+                            placeholder="appointment_reminder"
+                            value={reminderTemplate}
+                            onChange={(event) => setReminderTemplate(event.target.value)}
+                        />
+                    </div>
+                    {remindersData?.error_buckets?.length ? (
+                        <div className="mb-3 flex flex-wrap gap-2">
+                            {remindersData.error_buckets.map((bucket) => (
+                                <span
+                                    key={bucket.reason}
+                                    className="rounded-full border border-border/60 px-2 py-1 text-[11px] text-muted-foreground"
+                                >
+                                    {bucket.reason}: {bucket.count}
+                                </span>
+                            ))}
+                        </div>
+                    ) : null}
+                    {remindersLoading ? (
+                        <div className="text-sm text-muted-foreground">Загрузка reminders...</div>
+                    ) : remindersData?.items?.length ? (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead className="text-xs text-muted-foreground">
+                                    <tr className="text-left border-b border-border/60">
+                                        <th className="py-2 pr-3">Template</th>
+                                        <th className="py-2 pr-3">Run at</th>
+                                        <th className="py-2 pr-3">Status</th>
+                                        <th className="py-2 pr-3">Attempts</th>
+                                        <th className="py-2 pr-3">Error</th>
+                                        <th className="py-2 pr-3">Outbox</th>
+                                        <th className="py-2 pr-3 text-right">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {remindersData.items.map((item) => (
+                                        <tr key={item.id} className="border-b border-border/40">
+                                            <td className="py-2 pr-3">
+                                                <div className="text-xs text-foreground">{item.template}</div>
+                                                <div className="text-[11px] text-muted-foreground">{item.channel}</div>
+                                            </td>
+                                            <td className="py-2 pr-3 text-xs">
+                                                {item.run_at ? new Date(item.run_at).toLocaleString("ru-RU") : "—"}
+                                            </td>
+                                            <td className="py-2 pr-3">
+                                                <span
+                                                    className={`px-2 py-1 rounded text-xs font-medium ${
+                                                        item.status === "failed"
+                                                            ? "bg-red-100 text-red-800"
+                                                            : item.status === "pending"
+                                                                ? "bg-yellow-100 text-yellow-800"
+                                                                : "bg-green-100 text-green-800"
+                                                    }`}
+                                                >
+                                                    {item.status}
+                                                </span>
+                                            </td>
+                                            <td className="py-2 pr-3 text-xs">
+                                                {item.attempt}/{item.max_attempts}
+                                            </td>
+                                            <td className="py-2 pr-3 text-xs text-destructive">
+                                                {item.last_error || "—"}
+                                            </td>
+                                            <td className="py-2 pr-3 text-xs">
+                                                {item.outbox_status ? (
+                                                    <span
+                                                        className={`px-2 py-1 rounded text-[11px] font-medium ${
+                                                            item.outbox_status === "failed"
+                                                                ? "bg-red-100 text-red-800"
+                                                                : item.outbox_status === "pending"
+                                                                    ? "bg-yellow-100 text-yellow-800"
+                                                                    : "bg-blue-100 text-blue-800"
+                                                        }`}
+                                                    >
+                                                        {item.outbox_status}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-muted-foreground">no outbox</span>
+                                                )}
+                                            </td>
+                                            <td className="py-2 pr-3 text-right">
+                                                {(item.status === "failed" || item.status === "pending") && (
+                                                    <button
+                                                        type="button"
+                                                        className="text-xs text-primary hover:text-primary/80 disabled:opacity-50"
+                                                        onClick={() => reminderRetry.mutate({ ids: [item.id], confirm: false })}
+                                                        disabled={reminderRetry.isPending || !canWriteOps}
+                                                    >
+                                                        Retry
+                                                    </button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div className="text-sm text-muted-foreground">Reminder jobs не найдены</div>
                     )}
                 </div>
             )}

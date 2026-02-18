@@ -1015,6 +1015,63 @@ class ConsoleOutboxRetryResponse(BaseModel):
     skipped: int
 
 
+class ConsoleReminderCounts(BaseModel):
+    pending: int
+    sent: int
+    failed: int
+    due_now: int
+    overdue_15m: int
+
+
+class ConsoleReminderErrorBucket(BaseModel):
+    reason: str
+    count: int
+
+
+class ConsoleReminderItem(BaseModel):
+    id: UUID
+    appointment_id: UUID
+    branch_id: UUID
+    channel: str
+    template: str
+    run_at: str
+    status: str
+    attempt: int
+    max_attempts: int
+    next_attempt_at: Optional[str] = None
+    last_error: Optional[str] = None
+    dedupe_key: str
+    created_at: str
+    updated_at: str
+    outbox_id: Optional[UUID] = None
+    outbox_status: Optional[str] = None
+    outbox_attempts: Optional[int] = None
+    outbox_last_error: Optional[str] = None
+    outbox_updated_at: Optional[str] = None
+
+
+class ConsoleReminderListResponse(BaseModel):
+    items: list[ConsoleReminderItem]
+    cursor: Optional[str] = None
+    has_more: bool
+    counts: ConsoleReminderCounts
+    error_buckets: list[ConsoleReminderErrorBucket] = []
+
+
+class ConsoleReminderRetryRequest(BaseModel):
+    ids: Optional[list[UUID]] = None
+    limit: Optional[int] = 100
+    status: Literal["failed", "pending", "all"] = "failed"
+    confirm: bool = False
+
+
+class ConsoleReminderRetryResponse(BaseModel):
+    success: bool
+    retried: int
+    skipped: int
+    matched: int
+
+
 ConsoleOpsJobType = Literal["outbox_process", "integration_reconcile", "heal", "metrics_snapshot"]
 ConsoleOpsJobMode = Literal["dry_run", "execute"]
 ConsoleOpsJobStatus = Literal["success", "failed"]

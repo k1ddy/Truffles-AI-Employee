@@ -43,6 +43,7 @@ from app.models import (
     ReferencePack,
     User,
 )
+from app.models.reminder_job import ReminderJob
 from app.models import (
     ConsoleMacro as ConsoleMacroModel,
 )
@@ -167,6 +168,12 @@ from app.schemas.console import (
     ConsoleOutboxListResponse,
     ConsoleOutboxRetryRequest,
     ConsoleOutboxRetryResponse,
+    ConsoleReminderCounts,
+    ConsoleReminderErrorBucket,
+    ConsoleReminderItem,
+    ConsoleReminderListResponse,
+    ConsoleReminderRetryRequest,
+    ConsoleReminderRetryResponse,
     ConsoleOwnerMode,
     ConsoleOwnerOperationApplyRequest,
     ConsoleOwnerOperationApplyResponse,
@@ -3919,6 +3926,18 @@ _OUTBOX_STATUS_MAP = {
     "failed": "FAILED",
 }
 
+_REMINDER_STATUS_MAP = {
+    "pending": "PENDING",
+    "sent": "SENT",
+    "failed": "FAILED",
+}
+
+_REMINDER_RETRY_STATUS_MAP = {
+    "pending": ["PENDING"],
+    "failed": ["FAILED"],
+    "all": ["PENDING", "FAILED"],
+}
+
 _OPS_JOB_DEFINITIONS = {
     "outbox_process": {
         "label": "Outbox Process",
@@ -3978,6 +3997,33 @@ def _parse_outbox_status_param(status: Optional[str]) -> Optional[list[str]]:
     if normalized not in _OUTBOX_STATUS_MAP:
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
     return [_OUTBOX_STATUS_MAP[normalized]]
+
+
+def _normalize_reminder_status(status: Optional[str]) -> str:
+    if not status:
+        return "unknown"
+    lowered = status.lower()
+    if lowered in _REMINDER_STATUS_MAP:
+        return lowered
+    return lowered
+
+
+def _parse_reminder_status_param(status: Optional[str]) -> Optional[list[str]]:
+    if not status:
+        return None
+    normalized = status.strip().lower()
+    if normalized == "all":
+        return None
+    if normalized not in _REMINDER_STATUS_MAP:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
+    return [_REMINDER_STATUS_MAP[normalized]]
+
+
+def _parse_reminder_retry_status_param(status: str) -> list[str]:
+    normalized = (status or "").strip().lower()
+    if normalized not in _REMINDER_RETRY_STATUS_MAP:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid retry status")
+    return _REMINDER_RETRY_STATUS_MAP[normalized]
 
 
 def _truncate_preview(value: Optional[str], limit: int = 120) -> Optional[str]:
@@ -4058,6 +4104,34 @@ def _build_outbox_item(row: OutboxMessage) -> ConsoleOutboxItem:
         remote_jid=summary.get("remote_jid"),
         instance_id=summary.get("instance_id"),
         forwarded_to_telegram=summary.get("forwarded_to_telegram"),
+    )
+
+
+def _build_reminder_item(
+    row: ReminderJob,
+    *,
+    outbox_row: Optional[OutboxMessage],
+) -> ConsoleReminderItem:
+    return ConsoleReminderItem(
+        id=row.id,
+        appointment_id=row.appointment_id,
+        branch_id=row.branch_id,
+        channel=row.channel,
+        template=row.template,
+        run_at=row.run_at.isoformat() if row.run_at else "",
+        status=_normalize_reminder_status(row.status),
+        attempt=row.attempt,
+        max_attempts=row.max_attempts,
+        next_attempt_at=row.next_attempt_at.isoformat() if row.next_attempt_at else None,
+        last_error=row.last_error,
+        dedupe_key=row.dedupe_key,
+        created_at=row.created_at.isoformat() if row.created_at else "",
+        updated_at=row.updated_at.isoformat() if row.updated_at else "",
+        outbox_id=outbox_row.id if outbox_row else None,
+        outbox_status=_normalize_outbox_status(outbox_row.status) if outbox_row else None,
+        outbox_attempts=outbox_row.attempts if outbox_row else None,
+        outbox_last_error=outbox_row.last_error if outbox_row else None,
+        outbox_updated_at=outbox_row.updated_at.isoformat() if outbox_row and outbox_row.updated_at else None,
     )
 
 
@@ -8572,6 +8646,234 @@ async def retry_outbox(
     db.commit()
 
     return ConsoleOutboxRetryResponse(success=True, retried=retried, skipped=skipped)
+
+
+@router.get(
+    "/ops/reminders",
+    response_model=ConsoleReminderListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_reminders(
+    request: Request,
+    status: Optional[str] = None,
+    template: Optional[str] = None,
+    cursor: Optional[str] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+) -> ConsoleReminderListResponse:
+    """List reminder jobs with diagnostics and linked outbox state."""
+    context = get_console_context(request, db)
+    _require_ops_access(context, action="read")
+
+    _reject_unknown_query_params(request, {"status", "template", "cursor", "limit"})
+    _validate_limit(limit)
+
+    status_filters = _parse_reminder_status_param(status)
+    template_filter = template.strip() if template and template.strip() else None
+    allowed_branch_ids = _resolve_branch_scope(context)
+    if allowed_branch_ids is not None and not allowed_branch_ids:
+        return ConsoleReminderListResponse(
+            items=[],
+            cursor=None,
+            has_more=False,
+            counts=ConsoleReminderCounts(
+                pending=0,
+                sent=0,
+                failed=0,
+                due_now=0,
+                overdue_15m=0,
+            ),
+            error_buckets=[],
+        )
+
+    base_query = db.query(ReminderJob).filter(ReminderJob.client_id == context.client.id)
+    if allowed_branch_ids is not None:
+        base_query = base_query.filter(ReminderJob.branch_id.in_(allowed_branch_ids))
+    if template_filter:
+        base_query = base_query.filter(ReminderJob.template == template_filter)
+
+    counts_rows = (
+        base_query.with_entities(ReminderJob.status, func.count().label("count"))
+        .group_by(ReminderJob.status)
+        .all()
+    )
+    counts = {"pending": 0, "sent": 0, "failed": 0}
+    for status_value, count in counts_rows:
+        normalized = _normalize_reminder_status(status_value)
+        if normalized in counts:
+            counts[normalized] = int(count or 0)
+
+    now = datetime.now(timezone.utc)
+    due_now = (
+        base_query.filter(
+            ReminderJob.status == "PENDING",
+            ReminderJob.run_at <= now,
+        ).count()
+    )
+    overdue_15m = (
+        base_query.filter(
+            ReminderJob.status == "PENDING",
+            ReminderJob.run_at <= (now - timedelta(minutes=15)),
+        ).count()
+    )
+    error_rows = (
+        base_query.filter(
+            ReminderJob.status == "FAILED",
+            ReminderJob.last_error.isnot(None),
+            ReminderJob.last_error != "",
+        )
+        .with_entities(ReminderJob.last_error, func.count().label("count"))
+        .group_by(ReminderJob.last_error)
+        .order_by(func.count().desc(), ReminderJob.last_error.asc())
+        .limit(10)
+        .all()
+    )
+
+    query = base_query
+    if status_filters:
+        query = query.filter(ReminderJob.status.in_(status_filters))
+
+    cursor_date = _parse_cursor_param(cursor)
+    if cursor_date is not None:
+        query = query.filter(ReminderJob.created_at < cursor_date)
+
+    rows = (
+        query.order_by(ReminderJob.created_at.desc(), ReminderJob.id.desc())
+        .limit(limit + 1)
+        .all()
+    )
+    has_more = len(rows) > limit
+    items_rows = rows[:limit]
+    next_cursor = items_rows[-1].created_at.isoformat() if has_more and items_rows else None
+
+    outbox_map: dict[str, OutboxMessage] = {}
+    dedupe_keys = [row.dedupe_key for row in items_rows if row.dedupe_key]
+    if dedupe_keys:
+        outbox_query = db.query(OutboxMessage).filter(
+            OutboxMessage.client_id == context.client.id,
+            OutboxMessage.inbound_message_id.in_(dedupe_keys),
+        )
+        if allowed_branch_ids is not None:
+            outbox_query = outbox_query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
+        outbox_rows = (
+            outbox_query.order_by(OutboxMessage.created_at.desc(), OutboxMessage.id.desc())
+            .all()
+        )
+        for outbox_row in outbox_rows:
+            if outbox_row.inbound_message_id not in outbox_map:
+                outbox_map[outbox_row.inbound_message_id] = outbox_row
+
+    return ConsoleReminderListResponse(
+        items=[
+            _build_reminder_item(
+                row,
+                outbox_row=outbox_map.get(row.dedupe_key),
+            )
+            for row in items_rows
+        ],
+        cursor=next_cursor,
+        has_more=has_more,
+        counts=ConsoleReminderCounts(
+            pending=counts["pending"],
+            sent=counts["sent"],
+            failed=counts["failed"],
+            due_now=due_now,
+            overdue_15m=overdue_15m,
+        ),
+        error_buckets=[
+            ConsoleReminderErrorBucket(reason=str(reason), count=int(count or 0))
+            for reason, count in error_rows
+            if reason
+        ],
+    )
+
+
+@router.post(
+    "/ops/reminders/retry",
+    response_model=ConsoleReminderRetryResponse,
+    responses={
+        401: {"model": ConsoleErrorResponse},
+        403: {"model": ConsoleErrorResponse},
+        404: {"model": ConsoleErrorResponse},
+        409: {"model": ConsoleErrorResponse},
+    },
+)
+async def retry_reminders(
+    body: ConsoleReminderRetryRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleReminderRetryResponse:
+    """Retry reminder jobs in FAILED/PENDING state."""
+    context = get_console_context(request, db)
+    _require_ops_access(context, action="write")
+
+    ids = [entry for entry in (body.ids or []) if entry]
+    if not ids:
+        _validate_limit(body.limit or 100)
+    status_filters = _parse_reminder_retry_status_param(body.status)
+
+    query = db.query(ReminderJob).filter(ReminderJob.client_id == context.client.id)
+    allowed_branch_ids = _resolve_branch_scope(context)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            return ConsoleReminderRetryResponse(
+                success=True,
+                retried=0,
+                skipped=len(ids),
+                matched=0,
+            )
+        query = query.filter(ReminderJob.branch_id.in_(allowed_branch_ids))
+
+    query = query.filter(ReminderJob.status.in_(status_filters))
+    if ids:
+        query = query.filter(ReminderJob.id.in_(ids))
+    else:
+        query = query.order_by(ReminderJob.updated_at.desc(), ReminderJob.id.desc()).limit(body.limit or 100)
+
+    rows = query.all()
+    if ids and not rows:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Reminder jobs not found")
+    if len(rows) > 1 and not body.confirm:
+        raise ConsoleAPIError(
+            409,
+            "CONFIRMATION_REQUIRED",
+            "Bulk reminder retry requires confirm=true",
+        )
+
+    now = datetime.now(timezone.utc)
+    retried = 0
+    for row in rows:
+        row.status = "PENDING"
+        row.next_attempt_at = None
+        row.last_error = None
+        row.updated_at = now
+        retried += 1
+
+    skipped = max(0, len(ids) - retried) if ids else 0
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="reminder_retry",
+        entity_type="reminder_jobs",
+        payload={
+            "retried": retried,
+            "skipped": skipped,
+            "matched": len(rows),
+            "status": body.status,
+            "ids": [str(entry) for entry in ids] if ids else None,
+            "confirm": body.confirm,
+        },
+        client_id=context.client.id,
+        branch_id=context.effective_branch_id,
+    )
+    db.commit()
+
+    return ConsoleReminderRetryResponse(
+        success=True,
+        retried=retried,
+        skipped=skipped,
+        matched=len(rows),
+    )
 
 
 @router.get(
