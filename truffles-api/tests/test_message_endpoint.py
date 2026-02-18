@@ -13009,7 +13009,7 @@ def test_booking_verification_reuses_active_handover_before_truth_gate(monkeypat
     payload = WebhookRequest(
         client_slug="demo_salon",
         body=WebhookBody(
-            message="Все еще жду подтверждения.",
+            message="Все еще жду подтверждения, позовите менеджера.",
             messageType="text",
             metadata=WebhookMetadata(
                 remoteJid="77000000000@s.whatsapp.net",
@@ -13141,7 +13141,7 @@ def test_booking_verification_creates_handover_when_none_active(monkeypatch):
     payload = WebhookRequest(
         client_slug="demo_salon",
         body=WebhookBody(
-            message="Все еще жду ответа.",
+            message="Все еще жду ответа, соедините с менеджером.",
             messageType="text",
             metadata=WebhookMetadata(
                 remoteJid="77000000000@s.whatsapp.net",
@@ -13550,7 +13550,7 @@ def test_llm_policy_core_get_booking_ok_does_not_force_handoff(monkeypatch):
     assert meta.get("action") != "escalate"
 
 
-def test_booking_reschedule_missing_slot_escalates_to_pending(monkeypatch):
+def test_booking_reschedule_missing_slot_does_not_escalate_without_manager_request(monkeypatch):
     monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
@@ -13645,9 +13645,6 @@ def test_booking_reschedule_missing_slot_escalates_to_pending(monkeypatch):
         "elapsed_ms": 12.0,
     }
     domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
-    handover = SimpleNamespace(id=uuid4(), status="pending")
-    escalate_result = SimpleNamespace(ok=True, value=handover, error=None)
-
     with patch(
         "app.routers.webhook.decision.route_llm_policy_core", return_value=policy_result
     ), patch("app.routers.webhook.decision._collect_plan_consult_refs", return_value=([], None)), patch(
@@ -13688,9 +13685,9 @@ def test_booking_reschedule_missing_slot_escalates_to_pending(monkeypatch):
         "app.routers.webhook.decision._reuse_active_handover",
         return_value=(None, False, False),
     ) as reuse_handover_mock, patch(
-        "app.routers.webhook.decision.escalate_to_pending", return_value=escalate_result
+        "app.routers.webhook.decision.escalate_to_pending"
     ) as escalate_mock, patch(
-        "app.routers.webhook.decision.send_telegram_notification", return_value=True
+        "app.routers.webhook.decision.send_telegram_notification"
     ) as telegram_mock:
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
@@ -13704,14 +13701,14 @@ def test_booking_reschedule_missing_slot_escalates_to_pending(monkeypatch):
         )
 
     assert response.success is True
-    assert response.bot_response == webhook_router.MSG_ESCALATED
-    assert reuse_handover_mock.called
-    assert escalate_mock.called
-    assert telegram_mock.called
+    assert response.bot_response != webhook_router.MSG_ESCALATED
+    assert "На какую дату и время вам удобно?" in (response.bot_response or "")
+    assert reuse_handover_mock.called is False
+    assert escalate_mock.called is False
+    assert telegram_mock.called is False
     meta = saved_message.message_metadata.get("decision_meta", {})
-    assert meta.get("action") == "escalate"
-    assert meta.get("intent") == "check_booking"
-    assert meta.get("source") == "tool_registry"
+    assert meta.get("tool_action") == "calendar.list_slots"
+    assert meta.get("tool_decision") == "missing_slot"
 
 
 def test_llm_policy_core_info_tool_restores_booking_followup_from_slots(monkeypatch):
