@@ -50,3 +50,4 @@
 - `npm --prefix console-web run generate:api` -> `openapi-typescript: not found`
 - `npm --prefix console-web run lint -- --file src/components/OpsPage.tsx` -> `next: not found`
 - Interpretation: frontend dependency layer is not installed in this environment; backend and API contract validations are green.
+- Canon blocker outside wave scope: `STATE.md` currently has unresolved merge markers in `NOW` section (`<<<<<<< ...`), which should be fixed before canon-sensitive doc updates.
