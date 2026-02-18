@@ -43,10 +43,10 @@ from app.models import (
     ReferencePack,
     User,
 )
-from app.models.reminder_job import ReminderJob
 from app.models import (
     ConsoleMacro as ConsoleMacroModel,
 )
+from app.models.reminder_job import ReminderJob
 from app.schemas.capabilities import CAPABILITIES_SCHEMA_VERSION, CapabilitiesPayload
 from app.schemas.console import (
     ConsoleAgent,
@@ -168,12 +168,6 @@ from app.schemas.console import (
     ConsoleOutboxListResponse,
     ConsoleOutboxRetryRequest,
     ConsoleOutboxRetryResponse,
-    ConsoleReminderCounts,
-    ConsoleReminderErrorBucket,
-    ConsoleReminderItem,
-    ConsoleReminderListResponse,
-    ConsoleReminderRetryRequest,
-    ConsoleReminderRetryResponse,
     ConsoleOwnerMode,
     ConsoleOwnerOperationApplyRequest,
     ConsoleOwnerOperationApplyResponse,
@@ -190,6 +184,12 @@ from app.schemas.console import (
     ConsoleReferencePack,
     ConsoleReferencePackListResponse,
     ConsoleReferencePackUpsertRequest,
+    ConsoleReminderCounts,
+    ConsoleReminderErrorBucket,
+    ConsoleReminderItem,
+    ConsoleReminderListResponse,
+    ConsoleReminderRetryRequest,
+    ConsoleReminderRetryResponse,
     ConsoleSettingsResponse,
     ConsoleSettingsUpdateRequest,
     ConsoleSettingsUpdateResponse,
