@@ -1,6 +1,37 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+  cat <<'USAGE'
+Usage: scripts/session_audit.sh [--strict] [--stale-hours N]
+
+Validates session metadata consistency.
+Default mode:
+  - hard errors fail the audit
+  - stale/legacy session drift is reported as warning
+Strict mode:
+  - warnings also fail the audit
+USAGE
+}
+
+strict="false"
+stale_hours="${SESSION_LEASE_HOURS:-24}"
+canonical_repo_root="${TRUFFLES_CANONICAL_REPO_ROOT:-/home/zhan/truffles-main}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --strict) strict="true"; shift 1;;
+    --stale-hours) stale_hours="$2"; shift 2;;
+    -h|--help) usage; exit 0;;
+    *) echo "Unknown arg: $1"; usage; exit 1;;
+  esac
+done
+
+if ! [[ "$stale_hours" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: --stale-hours must be an integer (got '${stale_hours}')." >&2
+  exit 1
+fi
+
 repo_root=$(git rev-parse --show-toplevel)
 sessions_dir="$repo_root/docs/SESSIONS"
 index_file="$repo_root/docs/SESSION_INDEX.md"
@@ -10,7 +41,9 @@ if [[ ! -d "$sessions_dir" ]]; then
   exit 1
 fi
 
-issues=0
+errors=0
+warnings=0
+now_ts=$(date +%s)
 
 for session_file in "$sessions_dir"/SESSION-*.md; do
   [[ -f "$session_file" ]] || continue
@@ -26,54 +59,66 @@ for session_file in "$sessions_dir"/SESSION-*.md; do
   last_updated=$(grep -E "^- last_updated: " "$session_file" | head -n1 | sed 's/^- last_updated: //')
 
   if [[ -z "$status" || -z "$branch" || -z "$worktree" || -z "$task_package" ]]; then
-    echo "ISSUE: ${session_id} has missing required fields." >&2
-    issues=$((issues + 1))
+    echo "ERROR: ${session_id} has missing required fields." >&2
+    errors=$((errors + 1))
   fi
 
   if [[ -f "$index_file" ]] && ! grep -q "^| ${session_id} |" "$index_file"; then
-    echo "ISSUE: ${session_id} missing from SESSION_INDEX." >&2
-    issues=$((issues + 1))
+    echo "ERROR: ${session_id} missing from SESSION_INDEX." >&2
+    errors=$((errors + 1))
   fi
 
   if [[ "$status" == "active" || "$status" == "paused" ]]; then
     if [[ ! -d "$worktree" ]]; then
-      echo "ISSUE: ${session_id} status=${status} but worktree missing: ${worktree}" >&2
-      issues=$((issues + 1))
+      echo "WARN: ${session_id} status=${status} but worktree missing: ${worktree}" >&2
+      warnings=$((warnings + 1))
     fi
     if ! git -C "$repo_root" show-ref --verify --quiet "refs/heads/${branch}"; then
-      echo "ISSUE: ${session_id} status=${status} but branch missing: ${branch}" >&2
-      issues=$((issues + 1))
+      echo "WARN: ${session_id} status=${status} but branch missing: ${branch}" >&2
+      warnings=$((warnings + 1))
+    fi
+    if [[ "$worktree" == "$canonical_repo_root" && "$branch" != "main" && "$branch" != "master" ]]; then
+      echo "WARN: ${session_id} uses canonical root on non-main branch (${branch}); move to dedicated worktree." >&2
+      warnings=$((warnings + 1))
     fi
   fi
 
   if [[ "$status" == "done" ]]; then
     if [[ -d "$worktree" ]]; then
-      echo "ISSUE: ${session_id} status=done but worktree still exists: ${worktree}" >&2
-      issues=$((issues + 1))
+      echo "WARN: ${session_id} status=done but worktree still exists: ${worktree}" >&2
+      warnings=$((warnings + 1))
     fi
     if git -C "$repo_root" show-ref --verify --quiet "refs/heads/${branch}"; then
-      echo "ISSUE: ${session_id} status=done but branch still exists: ${branch}" >&2
-      issues=$((issues + 1))
+      echo "WARN: ${session_id} status=done but branch still exists: ${branch}" >&2
+      warnings=$((warnings + 1))
     fi
   fi
 
-  if [[ -n "$last_updated" && "$status" == "active" ]]; then
-    if date -d "$last_updated" +%s >/dev/null 2>&1; then
-      last_ts=$(date -d "$last_updated" +%s)
-      now_ts=$(date +%s)
-      age_days=$(( (now_ts - last_ts) / 86400 ))
-      if (( age_days > 7 )); then
-        echo "ISSUE: ${session_id} active but stale ${age_days} days (last_updated=${last_updated})." >&2
-        issues=$((issues + 1))
+  if [[ "$status" == "active" ]]; then
+    if [[ -z "$last_updated" ]]; then
+      echo "WARN: ${session_id} active but last_updated is missing." >&2
+      warnings=$((warnings + 1))
+    elif parsed_ts=$(date -d "$last_updated" +%s 2>/dev/null); then
+      age_hours=$(( (now_ts - parsed_ts) / 3600 ))
+      if (( age_hours > stale_hours )); then
+        echo "WARN: ${session_id} active but stale ${age_hours}h (last_updated=${last_updated})." >&2
+        warnings=$((warnings + 1))
       fi
+    else
+      echo "WARN: ${session_id} active but last_updated is not parseable: ${last_updated}" >&2
+      warnings=$((warnings + 1))
     fi
   fi
-
 done
 
-if [[ $issues -gt 0 ]]; then
-  echo "Session audit failed: ${issues} issue(s)." >&2
+if [[ $errors -gt 0 ]]; then
+  echo "Session audit failed: ${errors} error(s), ${warnings} warning(s)." >&2
   exit 1
 fi
 
-echo "Session audit OK"
+if [[ "$strict" == "true" && $warnings -gt 0 ]]; then
+  echo "Session audit strict-failed: ${warnings} warning(s)." >&2
+  exit 1
+fi
+
+echo "Session audit OK: ${warnings} warning(s), ${errors} error(s)."
