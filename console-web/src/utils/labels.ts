@@ -143,16 +143,16 @@ export function getSlaCountdown(createdAt: string): SlaCountdown {
 export function getBookingStatusLabel(status: string): string {
     const normalized = status.toLowerCase();
     const labels: Record<string, string> = {
-        pending: "ожидает",
-        draft: "черновик",
-        hold: "бронь",
-        pending_confirmation: "ожидает подтверждения",
-        confirmed: "подтверждена",
-        checked_in: "клиент пришел",
-        reschedule_requested: "нужен перенос",
+        pending: "запланировано",
+        draft: "запланировано",
+        hold: "запланировано",
+        pending_confirmation: "запланировано",
+        confirmed: "запланировано",
+        checked_in: "запланировано",
+        reschedule_requested: "запланировано",
         cancelled: "отменена",
-        completed: "клиент пришел",
-        no_show: "не пришёл",
+        completed: "пришел",
+        no_show: "не пришел",
     };
     return labels[normalized] || status;
 }

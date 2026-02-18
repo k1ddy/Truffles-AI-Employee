@@ -1,0 +1,25 @@
+# SESSION 2026-02-18-wavea-operational-contract-calendar-a100 — Session 2026-02-18-wavea-operational-contract-calendar-a100
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-18-waveA-operational-contract-calendar-a100.md
+- branch: feat/2026-02-18-wavea-operational-contract-calendar-a100
+- worktree: /home/zhan/worktrees/2026-02-18-wavea-operational-contract-calendar-a100
+- base_ref: origin/main
+- scope: Упростить календарный операционный цикл филиала в существующем экране `Записи` (без новых вкладок): простые статусы + follow-up closed state для no-show.
+- done:
+  - Session created.
+  - Добавлен API-флаг `no_show_followup_done` в booking response (`calendar` router + contract).
+  - Обновлен Calendar UI: для `NO_SHOW` после фиксации follow-up отображается `follow-up закрыт`; действие больше не предлагается как основное повторно.
+  - Упрощены пользовательские ярлыки статусов записи (`запланировано / пришел / не пришел`) в `labels.ts`.
+  - Обновлены тесты router/openapi-контракта под новый флаг.
+- next:
+  - Подготовить PR и передать на review/merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-18-waveA-operational-contract-calendar-a100.md
+  - `pytest -q truffles-api/tests/test_calendar_noshow_followup_router.py` -> `2 passed`
+  - `pytest -q truffles-api/tests/test_console_openapi_calendar_contract.py` -> `4 passed`
+  - `ruff check truffles-api/app/routers/calendar.py truffles-api/tests/test_calendar_noshow_followup_router.py truffles-api/tests/test_console_openapi_calendar_contract.py` -> `All checks passed`
+  - `python3 truffles-api/scripts/generate_openapi.py --check` -> passed
+  - Frontend checks blocked in local env: `npm --prefix console-web run lint ...` (`next: not found`), `npx --prefix console-web tsc ...` (`typescript not installed`)
+- last_updated: 2026-02-18

@@ -67,3 +67,13 @@ def test_booking_status_update_contract_uses_simple_terminal_statuses() -> None:
     status_schema = (booking_status_schema.get("properties") or {}).get("status") or {}
 
     assert status_schema.get("enum") == ["COMPLETED", "NO_SHOW"]
+
+
+def test_booking_response_contract_exposes_no_show_followup_flag() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    booking_response = schemas.get("BookingResponse") or {}
+    properties = booking_response.get("properties") or {}
+
+    assert "no_show_followup_done" in properties
+    assert (properties.get("no_show_followup_done") or {}).get("type") == "boolean"
