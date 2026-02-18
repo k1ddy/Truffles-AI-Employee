@@ -3,7 +3,7 @@ Calendar and Booking API Router.
 Provides endpoints for slots, bookings, and Google Calendar OAuth.
 """
 from datetime import datetime, timedelta, timezone
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -123,6 +123,8 @@ class BookingStatusUpdateRequest(BaseModel):
 
 
 class BookingNoShowFollowUpRequest(BaseModel):
+    result: Literal["contacted", "rebooked"] = "contacted"
+    rebooked_appointment_id: Optional[str] = None
     note: Optional[str] = Field(default=None, max_length=500)
 
 
@@ -137,6 +139,10 @@ class BookingResponse(BaseModel):
     service_type: Optional[str] = None
     status: str
     no_show_followup_done: bool = False
+    no_show_followup_result: Optional[str] = None
+    no_show_followup_closed_at: Optional[str] = None
+    no_show_followup_closed_by: Optional[str] = None
+    no_show_followup_rebooked_appointment_id: Optional[str] = None
     google_event_id: Optional[str] = None
     created_at: str
 
@@ -259,6 +265,33 @@ def _resolve_booking_for_context(
     return booking
 
 
+def _serialize_no_show_followup_state(audit_row: Optional[AppointmentAudit]) -> dict[str, Any]:
+    if not audit_row:
+        return {
+            "done": False,
+            "result": None,
+            "closed_at": None,
+            "closed_by": None,
+            "rebooked_appointment_id": None,
+        }
+    payload = audit_row.payload if isinstance(audit_row.payload, dict) else {}
+    closed_at = payload.get("follow_up_closed_at")
+    if not closed_at and audit_row.created_at:
+        closed_at = audit_row.created_at.isoformat()
+    closed_by = payload.get("follow_up_closed_by")
+    if not closed_by and audit_row.actor_id:
+        closed_by = str(audit_row.actor_id)
+    result = payload.get("result") or "contacted"
+    rebooked_appointment_id = payload.get("rebooked_appointment_id")
+    return {
+        "done": True,
+        "result": result,
+        "closed_at": closed_at,
+        "closed_by": closed_by,
+        "rebooked_appointment_id": rebooked_appointment_id,
+    }
+
+
 def _build_booking_response(db: Session, booking: Appointment) -> BookingResponse:
     specialist = None
     if booking.specialist_id:
@@ -276,15 +309,16 @@ def _build_booking_response(db: Session, booking: Appointment) -> BookingRespons
         )
         .scalar()
     )
-    no_show_followup_done = (
-        db.query(AppointmentAudit.id)
+    no_show_followup_audit = (
+        db.query(AppointmentAudit)
         .filter(
             AppointmentAudit.appointment_id == booking.id,
             AppointmentAudit.action == "no_show_followup",
         )
+        .order_by(AppointmentAudit.created_at.desc())
         .first()
-        is not None
     )
+    no_show_followup_state = _serialize_no_show_followup_state(no_show_followup_audit)
     return BookingResponse(
         id=str(booking.id),
         specialist_id=str(booking.specialist_id),
@@ -295,7 +329,11 @@ def _build_booking_response(db: Session, booking: Appointment) -> BookingRespons
         customer_phone=booking.customer_phone,
         service_type=service_name,
         status=booking.status,
-        no_show_followup_done=no_show_followup_done,
+        no_show_followup_done=no_show_followup_state["done"],
+        no_show_followup_result=no_show_followup_state["result"],
+        no_show_followup_closed_at=no_show_followup_state["closed_at"],
+        no_show_followup_closed_by=no_show_followup_state["closed_by"],
+        no_show_followup_rebooked_appointment_id=no_show_followup_state["rebooked_appointment_id"],
         google_event_id=google_event_id,
         created_at=booking.created_at.isoformat(),
     )
@@ -707,18 +745,26 @@ async def list_bookings(
         for row in rows:
             sync_map[row.appointment_id] = row.external_id
 
-    no_show_followup_map: dict[UUID, bool] = {}
+    no_show_followup_map: dict[UUID, dict[str, Any]] = {}
     if appointment_ids:
         rows = (
-            db.query(AppointmentAudit.appointment_id)
+            db.query(AppointmentAudit)
             .filter(
                 AppointmentAudit.appointment_id.in_(appointment_ids),
                 AppointmentAudit.action == "no_show_followup",
             )
-            .distinct()
+            .order_by(
+                AppointmentAudit.appointment_id.asc(),
+                AppointmentAudit.created_at.desc(),
+            )
             .all()
         )
-        no_show_followup_map = {row[0]: True for row in rows if row and row[0]}
+        for row in rows:
+            if not row or not row.appointment_id:
+                continue
+            if row.appointment_id in no_show_followup_map:
+                continue
+            no_show_followup_map[row.appointment_id] = _serialize_no_show_followup_state(row)
     
     return BookingsListResponse(
         items=[
@@ -732,7 +778,11 @@ async def list_bookings(
                 customer_phone=b.customer_phone,
                 service_type=services_map.get(b.id),
                 status=b.status,
-                no_show_followup_done=bool(no_show_followup_map.get(b.id, False)),
+                no_show_followup_done=bool(no_show_followup_map.get(b.id, {}).get("done", False)),
+                no_show_followup_result=no_show_followup_map.get(b.id, {}).get("result"),
+                no_show_followup_closed_at=no_show_followup_map.get(b.id, {}).get("closed_at"),
+                no_show_followup_closed_by=no_show_followup_map.get(b.id, {}).get("closed_by"),
+                no_show_followup_rebooked_appointment_id=no_show_followup_map.get(b.id, {}).get("rebooked_appointment_id"),
                 google_event_id=sync_map.get(b.id),
                 created_at=b.created_at.isoformat()
             )
@@ -868,31 +918,121 @@ async def register_booking_no_show_followup(
             details={"current_status": booking.status, "required_status": "NO_SHOW"},
         )
 
+    result = (data.result or "contacted").strip().lower()
     note = _normalize_optional_text(data.note)
-    now = datetime.now(timezone.utc)
-    payload: dict[str, Any] = {
-        "action": "contact_rebook",
-        "source": "calendar_console",
-    }
-    if note:
-        payload["note"] = note
-
-    db.add(
-        AppointmentAudit(
-            appointment_id=booking.id,
-            actor_type="agent",
-            actor_id=context.agent.id,
-            channel="console",
-            action="no_show_followup",
-            prev_status=booking.status,
-            new_status=booking.status,
-            prev_version=int(booking.version or 0),
-            new_version=int(booking.version or 0),
-            payload=payload,
-            created_at=now,
+    rebooked_appointment_id = _normalize_optional_text(data.rebooked_appointment_id)
+    if result != "rebooked" and rebooked_appointment_id:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            "rebooked_appointment_id is allowed only when result=rebooked",
         )
+    if rebooked_appointment_id:
+        rebooked_uuid = _parse_uuid(
+            rebooked_appointment_id,
+            field_name="rebooked_appointment_id",
+        )
+        if rebooked_uuid == booking.id:
+            raise ConsoleAPIError(
+                400,
+                "INVALID_PARAM",
+                "rebooked_appointment_id must reference another booking",
+            )
+        if not (
+            db.query(Appointment)
+            .filter(
+                Appointment.id == rebooked_uuid,
+                Appointment.client_id == context.client.id,
+            )
+            .first()
+        ):
+            raise ConsoleAPIError(
+                404,
+                "BOOKING_NOT_FOUND",
+                "Rebooked booking not found",
+            )
+
+    existing_followup = (
+        db.query(AppointmentAudit)
+        .filter(
+            AppointmentAudit.appointment_id == booking.id,
+            AppointmentAudit.action == "no_show_followup",
+        )
+        .order_by(AppointmentAudit.created_at.desc())
+        .first()
     )
-    db.commit()
+
+    now = datetime.now(timezone.utc)
+    if existing_followup:
+        existing_payload = (
+            dict(existing_followup.payload)
+            if isinstance(existing_followup.payload, dict)
+            else {}
+        )
+        updated_payload = dict(existing_payload)
+        changed = False
+
+        if updated_payload.get("action") != "contact_rebook":
+            updated_payload["action"] = "contact_rebook"
+            changed = True
+        if updated_payload.get("source") != "calendar_console":
+            updated_payload["source"] = "calendar_console"
+            changed = True
+        if not updated_payload.get("follow_up_closed_at"):
+            if existing_followup.created_at:
+                updated_payload["follow_up_closed_at"] = existing_followup.created_at.isoformat()
+            else:
+                updated_payload["follow_up_closed_at"] = now.isoformat()
+            changed = True
+        if not updated_payload.get("follow_up_closed_by"):
+            updated_payload["follow_up_closed_by"] = str(existing_followup.actor_id or context.agent.id)
+            changed = True
+        if not updated_payload.get("result"):
+            updated_payload["result"] = result
+            changed = True
+        if note and updated_payload.get("note") != note:
+            updated_payload["note"] = note
+            changed = True
+        if result == "rebooked":
+            if updated_payload.get("result") != "rebooked":
+                updated_payload["result"] = "rebooked"
+                changed = True
+            if updated_payload.get("rebooked_appointment_id") != rebooked_appointment_id:
+                updated_payload["rebooked_appointment_id"] = rebooked_appointment_id
+                changed = True
+
+        if changed:
+            existing_followup.payload = updated_payload
+            db.commit()
+    else:
+        payload: dict[str, Any] = {
+            "action": "contact_rebook",
+            "source": "calendar_console",
+            "result": result,
+            "follow_up_closed_at": now.isoformat(),
+            "follow_up_closed_by": str(context.agent.id),
+        }
+        if note:
+            payload["note"] = note
+        if rebooked_appointment_id:
+            payload["rebooked_appointment_id"] = rebooked_appointment_id
+
+        db.add(
+            AppointmentAudit(
+                appointment_id=booking.id,
+                actor_type="agent",
+                actor_id=context.agent.id,
+                channel="console",
+                action="no_show_followup",
+                prev_status=booking.status,
+                new_status=booking.status,
+                prev_version=int(booking.version or 0),
+                new_version=int(booking.version or 0),
+                payload=payload,
+                created_at=now,
+            )
+        )
+        db.commit()
 
     logger.info(
         "Booking no_show follow-up recorded",
@@ -901,6 +1041,7 @@ async def register_booking_no_show_followup(
                 "agent": context.agent.name,
                 "booking_id": booking_id,
                 "action": "contact_rebook",
+                "result": result,
             }
         },
     )

@@ -32,7 +32,19 @@ Key UI elements
   - Status actions:
     - `PENDING_CONFIRMATION`/`CONFIRMED`/`RESCHEDULE_REQUESTED`/`HOLD` -> `COMPLETED` (`Пришел`) or `NO_SHOW`
     - `CHECKED_IN` (legacy row) -> `COMPLETED` (`Пришел`) or `NO_SHOW`
-    - `NO_SHOW` -> follow-up action `Связаться / перезаписать` (фиксируется в audit, статус визита не меняется)
+    - `NO_SHOW` -> follow-up actions `Связались` or `Перезаписали` (фиксируется в audit, статус визита не меняется)
+
+Operating contract (one page)
+| Role | Action in Calendar | Fact written (SoT) | Why it matters | KPI surface |
+| --- | --- | --- | --- | --- |
+| manager/admin/owner | `Пришел` | `appointments.status=COMPLETED` + `visits` row + `appointment_audit` | Confirms that service was delivered | Completed visits by branch/day/specialist |
+| manager/admin/owner | `Не пришел` | `appointments.status=NO_SHOW` + `appointment_audit` | Moves booking into no-show handling | No-show count and rate |
+| manager/admin/owner | `Связались` (on `NO_SHOW`) | `appointment_audit.action=no_show_followup`, payload: `result=contacted`, `follow_up_closed_at`, `follow_up_closed_by` | Closes operational loop for missed visit | Closed no-show follow-ups |
+| manager/admin/owner | `Перезаписали` (on `NO_SHOW`) | same audit fact, payload: `result=rebooked`, optional `rebooked_appointment_id` | Shows that no-show was handled with rebooking | Rebooked no-show follow-ups |
+
+Rule of ownership
+- Follow-up closure is done by manager/admin/owner from the same Calendar list where `NO_SHOW` is visible.
+- No separate screen is required for this wave.
 
 Behavior
 - Default date is set to the user's local date (no UTC shift).
@@ -59,7 +71,7 @@ System interactions
 - Booking creation uses `SchedulingService.create_appointment` with conflict checks.
 - Booking status mutation uses `SchedulingService.update_appointment_status` with transition guard, `visits` upsert, and `appointment_audit` write.
 - In the operator UX, `Пришел` is a terminal outcome and maps directly to `COMPLETED` (separate check-in step is removed).
-- For `NO_SHOW`, manager follow-up is tracked via `appointment_audit.action=no_show_followup`.
+- For `NO_SHOW`, manager follow-up is tracked via `appointment_audit.action=no_show_followup` with explicit `result=contacted|rebooked`.
 - Errors surfaced as `BOOKING_CONFLICT` when slot is taken.
 
 Related code

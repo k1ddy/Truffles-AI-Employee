@@ -77,3 +77,22 @@ def test_booking_response_contract_exposes_no_show_followup_flag() -> None:
 
     assert "no_show_followup_done" in properties
     assert (properties.get("no_show_followup_done") or {}).get("type") == "boolean"
+
+    assert "no_show_followup_result" in properties
+    assert (properties.get("no_show_followup_result") or {}).get("type") == "string"
+    assert "no_show_followup_closed_at" in properties
+    assert (properties.get("no_show_followup_closed_at") or {}).get("type") == "string"
+    assert "no_show_followup_closed_by" in properties
+    assert (properties.get("no_show_followup_closed_by") or {}).get("type") == "string"
+    assert "no_show_followup_rebooked_appointment_id" in properties
+    assert (properties.get("no_show_followup_rebooked_appointment_id") or {}).get("type") == "string"
+
+
+def test_no_show_followup_request_contract_exposes_result_and_rebook_link() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    followup_schema = schemas.get("BookingNoShowFollowUpRequest") or {}
+    properties = followup_schema.get("properties") or {}
+
+    assert (properties.get("result") or {}).get("enum") == ["contacted", "rebooked"]
+    assert (properties.get("rebooked_appointment_id") or {}).get("type") == "string"
