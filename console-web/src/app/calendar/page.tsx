@@ -51,6 +51,11 @@ interface BookingCreateRequest {
     conversation_id?: string;
 }
 
+interface BookingStatusUpdateRequest {
+    status: "CHECKED_IN" | "COMPLETED" | "NO_SHOW";
+    reason?: string;
+}
+
 interface BookingActionResponse {
     success: boolean;
     booking: Booking;
@@ -75,6 +80,25 @@ async function fetchBookings(date?: string): Promise<{ items: Booking[] }> {
 async function createBooking(data: BookingCreateRequest): Promise<BookingActionResponse> {
     const response = await api.post("/calendar/bookings", data);
     return response.data;
+}
+
+async function updateBookingStatus(bookingId: string, data: BookingStatusUpdateRequest): Promise<BookingActionResponse> {
+    const response = await api.post(`/calendar/bookings/${bookingId}/status`, data);
+    return response.data;
+}
+
+function getVisitActionOptions(status: string): Array<{ status: BookingStatusUpdateRequest["status"]; label: string }> {
+    const normalized = status.toUpperCase();
+    if (normalized === "CONFIRMED" || normalized === "RESCHEDULE_REQUESTED") {
+        return [
+            { status: "CHECKED_IN", label: "Клиент пришел" },
+            { status: "NO_SHOW", label: "Не пришел" },
+        ];
+    }
+    if (normalized === "CHECKED_IN") {
+        return [{ status: "COMPLETED", label: "Завершить" }];
+    }
+    return [];
 }
 
 function formatDate(date: Date): string {
@@ -112,6 +136,7 @@ export default function CalendarPage() {
     const [notes, setNotes] = useState("");
     const [showForm, setShowForm] = useState(false);
     const [showPastDates, setShowPastDates] = useState(false);
+    const [statusUpdateBookingId, setStatusUpdateBookingId] = useState<string | null>(null);
 
     // Queries
     const { data: specialistsData, isError: specialistsError, error: specialistsErrorData } = useQuery({
@@ -157,6 +182,35 @@ export default function CalendarPage() {
             } else {
                 toast.error("Не удалось создать запись");
             }
+        },
+    });
+
+    const statusMutation = useMutation({
+        mutationFn: async (payload: { bookingId: string; status: BookingStatusUpdateRequest["status"] }) => {
+            setStatusUpdateBookingId(payload.bookingId);
+            return updateBookingStatus(payload.bookingId, { status: payload.status });
+        },
+        onSuccess: (_data, variables) => {
+            const labels: Record<BookingStatusUpdateRequest["status"], string> = {
+                CHECKED_IN: "Статус: клиент пришел",
+                COMPLETED: "Статус: визит завершен",
+                NO_SHOW: "Статус: клиент не пришел",
+            };
+            toast.success(labels[variables.status]);
+            queryClient.invalidateQueries({ queryKey: ["bookings"] });
+        },
+        onError: (error: unknown) => {
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            if (code === "BOOKING_STATUS_TRANSITION_DENIED") {
+                toast.error("Недопустимый переход статуса для этой записи");
+            } else if (code === "INVALID_STATUS") {
+                toast.error("Некорректный статус визита");
+            } else {
+                toast.error("Не удалось обновить статус визита");
+            }
+        },
+        onSettled: () => {
+            setStatusUpdateBookingId(null);
         },
     });
 
@@ -520,6 +574,24 @@ export default function CalendarPage() {
                                         {booking.service_type && (
                                             <div className="text-xs text-muted-foreground mt-1">
                                                 {booking.service_type}
+                                            </div>
+                                        )}
+                                        {canWriteCalendar && getVisitActionOptions(booking.status).length > 0 && (
+                                            <div className="mt-3 flex flex-wrap gap-2">
+                                                {getVisitActionOptions(booking.status).map((action) => {
+                                                    const isPending = statusMutation.isPending && statusUpdateBookingId === booking.id;
+                                                    return (
+                                                        <button
+                                                            key={`${booking.id}-${action.status}`}
+                                                            type="button"
+                                                            onClick={() => statusMutation.mutate({ bookingId: booking.id, status: action.status })}
+                                                            disabled={isPending}
+                                                            className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
+                                                        >
+                                                            {isPending ? "Обновляем..." : action.label}
+                                                        </button>
+                                                    );
+                                                })}
                                             </div>
                                         )}
                                     </div>

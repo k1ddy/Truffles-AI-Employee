@@ -21,6 +21,7 @@ def test_calendar_paths_are_present_in_console_openapi_contract() -> None:
         "/calendar/slots": {"get"},
         "/calendar/bookings": {"get", "post"},
         "/calendar/bookings/{booking_id}/cancel": {"post"},
+        "/calendar/bookings/{booking_id}/status": {"post"},
         "/calendar/google/connect": {"get"},
         "/calendar/google/callback": {"get"},
         "/calendar/google/status": {"get"},
@@ -46,6 +47,7 @@ def test_calendar_schemas_are_present_in_console_openapi_contract() -> None:
         "SlotResponse",
         "SlotsResponse",
         "BookingCreate",
+        "BookingStatusUpdateRequest",
         "BookingResponse",
         "BookingActionResponse",
         "BookingsListResponse",
@@ -54,4 +56,3 @@ def test_calendar_schemas_are_present_in_console_openapi_contract() -> None:
 
     for schema_name in required_schemas:
         assert schema_name in schemas, f"missing schema in console contract: {schema_name}"
-

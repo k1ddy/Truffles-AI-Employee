@@ -63,7 +63,7 @@
   - `appointments.status` changed
   - `visits` row created/updated
   - `appointment_audit` row created with actor/action/status delta
-- `docs/REPORTS/<date>-wave1-visit-fact-pipeline-a88.md`
+- `docs/REPORTS/2026-02-18-wave1-visit-fact-pipeline-a88.md`
 - `STATE.md` FACT/GAP entry
 
 ## Rollback

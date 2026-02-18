@@ -475,4 +475,5 @@
 | 2026-02-17-onboarding-p4p5-a88 | active | feat/2026-02-17-onboarding-p4p5-a88 | /home/zhan/worktrees/2026-02-17-onboarding-p4p5-a88 | docs/TASK_PACKAGES/TP-2026-02-17-onboarding-p4p5-a88.md | 2026-02-17 |
 | 2026-02-17-onboarding-p6p7-enterprise-loop-a88 | active | feat/2026-02-17-onboarding-p6p7-enterprise-loop-a88 | /home/zhan/worktrees/worktrees/2026-02-17-onboarding-p6p7-enterprise-loop-a88 | docs/TASK_PACKAGES/TP-2026-02-17-onboarding-p6p7-enterprise-loop-a88.md | 2026-02-17 |
 | 2026-02-18-booking-handoff-merge-a88 | active | fix/2026-02-18-booking-handoff-merge-a88 | /tmp/truffles-main-pr730-clean | docs/TASK_PACKAGES/TP-2026-02-18-booking-handoff-merge-a88.md | 2026-02-18 |
+| 2026-02-18-wave1-visit-fact-pipeline-a88 | active | feat/2026-02-18-wave1-visit-fact-pipeline-a88 | /home/zhan/worktrees/2026-02-18-wave1-visit-fact-pipeline-a88 | docs/TASK_PACKAGES/TP-2026-02-18-wave1-visit-fact-pipeline-a88.md | 2026-02-18 |
 | 2026-02-18-session-root-main-a88 | active | feat/2026-02-18-session-root-main-a88 | /home/zhan/worktrees/2026-02-18-session-root-main-a88 | docs/TASK_PACKAGES/TP-2026-01-27-session-governance.md | 2026-02-18 |

@@ -22,6 +22,7 @@ from app.models.calendar_block import CalendarBlock
 from app.models.service import Service
 from app.models.specialist import Specialist
 from app.models.specialist_service import SpecialistService
+from app.models.visit import Visit
 from app.services.appointment_reminder_service import mark_pending_reminders_failed
 
 logger = get_logger(__name__)
@@ -41,6 +42,23 @@ class SpecialistNotFoundError(Exception):
 
 class BranchNotFoundError(Exception):
     """Raised when a branch is not found."""
+
+
+class AppointmentStatusValidationError(Exception):
+    """Raised when requested appointment status is invalid for visit transitions."""
+
+    def __init__(self, status: str):
+        super().__init__(f"Invalid appointment status: {status}")
+        self.status = status
+
+
+class InvalidAppointmentTransitionError(Exception):
+    """Raised when status transition is not allowed by booking state machine."""
+
+    def __init__(self, current_status: str, target_status: str):
+        super().__init__(f"Invalid transition: {current_status} -> {target_status}")
+        self.current_status = current_status
+        self.target_status = target_status
 
 
 @dataclass
@@ -72,6 +90,12 @@ class SchedulingService:
         "CONFIRMED",
         "RESCHEDULE_REQUESTED",
         "CHECKED_IN",
+    }
+    VISIT_STATUSES = {"CHECKED_IN", "COMPLETED", "NO_SHOW"}
+    VISIT_TRANSITIONS = {
+        "CONFIRMED": {"CHECKED_IN", "COMPLETED", "NO_SHOW"},
+        "RESCHEDULE_REQUESTED": {"CHECKED_IN", "COMPLETED", "NO_SHOW"},
+        "CHECKED_IN": {"COMPLETED"},
     }
 
     def __init__(self, db: Session):
@@ -318,6 +342,150 @@ class SchedulingService:
         )
         self.db.commit()
 
+        return appointment
+
+    @classmethod
+    def normalize_visit_status(cls, status: str) -> str:
+        return (status or "").strip().upper()
+
+    @classmethod
+    def can_transition_to_visit_status(cls, current_status: str, target_status: str) -> bool:
+        normalized_current = cls.normalize_visit_status(current_status)
+        normalized_target = cls.normalize_visit_status(target_status)
+        if normalized_target not in cls.VISIT_STATUSES:
+            return False
+        if normalized_current == normalized_target:
+            return True
+        return normalized_target in cls.VISIT_TRANSITIONS.get(normalized_current, set())
+
+    def _upsert_visit_fact(
+        self,
+        *,
+        appointment: Appointment,
+        target_status: str,
+        actor_id: Optional[UUID],
+        now: datetime,
+        reason: Optional[str],
+    ) -> Visit:
+        visit = self.db.query(Visit).filter(Visit.appointment_id == appointment.id).first()
+        if not visit:
+            visit = Visit(
+                appointment_id=appointment.id,
+                client_id=appointment.client_id,
+                branch_id=appointment.branch_id,
+                specialist_id=appointment.specialist_id,
+                user_id=appointment.user_id,
+                status=target_status,
+                created_by=actor_id,
+                visit_metadata={},
+            )
+            self.db.add(visit)
+
+        metadata = visit.visit_metadata if isinstance(visit.visit_metadata, dict) else {}
+        metadata = dict(metadata)
+        metadata["source"] = "calendar_console"
+        metadata["last_transition"] = target_status
+        metadata["updated_at"] = now.isoformat()
+        if reason:
+            metadata["reason"] = reason
+
+        visit.status = target_status
+        visit.specialist_id = appointment.specialist_id
+        visit.user_id = appointment.user_id
+        visit.visit_metadata = metadata
+
+        if target_status == "CHECKED_IN":
+            visit.arrived_at = visit.arrived_at or now
+            visit.completed_at = None
+        elif target_status == "COMPLETED":
+            visit.arrived_at = visit.arrived_at or now
+            visit.completed_at = now
+        elif target_status == "NO_SHOW":
+            visit.arrived_at = None
+            visit.completed_at = None
+
+        return visit
+
+    def update_appointment_status(
+        self,
+        *,
+        appointment_id: UUID,
+        client_id: UUID,
+        target_status: str,
+        actor_id: Optional[UUID] = None,
+        actor_type: str = "agent",
+        channel: str = "console",
+        trace_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        reason: Optional[str] = None,
+        commit: bool = True,
+    ) -> Appointment:
+        normalized_target = self.normalize_visit_status(target_status)
+        if normalized_target not in self.VISIT_STATUSES:
+            raise AppointmentStatusValidationError(target_status)
+
+        appointment = self.db.query(Appointment).filter(
+            Appointment.id == appointment_id,
+            Appointment.client_id == client_id,
+        ).first()
+        if not appointment:
+            raise AppointmentNotFoundError(f"Appointment {appointment_id} not found")
+
+        normalized_current = self.normalize_visit_status(appointment.status)
+        if not self.can_transition_to_visit_status(normalized_current, normalized_target):
+            raise InvalidAppointmentTransitionError(normalized_current, normalized_target)
+
+        now = datetime.now(timezone.utc)
+        previous_version = int(appointment.version or 0)
+        is_idempotent = normalized_current == normalized_target
+
+        if not is_idempotent:
+            appointment.status = normalized_target
+            appointment.version = previous_version + 1
+            appointment.updated_at = now
+            if reason:
+                appointment.notes = f"{appointment.notes or ''}\nStatus note: {reason}".strip()
+            if normalized_target in {"COMPLETED", "NO_SHOW"}:
+                mark_pending_reminders_failed(
+                    self.db,
+                    appointment_id=appointment.id,
+                    reason=normalized_target.lower(),
+                    commit=False,
+                )
+
+        visit = self._upsert_visit_fact(
+            appointment=appointment,
+            target_status=normalized_target,
+            actor_id=actor_id,
+            now=now,
+            reason=reason,
+        )
+
+        audit_entry = AppointmentAudit(
+            appointment=appointment,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            channel=channel,
+            action="status_update_idempotent" if is_idempotent else "status_update",
+            prev_status=normalized_current,
+            new_status=normalized_target,
+            prev_version=previous_version,
+            new_version=appointment.version,
+            payload={
+                "reason": reason,
+                "visit_id": str(visit.id),
+                "idempotent": is_idempotent,
+            },
+            trace_id=trace_id,
+            correlation_id=correlation_id,
+        )
+        self.db.add(audit_entry)
+
+        if commit:
+            self.db.commit()
+        else:
+            self.db.flush()
+        self.db.refresh(appointment)
         return appointment
 
     def get_appointments(

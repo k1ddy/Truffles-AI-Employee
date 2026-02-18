@@ -9,6 +9,7 @@ UI entry points
 Roles
 - Read: platform_admin, owner, admin, manager.
 - Write (create booking): platform_admin, owner, admin, manager.
+- Write (visit status update): platform_admin, owner, admin, manager.
 
 Layout
 - Header with title, guidance, and link back to Inbox.
@@ -28,6 +29,9 @@ Key UI elements
   - Create booking and cancel buttons.
 - Bookings list:
   - Time range, status badge, specialist name, customer details, service.
+  - Status actions:
+    - `CONFIRMED`/`RESCHEDULE_REQUESTED` -> `CHECKED_IN` or `NO_SHOW`
+    - `CHECKED_IN` -> `COMPLETED`
 
 Behavior
 - Default date is set to the user's local date (no UTC shift).
@@ -39,17 +43,19 @@ API endpoints used
 - Slots: `GET /calendar/slots?specialist_id=...&date=...&duration=...`.
 - Bookings list: `GET /calendar/bookings?date_from=...&date_to=...`.
 - Create booking: `POST /calendar/bookings`.
+- Update booking visit status: `POST /calendar/bookings/{booking_id}/status`.
 
 Backend handlers
 - `truffles-api/app/routers/calendar.py`:
-  - `list_specialists`, `get_slots`, `list_bookings`, `create_booking`.
+  - `list_specialists`, `get_slots`, `list_bookings`, `create_booking`, `update_booking_status`.
 
 Data sources
-- `specialists`, `appointments`, `appointment_services`, `appointment_sync_state`.
+- `specialists`, `appointments`, `appointment_services`, `appointment_sync_state`, `visits`, `appointment_audit`.
 - `SchedulingService` computes slots and creates bookings.
 
 System interactions
 - Booking creation uses `SchedulingService.create_appointment` with conflict checks.
+- Booking status mutation uses `SchedulingService.update_appointment_status` with transition guard, `visits` upsert, and `appointment_audit` write.
 - Errors surfaced as `BOOKING_CONFLICT` when slot is taken.
 
 Related code
