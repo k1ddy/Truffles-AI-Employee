@@ -1679,6 +1679,46 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /calendar/bookings/{booking_id}/no-show-followup:
+    parameters:
+      - $ref: "#/components/parameters/client_id_header"
+      - $ref: "#/components/parameters/branch_id_header"
+      - name: booking_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: registerCalendarBookingNoShowFollowup
+      tags: [calendar]
+      summary: Record no-show follow-up action
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookingNoShowFollowUpRequest"
+      responses:
+        "200":
+          description: Booking no-show follow-up recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /calendar/google/connect:
     parameters:
       - $ref: "#/components/parameters/client_id_header"
@@ -5881,6 +5921,8 @@ components:
         - arrived_visits_today
         - no_show_visits_today
         - cancelled_visits_today
+        - reminder_delivery_failures_today
+        - no_show_followup_pending
         - outbox_backlog
         - outbox_failed_24h
         - pending_cases
@@ -5907,6 +5949,10 @@ components:
         arrival_rate_percent:
           type: number
           nullable: true
+        reminder_delivery_failures_today:
+          type: integer
+        no_show_followup_pending:
+          type: integer
         outbox_backlog:
           type: integer
         outbox_failed_24h:
@@ -8104,6 +8150,14 @@ components:
           type: string
           enum: [COMPLETED, NO_SHOW]
         reason:
+          type: string
+          nullable: true
+          maxLength: 500
+
+    BookingNoShowFollowUpRequest:
+      type: object
+      properties:
+        note:
           type: string
           nullable: true
           maxLength: 500

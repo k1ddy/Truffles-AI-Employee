@@ -32,6 +32,7 @@ Key UI elements
   - Status actions:
     - `PENDING_CONFIRMATION`/`CONFIRMED`/`RESCHEDULE_REQUESTED`/`HOLD` -> `COMPLETED` (`Пришел`) or `NO_SHOW`
     - `CHECKED_IN` (legacy row) -> `COMPLETED` (`Пришел`) or `NO_SHOW`
+    - `NO_SHOW` -> follow-up action `Связаться / перезаписать` (фиксируется в audit, статус визита не меняется)
 
 Behavior
 - Default date is set to the user's local date (no UTC shift).
@@ -44,6 +45,7 @@ API endpoints used
 - Bookings list: `GET /calendar/bookings?date_from=...&date_to=...`.
 - Create booking: `POST /calendar/bookings`.
 - Update booking visit status: `POST /calendar/bookings/{booking_id}/status`.
+- Record no-show follow-up: `POST /calendar/bookings/{booking_id}/no-show-followup`.
 
 Backend handlers
 - `truffles-api/app/routers/calendar.py`:
@@ -57,6 +59,7 @@ System interactions
 - Booking creation uses `SchedulingService.create_appointment` with conflict checks.
 - Booking status mutation uses `SchedulingService.update_appointment_status` with transition guard, `visits` upsert, and `appointment_audit` write.
 - In the operator UX, `Пришел` is a terminal outcome and maps directly to `COMPLETED` (separate check-in step is removed).
+- For `NO_SHOW`, manager follow-up is tracked via `appointment_audit.action=no_show_followup`.
 - Errors surfaced as `BOOKING_CONFLICT` when slot is taken.
 
 Related code

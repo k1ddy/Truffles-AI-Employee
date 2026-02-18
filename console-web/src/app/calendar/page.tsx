@@ -56,6 +56,10 @@ interface BookingStatusUpdateRequest {
     reason?: string;
 }
 
+interface BookingNoShowFollowUpRequest {
+    note?: string;
+}
+
 interface BookingActionResponse {
     success: boolean;
     booking: Booking;
@@ -84,6 +88,14 @@ async function createBooking(data: BookingCreateRequest): Promise<BookingActionR
 
 async function updateBookingStatus(bookingId: string, data: BookingStatusUpdateRequest): Promise<BookingActionResponse> {
     const response = await api.post(`/calendar/bookings/${bookingId}/status`, data);
+    return response.data;
+}
+
+async function registerNoShowFollowUp(
+    bookingId: string,
+    data: BookingNoShowFollowUpRequest = {},
+): Promise<BookingActionResponse> {
+    const response = await api.post(`/calendar/bookings/${bookingId}/no-show-followup`, data);
     return response.data;
 }
 
@@ -134,6 +146,7 @@ export default function CalendarPage() {
     const [showForm, setShowForm] = useState(false);
     const [showPastDates, setShowPastDates] = useState(false);
     const [statusUpdateBookingId, setStatusUpdateBookingId] = useState<string | null>(null);
+    const [followUpBookingId, setFollowUpBookingId] = useState<string | null>(null);
 
     // Queries
     const { data: specialistsData, isError: specialistsError, error: specialistsErrorData } = useQuery({
@@ -207,6 +220,28 @@ export default function CalendarPage() {
         },
         onSettled: () => {
             setStatusUpdateBookingId(null);
+        },
+    });
+
+    const followUpMutation = useMutation({
+        mutationFn: async (payload: { bookingId: string }) => {
+            setFollowUpBookingId(payload.bookingId);
+            return registerNoShowFollowUp(payload.bookingId, {});
+        },
+        onSuccess: () => {
+            toast.success("Неявка передана менеджеру в follow-up");
+            queryClient.invalidateQueries({ queryKey: ["bookings"] });
+        },
+        onError: (error: unknown) => {
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            if (code === "BOOKING_STATUS_REQUIRED") {
+                toast.error("Follow-up доступен только для статуса 'Не пришел'");
+            } else {
+                toast.error("Не удалось зафиксировать follow-up");
+            }
+        },
+        onSettled: () => {
+            setFollowUpBookingId(null);
         },
     });
 
@@ -588,6 +623,20 @@ export default function CalendarPage() {
                                                         </button>
                                                     );
                                                 })}
+                                            </div>
+                                        )}
+                                        {canWriteCalendar && booking.status.toUpperCase() === "NO_SHOW" && (
+                                            <div className="mt-2 flex flex-wrap gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => followUpMutation.mutate({ bookingId: booking.id })}
+                                                    disabled={followUpMutation.isPending && followUpBookingId === booking.id}
+                                                    className="px-2.5 py-1.5 rounded-md border border-border/70 text-xs font-medium hover:bg-background disabled:opacity-50"
+                                                >
+                                                    {followUpMutation.isPending && followUpBookingId === booking.id
+                                                        ? "Фиксируем..."
+                                                        : "Связаться / перезаписать"}
+                                                </button>
                                             </div>
                                         )}
                                     </div>

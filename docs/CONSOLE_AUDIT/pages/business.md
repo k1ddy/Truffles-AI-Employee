@@ -19,6 +19,7 @@ Sections
   - plain-language status label.
 - KPI cards:
   - visits today: planned, arrived, no-show, cancelled, arrival rate.
+  - operations today: reminder delivery failures, no-show without manager follow-up.
   - outbox backlog + failed 24h,
   - unresolved cases (`pending` + `active`),
   - response speed (`first_response_p90_seconds`) + oldest unresolved age.
@@ -38,6 +39,8 @@ Backend handlers
 
 Data sources
 - `appointments` (today outcomes: planned/arrived/no-show/cancelled + arrival rate).
+- `appointment_audit` (no-show follow-up progress).
+- `reminder_jobs` (today reminder delivery failures).
 - `outbox_messages` (backlog, failed 24h).
 - `handovers` (+ `conversations` when branch scope is restricted).
 - `metrics_analytics_daily` (latest `first_response_p90_seconds`).

@@ -478,3 +478,4 @@
 | 2026-02-18-wave1-visit-fact-pipeline-a88 | active | feat/2026-02-18-wave1-visit-fact-pipeline-a88 | /home/zhan/worktrees/2026-02-18-wave1-visit-fact-pipeline-a88 | docs/TASK_PACKAGES/TP-2026-02-18-wave1-visit-fact-pipeline-a88.md | 2026-02-18 |
 | 2026-02-18-session-root-main-a88 | active | feat/2026-02-18-session-root-main-a88 | /home/zhan/worktrees/2026-02-18-session-root-main-a88 | docs/TASK_PACKAGES/TP-2026-01-27-session-governance.md | 2026-02-18 |
 | 2026-02-18-wave2-reminder-control-plane-a88 | active | feat/2026-02-18-wave2-reminder-control-plane-a88 | /home/zhan/worktrees/worktrees/2026-02-18-wave2-reminder-control-plane-a88 | docs/TASK_PACKAGES/TP-2026-02-18-wave2-reminder-control-plane-a88.md | 2026-02-18T20:10:00Z |
+| 2026-02-18-wave2-noshow-ops-a88 | active | feat/2026-02-18-wave2-noshow-ops-a88 | /home/zhan/worktrees/2026-02-18-wave2-noshow-ops-a88 | docs/TASK_PACKAGES/TP-2026-02-18-wave2-noshow-ops-a88.md | 2026-02-18 |

@@ -547,6 +547,8 @@ export type BusinessSummaryResponse = {
     no_show_visits_today: number;
     cancelled_visits_today: number;
     arrival_rate_percent?: number | null;
+    reminder_delivery_failures_today: number;
+    no_show_followup_pending: number;
     outbox_backlog: number;
     outbox_failed_24h: number;
     pending_cases: number;

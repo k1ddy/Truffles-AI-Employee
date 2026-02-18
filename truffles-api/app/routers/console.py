@@ -47,6 +47,7 @@ from app.models import (
     ConsoleMacro as ConsoleMacroModel,
 )
 from app.models.appointment import Appointment
+from app.models.appointment_audit import AppointmentAudit
 from app.models.reminder_job import ReminderJob
 from app.schemas.capabilities import CAPABILITIES_SCHEMA_VERSION, CapabilitiesPayload
 from app.schemas.console import (
@@ -6550,6 +6551,19 @@ def _summarize_daily_visit_outcomes(status_rows: list[object]) -> tuple[int, int
     )
 
 
+def _compute_no_show_followup_pending(
+    no_show_appointment_ids: list[UUID],
+    followup_appointment_ids: list[UUID],
+) -> int:
+    no_show_set = {appointment_id for appointment_id in no_show_appointment_ids if appointment_id}
+    if not no_show_set:
+        return 0
+    followed_up_set = {
+        appointment_id for appointment_id in followup_appointment_ids if appointment_id in no_show_set
+    }
+    return max(0, len(no_show_set) - len(followed_up_set))
+
+
 @router.get(
     "/business/summary",
     response_model=ConsoleBusinessSummaryResponse,
@@ -6665,6 +6679,60 @@ async def get_business_summary(
         effective_planned_today,
         arrival_rate_percent,
     ) = _summarize_daily_visit_outcomes(appointment_status_rows)
+    reminder_failures_query = db.query(ReminderJob).filter(
+        ReminderJob.client_id == context.client.id,
+        ReminderJob.status == "FAILED",
+        ReminderJob.updated_at >= day_start,
+        ReminderJob.updated_at < day_end,
+    )
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            reminder_delivery_failures_today = 0
+        else:
+            reminder_delivery_failures_today = reminder_failures_query.filter(
+                ReminderJob.branch_id.in_(allowed_branch_ids)
+            ).count()
+    else:
+        reminder_delivery_failures_today = reminder_failures_query.count()
+
+    no_show_query = db.query(Appointment.id).filter(
+        Appointment.client_id == context.client.id,
+        Appointment.status == "NO_SHOW",
+        Appointment.start_at >= day_start,
+        Appointment.start_at < day_end,
+    )
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            no_show_appointment_ids: list[UUID] = []
+        else:
+            no_show_appointment_ids = [
+                row[0]
+                for row in no_show_query.filter(Appointment.branch_id.in_(allowed_branch_ids)).all()
+                if row and row[0]
+            ]
+    else:
+        no_show_appointment_ids = [row[0] for row in no_show_query.all() if row and row[0]]
+
+    followup_appointment_ids: list[UUID] = []
+    if no_show_appointment_ids:
+        followup_appointment_ids = [
+            row[0]
+            for row in (
+                db.query(AppointmentAudit.appointment_id)
+                .filter(
+                    AppointmentAudit.appointment_id.in_(no_show_appointment_ids),
+                    AppointmentAudit.action == "no_show_followup",
+                )
+                .distinct()
+                .all()
+            )
+            if row and row[0]
+        ]
+
+    no_show_followup_pending = _compute_no_show_followup_pending(
+        no_show_appointment_ids,
+        followup_appointment_ids,
+    )
 
     analytics_row = db.execute(
         text(
@@ -6701,6 +6769,34 @@ async def get_business_summary(
         unresolved_cases=unresolved_cases,
         first_response_p90_seconds=first_response_p90_seconds,
     )
+    if reminder_delivery_failures_today > 0:
+        actions.insert(
+            0,
+            ConsoleBusinessActionItem(
+                id="reminder_delivery_failures",
+                severity="critical" if reminder_delivery_failures_today >= 10 else "warn",
+                title="Проверьте сбои напоминаний",
+                description=(
+                    f"Сегодня напоминания завершились ошибкой {reminder_delivery_failures_today} раз. "
+                    "Проверьте Ops reminders."
+                ),
+                href="/ops",
+            ),
+        )
+    if no_show_followup_pending > 0:
+        actions.insert(
+            0,
+            ConsoleBusinessActionItem(
+                id="no_show_followup_pending",
+                severity="critical" if no_show_followup_pending >= 5 else "warn",
+                title="Разберите неявки без follow-up",
+                description=(
+                    f"По {no_show_followup_pending} неявкам еще нет действия менеджера. "
+                    "Откройте календарь и обработайте клиентов."
+                ),
+                href="/calendar",
+            ),
+        )
     if effective_planned_today >= 5 and no_show_visits_today > 0:
         no_show_rate = no_show_visits_today / effective_planned_today
         if no_show_rate >= 0.3:
@@ -6804,6 +6900,20 @@ async def get_business_summary(
             sample_size=effective_planned_today if arrival_rate_percent is not None else None,
             note="no planned visits today" if arrival_rate_percent is None else None,
         ),
+        "reminder_delivery_failures_today": _build_metric_meta(
+            kind="fact",
+            source="reminder_jobs",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=reminder_delivery_failures_today,
+        ),
+        "no_show_followup_pending": _build_metric_meta(
+            kind="fact",
+            source="appointments+appointment_audit",
+            as_of=now.isoformat(),
+            scope=scope,
+            sample_size=no_show_followup_pending,
+        ),
     }
 
     return ConsoleBusinessSummaryResponse(
@@ -6815,6 +6925,8 @@ async def get_business_summary(
         no_show_visits_today=no_show_visits_today,
         cancelled_visits_today=cancelled_visits_today,
         arrival_rate_percent=arrival_rate_percent,
+        reminder_delivery_failures_today=reminder_delivery_failures_today,
+        no_show_followup_pending=no_show_followup_pending,
         outbox_backlog=outbox_backlog,
         outbox_failed_24h=outbox_failed_24h,
         pending_cases=pending_cases,

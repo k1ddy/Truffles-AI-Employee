@@ -489,6 +489,18 @@ def test_summarize_daily_visit_outcomes_uses_terminal_business_counts() -> None:
     assert arrival_rate_percent == pytest.approx(36.4, abs=0.01)
 
 
+def test_compute_no_show_followup_pending_deduplicates_and_bounds() -> None:
+    a = uuid4()
+    b = uuid4()
+    c = uuid4()
+    pending = console_router._compute_no_show_followup_pending(
+        [a, b, c, a],
+        [a, a, uuid4()],
+    )
+
+    assert pending == 2
+
+
 def test_apply_console_settings_update_maps_public_fields_to_model_columns() -> None:
     settings = SimpleNamespace(
         reminder_timeout_1=30,
