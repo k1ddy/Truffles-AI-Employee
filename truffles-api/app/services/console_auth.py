@@ -53,7 +53,7 @@ _role_priority = {
 }
 _console_rbac_matrix: dict[str, dict[str, tuple[str, ...]]] = {
     "inbox": {
-        "read": ("platform_admin", "owner", "admin", "manager", "support", "viewer"),
+        "read": ("platform_admin", "owner", "admin", "manager", "viewer"),
         "write": ("platform_admin", "owner", "admin", "manager"),
     },
     "knowledge": {
@@ -65,23 +65,23 @@ _console_rbac_matrix: dict[str, dict[str, tuple[str, ...]]] = {
         "write": ("platform_admin", "owner", "admin"),
     },
     "calendar": {
-        "read": ("platform_admin", "owner", "admin", "manager", "specialist", "viewer"),
-        "write": ("platform_admin", "owner", "admin", "manager", "specialist"),
+        "read": ("platform_admin", "owner", "admin", "manager", "viewer"),
+        "write": ("platform_admin", "owner", "admin", "manager"),
     },
     "settings": {
         "read": ("platform_admin", "owner", "admin"),
         "write": ("platform_admin", "owner", "admin"),
     },
     "ops": {
-        "read": ("platform_admin", "owner", "admin", "support"),
+        "read": ("platform_admin", "owner", "admin"),
         "write": ("platform_admin", "owner", "admin"),
     },
     "audit": {
-        "read": ("platform_admin", "owner", "admin", "support", "viewer"),
+        "read": ("platform_admin", "owner", "admin", "viewer"),
         "write": (),
     },
     "provisioning": {
-        "read": ("platform_admin", "owner", "admin", "support"),
+        "read": ("platform_admin", "owner", "admin"),
         "write": ("platform_admin", "owner", "admin"),
     },
     "integrations": {

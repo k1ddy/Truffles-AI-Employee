@@ -1,0 +1,25 @@
+# SESSION 2026-02-18-role-simplification-support-specialist-a99 — Session 2026-02-18-role-simplification-support-specialist-a99
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-18-role-simplification-support-specialist-a99.md
+- branch: feat/2026-02-18-role-simplification-support-specialist-a99
+- worktree: /home/zhan/worktrees/2026-02-18-role-simplification-support-specialist-a99
+- base_ref: origin/main
+- scope: Упростить tenant role management — убрать `support/specialist` из assignable ролей в API/UI, не затрагивая calendar specialist domain.
+- done:
+  - Session created.
+  - Backend guardrails добавлены: `create_agent`, `create_branch bootstrap_accounts`, `membership create/update` блокируют `support/specialist`; `manager` остаётся единственной ролью с обязательным `branch_id`.
+  - RBAC матрицы backend/frontend синхронизированы: `support/specialist` убраны из разрешённых доступов (`inbox/calendar/ops/audit/provisioning`).
+  - UI упрощён: в Provisioning и Team role selectors оставлены `owner/admin/manager/viewer` (без `support/specialist`), тексты/валидации обновлены под manager-only branch requirement.
+  - Тесты обновлены и расширены для deprecated role guardrails (create_agent/bootstrap/membership + RBAC assertions).
+- next:
+  - Подготовить PR и передать Brain/Top Architect на merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-18-role-simplification-support-specialist-a99.md
+  - `pytest -q truffles-api/tests/test_console_access_admin_pr2.py` → `40 passed`
+  - `pytest -q truffles-api/tests/test_console_rbac.py` → `38 passed`
+  - `ruff check truffles-api/app/routers/console.py truffles-api/app/services/console_auth.py truffles-api/tests/test_console_access_admin_pr2.py truffles-api/tests/test_console_rbac.py` → `All checks passed`
+  - `python3 truffles-api/scripts/generate_openapi.py --check` → passed
+  - Frontend checks blocked locally: `npm --prefix console-web run lint ...` (`next: not found`), `npx --prefix console-web tsc ...` (`typescript not installed`)
+- last_updated: 2026-02-18

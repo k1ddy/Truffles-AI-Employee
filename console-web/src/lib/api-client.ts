@@ -89,7 +89,7 @@ export type ConsoleAction = "read" | "write";
 
 export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRole[]>> = {
     inbox: {
-        read: ["platform_admin", "owner", "admin", "manager", "support", "viewer"],
+        read: ["platform_admin", "owner", "admin", "manager", "viewer"],
         write: ["platform_admin", "owner", "admin", "manager"],
     },
     knowledge: {
@@ -101,8 +101,8 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
         write: ["platform_admin", "owner", "admin"],
     },
     calendar: {
-        read: ["platform_admin", "owner", "admin", "manager", "specialist", "viewer"],
-        write: ["platform_admin", "owner", "admin", "manager", "specialist"],
+        read: ["platform_admin", "owner", "admin", "manager", "viewer"],
+        write: ["platform_admin", "owner", "admin", "manager"],
     },
     insights: {
         read: ["platform_admin", "owner", "admin"],
@@ -121,11 +121,11 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
         write: ["platform_admin", "owner", "admin"],
     },
     ops: {
-        read: ["platform_admin", "owner", "admin", "support"],
+        read: ["platform_admin", "owner", "admin"],
         write: ["platform_admin", "owner", "admin"],
     },
     audit: {
-        read: ["platform_admin", "owner", "admin", "support", "viewer"],
+        read: ["platform_admin", "owner", "admin", "viewer"],
         write: [],
     },
     integrations: {
@@ -137,7 +137,7 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
         write: ["platform_admin"],
     },
     provisioning: {
-        read: ["platform_admin", "owner", "admin", "support"],
+        read: ["platform_admin", "owner", "admin"],
         write: ["platform_admin", "owner", "admin"],
     },
 };

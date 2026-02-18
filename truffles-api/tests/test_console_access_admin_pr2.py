@@ -197,9 +197,9 @@ async def test_create_agent_provisions_sso_user_and_binds_subject(monkeypatch):
         request=Mock(),
         body=ConsoleAgentCreateRequest(
             client_id=client_id,
-            role="support",
-            name="Support User",
-            sso_username="support.user",
+            role="owner",
+            name="Owner User",
+            sso_username="owner.user",
             sso_password="Password123",
             sso_temp_password=False,
         ),
@@ -207,12 +207,46 @@ async def test_create_agent_provisions_sso_user_and_binds_subject(monkeypatch):
     )
 
     assert response.agent.client_id == client_id
-    assert response.agent.role == "support"
+    assert response.agent.role == "owner"
     assert created["oidc_subject"] == "keycloak-sub-123"
     assert created["linked_from"] == "admin_api"
-    assert sso_calls["username"] == "support.user"
+    assert sso_calls["username"] == "owner.user"
     assert sso_calls["password"] == "Password123"
     assert sso_calls["temporary_password"] is False
+
+
+@pytest.mark.parametrize("deprecated_role", ["support", "specialist"])
+@pytest.mark.asyncio
+async def test_create_agent_rejects_deprecated_roles(monkeypatch, deprecated_role: str):
+    client_id = uuid4()
+    company_id = uuid4()
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(id=client_id, company_id=company_id)
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=client_id, company_id=company_id)],
+            client_id=client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.create_agent(
+            request=Mock(),
+            body=ConsoleAgentCreateRequest(
+                client_id=client_id,
+                role=deprecated_role,
+                name="Deprecated Role",
+            ),
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert "deprecated for assignment" in exc_info.value.message
 
 
 def test_resolve_keycloak_admin_config_accepts_non_console_username_password_aliases(monkeypatch):
@@ -361,6 +395,44 @@ async def test_create_branch_bootstrap_accounts_return_created_agents(monkeypatc
     assert helper_calls[1]["role"] == "manager"
     assert helper_calls[1]["branch_id"] == response.branch.id
     db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_branch_rejects_deprecated_bootstrap_role(monkeypatch):
+    client_id = uuid4()
+    company_id = uuid4()
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(id=client_id, company_id=company_id)
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=client_id, company_id=company_id)],
+            client_id=client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "_ensure_unique_branch_field", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.create_branch(
+            request=Mock(),
+            body=ConsoleBranchCreateRequest(
+                client_id=client_id,
+                slug="branch-deprecated-role",
+                name="Branch Deprecated Role",
+                is_active=False,
+                bootstrap_accounts=[
+                    ConsoleBranchBootstrapAccountTemplate(role="support", name="Support User"),
+                ],
+            ),
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert "deprecated for assignment" in exc_info.value.message
 
 
 @pytest.mark.asyncio
@@ -1094,6 +1166,14 @@ def test_membership_role_guard_rejects_platform_admin():
     with pytest.raises(ConsoleAPIError) as exc_info:
         console_router._ensure_membership_role_is_assignable("platform_admin")
     assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.parametrize("deprecated_role", ["support", "specialist"])
+def test_membership_role_guard_rejects_deprecated_roles(deprecated_role: str):
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._ensure_membership_role_is_assignable(deprecated_role)
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert "deprecated for assignment" in exc_info.value.message
 
 
 def test_membership_agent_guard_rejects_platform_admin_agent():
