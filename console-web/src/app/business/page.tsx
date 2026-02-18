@@ -86,6 +86,22 @@ function severityLabel(severity: "critical" | "warn" | "info"): string {
     return "Планово";
 }
 
+function incidentReasonHint(reasonCode: IncidentItem["reason_code"]): string | null {
+    if (reasonCode === "provider_billing_blocked") {
+        return "Оплата/тариф у провайдера заблокированы: сообщения не отправятся, пока не будет подтверждена оплата.";
+    }
+    if (reasonCode === "provider_unavailable") {
+        return "Сервис провайдера недоступен: это технический outage, а не проблема оплаты.";
+    }
+    if (reasonCode === "provider_auth") {
+        return "Ошибка авторизации у провайдера: проверьте токены, webhook и instance binding.";
+    }
+    if (reasonCode === "provider_rate_limited") {
+        return "Провайдер ограничил скорость/объём запросов: нужна пауза или распределение очереди.";
+    }
+    return null;
+}
+
 type BusinessNowStep = {
     id: string;
     title: string;
@@ -379,31 +395,39 @@ export default function BusinessPage() {
                     <p className="text-sm text-muted-foreground">Критичных инцидентов не найдено. Продолжайте ежедневный контроль.</p>
                 ) : (
                     <div className="space-y-3">
-                        {incidentsData.items.map((incident) => (
-                            <article key={incident.id} className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid={`business-incident-${incident.id}`}>
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <p className="text-sm font-semibold">{incident.title}</p>
-                                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${incidentChipClass(incident.severity)}`}>
-                                        {incident.severity}
-                                    </span>
-                                </div>
-                                <p className="mt-1 text-xs text-muted-foreground">{incident.reason_label}</p>
-                                <p className="mt-1 text-xs text-muted-foreground">{incident.summary}</p>
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                    {incident.actions.map((action) => (
-                                        action.href ? (
-                                            <Link key={action.id} href={action.href} className="btn-ghost text-xs">
-                                                {action.title}
-                                            </Link>
-                                        ) : (
-                                            <span key={action.id} className="rounded-full border border-border/60 px-2 py-1 text-[11px] text-muted-foreground">
-                                                {action.title} {action.job_type ? `(${action.job_type}:${action.mode})` : ""}
-                                            </span>
-                                        )
-                                    ))}
-                                </div>
-                            </article>
-                        ))}
+                        {incidentsData.items.map((incident) => {
+                            const reasonHint = incidentReasonHint(incident.reason_code);
+                            return (
+                                <article key={incident.id} className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid={`business-incident-${incident.id}`}>
+                                    {reasonHint && (
+                                        <p className="mb-2 rounded-md border border-border/60 bg-background px-2 py-1 text-[11px] text-muted-foreground">
+                                            {reasonHint}
+                                        </p>
+                                    )}
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <p className="text-sm font-semibold">{incident.title}</p>
+                                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${incidentChipClass(incident.severity)}`}>
+                                            {incident.severity}
+                                        </span>
+                                    </div>
+                                    <p className="mt-1 text-xs text-muted-foreground">{incident.reason_label}</p>
+                                    <p className="mt-1 text-xs text-muted-foreground">{incident.summary}</p>
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                        {incident.actions.map((action) => (
+                                            action.href ? (
+                                                <Link key={action.id} href={action.href} className="btn-ghost text-xs">
+                                                    {action.title}
+                                                </Link>
+                                            ) : (
+                                                <span key={action.id} className="rounded-full border border-border/60 px-2 py-1 text-[11px] text-muted-foreground">
+                                                    {action.title} {action.job_type ? `(${action.job_type}:${action.mode})` : ""}
+                                                </span>
+                                            )
+                                        ))}
+                                    </div>
+                                </article>
+                            );
+                        })}
                     </div>
                 )}
             </section>

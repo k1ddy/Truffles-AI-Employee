@@ -375,7 +375,6 @@ class TestEscalateToPending:
         assert media_refs
         assert media_refs[0].get("source") == "recent_message_history"
         assert media_refs[0].get("public_url") == "https://example.com/recent-photo.jpg"
-
     def test_fails_from_wrong_state(self):
         db = Mock()
         conversation = Mock()

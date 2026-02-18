@@ -2739,6 +2739,19 @@ MEMORY_PROFILE_ENABLED = os.environ.get("MEMORY_PROFILE_ENABLED", "").strip().lo
     "true",
     "yes",
 }
+MEMORY_POLICY_RETRIEVAL_MAX_ITEMS = max(
+    int(os.environ.get("MEMORY_POLICY_RETRIEVAL_MAX_ITEMS", "4")),
+    1,
+)
+MEMORY_POLICY_RETRIEVAL_MAX_VALUE_CHARS = max(
+    int(os.environ.get("MEMORY_POLICY_RETRIEVAL_MAX_VALUE_CHARS", "120")),
+    40,
+)
+MEMORY_POLICY_RETRIEVAL_MIN_TOKEN_LEN = max(
+    int(os.environ.get("MEMORY_POLICY_RETRIEVAL_MIN_TOKEN_LEN", "2")),
+    1,
+)
+MEMORY_POLICY_RETRIEVAL_BLOCKED_KEYS = {"phone", "customer_phone", "contact_phone"}
 
 MSG_BOOKING_ASK_SERVICE = "На какую услугу хотите записаться?"
 MSG_BOOKING_ASK_DATETIME = "На какую дату и время вам удобно?"
@@ -6192,6 +6205,172 @@ async def _handle_webhook_payload(
             }
         return candidates
 
+    def _tokenize_memory_terms(value: str | None) -> set[str]:
+        if not isinstance(value, str) or not value.strip():
+            return set()
+        normalized = _normalize_text(value)
+        if not normalized:
+            return set()
+        return {
+            token
+            for token in normalized.split()
+            if len(token) >= MEMORY_POLICY_RETRIEVAL_MIN_TOKEN_LEN and not token.isdigit()
+        }
+
+    def _parse_memory_profile_item_time(value: Any) -> datetime | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            parsed = datetime.fromisoformat(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+
+    def _retrieve_memory_profile_items(
+        *,
+        memory_items: dict[str, Any],
+        message_text: str | None,
+        current_goal: str | None,
+        expected_reply_type: str | None,
+        now: datetime,
+    ) -> list[dict[str, str]]:
+        query_tokens = _tokenize_memory_terms(message_text)
+        expected_reply_hints: dict[str, set[str]] = {
+            EXPECTED_REPLY_SERVICE: {"service", "preferred", "услуг"},
+            EXPECTED_REPLY_TIME: {"time", "datetime", "врем"},
+            EXPECTED_REPLY_NAME: {"name", "имя"},
+        }
+        expected_hint_tokens = expected_reply_hints.get(expected_reply_type or "", set())
+        goal_normalized = (
+            current_goal.strip().casefold()
+            if isinstance(current_goal, str) and current_goal.strip()
+            else None
+        )
+        scored_rows: list[tuple[float, float, str, dict[str, str]]] = []
+        for raw_key, raw_item in memory_items.items():
+            if not isinstance(raw_key, str) or not isinstance(raw_item, dict):
+                continue
+            key = raw_key.strip().casefold()
+            if not key or key in MEMORY_POLICY_RETRIEVAL_BLOCKED_KEYS:
+                continue
+            raw_value = raw_item.get("value")
+            if not isinstance(raw_value, str) or not raw_value.strip():
+                continue
+            value = " ".join(raw_value.split())
+            if not value:
+                continue
+            value = value[:MEMORY_POLICY_RETRIEVAL_MAX_VALUE_CHARS]
+            key_tokens = _tokenize_memory_terms(key.replace("_", " "))
+            value_tokens = _tokenize_memory_terms(value)
+            candidate_tokens = key_tokens | value_tokens
+            score = 0.0
+            if query_tokens and candidate_tokens:
+                overlap = query_tokens & candidate_tokens
+                if overlap:
+                    score += 2.0 + min(float(len(overlap)) * 0.4, 1.2)
+            if expected_hint_tokens and key_tokens:
+                if key_tokens & expected_hint_tokens:
+                    score += 1.1
+            if goal_normalized == "booking" and (
+                key.startswith("preferred_") or key in {"name", "preferred_time", "preferred_service"}
+            ):
+                score += 0.35
+            source = raw_item.get("source")
+            if isinstance(source, str) and source.strip().casefold() == "booking_slot":
+                score += 0.2
+            confidence = raw_item.get("confidence")
+            if isinstance(confidence, (int, float)):
+                score += max(0.0, min(float(confidence), 1.0)) * 0.2
+
+            item_time = _parse_memory_profile_item_time(raw_item.get("updated_at"))
+            if item_time is None:
+                item_time = _parse_memory_profile_item_time(raw_item.get("captured_at"))
+            ts_value = item_time.timestamp() if item_time else 0.0
+            if item_time:
+                age_seconds = max((now - item_time).total_seconds(), 0.0)
+                age_days = age_seconds / 86400.0
+                score += max(0.0, 1.0 - min(age_days / 30.0, 1.0)) * 0.2
+            if score <= 0:
+                continue
+            item: dict[str, str] = {"key": key[:80], "value": value}
+            if isinstance(source, str) and source.strip():
+                item["source"] = source.strip().casefold()[:24]
+            scored_rows.append((score, ts_value, key, item))
+        if not scored_rows:
+            return []
+        scored_rows.sort(key=lambda row: (-row[0], -row[1], row[2]))
+        return [
+            row[3] for row in scored_rows[:MEMORY_POLICY_RETRIEVAL_MAX_ITEMS]
+        ]
+
+    def _build_policy_memory_profile_payload(
+        *,
+        context: dict,
+        booking_state: dict[str, Any] | None,
+        message_text: str | None,
+        current_goal: str | None,
+        expected_reply_type: str | None,
+        now: datetime,
+    ) -> tuple[dict[str, Any] | None, list[str]]:
+        profile, _ = _get_memory_profile(context, now=now)
+        if not isinstance(profile, dict):
+            return None, []
+        payload: dict[str, Any] = {}
+        retrieved_keys: list[str] = []
+
+        consent = profile.get("consent")
+        consent_status = None
+        if isinstance(consent, dict):
+            raw_status = consent.get("status")
+            if isinstance(raw_status, str) and raw_status.strip():
+                consent_status = raw_status.strip().casefold()
+        if consent_status:
+            payload["consent_status"] = consent_status
+
+        memory_items = profile.get("items")
+        stored_keys: list[str] = []
+        if isinstance(memory_items, dict):
+            for key in sorted(memory_items.keys()):
+                if isinstance(key, str) and key.strip():
+                    stored_keys.append(key.strip())
+        if stored_keys:
+            payload["stored_keys"] = stored_keys
+
+        if isinstance(current_goal, str) and current_goal.strip():
+            payload["active_goal"] = current_goal.strip().casefold()
+
+        if expected_reply_type in {
+            EXPECTED_REPLY_SERVICE,
+            EXPECTED_REPLY_TIME,
+            EXPECTED_REPLY_NAME,
+        }:
+            payload["expected_reply_type"] = expected_reply_type
+
+        active_slots: list[str] = []
+        if isinstance(booking_state, dict):
+            for slot_key in BOOKING_SLOT_ORDER:
+                value = booking_state.get(slot_key)
+                if isinstance(value, str) and value.strip():
+                    active_slots.append(slot_key)
+        if active_slots:
+            payload["active_slots"] = active_slots
+
+        if consent_status == "granted" and isinstance(memory_items, dict):
+            retrieved_items = _retrieve_memory_profile_items(
+                memory_items=memory_items,
+                message_text=message_text,
+                current_goal=current_goal,
+                expected_reply_type=expected_reply_type,
+                now=now,
+            )
+            if retrieved_items:
+                payload["retrieved_items"] = retrieved_items
+                retrieved_keys = [item["key"] for item in retrieved_items if isinstance(item, dict) and item.get("key")]
+
+        return payload or None, retrieved_keys
+
     def _upsert_memory_item(
         *,
         items: dict[str, dict],
@@ -6360,6 +6539,18 @@ async def _handle_webhook_payload(
                 _update_message_decision_metadata(
                     saved_message,
                     {"memory_profile_stored": sorted(set(stored_keys))},
+                )
+            if {
+                "name",
+                "preferred_service",
+                "preferred_time",
+                "language",
+            } & set(stored_keys):
+                _update_compact_summary(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    reason="memory_profile",
+                    now=now,
                 )
         return response_text
 
@@ -6620,32 +6811,14 @@ async def _handle_webhook_payload(
         summary_text_seed = compact_summary_seed.get("text")
         if isinstance(summary_text_seed, str) and summary_text_seed.strip():
             policy_memory_summary_seed = summary_text_seed.strip()
-    policy_memory_profile_seed = None
-    memory_profile_seed, _ = _get_memory_profile(context, now=now)
-    if isinstance(memory_profile_seed, dict):
-        consent_seed = memory_profile_seed.get("consent")
-        consent_status_seed = None
-        if isinstance(consent_seed, dict):
-            raw_status_seed = consent_seed.get("status")
-            if isinstance(raw_status_seed, str) and raw_status_seed.strip():
-                consent_status_seed = raw_status_seed.strip()
-        memory_items_seed = memory_profile_seed.get("items")
-        stored_keys_seed: list[str] = []
-        if isinstance(memory_items_seed, dict):
-            for key in sorted(memory_items_seed.keys()):
-                if isinstance(key, str) and key.strip():
-                    stored_keys_seed.append(key.strip())
-        memory_active_goal_seed = None
-        if isinstance(current_goal, str) and current_goal.strip():
-            memory_active_goal_seed = current_goal.strip()
-        if consent_status_seed or stored_keys_seed or memory_active_goal_seed:
-            policy_memory_profile_seed = {}
-            if consent_status_seed:
-                policy_memory_profile_seed["consent_status"] = consent_status_seed
-            if stored_keys_seed:
-                policy_memory_profile_seed["stored_keys"] = stored_keys_seed
-            if memory_active_goal_seed:
-                policy_memory_profile_seed["active_goal"] = memory_active_goal_seed
+    policy_memory_profile_seed, policy_memory_retrieved_keys_seed = _build_policy_memory_profile_payload(
+        context=context,
+        booking_state=_get_booking_context(context),
+        message_text=message_text,
+        current_goal=current_goal,
+        expected_reply_type=expected_reply_type,
+        now=now,
+    )
 
     # 4.5 Branch routing (instance_id -> branch, or ask user)
     branch_response = _handle_branch_selection_gate(
@@ -7662,37 +7835,27 @@ async def _handle_webhook_payload(
                 summary_text = compact_summary.get("text")
                 if isinstance(summary_text, str) and summary_text.strip():
                     policy_memory_summary = summary_text.strip()
+        policy_memory_retrieved_keys: list[str] = []
         policy_memory_profile = (
             dict(policy_memory_profile_seed)
             if isinstance(policy_memory_profile_seed, dict)
             else None
         )
+        if isinstance(policy_memory_retrieved_keys_seed, list):
+            policy_memory_retrieved_keys = [
+                item.strip()
+                for item in policy_memory_retrieved_keys_seed
+                if isinstance(item, str) and item.strip()
+            ]
         if not policy_memory_profile:
-            memory_profile, _ = _get_memory_profile(context, now=now)
-            if isinstance(memory_profile, dict):
-                consent = memory_profile.get("consent")
-                consent_status = None
-                if isinstance(consent, dict):
-                    raw_status = consent.get("status")
-                    if isinstance(raw_status, str) and raw_status.strip():
-                        consent_status = raw_status.strip()
-                memory_items = memory_profile.get("items")
-                stored_keys: list[str] = []
-                if isinstance(memory_items, dict):
-                    for key in sorted(memory_items.keys()):
-                        if isinstance(key, str) and key.strip():
-                            stored_keys.append(key.strip())
-                memory_active_goal = None
-                if isinstance(current_goal, str) and current_goal.strip():
-                    memory_active_goal = current_goal.strip()
-                if consent_status or stored_keys or memory_active_goal:
-                    policy_memory_profile = {}
-                    if consent_status:
-                        policy_memory_profile["consent_status"] = consent_status
-                    if stored_keys:
-                        policy_memory_profile["stored_keys"] = stored_keys
-                    if memory_active_goal:
-                        policy_memory_profile["active_goal"] = memory_active_goal
+            policy_memory_profile, policy_memory_retrieved_keys = _build_policy_memory_profile_payload(
+                context=context,
+                booking_state=booking if isinstance(booking, dict) else None,
+                message_text=message_text,
+                current_goal=current_goal,
+                expected_reply_type=expected_reply_type,
+                now=now,
+            )
         if expected_reply_type in {
             EXPECTED_REPLY_SERVICE,
             EXPECTED_REPLY_TIME,
@@ -7713,6 +7876,14 @@ async def _handle_webhook_payload(
             if not isinstance(policy_memory_profile, dict):
                 policy_memory_profile = {}
             policy_memory_profile["active_slots"] = active_slots
+        if isinstance(policy_memory_profile, dict):
+            raw_retrieved = policy_memory_profile.get("retrieved_items")
+            if isinstance(raw_retrieved, list):
+                policy_memory_retrieved_keys = [
+                    str(item.get("key")).strip()
+                    for item in raw_retrieved
+                    if isinstance(item, dict) and isinstance(item.get("key"), str) and item.get("key").strip()
+                ]
         info_refs = sorted(INFO_INTENTS)
         consult_refs, consult_refs_error = _collect_plan_consult_refs(payload.client_slug)
         policy_result = route_llm_policy_core(
@@ -8116,6 +8287,8 @@ async def _handle_webhook_payload(
                 if isinstance(policy_memory_profile, dict)
                 else []
             ),
+            "memory_profile_retrieved_keys": policy_memory_retrieved_keys,
+            "memory_profile_retrieved_count": len(policy_memory_retrieved_keys),
             "memory_expected_reply_type": (
                 policy_memory_profile.get("expected_reply_type")
                 if isinstance(policy_memory_profile, dict)
@@ -8152,6 +8325,8 @@ async def _handle_webhook_payload(
                 "action_normalized": policy_action_normalized,
                 "memory_summary_used": bool(policy_memory_summary),
                 "memory_profile_used": bool(policy_memory_profile),
+                "memory_profile_retrieved_keys": policy_memory_retrieved_keys,
+                "memory_profile_retrieved_count": len(policy_memory_retrieved_keys),
                 "memory_expected_reply_type": (
                     policy_memory_profile.get("expected_reply_type")
                     if isinstance(policy_memory_profile, dict)

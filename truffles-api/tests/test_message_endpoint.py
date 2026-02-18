@@ -6820,7 +6820,7 @@ def test_llm_policy_core_receives_memory_hints_and_writes_meta():
     payload = WebhookRequest(
         client_slug="demo_salon",
         body=WebhookBody(
-            message="Сколько стоит?",
+            message="Хочу к мастеру Алия",
             messageType="text",
             metadata=WebhookMetadata(
                 remoteJid="77000000000@s.whatsapp.net",
@@ -6897,6 +6897,9 @@ def test_llm_policy_core_receives_memory_hints_and_writes_meta():
         "parking_preference",
         "preferred_master",
     ]
+    assert captured_kwargs.get("memory_profile", {}).get("retrieved_items") == [
+        {"key": "preferred_master", "value": "Алия"},
+    ]
     meta = saved_message.message_metadata.get("decision_meta", {})
     llm_policy_meta = meta.get("llm_policy_core", {})
     assert llm_policy_meta.get("memory_summary_used") is True
@@ -6905,6 +6908,8 @@ def test_llm_policy_core_receives_memory_hints_and_writes_meta():
         "parking_preference",
         "preferred_master",
     ]
+    assert llm_policy_meta.get("memory_profile_retrieved_keys") == ["preferred_master"]
+    assert llm_policy_meta.get("memory_profile_retrieved_count") == 1
 
 
 def test_llm_policy_core_normalizes_action_from_tool_action(monkeypatch):

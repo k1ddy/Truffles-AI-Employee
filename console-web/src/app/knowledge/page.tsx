@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import axios from "axios";
@@ -19,6 +20,7 @@ import {
 import { useErrorHandler } from "@/lib/api-hooks";
 import AccessDenied from "@/components/AccessDenied";
 import api from "@/lib/api";
+import { writeConsoleContextScopeToStorage } from "@/lib/console-context-storage";
 import type { components } from "@/types/api.generated";
 
 type SessionData = ReturnType<typeof useSession>["data"];
@@ -60,10 +62,6 @@ type SpecialistSummary = {
     services?: Array<Record<string, unknown>>;
     is_active?: boolean;
 };
-
-const COMPANY_ID_STORAGE_KEY = "console:company_id";
-const CLIENT_ID_STORAGE_KEY = "console:client_id";
-const BRANCH_ID_STORAGE_KEY = "console:branch_id";
 
 const KNOWLEDGE_STEPS = [
     { id: "draft", label: "Draft", hint: "редактирование" },
@@ -159,15 +157,38 @@ function extractHistoryItems(value: unknown): KnowledgeHistoryItem[] {
     return items as KnowledgeHistoryItem[];
 }
 
-function setLocalStorageValue(key: string, value?: string | null) {
-    if (typeof window === "undefined") {
-        return;
+function extractApiErrorMessage(error: unknown): string | null {
+    if (!axios.isAxiosError(error)) {
+        return null;
     }
-    if (!value) {
-        window.localStorage.removeItem(key);
-        return;
+    const payload = error.response?.data as { error?: { message?: unknown } } | undefined;
+    const message = payload?.error?.message;
+    if (typeof message !== "string") {
+        return null;
     }
-    window.localStorage.setItem(key, value);
+    const trimmed = message.trim();
+    return trimmed || null;
+}
+
+function resolveKnowledgeActionErrorMessage(error: unknown): string {
+    if (isGatewayLikeError(error)) {
+        return "Сервис знаний временно недоступен (gateway). Повторите позже или проверьте OPS.";
+    }
+    const code = extractApiErrorCode(error);
+    if (code === "CLIENT_SELECTION_REQUIRED") {
+        return "Выберите клиента в контексте Console и повторите.";
+    }
+    if (code === "BRANCH_SELECTION_REQUIRED") {
+        return "Выберите филиал в контексте Console и повторите.";
+    }
+    const apiMessage = extractApiErrorMessage(error);
+    if (apiMessage) {
+        return apiMessage;
+    }
+    if (error instanceof Error && error.message.trim()) {
+        return error.message;
+    }
+    return "Не удалось выполнить действие. Проверьте контекст и попробуйте снова.";
 }
 
 function parseOptionalJson(value: string, label: string): { value?: Record<string, unknown>; error?: string } {
@@ -1094,6 +1115,17 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                 setApiUnavailable(true);
                 return;
             }
+            if (isGatewayLikeError(error)) {
+                const message = resolveKnowledgeActionErrorMessage(error);
+                setGatewayError(message);
+                toast.error(message);
+                return;
+            }
+            const code = extractApiErrorCode(error);
+            if (code === "CLIENT_SELECTION_REQUIRED" || code === "BRANCH_SELECTION_REQUIRED") {
+                toast.error(resolveKnowledgeActionErrorMessage(error));
+                return;
+            }
             handleError(error);
         },
     });
@@ -1114,9 +1146,20 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                 setApiUnavailable(true);
                 return;
             }
+            if (isGatewayLikeError(error)) {
+                const message = resolveKnowledgeActionErrorMessage(error);
+                setGatewayError(message);
+                toast.error(message);
+                return;
+            }
             if (extractApiErrorCode(error) === "KNOWLEDGE_PREFLIGHT_REQUIRED") {
                 toast.error("Сначала выполните Validate для текущего draft, затем Publish.");
                 setStepIndex(1);
+                return;
+            }
+            const code = extractApiErrorCode(error);
+            if (code === "CLIENT_SELECTION_REQUIRED" || code === "BRANCH_SELECTION_REQUIRED") {
+                toast.error(resolveKnowledgeActionErrorMessage(error));
                 return;
             }
             handleError(error);
@@ -1146,6 +1189,12 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         onError: (error) => {
             if (isApiUnavailable(error)) {
                 setApiUnavailable(true);
+                return;
+            }
+            if (isGatewayLikeError(error)) {
+                const message = resolveKnowledgeActionErrorMessage(error);
+                setGatewayError(message);
+                toast.error(message);
                 return;
             }
             handleError(error);
@@ -1207,7 +1256,10 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             }
         },
         onError: (error) => {
-            const message = error instanceof Error ? error.message : "Не удалось применить изменения";
+            const message = resolveKnowledgeActionErrorMessage(error);
+            if (isGatewayLikeError(error)) {
+                setGatewayError(message);
+            }
             toast.error(message);
         },
     });
@@ -1242,9 +1294,11 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
         setIsApplyingFleetContext(true);
         setGatewayError(null);
         try {
-            setLocalStorageValue(COMPANY_ID_STORAGE_KEY, companyId ?? null);
-            setLocalStorageValue(CLIENT_ID_STORAGE_KEY, clientId ?? null);
-            setLocalStorageValue(BRANCH_ID_STORAGE_KEY, nextBranchId ?? null);
+            writeConsoleContextScopeToStorage({
+                companyId: companyId ?? "",
+                clientId: clientId ?? "",
+                branchId: nextBranchId ?? "",
+            });
             await queryClient.invalidateQueries({ queryKey: ["console-me"] });
             await queryClient.refetchQueries({ queryKey: ["console-me"], exact: true });
             await queryClient.invalidateQueries({ queryKey: ["knowledge-current"] });
@@ -1864,8 +1918,16 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
                             ))}
                         </select>
                     ) : (
-                        <div className="rounded-lg border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
-                            Нет доступных филиалов.
+                        <div className="space-y-3 rounded-lg border border-border bg-muted px-3 py-3 text-sm text-muted-foreground">
+                            <p>Нет доступных филиалов в текущем контексте.</p>
+                            <p className="text-xs">
+                                Проверьте выбранного клиента в верхней панели или откройте Workspace и активируйте филиал.
+                            </p>
+                            <div>
+                                <Link href="/company-workspace" className="btn-ghost text-xs">
+                                    Открыть Workspace
+                                </Link>
+                            </div>
                         </div>
                     )}
                     <div className="mt-6 flex justify-end">

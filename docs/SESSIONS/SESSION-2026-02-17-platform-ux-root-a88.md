@@ -1,0 +1,24 @@
+# SESSION 2026-02-17-platform-ux-root-a88 — Console Platform UX Root
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-17-platform-ux-root-a88.md
+- branch: fix/2026-02-17-platform-ux-root-a88
+- worktree: /tmp/truffles-main-platform-ux-root
+- base_ref: origin/main
+- scope: ConsoleShell UX clarity + navigation performance without backend contract changes.
+- done:
+  - Identified root UX defect: single-branch + `selected_branch_id=null` rendered as `—`.
+  - Implemented fallback label logic for client/branch context.
+  - Added platform-admin active-scope hint in context bar.
+  - Switched sidebar navigation from full reload to client-side `router.push`.
+  - Tuned `/console/v1/me` query options (`staleTime`, `refetchOnWindowFocus`).
+  - Ran `npm run lint` and `npm run build` in `console-web` with success.
+- next:
+  - Prepare commit with session artifacts.
+  - Push branch and open PR.
+- evidence:
+  - console-web lint/build logs (local)
+  - `console-web/src/components/ConsoleShell.tsx` diff
+  - docs/TASK_PACKAGES/TP-2026-02-17-platform-ux-root-a88.md
+- last_updated: 2026-02-17

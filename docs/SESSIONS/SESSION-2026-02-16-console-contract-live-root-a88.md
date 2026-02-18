@@ -1,0 +1,21 @@
+# SESSION 2026-02-16-console-contract-live-root-a88 — console-contract-live root cause fix
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-16-console-contract-live-root-a88.md
+- branch: fix/2026-02-16-console-contract-live-root-a88
+- worktree: /tmp/fix-console-contract-live-root-1771285761
+- base_ref: origin/main
+- scope: Fix incorrect env export in CI (`\\n` vs `\n`) that corrupted `SCHEMATHESIS_TOKEN` and dropped `SCHEMATHESIS_TOKEN_SOURCE` in `console-contract-live`.
+- done:
+  - Confirmed root cause from failing run logs (`token_source=unknown`, `/console/v1/me -> 401`).
+  - Patched env writes in `.github/workflows/ci.yml` to use real newline separators.
+  - Validated workflow YAML parse and session gate.
+- next:
+  - Push branch and open PR.
+  - Verify `console-contract-live` on PR/main CI.
+- evidence:
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22080707510
+  - .github/workflows/ci.yml
+  - docs/TASK_PACKAGES/TP-2026-02-16-console-contract-live-root-a88.md
+- last_updated: 2026-02-16T23:56:00Z

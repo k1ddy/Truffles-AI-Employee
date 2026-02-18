@@ -198,6 +198,10 @@ POLICY_CORE_MICRO_MIN_REMAINING_MS = max(
     float(os.environ.get("LLM_POLICY_CORE_MICRO_MIN_REMAINING_MS", "350")),
     0.0,
 )
+POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS = max(
+    int(os.environ.get("LLM_POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS", "120")),
+    40,
+)
 ANSWER_INTERPRETER_TIMEOUT_SECONDS = float(
     os.environ.get("ANSWER_INTERPRETER_TIMEOUT_SECONDS", "2.5")
 )
@@ -361,6 +365,36 @@ def _normalize_policy_core_memory_profile(profile: dict[str, Any] | None) -> dic
             seen_keys.add(key)
         if cleaned_keys:
             normalized["stored_keys"] = cleaned_keys
+    retrieved_items = profile.get("retrieved_items")
+    if isinstance(retrieved_items, list):
+        cleaned_items: list[dict[str, str]] = []
+        seen_items: set[tuple[str, str]] = set()
+        for raw_item in retrieved_items:
+            if len(cleaned_items) >= POLICY_CORE_MEMORY_PROFILE_MAX_ITEMS:
+                break
+            if not isinstance(raw_item, dict):
+                continue
+            raw_key = raw_item.get("key")
+            raw_value = raw_item.get("value")
+            if not isinstance(raw_key, str) or not isinstance(raw_value, str):
+                continue
+            key = raw_key.strip()
+            value = " ".join(raw_value.split())
+            if not key or not value:
+                continue
+            key = key[:80]
+            value = value[:POLICY_CORE_MEMORY_PROFILE_ITEM_MAX_CHARS]
+            fingerprint = (key, value)
+            if fingerprint in seen_items:
+                continue
+            item_payload = {"key": key, "value": value}
+            raw_source = raw_item.get("source")
+            if isinstance(raw_source, str) and raw_source.strip():
+                item_payload["source"] = raw_source.strip().casefold()[:24]
+            cleaned_items.append(item_payload)
+            seen_items.add(fingerprint)
+        if cleaned_items:
+            normalized["retrieved_items"] = cleaned_items
     return normalized or None
 
 
