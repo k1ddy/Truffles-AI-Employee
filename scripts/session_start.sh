@@ -48,6 +48,23 @@ done
 
 repo_root=$(git rev-parse --show-toplevel)
 repo_parent=$(dirname "$repo_root")
+canonical_repo_root="${TRUFFLES_CANONICAL_REPO_ROOT:-/home/zhan/truffles-main}"
+session_lease_hours="${SESSION_LEASE_HOURS:-24}"
+now_ts=$(date +%s)
+
+if ! [[ "$session_lease_hours" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: SESSION_LEASE_HOURS must be an integer (got '${session_lease_hours}')." >&2
+  exit 1
+fi
+
+if [[ "$repo_root" == "$canonical_repo_root" ]]; then
+  current_branch=$(git -C "$repo_root" rev-parse --abbrev-ref HEAD)
+  if [[ "$current_branch" != "main" && "$current_branch" != "master" ]]; then
+    echo "ERROR: Canonical repo root must stay on main/master before starting a session." >&2
+    echo "Run: cd ${repo_root} && git checkout main" >&2
+    exit 1
+  fi
+fi
 
 if [[ -z "$session_id" ]]; then
   echo "ERROR: --session-id is required (format: YYYY-MM-DD-<slug>-<agent>)." >&2
@@ -62,6 +79,12 @@ fi
 
 branch=${branch:-"feat/${session_id}"}
 worktree=${worktree:-"${repo_parent}/worktrees/${session_id}"}
+
+if [[ "$worktree" == "$repo_root" ]]; then
+  echo "ERROR: worktree must not be canonical repo root (${repo_root})." >&2
+  echo "Use a dedicated worktree under ${repo_parent}/worktrees/." >&2
+  exit 1
+fi
 
 if [[ -z "$title" ]]; then
   title="Session ${session_id}"
@@ -110,20 +133,75 @@ fi
 
 index_file_root="$repo_root/docs/SESSION_INDEX.md"
 if [[ -f "$index_file_root" ]]; then
-  open_matches=$(awk -F'|' -v agent="$agent" '
+  open_matches_raw=$(awk -F'|' -v agent="$agent" '
     function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
     /^\|/ {
-      sid=trim($2); status=trim($3); worktree=trim($5);
+      sid=trim($2); status=trim($3); branch=trim($4); worktree=trim($5); last_updated=trim($7);
       if (sid=="" || sid=="session_id") next;
-      if (status=="done") next;
-      if (sid ~ "-"agent"$") { print sid "|" status "|" worktree; }
+      if (status!="active") next;
+      if (sid ~ "-"agent"$") { print sid "|" status "|" branch "|" worktree "|" last_updated; }
     }
   ' "$index_file_root")
+
+  open_matches=""
+  stale_matches=""
+  if [[ -n "$open_matches_raw" ]]; then
+    while IFS='|' read -r sid status sid_branch sid_worktree sid_last_updated; do
+      [[ -z "$sid" ]] && continue
+      stale_reasons=""
+
+      if [[ ! -d "$sid_worktree" ]]; then
+        stale_reasons="worktree_missing"
+      fi
+      if ! git -C "$repo_root" show-ref --verify --quiet "refs/heads/${sid_branch}"; then
+        stale_reasons="${stale_reasons:+${stale_reasons},}branch_missing"
+      fi
+
+      session_file="$repo_root/docs/SESSIONS/SESSION-${sid}.md"
+      ref_last_updated="$sid_last_updated"
+      if [[ -f "$session_file" ]]; then
+        file_last_updated=$(grep -E "^- last_updated: " "$session_file" | head -n1 | sed 's/^- last_updated: //' || true)
+        if [[ -n "$file_last_updated" ]]; then
+          ref_last_updated="$file_last_updated"
+        fi
+      fi
+
+      if [[ -z "$ref_last_updated" ]]; then
+        stale_reasons="${stale_reasons:+${stale_reasons},}last_updated_missing"
+      else
+        if parsed_ts=$(date -d "$ref_last_updated" +%s 2>/dev/null); then
+          age_hours=$(( (now_ts - parsed_ts) / 3600 ))
+          if (( age_hours > session_lease_hours )); then
+            stale_reasons="${stale_reasons:+${stale_reasons},}stale_${age_hours}h"
+          fi
+        else
+          stale_reasons="${stale_reasons:+${stale_reasons},}last_updated_invalid"
+        fi
+      fi
+
+      if [[ -n "$stale_reasons" ]]; then
+        stale_matches+="${sid}|${status}|${sid_worktree}|${sid_branch}|${stale_reasons}"$'\n'
+        continue
+      fi
+
+      open_matches+="${sid}|${status}|${sid_worktree}|${sid_branch}"$'\n'
+    done <<< "$open_matches_raw"
+  fi
+
+  if [[ -n "$stale_matches" ]]; then
+    echo "WARN: stale active sessions ignored for '-${agent}' (lease=${session_lease_hours}h):" >&2
+    while IFS='|' read -r sid status wt br reasons; do
+      [[ -z "$sid" ]] && continue
+      echo "  - ${sid} (${status}) ${wt} ${br} [${reasons}]" >&2
+    done <<< "$stale_matches"
+    echo "Hint: run scripts/session_audit.sh for governance cleanup." >&2
+  fi
+
   if [[ -n "$open_matches" && "$force_new" != "true" ]]; then
     echo "ERROR: Open session exists for agent suffix '-${agent}'." >&2
-    while IFS='|' read -r sid status wt; do
+    while IFS='|' read -r sid status wt br; do
       [[ -z "$sid" ]] && continue
-      echo "  - ${sid} (${status}) ${wt}" >&2
+      echo "  - ${sid} (${status}) ${wt} ${br}" >&2
     done <<< "$open_matches"
     echo "Resume with: scripts/session_resume.sh --agent ${agent}" >&2
     echo "Or pass --force-new if you intentionally start a parallel session for ${agent}." >&2
