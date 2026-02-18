@@ -5068,7 +5068,7 @@ def _llm_quality_evaluate_turn(
     *,
     meta,
     trace_entries,
-    trace_error,
+    trace_error=None,
     state,
     conv_meta,
     handover_meta,
