@@ -91,11 +91,13 @@ class SchedulingService:
         "RESCHEDULE_REQUESTED",
         "CHECKED_IN",
     }
-    VISIT_STATUSES = {"CHECKED_IN", "COMPLETED", "NO_SHOW"}
+    VISIT_STATUSES = {"COMPLETED", "NO_SHOW"}
     VISIT_TRANSITIONS = {
-        "CONFIRMED": {"CHECKED_IN", "COMPLETED", "NO_SHOW"},
-        "RESCHEDULE_REQUESTED": {"CHECKED_IN", "COMPLETED", "NO_SHOW"},
-        "CHECKED_IN": {"COMPLETED"},
+        "HOLD": {"COMPLETED", "NO_SHOW"},
+        "PENDING_CONFIRMATION": {"COMPLETED", "NO_SHOW"},
+        "CONFIRMED": {"COMPLETED", "NO_SHOW"},
+        "RESCHEDULE_REQUESTED": {"COMPLETED", "NO_SHOW"},
+        "CHECKED_IN": {"COMPLETED", "NO_SHOW"},
     }
 
     def __init__(self, db: Session):

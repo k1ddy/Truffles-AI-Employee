@@ -776,7 +776,7 @@ async def update_booking_status(
     data: BookingStatusUpdateRequest,
     db: Session = Depends(get_db)
 ):
-    """Update booking visit status (checked_in/completed/no_show)."""
+    """Update booking visit status (completed/no_show)."""
     context = get_console_context(request, db)
     require_console_permission(context, "calendar", "write")
 
@@ -802,7 +802,7 @@ async def update_booking_status(
         raise ConsoleAPIError(
             400,
             "INVALID_STATUS",
-            "Status must be one of: checked_in, completed, no_show",
+            "Status must be one of: completed, no_show",
             details={"status": exc.status},
         )
     except InvalidAppointmentTransitionError as exc:

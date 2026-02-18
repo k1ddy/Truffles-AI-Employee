@@ -463,6 +463,32 @@ def test_summarize_owner_operation_delta_states() -> None:
     assert mixed == "mixed_or_stable"
 
 
+def test_summarize_daily_visit_outcomes_uses_terminal_business_counts() -> None:
+    rows = [
+        SimpleNamespace(status="PENDING_CONFIRMATION", count=5),
+        SimpleNamespace(status="COMPLETED", count=3),
+        SimpleNamespace(status="CHECKED_IN", count=1),
+        SimpleNamespace(status="NO_SHOW", count=2),
+        SimpleNamespace(status="CANCELLED", count=1),
+    ]
+
+    (
+        scheduled_visits_today,
+        arrived_visits_today,
+        no_show_visits_today,
+        cancelled_visits_today,
+        effective_planned_today,
+        arrival_rate_percent,
+    ) = console_router._summarize_daily_visit_outcomes(rows)
+
+    assert scheduled_visits_today == 12
+    assert arrived_visits_today == 4
+    assert no_show_visits_today == 2
+    assert cancelled_visits_today == 1
+    assert effective_planned_today == 11
+    assert arrival_rate_percent == pytest.approx(36.4, abs=0.01)
+
+
 def test_apply_console_settings_update_maps_public_fields_to_model_columns() -> None:
     settings = SimpleNamespace(
         reminder_timeout_1=30,

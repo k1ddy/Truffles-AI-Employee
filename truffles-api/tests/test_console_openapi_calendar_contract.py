@@ -56,3 +56,12 @@ def test_calendar_schemas_are_present_in_console_openapi_contract() -> None:
 
     for schema_name in required_schemas:
         assert schema_name in schemas, f"missing schema in console contract: {schema_name}"
+
+
+def test_booking_status_update_contract_uses_simple_terminal_statuses() -> None:
+    spec = _load_console_contract()
+    schemas = ((spec.get("components") or {}).get("schemas")) or {}
+    booking_status_schema = schemas.get("BookingStatusUpdateRequest") or {}
+    status_schema = (booking_status_schema.get("properties") or {}).get("status") or {}
+
+    assert status_schema.get("enum") == ["COMPLETED", "NO_SHOW"]

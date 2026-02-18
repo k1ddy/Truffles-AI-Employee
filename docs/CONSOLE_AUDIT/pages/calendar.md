@@ -30,8 +30,8 @@ Key UI elements
 - Bookings list:
   - Time range, status badge, specialist name, customer details, service.
   - Status actions:
-    - `CONFIRMED`/`RESCHEDULE_REQUESTED` -> `CHECKED_IN` or `NO_SHOW`
-    - `CHECKED_IN` -> `COMPLETED`
+    - `PENDING_CONFIRMATION`/`CONFIRMED`/`RESCHEDULE_REQUESTED`/`HOLD` -> `COMPLETED` (`Пришел`) or `NO_SHOW`
+    - `CHECKED_IN` (legacy row) -> `COMPLETED` (`Пришел`) or `NO_SHOW`
 
 Behavior
 - Default date is set to the user's local date (no UTC shift).
@@ -56,6 +56,7 @@ Data sources
 System interactions
 - Booking creation uses `SchedulingService.create_appointment` with conflict checks.
 - Booking status mutation uses `SchedulingService.update_appointment_status` with transition guard, `visits` upsert, and `appointment_audit` write.
+- In the operator UX, `Пришел` is a terminal outcome and maps directly to `COMPLETED` (separate check-in step is removed).
 - Errors surfaced as `BOOKING_CONFLICT` when slot is taken.
 
 Related code

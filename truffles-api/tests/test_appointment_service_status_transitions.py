@@ -38,11 +38,12 @@ def _build_db(*, appointment, visit):
 
 
 def test_visit_transition_matrix_allows_expected_paths():
-    assert SchedulingService.can_transition_to_visit_status("CONFIRMED", "CHECKED_IN")
+    assert SchedulingService.can_transition_to_visit_status("PENDING_CONFIRMATION", "COMPLETED")
     assert SchedulingService.can_transition_to_visit_status("CONFIRMED", "NO_SHOW")
+    assert SchedulingService.can_transition_to_visit_status("RESCHEDULE_REQUESTED", "COMPLETED")
     assert SchedulingService.can_transition_to_visit_status("CHECKED_IN", "COMPLETED")
-    assert SchedulingService.can_transition_to_visit_status("CHECKED_IN", "CHECKED_IN")
-    assert not SchedulingService.can_transition_to_visit_status("CANCELLED", "CHECKED_IN")
+    assert SchedulingService.can_transition_to_visit_status("COMPLETED", "COMPLETED")
+    assert not SchedulingService.can_transition_to_visit_status("CANCELLED", "COMPLETED")
     assert not SchedulingService.can_transition_to_visit_status("NO_SHOW", "COMPLETED")
 
 
@@ -90,7 +91,7 @@ def test_update_appointment_status_rejects_invalid_transition():
         service.update_appointment_status(
             appointment_id=appointment.id,
             client_id=appointment.client_id,
-            target_status="CHECKED_IN",
+            target_status="COMPLETED",
             actor_id=uuid4(),
             commit=False,
         )
@@ -104,7 +105,7 @@ def test_update_appointment_status_creates_visit_and_audit():
         branch_id=uuid4(),
         specialist_id=uuid4(),
         user_id=None,
-        status="CONFIRMED",
+        status="PENDING_CONFIRMATION",
         version=3,
         notes=None,
         updated_at=None,
@@ -116,26 +117,27 @@ def test_update_appointment_status_creates_visit_and_audit():
         updated = service.update_appointment_status(
             appointment_id=appointment.id,
             client_id=client_id,
-            target_status="CHECKED_IN",
+            target_status="COMPLETED",
             actor_id=uuid4(),
-            reason="Клиент на месте",
+            reason="Пришел и обслужен",
             commit=False,
         )
 
-    assert updated.status == "CHECKED_IN"
+    assert updated.status == "COMPLETED"
     assert updated.version == 4
     assert updated.updated_at is not None
-    mark_failed.assert_not_called()
+    mark_failed.assert_called_once()
 
     added_rows = [call.args[0] for call in db.add.call_args_list]
     visit_rows = [row for row in added_rows if isinstance(row, Visit)]
     audit_rows = [row for row in added_rows if isinstance(row, AppointmentAudit)]
     assert len(visit_rows) == 1
     assert len(audit_rows) == 1
-    assert visit_rows[0].status == "CHECKED_IN"
+    assert visit_rows[0].status == "COMPLETED"
     assert visit_rows[0].arrived_at is not None
+    assert visit_rows[0].completed_at is not None
     assert audit_rows[0].action == "status_update"
-    assert audit_rows[0].new_status == "CHECKED_IN"
+    assert audit_rows[0].new_status == "COMPLETED"
 
 
 def test_update_appointment_status_idempotent_keeps_version_and_marks_audit():
@@ -146,7 +148,7 @@ def test_update_appointment_status_idempotent_keeps_version_and_marks_audit():
         branch_id=uuid4(),
         specialist_id=uuid4(),
         user_id=None,
-        status="CHECKED_IN",
+        status="COMPLETED",
         version=5,
         notes=None,
         updated_at=datetime.now(timezone.utc),
@@ -158,9 +160,9 @@ def test_update_appointment_status_idempotent_keeps_version_and_marks_audit():
         branch_id=appointment.branch_id,
         specialist_id=appointment.specialist_id,
         user_id=None,
-        status="CHECKED_IN",
+        status="COMPLETED",
         arrived_at=datetime.now(timezone.utc),
-        completed_at=None,
+        completed_at=datetime.now(timezone.utc),
         visit_metadata={},
         created_by=None,
         created_at=datetime.now(timezone.utc),
@@ -172,12 +174,12 @@ def test_update_appointment_status_idempotent_keeps_version_and_marks_audit():
         updated = service.update_appointment_status(
             appointment_id=appointment.id,
             client_id=client_id,
-            target_status="CHECKED_IN",
+            target_status="COMPLETED",
             actor_id=uuid4(),
             commit=False,
         )
 
-    assert updated.status == "CHECKED_IN"
+    assert updated.status == "COMPLETED"
     assert updated.version == 5
     mark_failed.assert_not_called()
 

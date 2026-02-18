@@ -151,7 +151,7 @@ export function getBookingStatusLabel(status: string): string {
         checked_in: "клиент пришел",
         reschedule_requested: "нужен перенос",
         cancelled: "отменена",
-        completed: "завершена",
+        completed: "клиент пришел",
         no_show: "не пришёл",
     };
     return labels[normalized] || status;
@@ -169,7 +169,7 @@ export function getBookingStatusColor(status: string): string {
         checked_in: "bg-green-100 text-green-800",
         reschedule_requested: "bg-orange-100 text-orange-800",
         cancelled: "bg-muted text-muted-foreground",
-        completed: "bg-secondary text-secondary-foreground",
+        completed: "bg-green-100 text-green-800",
         no_show: "bg-red-100 text-red-800",
     };
     return colors[normalized] || "bg-muted text-muted-foreground";

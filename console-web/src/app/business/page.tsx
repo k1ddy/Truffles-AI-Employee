@@ -39,6 +39,13 @@ function formatSeconds(value?: number | null): string {
     return `${(minutes / 60).toFixed(1)} ч`;
 }
 
+function formatPercent(value?: number | null): string {
+    if (value === null || value === undefined || Number.isNaN(value)) {
+        return "—";
+    }
+    return `${value.toFixed(1)}%`;
+}
+
 function statusChipClass(status?: string | null): string {
     if (status === "unhealthy") {
         return "bg-red-100 text-red-800";
@@ -178,6 +185,19 @@ export default function BusinessPage() {
             return [];
         }
         const steps: BusinessNowStep[] = [];
+        const effectivePlanned = Math.max(0, data.scheduled_visits_today - data.cancelled_visits_today);
+        if (effectivePlanned >= 5 && data.no_show_visits_today > 0) {
+            const noShowRate = data.no_show_visits_today / effectivePlanned;
+            if (noShowRate >= 0.3) {
+                steps.push({
+                    id: "reduce_no_show",
+                    title: "Снизьте неявки по записям",
+                    summary: `Не пришли ${data.no_show_visits_today} из ${effectivePlanned} запланированных визитов.`,
+                    href: "/calendar",
+                    severity: noShowRate >= 0.5 ? "critical" : "warn",
+                });
+            }
+        }
 
         if (data.outbox_backlog >= 500 || data.outbox_failed_24h >= 30) {
             steps.push({
@@ -447,6 +467,34 @@ export default function BusinessPage() {
                     <p className="mt-1 text-2xl font-semibold text-foreground">{formatSeconds(data.first_response_p90_seconds)}</p>
                     <p className="text-xs text-muted-foreground">старейшая незавершенная: {formatMinutes(data.oldest_unresolved_minutes)}</p>
                     <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.first_response_p90_seconds)}</p>
+                </div>
+            </section>
+
+            <section className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-5" data-testid="business-visit-kpi-grid">
+                <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
+                    <p className="text-sm text-muted-foreground">Запланировано</p>
+                    <p className="mt-1 text-2xl font-semibold text-foreground">{data.scheduled_visits_today}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.scheduled_visits_today)}</p>
+                </div>
+                <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
+                    <p className="text-sm text-muted-foreground">Пришли</p>
+                    <p className="mt-1 text-2xl font-semibold text-foreground">{data.arrived_visits_today}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.arrived_visits_today)}</p>
+                </div>
+                <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
+                    <p className="text-sm text-muted-foreground">Не пришли</p>
+                    <p className="mt-1 text-2xl font-semibold text-foreground">{data.no_show_visits_today}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.no_show_visits_today)}</p>
+                </div>
+                <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
+                    <p className="text-sm text-muted-foreground">Отменены</p>
+                    <p className="mt-1 text-2xl font-semibold text-foreground">{data.cancelled_visits_today}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.cancelled_visits_today)}</p>
+                </div>
+                <div className="rounded-lg border border-border/60 bg-muted/30 p-4">
+                    <p className="text-sm text-muted-foreground">% прихода</p>
+                    <p className="mt-1 text-2xl font-semibold text-foreground">{formatPercent(data.arrival_rate_percent)}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">{formatMetricMeta(data.metric_meta?.arrival_rate_percent)}</p>
                 </div>
             </section>
 
