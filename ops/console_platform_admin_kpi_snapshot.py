@@ -39,6 +39,16 @@ SEVERITY_ORDER = {
     "critical": 3,
 }
 
+EXPECTED_EXTERNAL_BLOCK_PATTERNS = [
+    "chatflow_billing_blocked",
+    "billing blocked",
+    "plan renewal required",
+    "payment required",
+    "subscription expired",
+    "insufficient balance",
+    "unpaid",
+]
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Capture Platform Admin KPI snapshot")
@@ -53,6 +63,9 @@ def parse_args() -> argparse.Namespace:
         help="Admin version URL",
     )
     parser.add_argument("--timeout", type=float, default=10.0, help="HTTP timeout in seconds")
+    parser.add_argument("--postgres-container", default="truffles_postgres_1", help="Postgres container name")
+    parser.add_argument("--postgres-db", default="chatbot", help="Postgres database name")
+    parser.add_argument("--db-user", default=None, help="Postgres user override")
     parser.add_argument("--output", help="Output file path for JSON snapshot")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     parser.add_argument("--outbox-pending-warning", type=int, default=500, help="Outbox pending warning threshold")
@@ -200,13 +213,39 @@ def evaluate_outbox_guard(pending: Any, failed: Any, args: argparse.Namespace) -
         key=lambda item: SEVERITY_ORDER.get(item, 0),
     )
 
+    reason_breakdown = collect_outbox_reason_breakdown(args)
+    failed_class_totals = (
+        reason_breakdown.get("classification_by_status", {})
+        .get("FAILED", {})
+        if isinstance(reason_breakdown, dict)
+        else {}
+    )
+    failed_expected_external = int(failed_class_totals.get("expected_external_block", 0) or 0)
+    failed_unexpected = int(failed_class_totals.get("unexpected_failure", 0) or 0)
+
+    incident_class = "none"
+    if coerce_int(failed_value) and int(failed_value) > 0:
+        if failed_unexpected > 0:
+            incident_class = "runtime_incident"
+        elif failed_expected_external > 0:
+            incident_class = "external_block_only"
+        else:
+            incident_class = "unknown_failure_mix"
+
     guidance: list[str] = []
     if overall_status in {"warning", "critical"}:
-        guidance = [
-            "Проверить backlog outbox в Console Ops и зафиксировать trend за 24ч.",
-            "Запустить remediation runbook outbox и повторить snapshot после действий.",
-            "Если status=critical: stop-the-line для Platform Admin релизных решений.",
-        ]
+        if incident_class == "external_block_only":
+            guidance = [
+                "Отметить backlog как expected_external_block (billing/provider) и вести как бизнес-ограничение.",
+                "Не открывать runtime incident без unexpected_failure; эскалировать billing/account remediation.",
+                "Повторить snapshot после внешнего unblock и проверить нормализацию failed.",
+            ]
+        else:
+            guidance = [
+                "Проверить backlog outbox в Console Ops и зафиксировать trend за 24ч.",
+                "Запустить remediation runbook outbox и повторить snapshot после действий.",
+                "Если status=critical: stop-the-line для Platform Admin релизных решений.",
+            ]
     elif overall_status == "unknown":
         guidance = [
             "Не удалось извлечь outbox metrics из health payload; проверить доступность endpoint и формат ответа.",
@@ -214,6 +253,11 @@ def evaluate_outbox_guard(pending: Any, failed: Any, args: argparse.Namespace) -
 
     return {
         "status": overall_status,
+        "incident_class": incident_class,
+        "failed_reason_classes": {
+            "expected_external_block": failed_expected_external,
+            "unexpected_failure": failed_unexpected,
+        },
         "metrics": {
             "pending": {
                 "value": pending_value,
@@ -228,7 +272,136 @@ def evaluate_outbox_guard(pending: Any, failed: Any, args: argparse.Namespace) -
                 "critical_threshold": args.outbox_failed_critical,
             },
         },
+        "reason_breakdown": reason_breakdown,
         "guidance": guidance,
+    }
+
+
+def classify_outbox_reason(reason: str) -> str:
+    token = (reason or "").strip().casefold()
+    if not token or token == "(empty)":
+        return "unknown"
+    if any(pattern in token for pattern in EXPECTED_EXTERNAL_BLOCK_PATTERNS):
+        return "expected_external_block"
+    return "unexpected_failure"
+
+
+def resolve_db_user(args: argparse.Namespace) -> str:
+    if args.db_user:
+        return args.db_user
+    env_user = os.getenv("DB_USER")
+    if env_user:
+        return env_user
+    try:
+        detected = run_command(
+            [
+                "docker",
+                "exec",
+                "-i",
+                args.postgres_container,
+                "/bin/sh",
+                "-lc",
+                "printf '%s' \"${POSTGRES_USER:-postgres}\"",
+            ]
+        )
+        detected = detected.strip()
+        if detected:
+            return detected
+    except RuntimeError:
+        pass
+    return "postgres"
+
+
+def load_outbox_reason_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
+    db_user = resolve_db_user(args)
+    sql = (
+        "SELECT status, COALESCE(NULLIF(LEFT(last_error, 220), ''), '(empty)') AS reason, COUNT(*)::bigint "
+        "FROM outbox_messages "
+        "WHERE status IN ('FAILED', 'PENDING', 'PROCESSING') "
+        "GROUP BY status, reason "
+        "ORDER BY COUNT(*) DESC;"
+    )
+    completed = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            args.postgres_container,
+            "psql",
+            "-U",
+            db_user,
+            "-d",
+            args.postgres_db,
+            "-AtF",
+            "\t",
+            "-c",
+            sql,
+        ],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        stderr = (completed.stderr or "").strip()
+        raise RuntimeError(stderr or "psql failed")
+
+    rows: list[dict[str, Any]] = []
+    for line in completed.stdout.splitlines():
+        parts = line.strip().split("\t")
+        if len(parts) != 3:
+            continue
+        status, reason, count_str = parts
+        try:
+            count_value = int(count_str)
+        except ValueError:
+            continue
+        rows.append(
+            {
+                "status": status,
+                "reason": reason,
+                "count": count_value,
+                "class": classify_outbox_reason(reason),
+            }
+        )
+    return rows
+
+
+def collect_outbox_reason_breakdown(args: argparse.Namespace) -> dict[str, Any]:
+    try:
+        rows = load_outbox_reason_rows(args)
+    except Exception as exc:
+        return {
+            "status": "error",
+            "error": f"{type(exc).__name__}: {exc}",
+            "rows": [],
+            "classification_totals": {},
+            "status_totals": {},
+            "classification_by_status": {},
+        }
+
+    classification_totals: dict[str, int] = {}
+    status_totals: dict[str, int] = {}
+    classification_by_status: dict[str, dict[str, int]] = {}
+
+    for row in rows:
+        status = str(row.get("status") or "UNKNOWN")
+        reason_class = str(row.get("class") or "unknown")
+        count_value = int(row.get("count") or 0)
+
+        status_totals[status] = status_totals.get(status, 0) + count_value
+        classification_totals[reason_class] = classification_totals.get(reason_class, 0) + count_value
+
+        status_bucket = classification_by_status.setdefault(status, {})
+        status_bucket[reason_class] = status_bucket.get(reason_class, 0) + count_value
+
+    return {
+        "status": "ok",
+        "rows": rows[:20],
+        "rows_total": sum(item.get("count", 0) for item in rows),
+        "classification_totals": classification_totals,
+        "status_totals": status_totals,
+        "classification_by_status": classification_by_status,
     }
 
 

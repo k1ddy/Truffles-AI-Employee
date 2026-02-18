@@ -4,7 +4,7 @@
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-18-booking-handoff-merge-a88.md
 - branch: fix/2026-02-18-booking-handoff-merge-a88
-- worktree: /tmp/truffles-main-pr730-clean
+- worktree: /home/zhan/truffles-main
 - base_ref: origin/main
 - scope: Port and merge minimal booking followup/handoff gating fixes.
 - done:

@@ -21,6 +21,16 @@ SEVERITY_ORDER = {
     "critical": 3,
 }
 
+EXPECTED_EXTERNAL_BLOCK_PATTERNS = [
+    "chatflow_billing_blocked",
+    "billing blocked",
+    "plan renewal required",
+    "payment required",
+    "subscription expired",
+    "insufficient balance",
+    "unpaid",
+]
+
 DEFAULT_LOC_FILES = [
     "truffles-api/app/routers/console.py",
     "truffles-api/app/services/console_owner_admin.py",
@@ -37,6 +47,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     parser.add_argument("--baseline", help="Path to previous snapshot JSON for delta analysis")
     parser.add_argument("--timeout", type=float, default=20.0, help="Shell command timeout in seconds")
+    parser.add_argument("--postgres-container", default="truffles_postgres_1", help="Postgres container name")
+    parser.add_argument("--postgres-db", default="chatbot", help="Postgres database name")
+    parser.add_argument("--db-user", default=None, help="Postgres user override")
 
     parser.add_argument("--outbox-warning", type=int, default=500, help="outbox_backlog warning threshold")
     parser.add_argument("--outbox-critical", type=int, default=1000, help="outbox_backlog critical threshold")
@@ -132,7 +145,40 @@ def classify(value: float | None, warning_threshold: float, critical_threshold: 
     return "ok"
 
 
-def load_business_kpis(client_slug: str, timeout: float) -> dict[str, Any]:
+def resolve_db_user(args: argparse.Namespace, *, timeout: float) -> str:
+    if args.db_user:
+        return args.db_user
+    shell = (
+        "DB_USER=$(docker exec -i "
+        f"{shlex.quote(args.postgres_container)} /bin/sh -lc 'printf %s \"${{POSTGRES_USER:-postgres}}\"')\n"
+        "printf '%s' \"$DB_USER\""
+    )
+    try:
+        resolved = run_shell(shell, timeout=timeout).strip()
+        if resolved:
+            return resolved
+    except Exception:
+        pass
+    return "postgres"
+
+
+def classify_outbox_reason(reason: str) -> str:
+    token = (reason or "").strip().casefold()
+    if not token or token == "(empty)":
+        return "unknown"
+    if any(pattern in token for pattern in EXPECTED_EXTERNAL_BLOCK_PATTERNS):
+        return "expected_external_block"
+    return "unexpected_failure"
+
+
+def load_business_kpis(
+    client_slug: str,
+    timeout: float,
+    *,
+    postgres_container: str,
+    postgres_db: str,
+    db_user: str,
+) -> dict[str, Any]:
     client_slug_sql = client_slug.replace("'", "''")
     sql = f"""
 WITH target AS (
@@ -195,8 +241,8 @@ SELECT json_build_object(
 """
 
     shell = (
-        "DB_USER=$(docker exec -i truffles_postgres_1 /bin/sh -lc 'printf %s \"${POSTGRES_USER:-postgres}\"')\n"
-        f"docker exec -i truffles_postgres_1 psql -U \"$DB_USER\" -d chatbot -Atc {shlex.quote(sql)}"
+        f"docker exec -i {shlex.quote(postgres_container)} "
+        f"psql -U {shlex.quote(db_user)} -d {shlex.quote(postgres_db)} -Atc {shlex.quote(sql)}"
     )
     raw = run_shell(shell, timeout=timeout)
     line = ""
@@ -210,6 +256,81 @@ SELECT json_build_object(
     if not payload.get("client_id"):
         raise RuntimeError(f"client not found: {client_slug}")
     return payload
+
+
+def collect_outbox_reason_breakdown(
+    *,
+    client_id: str,
+    timeout: float,
+    postgres_container: str,
+    postgres_db: str,
+    db_user: str,
+) -> dict[str, Any]:
+    client_id_sql = str(client_id or "").replace("'", "''")
+    sql = (
+        "SELECT status, COALESCE(NULLIF(LEFT(last_error, 220), ''), '(empty)') AS reason, COUNT(*)::bigint "
+        "FROM outbox_messages "
+        f"WHERE client_id = '{client_id_sql}'::uuid "
+        "AND status IN ('FAILED', 'PENDING', 'PROCESSING') "
+        "GROUP BY status, reason "
+        "ORDER BY COUNT(*) DESC;"
+    )
+    shell = (
+        f"docker exec -i {shlex.quote(postgres_container)} "
+        f"psql -U {shlex.quote(db_user)} -d {shlex.quote(postgres_db)} -AtF $'\\t' -c {shlex.quote(sql)}"
+    )
+
+    try:
+        raw = run_shell(shell, timeout=timeout)
+    except Exception as exc:
+        return {
+            "status": "error",
+            "error": f"{type(exc).__name__}: {exc}",
+            "rows": [],
+            "classification_totals": {},
+            "status_totals": {},
+            "classification_by_status": {},
+        }
+
+    rows: list[dict[str, Any]] = []
+    for line in raw.splitlines():
+        parts = line.strip().split("\t")
+        if len(parts) != 3:
+            continue
+        status, reason, count_str = parts
+        try:
+            count_value = int(count_str)
+        except ValueError:
+            continue
+        rows.append(
+            {
+                "status": status,
+                "reason": reason,
+                "count": count_value,
+                "class": classify_outbox_reason(reason),
+            }
+        )
+
+    classification_totals: dict[str, int] = {}
+    status_totals: dict[str, int] = {}
+    classification_by_status: dict[str, dict[str, int]] = {}
+    for row in rows:
+        status = str(row.get("status") or "UNKNOWN")
+        reason_class = str(row.get("class") or "unknown")
+        count_value = int(row.get("count") or 0)
+        classification_totals[reason_class] = classification_totals.get(reason_class, 0) + count_value
+        status_totals[status] = status_totals.get(status, 0) + count_value
+        status_bucket = classification_by_status.setdefault(status, {})
+        status_bucket[reason_class] = status_bucket.get(reason_class, 0) + count_value
+
+    return {
+        "status": "ok",
+        "rows": rows[:20],
+        "rows_total": sum(item.get("count", 0) for item in rows),
+        "classification_totals": classification_totals,
+        "status_totals": status_totals,
+        "classification_by_status": classification_by_status,
+    }
 
 
 def count_lines(path: Path) -> int:
@@ -235,7 +356,12 @@ def collect_loc_metrics() -> dict[str, Any]:
     }
 
 
-def evaluate_guard(kpi_values: dict[str, float | int | None], args: argparse.Namespace) -> dict[str, Any]:
+def evaluate_guard(
+    kpi_values: dict[str, float | int | None],
+    args: argparse.Namespace,
+    *,
+    outbox_reason_breakdown: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     statuses = {
         "outbox_backlog": classify(parse_float(kpi_values.get("outbox_backlog")), args.outbox_warning, args.outbox_critical),
         "unresolved_cases": classify(parse_float(kpi_values.get("unresolved_cases")), args.unresolved_warning, args.unresolved_critical),
@@ -244,16 +370,49 @@ def evaluate_guard(kpi_values: dict[str, float | int | None], args: argparse.Nam
     }
     overall = max(statuses.values(), key=lambda value: SEVERITY_ORDER.get(value, 0))
 
+    failed_class_totals = (
+        (outbox_reason_breakdown or {}).get("classification_by_status", {}).get("FAILED", {})
+        if isinstance(outbox_reason_breakdown, dict)
+        else {}
+    )
+    failed_expected_external = int(failed_class_totals.get("expected_external_block", 0) or 0)
+    failed_unexpected = int(failed_class_totals.get("unexpected_failure", 0) or 0)
+
+    incident_class = "none"
+    failed_total = int(
+        ((outbox_reason_breakdown or {}).get("status_totals", {}).get("FAILED", 0) or 0)
+        if isinstance(outbox_reason_breakdown, dict)
+        else 0
+    )
+    if failed_total > 0:
+        if failed_unexpected > 0:
+            incident_class = "runtime_incident"
+        elif failed_expected_external > 0:
+            incident_class = "external_block_only"
+        else:
+            incident_class = "unknown_failure_mix"
+
     guidance: list[str] = []
     if overall in {"warning", "critical"}:
-        guidance.append("Открыть Team Performance и зафиксировать remediation шаг (quick profile/распределение нагрузки).")
-        guidance.append("Сравнить T+24 snapshot с baseline и проверить снижение backlog/stale-cases.")
-        guidance.append("Если status=critical: stop-the-line для owner/admin rollout решений до стабилизации.")
+        if incident_class == "external_block_only":
+            guidance.append("Зафиксировать failed как expected_external_block (например ChatFlow unpaid/billing).")
+            guidance.append("Не открывать runtime incident без unexpected_failure; эскалировать billing unblock.")
+            guidance.append("Сравнить T+24 snapshot после внешнего unblock и проверить динамику failed.")
+        else:
+            guidance.append("Открыть Team Performance и зафиксировать remediation шаг (quick profile/распределение нагрузки).")
+            guidance.append("Сравнить T+24 snapshot с baseline и проверить снижение backlog/stale-cases.")
+            guidance.append("Если status=critical: stop-the-line для owner/admin rollout решений до стабилизации.")
     elif overall == "unknown":
         guidance.append("Не удалось собрать часть KPI; проверить доступ к postgres контейнеру и client slug.")
 
     return {
         "status": overall,
+        "incident_class": incident_class,
+        "failed_reason_classes": {
+            "expected_external_block": failed_expected_external,
+            "unexpected_failure": failed_unexpected,
+        },
+        "reason_breakdown": outbox_reason_breakdown or {},
         "metrics": statuses,
         "guidance": guidance,
     }
@@ -325,8 +484,16 @@ def main() -> int:
         "status": "ok",
     }
 
+    db_user = resolve_db_user(args, timeout=args.timeout)
+
     try:
-        raw_kpis = load_business_kpis(client_slug=args.client_slug, timeout=args.timeout)
+        raw_kpis = load_business_kpis(
+            client_slug=args.client_slug,
+            timeout=args.timeout,
+            postgres_container=args.postgres_container,
+            postgres_db=args.postgres_db,
+            db_user=db_user,
+        )
     except Exception as exc:
         snapshot["status"] = "error"
         snapshot["error"] = f"{type(exc).__name__}: {exc}"
@@ -359,6 +526,14 @@ def main() -> int:
         },
     }
 
+    outbox_reason_breakdown = collect_outbox_reason_breakdown(
+        client_id=str(raw_kpis.get("client_id") or ""),
+        timeout=args.timeout,
+        postgres_container=args.postgres_container,
+        postgres_db=args.postgres_db,
+        db_user=db_user,
+    )
+
     guard = evaluate_guard(
         {
             "outbox_backlog": kpi["outbox_backlog"]["value"],
@@ -367,6 +542,7 @@ def main() -> int:
             "first_response_p90_seconds": kpi["first_response_p90_seconds"]["value"],
         },
         args,
+        outbox_reason_breakdown=outbox_reason_breakdown,
     )
 
     snapshot.update(

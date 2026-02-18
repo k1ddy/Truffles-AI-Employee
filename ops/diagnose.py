@@ -15828,6 +15828,761 @@ def _run_emit_evidence(args):
         handle.write(output)
     print(json.dumps({"output": args.output, "suites": [s['name'] for s in suites]}, ensure_ascii=False))
 
+
+def _parse_integrity_gate_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py integrity-gate",
+        description="Run deterministic data-integrity checks for runtime core tables.",
+    )
+    parser.add_argument(
+        "--client-slug",
+        default="demo_salon",
+        help="Client slug scope for checks (ignored with --all-clients).",
+    )
+    parser.add_argument(
+        "--client-id",
+        default=None,
+        help="Client UUID scope for checks (overrides --client-slug).",
+    )
+    parser.add_argument(
+        "--all-clients",
+        action="store_true",
+        help="Run checks across all clients.",
+    )
+    parser.add_argument("--container-name", default="truffles_postgres_1", help="Postgres container name.")
+    parser.add_argument("--database", default="chatbot", help="Postgres database name.")
+    parser.add_argument("--db-user", default=None, help="Postgres user; defaults to DB_USER or POSTGRES_USER.")
+    parser.add_argument(
+        "--stuck-processing-minutes",
+        type=int,
+        default=30,
+        help="Age threshold for PROCESSING outbox messages.",
+    )
+    parser.add_argument("--sample-limit", type=int, default=10, help="Max rows per check in sample output.")
+    parser.add_argument("--timeout", type=float, default=45.0, help="Command timeout in seconds.")
+    parser.add_argument("--output", default=None, help="Write JSON result to path.")
+    parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+    parser.add_argument(
+        "--fail-on-critical",
+        action="store_true",
+        help="Exit 2 when critical checks return violations.",
+    )
+    return parser.parse_args(argv)
+
+
+def _integrity_sql_escape(value):
+    return str(value).replace("'", "''")
+
+
+def _integrity_extract_last_line(stdout):
+    lines = [line.strip() for line in str(stdout or "").splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return lines[-1]
+
+
+def _integrity_resolve_db_user(container_name, explicit_user, timeout):
+    if explicit_user:
+        return explicit_user
+    env_user = os.environ.get("DB_USER")
+    if env_user:
+        return env_user
+    result = run_command(
+        [
+            "docker",
+            "exec",
+            "-i",
+            container_name,
+            "/bin/sh",
+            "-lc",
+            "printf '%s' \"${POSTGRES_USER:-postgres}\"",
+        ],
+        timeout=timeout,
+    )
+    if result.returncode == 0:
+        detected = _integrity_extract_last_line(result.stdout)
+        if detected:
+            return detected
+    return "postgres"
+
+
+def _integrity_run_psql(container_name, db_name, db_user, sql, *, timeout):
+    command = [
+        "docker",
+        "exec",
+        "-i",
+        container_name,
+        "psql",
+        "-U",
+        db_user,
+        "-d",
+        db_name,
+        "-Atc",
+        sql,
+    ]
+    result = run_command(command, timeout=timeout)
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        raise RuntimeError(stderr or f"psql failed with exit={result.returncode}")
+    return _integrity_extract_last_line(result.stdout)
+
+
+def _integrity_resolve_client_scope(args, *, container_name, db_name, db_user):
+    if args.all_clients:
+        return {
+            "client_id": None,
+            "client_slug": None,
+            "scope": "all_clients",
+        }
+
+    if args.client_id:
+        return {
+            "client_id": args.client_id,
+            "client_slug": args.client_slug,
+            "scope": "single_client_id",
+        }
+
+    if not args.client_slug:
+        raise SystemExit("integrity-gate: provide --client-slug/--client-id or use --all-clients")
+
+    escaped_slug = _integrity_sql_escape(args.client_slug)
+    sql = f"SELECT id::text FROM clients WHERE name = '{escaped_slug}' LIMIT 1;"
+    client_id = _integrity_run_psql(
+        container_name,
+        db_name,
+        db_user,
+        sql,
+        timeout=args.timeout,
+    )
+    if not client_id:
+        raise SystemExit(f"integrity-gate: client not found for slug '{args.client_slug}'")
+    return {
+        "client_id": client_id,
+        "client_slug": args.client_slug,
+        "scope": "single_client_slug",
+    }
+
+
+def _integrity_client_filter(alias, column, client_id):
+    if not client_id:
+        return "TRUE"
+    return f"{alias}.{column} = '{client_id}'::uuid"
+
+
+def _integrity_membership_filter(client_id):
+    if not client_id:
+        return "TRUE"
+    return (
+        "("
+        f"(m.scope = 'client' AND m.client_id = '{client_id}'::uuid)"
+        " OR "
+        f"(m.scope = 'branch' AND EXISTS ("
+        "SELECT 1 FROM branches b "
+        f"WHERE b.id = m.branch_id AND b.client_id = '{client_id}'::uuid"
+        "))"
+        " OR "
+        f"(m.scope = 'company' AND EXISTS ("
+        "SELECT 1 FROM clients c "
+        f"WHERE c.id = '{client_id}'::uuid AND c.company_id = m.company_id"
+        "))"
+        ")"
+    )
+
+
+def _integrity_json_rows(container_name, db_name, db_user, sample_sql, *, timeout):
+    wrapped = (
+        "WITH rows AS ("
+        f"{sample_sql}"
+        ") SELECT COALESCE(json_agg(row_to_json(rows)), '[]'::json)::text FROM rows;"
+    )
+    raw = _integrity_run_psql(container_name, db_name, db_user, wrapped, timeout=timeout)
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"invalid json payload from psql: {exc}") from exc
+    if isinstance(payload, list):
+        return payload
+    return []
+
+
+def _integrity_count(container_name, db_name, db_user, count_sql, *, timeout):
+    raw = _integrity_run_psql(container_name, db_name, db_user, count_sql, timeout=timeout)
+    try:
+        return int(raw or "0")
+    except ValueError as exc:
+        raise RuntimeError(f"invalid count payload: {raw!r}") from exc
+
+
+def _integrity_build_checks(client_id, args):
+    sample_limit = max(int(args.sample_limit or 10), 1)
+    stuck_minutes = max(int(args.stuck_processing_minutes or 30), 1)
+
+    outbox_filter = _integrity_client_filter("o", "client_id", client_id)
+    handover_filter = _integrity_client_filter("h", "client_id", client_id)
+    conversation_filter = _integrity_client_filter("c", "client_id", client_id)
+    appointment_pair_filter = _integrity_client_filter("a1", "client_id", client_id)
+    appointment_filter = _integrity_client_filter("a", "client_id", client_id)
+    visit_filter = _integrity_client_filter("v", "client_id", client_id)
+    message_filter = _integrity_client_filter("m", "client_id", client_id)
+    membership_filter = _integrity_membership_filter(client_id)
+
+    active_appointment_statuses = (
+        "'HOLD', 'PENDING_CONFIRMATION', 'CONFIRMED', 'RESCHEDULE_REQUESTED', 'CHECKED_IN'"
+    )
+
+    checks = [
+        {
+            "id": "OUTBOX_DUPLICATE_IDEMPOTENCY",
+            "severity": "critical",
+            "description": "Duplicate outbox rows by (client_id, inbound_message_id).",
+            "count_sql": (
+                "SELECT COUNT(*) FROM ("
+                "SELECT o.client_id, o.inbound_message_id "
+                "FROM outbox_messages o "
+                f"WHERE {outbox_filter} "
+                "GROUP BY o.client_id, o.inbound_message_id "
+                "HAVING COUNT(*) > 1"
+                ") dup;"
+            ),
+            "sample_sql": (
+                "SELECT "
+                "o.client_id::text AS client_id, "
+                "o.inbound_message_id, "
+                "COUNT(*)::int AS duplicate_count, "
+                "MAX(o.updated_at) AS last_updated_at, "
+                "(ARRAY_AGG(o.id::text ORDER BY o.created_at DESC))[1:5] AS sample_outbox_ids "
+                "FROM outbox_messages o "
+                f"WHERE {outbox_filter} "
+                "GROUP BY o.client_id, o.inbound_message_id "
+                "HAVING COUNT(*) > 1 "
+                "ORDER BY duplicate_count DESC, last_updated_at DESC "
+                f"LIMIT {sample_limit}"
+            ),
+        },
+        {
+            "id": "OUTBOX_STUCK_PROCESSING",
+            "severity": "critical",
+            "description": "Outbox rows stuck in PROCESSING older than threshold.",
+            "count_sql": (
+                "SELECT COUNT(*) FROM outbox_messages o "
+                "WHERE o.status = 'PROCESSING' "
+                f"AND {outbox_filter} "
+                f"AND o.updated_at < NOW() - INTERVAL '{stuck_minutes} minutes';"
+            ),
+            "sample_sql": (
+                "SELECT "
+                "o.id::text AS outbox_id, "
+                "o.client_id::text AS client_id, "
+                "o.conversation_id::text AS conversation_id, "
+                "o.inbound_message_id, "
+                "o.attempts, "
+                "o.last_error, "
+                "o.updated_at, "
+                "EXTRACT(EPOCH FROM (NOW() - o.updated_at))::int AS age_seconds "
+                "FROM outbox_messages o "
+                "WHERE o.status = 'PROCESSING' "
+                f"AND {outbox_filter} "
+                f"AND o.updated_at < NOW() - INTERVAL '{stuck_minutes} minutes' "
+                "ORDER BY o.updated_at ASC "
+                f"LIMIT {sample_limit}"
+            ),
+        },
+        {
+            "id": "HANDOVER_OPEN_UNIQUENESS",
+            "severity": "critical",
+            "description": "At most one open handover (pending/active) per conversation.",
+            "count_sql": (
+                "SELECT COUNT(*) FROM ("
+                "SELECT h.conversation_id "
+                "FROM handovers h "
+                f"WHERE {handover_filter} "
+                "AND h.status IN ('pending', 'active') "
+                "GROUP BY h.conversation_id "
+                "HAVING COUNT(*) > 1"
+                ") conflicts;"
+            ),
+            "sample_sql": (
+                "SELECT "
+                "h.conversation_id::text AS conversation_id, "
+                "COUNT(*)::int AS open_handover_count, "
+                "(ARRAY_AGG(h.id::text ORDER BY h.created_at DESC))[1:5] AS open_handover_ids, "
+                "MAX(h.created_at) AS latest_created_at "
+                "FROM handovers h "
+                f"WHERE {handover_filter} "
+                "AND h.status IN ('pending', 'active') "
+                "GROUP BY h.conversation_id "
+                "HAVING COUNT(*) > 1 "
+                "ORDER BY open_handover_count DESC, latest_created_at DESC "
+                f"LIMIT {sample_limit}"
+            ),
+        },
+        {
+            "id": "CONVERSATION_STATE_CONSISTENCY",
+            "severity": "critical",
+            "description": "Conversation state must match open handover presence.",
+            "count_sql": (
+                "SELECT COUNT(*) FROM ("
+                "SELECT c.id "
+                "FROM conversations c "
+                f"WHERE {conversation_filter} "
+                "AND c.state IN ('pending', 'manager_active') "
+                "AND NOT EXISTS ("
+                "SELECT 1 FROM handovers h "
+                "WHERE h.conversation_id = c.id AND h.status IN ('pending', 'active')"
+                ") "
+                "UNION ALL "
+                "SELECT c.id "
+                "FROM handovers h "
+                "JOIN conversations c ON c.id = h.conversation_id "
+                f"WHERE {handover_filter} "
+                "AND h.status IN ('pending', 'active') "
+                "AND COALESCE(c.state, '') NOT IN ('pending', 'manager_active')"
+                ") anomalies;"
+            ),
+            "sample_sql": (
+                "SELECT * FROM ("
+                "SELECT "
+                "'conversation_state_without_open_handover'::text AS issue_type, "
+                "c.id::text AS conversation_id, "
+                "c.state::text AS conversation_state, "
+                "NULL::text AS handover_id, "
+                "NULL::text AS handover_status, "
+                "c.last_message_at AS observed_at "
+                "FROM conversations c "
+                f"WHERE {conversation_filter} "
+                "AND c.state IN ('pending', 'manager_active') "
+                "AND NOT EXISTS ("
+                "SELECT 1 FROM handovers h "
+                "WHERE h.conversation_id = c.id AND h.status IN ('pending', 'active')"
+                ") "
+                "UNION ALL "
+                "SELECT "
+                "'open_handover_with_inactive_conversation'::text AS issue_type, "
+                "c.id::text AS conversation_id, "
+                "c.state::text AS conversation_state, "
+                "h.id::text AS handover_id, "
+                "h.status::text AS handover_status, "
+                "h.created_at AS observed_at "
+                "FROM handovers h "
+                "JOIN conversations c ON c.id = h.conversation_id "
+                f"WHERE {handover_filter} "
+                "AND h.status IN ('pending', 'active') "
+                "AND COALESCE(c.state, '') NOT IN ('pending', 'manager_active')"
+                ") anomalies "
+                "ORDER BY observed_at DESC NULLS LAST "
+                f"LIMIT {sample_limit}"
+            ),
+        },
+        {
+            "id": "APPOINTMENT_TIME_CONFLICT",
+            "severity": "critical",
+            "description": "Overlapping active appointments for one specialist/branch.",
+            "count_sql": (
+                "SELECT COUNT(*) FROM ("
+                "SELECT a1.id, a2.id "
+                "FROM appointments a1 "
+                "JOIN appointments a2 ON a1.id < a2.id "
+                "AND a1.branch_id = a2.branch_id "
+                "AND a1.specialist_id = a2.specialist_id "
+                "AND a1.specialist_id IS NOT NULL "
+                f"AND a1.status IN ({active_appointment_statuses}) "
+                f"AND a2.status IN ({active_appointment_statuses}) "
+                "AND tstzrange(a1.start_at, a1.end_at, '[)') && tstzrange(a2.start_at, a2.end_at, '[)') "
+                f"WHERE {appointment_pair_filter}"
+                ") conflicts;"
+            ),
+            "sample_sql": (
+                "SELECT "
+                "a1.client_id::text AS client_id, "
+                "a1.branch_id::text AS branch_id, "
+                "a1.specialist_id::text AS specialist_id, "
+                "a1.id::text AS appointment_a_id, "
+                "a2.id::text AS appointment_b_id, "
+                "a1.status AS status_a, "
+                "a2.status AS status_b, "
+                "a1.start_at AS start_a, "
+                "a1.end_at AS end_a, "
+                "a2.start_at AS start_b, "
+                "a2.end_at AS end_b "
+                "FROM appointments a1 "
+                "JOIN appointments a2 ON a1.id < a2.id "
+                "AND a1.branch_id = a2.branch_id "
+                "AND a1.specialist_id = a2.specialist_id "
+                "AND a1.specialist_id IS NOT NULL "
+                f"AND a1.status IN ({active_appointment_statuses}) "
+                f"AND a2.status IN ({active_appointment_statuses}) "
+                "AND tstzrange(a1.start_at, a1.end_at, '[)') && tstzrange(a2.start_at, a2.end_at, '[)') "
+                f"WHERE {appointment_pair_filter} "
+                "ORDER BY a1.start_at DESC "
+                f"LIMIT {sample_limit}"
+            ),
+        },
+        {
+            "id": "APPOINTMENT_VISIT_CONSISTENCY",
+            "severity": "warning",
+            "description": "Appointment and visit statuses should not contradict each other.",
+            "count_sql": (
+                "SELECT COUNT(*) FROM ("
+                "SELECT a.id "
+                "FROM appointments a "
+                f"WHERE {appointment_filter} "
+                "AND a.status IN ('CHECKED_IN', 'COMPLETED') "
+                "AND NOT EXISTS (SELECT 1 FROM visits v WHERE v.appointment_id = a.id) "
+                "UNION ALL "
+                "SELECT v.id "
+                "FROM visits v "
+                "JOIN appointments a ON a.id = v.appointment_id "
+                f"WHERE {visit_filter} "
+                "AND LOWER(COALESCE(v.status, '')) IN ('arrived', 'checked_in', 'completed') "
+                "AND COALESCE(a.status, '') NOT IN ('CHECKED_IN', 'COMPLETED')"
+                ") anomalies;"
+            ),
+            "sample_sql": (
+                "SELECT * FROM ("
+                "SELECT "
+                "'appointment_requires_visit_missing'::text AS issue_type, "
+                "a.id::text AS appointment_id, "
+                "a.status::text AS appointment_status, "
+                "NULL::text AS visit_id, "
+                "NULL::text AS visit_status, "
+                "a.updated_at AS observed_at "
+                "FROM appointments a "
+                f"WHERE {appointment_filter} "
+                "AND a.status IN ('CHECKED_IN', 'COMPLETED') "
+                "AND NOT EXISTS (SELECT 1 FROM visits v WHERE v.appointment_id = a.id) "
+                "UNION ALL "
+                "SELECT "
+                "'visit_without_completed_appointment'::text AS issue_type, "
+                "a.id::text AS appointment_id, "
+                "a.status::text AS appointment_status, "
+                "v.id::text AS visit_id, "
+                "v.status::text AS visit_status, "
+                "v.created_at AS observed_at "
+                "FROM visits v "
+                "JOIN appointments a ON a.id = v.appointment_id "
+                f"WHERE {visit_filter} "
+                "AND LOWER(COALESCE(v.status, '')) IN ('arrived', 'checked_in', 'completed') "
+                "AND COALESCE(a.status, '') NOT IN ('CHECKED_IN', 'COMPLETED')"
+                ") anomalies "
+                "ORDER BY observed_at DESC NULLS LAST "
+                f"LIMIT {sample_limit}"
+            ),
+        },
+        {
+            "id": "MEMBERSHIP_DUPLICATE_ACTIVE",
+            "severity": "critical",
+            "description": "Duplicate active agent memberships for same scope/role target.",
+            "count_sql": (
+                "SELECT COUNT(*) FROM ("
+                "SELECT "
+                "m.agent_id, m.scope, m.role, m.company_id, m.client_id, m.branch_id "
+                "FROM agent_memberships m "
+                f"WHERE {membership_filter} "
+                "AND m.is_active IS TRUE "
+                "GROUP BY m.agent_id, m.scope, m.role, m.company_id, m.client_id, m.branch_id "
+                "HAVING COUNT(*) > 1"
+                ") dup;"
+            ),
+            "sample_sql": (
+                "SELECT "
+                "m.agent_id::text AS agent_id, "
+                "m.scope, "
+                "m.role, "
+                "m.company_id::text AS company_id, "
+                "m.client_id::text AS client_id, "
+                "m.branch_id::text AS branch_id, "
+                "COUNT(*)::int AS duplicate_count, "
+                "(ARRAY_AGG(m.id::text ORDER BY m.created_at DESC))[1:5] AS sample_membership_ids "
+                "FROM agent_memberships m "
+                f"WHERE {membership_filter} "
+                "AND m.is_active IS TRUE "
+                "GROUP BY m.agent_id, m.scope, m.role, m.company_id, m.client_id, m.branch_id "
+                "HAVING COUNT(*) > 1 "
+                "ORDER BY duplicate_count DESC "
+                f"LIMIT {sample_limit}"
+            ),
+        },
+        {
+            "id": "ORPHAN_REFERENCE_CHECK",
+            "severity": "critical",
+            "description": "Operational rows must not reference missing parent entities.",
+            "count_sql": (
+                "SELECT COUNT(*) FROM ("
+                "SELECT h.id "
+                "FROM handovers h "
+                "LEFT JOIN conversations c ON c.id = h.conversation_id "
+                f"WHERE {handover_filter} "
+                "AND c.id IS NULL "
+                "UNION ALL "
+                "SELECT h.id "
+                "FROM handovers h "
+                "LEFT JOIN clients cl ON cl.id = h.client_id "
+                f"WHERE {handover_filter} "
+                "AND cl.id IS NULL "
+                "UNION ALL "
+                "SELECT o.id "
+                "FROM outbox_messages o "
+                "LEFT JOIN conversations c ON c.id = o.conversation_id "
+                f"WHERE {outbox_filter} "
+                "AND o.conversation_id IS NOT NULL "
+                "AND c.id IS NULL "
+                "UNION ALL "
+                "SELECT o.id "
+                "FROM outbox_messages o "
+                "LEFT JOIN clients cl ON cl.id = o.client_id "
+                f"WHERE {outbox_filter} "
+                "AND cl.id IS NULL "
+                "UNION ALL "
+                "SELECT o.id "
+                "FROM outbox_messages o "
+                "LEFT JOIN branches b ON b.id = o.branch_id "
+                f"WHERE {outbox_filter} "
+                "AND o.branch_id IS NOT NULL "
+                "AND b.id IS NULL "
+                "UNION ALL "
+                "SELECT a.id "
+                "FROM appointments a "
+                "LEFT JOIN conversations c ON c.id = a.conversation_id "
+                f"WHERE {appointment_filter} "
+                "AND a.conversation_id IS NOT NULL "
+                "AND c.id IS NULL "
+                "UNION ALL "
+                "SELECT v.id "
+                "FROM visits v "
+                "LEFT JOIN appointments a ON a.id = v.appointment_id "
+                f"WHERE {visit_filter} "
+                "AND a.id IS NULL "
+                "UNION ALL "
+                "SELECT m.id "
+                "FROM messages m "
+                "LEFT JOIN conversations c ON c.id = m.conversation_id "
+                f"WHERE {message_filter} "
+                "AND c.id IS NULL"
+                ") orphans;"
+            ),
+            "sample_sql": (
+                "SELECT * FROM ("
+                "SELECT "
+                "'handover_missing_conversation'::text AS issue_type, "
+                "h.id::text AS entity_id, "
+                "h.client_id::text AS client_id, "
+                "h.conversation_id::text AS reference_id, "
+                "'conversations.id'::text AS reference_table, "
+                "h.created_at AS observed_at "
+                "FROM handovers h "
+                "LEFT JOIN conversations c ON c.id = h.conversation_id "
+                f"WHERE {handover_filter} "
+                "AND c.id IS NULL "
+                "UNION ALL "
+                "SELECT "
+                "'handover_missing_client'::text, "
+                "h.id::text, "
+                "h.client_id::text, "
+                "h.client_id::text, "
+                "'clients.id'::text, "
+                "h.created_at "
+                "FROM handovers h "
+                "LEFT JOIN clients cl ON cl.id = h.client_id "
+                f"WHERE {handover_filter} "
+                "AND cl.id IS NULL "
+                "UNION ALL "
+                "SELECT "
+                "'outbox_missing_conversation'::text, "
+                "o.id::text, "
+                "o.client_id::text, "
+                "o.conversation_id::text, "
+                "'conversations.id'::text, "
+                "o.created_at "
+                "FROM outbox_messages o "
+                "LEFT JOIN conversations c ON c.id = o.conversation_id "
+                f"WHERE {outbox_filter} "
+                "AND o.conversation_id IS NOT NULL "
+                "AND c.id IS NULL "
+                "UNION ALL "
+                "SELECT "
+                "'outbox_missing_client'::text, "
+                "o.id::text, "
+                "o.client_id::text, "
+                "o.client_id::text, "
+                "'clients.id'::text, "
+                "o.created_at "
+                "FROM outbox_messages o "
+                "LEFT JOIN clients cl ON cl.id = o.client_id "
+                f"WHERE {outbox_filter} "
+                "AND cl.id IS NULL "
+                "UNION ALL "
+                "SELECT "
+                "'outbox_missing_branch'::text, "
+                "o.id::text, "
+                "o.client_id::text, "
+                "o.branch_id::text, "
+                "'branches.id'::text, "
+                "o.created_at "
+                "FROM outbox_messages o "
+                "LEFT JOIN branches b ON b.id = o.branch_id "
+                f"WHERE {outbox_filter} "
+                "AND o.branch_id IS NOT NULL "
+                "AND b.id IS NULL "
+                "UNION ALL "
+                "SELECT "
+                "'appointment_missing_conversation'::text, "
+                "a.id::text, "
+                "a.client_id::text, "
+                "a.conversation_id::text, "
+                "'conversations.id'::text, "
+                "a.updated_at "
+                "FROM appointments a "
+                "LEFT JOIN conversations c ON c.id = a.conversation_id "
+                f"WHERE {appointment_filter} "
+                "AND a.conversation_id IS NOT NULL "
+                "AND c.id IS NULL "
+                "UNION ALL "
+                "SELECT "
+                "'visit_missing_appointment'::text, "
+                "v.id::text, "
+                "v.client_id::text, "
+                "v.appointment_id::text, "
+                "'appointments.id'::text, "
+                "v.created_at "
+                "FROM visits v "
+                "LEFT JOIN appointments a ON a.id = v.appointment_id "
+                f"WHERE {visit_filter} "
+                "AND a.id IS NULL "
+                "UNION ALL "
+                "SELECT "
+                "'message_missing_conversation'::text, "
+                "m.id::text, "
+                "m.client_id::text, "
+                "m.conversation_id::text, "
+                "'conversations.id'::text, "
+                "m.created_at "
+                "FROM messages m "
+                "LEFT JOIN conversations c ON c.id = m.conversation_id "
+                f"WHERE {message_filter} "
+                "AND c.id IS NULL "
+                ") anomalies "
+                "ORDER BY observed_at DESC NULLS LAST "
+                f"LIMIT {sample_limit}"
+            ),
+        },
+    ]
+    return checks
+
+
+def _run_integrity_gate(args):
+    container_name = args.container_name
+    db_name = args.database
+    db_user = _integrity_resolve_db_user(container_name, args.db_user, args.timeout)
+    generated_at = datetime.now(timezone.utc).isoformat()
+
+    scope = _integrity_resolve_client_scope(
+        args,
+        container_name=container_name,
+        db_name=db_name,
+        db_user=db_user,
+    )
+    checks = _integrity_build_checks(scope.get("client_id"), args)
+
+    results = []
+    runtime_errors = []
+    summary_counts = {"PASS": 0, "WARN": 0, "FAIL": 0, "ERROR": 0}
+    critical_failures = []
+
+    for check in checks:
+        check_result = {
+            "id": check["id"],
+            "severity": check["severity"],
+            "description": check["description"],
+            "status": "PASS",
+            "row_count": 0,
+            "sample_rows": [],
+            "count_sql": check["count_sql"],
+            "sample_sql": check["sample_sql"],
+        }
+        try:
+            row_count = _integrity_count(
+                container_name,
+                db_name,
+                db_user,
+                check["count_sql"],
+                timeout=args.timeout,
+            )
+            sample_rows = _integrity_json_rows(
+                container_name,
+                db_name,
+                db_user,
+                check["sample_sql"],
+                timeout=args.timeout,
+            )
+            check_result["row_count"] = row_count
+            check_result["sample_rows"] = sample_rows
+            if row_count > 0:
+                if check["severity"] == "critical":
+                    check_result["status"] = "FAIL"
+                else:
+                    check_result["status"] = "WARN"
+        except Exception as exc:
+            check_result["status"] = "ERROR"
+            check_result["error"] = f"{type(exc).__name__}: {exc}"
+            runtime_errors.append(
+                {
+                    "check_id": check["id"],
+                    "error": check_result["error"],
+                }
+            )
+
+        summary_counts[check_result["status"]] += 1
+        if check_result["status"] in {"FAIL", "ERROR"} and check["severity"] == "critical":
+            critical_failures.append(check["id"])
+        results.append(check_result)
+
+    summary_status = "PASS"
+    if summary_counts["ERROR"] > 0 or summary_counts["FAIL"] > 0:
+        summary_status = "FAIL"
+    elif summary_counts["WARN"] > 0:
+        summary_status = "WARN"
+
+    payload = {
+        "command": "integrity-gate",
+        "generated_at": generated_at,
+        "scope": scope,
+        "db": {
+            "container_name": container_name,
+            "database": db_name,
+            "db_user": db_user,
+        },
+        "summary": {
+            "status": summary_status,
+            "infra_valid": len(runtime_errors) == 0,
+            "checks_total": len(results),
+            "pass_count": summary_counts["PASS"],
+            "warn_count": summary_counts["WARN"],
+            "fail_count": summary_counts["FAIL"],
+            "error_count": summary_counts["ERROR"],
+            "critical_failures": critical_failures,
+        },
+        "checks": results,
+        "runtime_errors": runtime_errors,
+    }
+
+    indent = 2 if args.pretty else None
+    output = json.dumps(payload, ensure_ascii=False, indent=indent)
+    if args.output:
+        output_dir = os.path.dirname(args.output)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        with open(args.output, "w", encoding="utf-8") as handle:
+            handle.write(output + "\n")
+    print(output)
+
+    if runtime_errors:
+        return 1
+    if args.fail_on_critical and critical_failures:
+        return 2
+    return 0
+
 _RUN_COMMAND_TIMEOUT_SEC = float(os.getenv("DIAGNOSE_CMD_TIMEOUT_SEC", "30"))
 
 
@@ -15935,6 +16690,8 @@ if len(sys.argv) > 1 and sys.argv[1] == "livecheck":
 if len(sys.argv) > 1 and sys.argv[1] == "deploy-verify":
     _run_deploy_verify(_parse_deploy_verify_args(sys.argv[2:]))
     raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "integrity-gate":
+    raise SystemExit(_run_integrity_gate(_parse_integrity_gate_args(sys.argv[2:])))
 
 print("=" * 60)
 print("ДИАГНОСТИКА TRUFFLES")
