@@ -38,6 +38,8 @@ from app.models import (
     Handover,
     KnowledgeVersion,
     LearnedResponse,
+    MarketingCampaign,
+    MarketingCampaignDelivery,
     Message,
     OutboxMessage,
     ReferencePack,
@@ -133,6 +135,14 @@ from app.schemas.console import (
     ConsoleMacroUpdateRequest,
     ConsoleManagerMessageRequest,
     ConsoleManagerMessageResponse,
+    ConsoleMarketingCampaign,
+    ConsoleMarketingCampaignCreateRequest,
+    ConsoleMarketingCampaignCreateResponse,
+    ConsoleMarketingCampaignExecuteRequest,
+    ConsoleMarketingCampaignExecuteResponse,
+    ConsoleMarketingCampaignListResponse,
+    ConsoleMarketingCampaignPreviewRequest,
+    ConsoleMarketingCampaignPreviewResponse,
     ConsoleMembershipCreateRequest,
     ConsoleMembershipListResponse,
     ConsoleMembershipUpdateRequest,
@@ -1805,6 +1815,79 @@ def _require_company_access(
 ) -> None:
     if company_id not in _accessible_company_ids(context):
         raise ConsoleAPIError(403, "ACCESS_DENIED", message)
+
+
+_MARKETING_ALLOWED_ROLES = {"platform_admin", "owner", "admin"}
+_MARKETING_SAMPLE_LIMIT_DEFAULT = 5
+_MARKETING_SAMPLE_LIMIT_MAX = 20
+_MARKETING_EXECUTE_MAX_LIMIT = 500
+
+
+def _require_marketing_access(context: ConsoleAuthContext, *, action: str) -> None:
+    if context.role not in _MARKETING_ALLOWED_ROLES:
+        raise ConsoleAPIError(
+            403,
+            "ACCESS_DENIED",
+            f"Only owner/admin/platform admin can {action} marketing campaigns",
+        )
+
+
+def _serialize_marketing_campaign(campaign: MarketingCampaign) -> ConsoleMarketingCampaign:
+    return ConsoleMarketingCampaign(
+        id=campaign.id,
+        client_id=campaign.client_id,
+        branch_id=campaign.branch_id,
+        name=campaign.name,
+        message_text=campaign.message_text,
+        status=campaign.status,
+        audience_mode=campaign.audience_mode,
+        preview_total=int(campaign.preview_total or 0),
+        last_preview_at=campaign.last_preview_at.isoformat() if campaign.last_preview_at else None,
+        executed_at=campaign.executed_at.isoformat() if campaign.executed_at else None,
+        created_at=campaign.created_at.isoformat() if campaign.created_at else None,
+        updated_at=campaign.updated_at.isoformat() if campaign.updated_at else None,
+    )
+
+
+def _resolve_marketing_branch(
+    context: ConsoleAuthContext,
+    db: Session,
+    branch_id: UUID,
+) -> Branch:
+    branch = db.query(Branch).filter(Branch.id == branch_id).first()
+    if not branch:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+    _require_client_access(context, branch.client_id, message="Branch belongs to another tenant")
+    if context.client and branch.client_id != context.client.id:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to selected client")
+    _require_branch_access(context, branch.id, message="Branch access denied for marketing operation")
+    if not branch.is_active:
+        raise ConsoleAPIError(409, "BRANCH_INACTIVE", "Branch must be active for marketing campaign")
+    return branch
+
+
+def _normalize_marketing_sample_limit(sample_limit: Optional[int]) -> int:
+    if sample_limit is None:
+        return _MARKETING_SAMPLE_LIMIT_DEFAULT
+    if sample_limit < 1 or sample_limit > _MARKETING_SAMPLE_LIMIT_MAX:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"sample_limit must be between 1 and {_MARKETING_SAMPLE_LIMIT_MAX}",
+        )
+    return sample_limit
+
+
+def _normalize_marketing_max_recipients(max_recipients: Optional[int]) -> Optional[int]:
+    if max_recipients is None:
+        return None
+    if max_recipients < 1 or max_recipients > _MARKETING_EXECUTE_MAX_LIMIT:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"max_recipients must be between 1 and {_MARKETING_EXECUTE_MAX_LIMIT}",
+        )
+    return max_recipients
 
 
 def _ensure_unique_oidc_subject(
@@ -11593,6 +11676,297 @@ async def list_branches(
         items=[_serialize_branch(branch) for branch in items],
         cursor=next_cursor,
         has_more=has_more,
+    )
+
+
+@router.get(
+    "/admin/marketing/campaigns",
+    response_model=ConsoleMarketingCampaignListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_marketing_campaigns(
+    request: Request,
+    branch_id: Optional[str] = None,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignListResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="view")
+    _reject_unknown_query_params(request, {"branch_id", "status"})
+
+    branch_uuid = _parse_uuid_param("branch_id", branch_id)
+    status_value = _normalize_optional_text(status)
+    if status_value and status_value not in {"draft", "ready", "executed", "paused"}:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
+
+    query = db.query(MarketingCampaign).filter(MarketingCampaign.client_id == context.client.id)
+    if branch_uuid is not None:
+        _resolve_marketing_branch(context, db, branch_uuid)
+        query = query.filter(MarketingCampaign.branch_id == branch_uuid)
+    if status_value:
+        query = query.filter(MarketingCampaign.status == status_value)
+
+    campaigns = query.order_by(MarketingCampaign.created_at.desc(), MarketingCampaign.id.desc()).all()
+    return ConsoleMarketingCampaignListResponse(
+        items=[_serialize_marketing_campaign(campaign) for campaign in campaigns],
+    )
+
+
+@router.post(
+    "/admin/marketing/campaigns",
+    response_model=ConsoleMarketingCampaignCreateResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def create_marketing_campaign(
+    request: Request,
+    payload: ConsoleMarketingCampaignCreateRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignCreateResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="create")
+
+    branch = _resolve_marketing_branch(context, db, payload.branch_id)
+    name = _normalize_required_text(payload.name, "name")
+    message_text = _normalize_required_text(payload.message_text, "message_text")
+    if len(name) > 120:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "name too long")
+    if len(message_text) > 2000:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "message_text too long")
+
+    now = datetime.now(timezone.utc)
+    campaign = MarketingCampaign(
+        client_id=context.client.id,
+        branch_id=branch.id,
+        created_by=context.agent.id,
+        name=name,
+        message_text=message_text,
+        status="draft",
+        audience_mode=payload.audience_mode,
+        audience_filter={},
+        preview_total=0,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(campaign)
+    db.commit()
+    db.refresh(campaign)
+
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=branch.id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="marketing_campaign_created",
+        entity_type="marketing_campaign",
+        entity_id=campaign.id,
+        payload={
+            "campaign_name": campaign.name,
+            "audience_mode": campaign.audience_mode,
+        },
+    )
+
+    return ConsoleMarketingCampaignCreateResponse(campaign=_serialize_marketing_campaign(campaign))
+
+
+@router.post(
+    "/admin/marketing/campaigns/{campaign_id}/preview",
+    response_model=ConsoleMarketingCampaignPreviewResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def preview_marketing_campaign(
+    campaign_id: str,
+    request: Request,
+    payload: ConsoleMarketingCampaignPreviewRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignPreviewResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="preview")
+
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+
+    campaign = db.query(MarketingCampaign).filter(MarketingCampaign.id == campaign_uuid).first()
+    if not campaign:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Campaign not found")
+    if campaign.client_id != context.client.id:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Campaign belongs to another tenant")
+
+    branch = _resolve_marketing_branch(context, db, campaign.branch_id)
+    sample_limit = _normalize_marketing_sample_limit(payload.sample_limit)
+    audience_query = (
+        db.query(
+            Conversation.id.label("conversation_id"),
+            Conversation.user_id.label("user_id"),
+            User.remote_jid.label("recipient_jid"),
+        )
+        .join(User, User.id == Conversation.user_id)
+        .filter(
+            Conversation.client_id == context.client.id,
+            Conversation.branch_id == branch.id,
+            Conversation.channel == "whatsapp",
+            User.remote_jid.isnot(None),
+            func.length(func.trim(User.remote_jid)) > 0,
+        )
+        .order_by(Conversation.last_message_at.desc().nullslast(), Conversation.id.desc())
+    )
+    estimated_recipients = audience_query.count()
+    sample_rows = audience_query.limit(sample_limit).all()
+
+    now = datetime.now(timezone.utc)
+    campaign.preview_total = estimated_recipients
+    campaign.last_preview_at = now
+    campaign.status = "ready" if estimated_recipients > 0 else "draft"
+    campaign.updated_at = now
+    db.add(campaign)
+    db.commit()
+
+    return ConsoleMarketingCampaignPreviewResponse(
+        campaign_id=campaign.id,
+        branch_id=campaign.branch_id,
+        audience_mode=campaign.audience_mode,
+        estimated_recipients=estimated_recipients,
+        sample_conversation_ids=[row.conversation_id for row in sample_rows if row.conversation_id],
+        sample_recipient_jids=[row.recipient_jid for row in sample_rows if row.recipient_jid],
+    )
+
+
+@router.post(
+    "/admin/marketing/campaigns/{campaign_id}/execute",
+    response_model=ConsoleMarketingCampaignExecuteResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def execute_marketing_campaign(
+    campaign_id: str,
+    request: Request,
+    payload: ConsoleMarketingCampaignExecuteRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignExecuteResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="execute")
+    if not payload.confirm_send:
+        raise ConsoleAPIError(409, "CONFIRMATION_REQUIRED", "Use confirm_send=true to execute campaign")
+
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+
+    campaign = db.query(MarketingCampaign).filter(MarketingCampaign.id == campaign_uuid).first()
+    if not campaign:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Campaign not found")
+    if campaign.client_id != context.client.id:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Campaign belongs to another tenant")
+    if campaign.status == "paused":
+        raise ConsoleAPIError(409, "INVALID_STATE", "Campaign is paused")
+
+    branch = _resolve_marketing_branch(context, db, campaign.branch_id)
+    max_recipients = _normalize_marketing_max_recipients(payload.max_recipients)
+    audience_query = (
+        db.query(
+            Conversation.id.label("conversation_id"),
+            Conversation.user_id.label("user_id"),
+            User.remote_jid.label("recipient_jid"),
+        )
+        .join(User, User.id == Conversation.user_id)
+        .filter(
+            Conversation.client_id == context.client.id,
+            Conversation.branch_id == branch.id,
+            Conversation.channel == "whatsapp",
+            User.remote_jid.isnot(None),
+            func.length(func.trim(User.remote_jid)) > 0,
+        )
+        .order_by(Conversation.last_message_at.desc().nullslast(), Conversation.id.desc())
+    )
+    if max_recipients is not None:
+        audience_query = audience_query.limit(max_recipients)
+    audience_rows = audience_query.all()
+
+    existing_conversation_ids = {
+        row.conversation_id
+        for row in db.query(MarketingCampaignDelivery.conversation_id)
+        .filter(
+            MarketingCampaignDelivery.campaign_id == campaign.id,
+            MarketingCampaignDelivery.conversation_id.isnot(None),
+        )
+        .all()
+        if row.conversation_id
+    }
+
+    queued_count = 0
+    skipped_count = 0
+    now = datetime.now(timezone.utc)
+    for row in audience_rows:
+        if row.conversation_id in existing_conversation_ids:
+            skipped_count += 1
+            continue
+
+        synthetic_inbound_id = f"marketing:{campaign.id}:{row.conversation_id}"
+        outbox_item = OutboxMessage(
+            client_id=context.client.id,
+            conversation_id=row.conversation_id,
+            branch_id=branch.id,
+            inbound_message_id=synthetic_inbound_id,
+            payload_json={"text": campaign.message_text},
+            meta={
+                "source": "marketing_campaign",
+                "campaign_id": str(campaign.id),
+                "campaign_name": campaign.name,
+                "audience_mode": campaign.audience_mode,
+            },
+            status="PENDING",
+            attempts=0,
+            next_attempt_at=None,
+            last_error=None,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(outbox_item)
+        db.flush()
+
+        delivery = MarketingCampaignDelivery(
+            campaign_id=campaign.id,
+            client_id=context.client.id,
+            branch_id=branch.id,
+            conversation_id=row.conversation_id,
+            user_id=row.user_id,
+            recipient_jid=row.recipient_jid,
+            status="queued",
+            outbox_id=outbox_item.id,
+            error_reason=None,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(delivery)
+        queued_count += 1
+
+    campaign.status = "executed" if queued_count > 0 else "ready"
+    campaign.executed_at = now if queued_count > 0 else campaign.executed_at
+    campaign.updated_at = now
+    db.add(campaign)
+    db.commit()
+
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=branch.id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="marketing_campaign_executed",
+        entity_type="marketing_campaign",
+        entity_id=campaign.id,
+        payload={
+            "queued_count": queued_count,
+            "skipped_count": skipped_count,
+            "max_recipients": max_recipients,
+        },
+    )
+
+    return ConsoleMarketingCampaignExecuteResponse(
+        campaign_id=campaign.id,
+        queued_count=queued_count,
+        skipped_count=skipped_count,
+        status="queued" if queued_count > 0 else "skipped",
     )
 
 

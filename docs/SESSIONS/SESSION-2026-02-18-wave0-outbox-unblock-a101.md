@@ -1,6 +1,6 @@
 # SESSION 2026-02-18-wave0-outbox-unblock-a101 — Wave 0.2 Outbox Unblock
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-18-wave0-outbox-unblock-a101.md
 - branch: feat/2026-02-18-wave0-outbox-unblock-a101
@@ -12,11 +12,11 @@
   - Runtime moved to truffles-api:wave0-outbox-unblock-a101-r3 (api/outbox/sentinel/outbox-service).
   - Actionable outbox health calculation excludes archived and calendar sync system failures.
   - Live health recovered to healthy with pending=0 and actionable failed_24h=2.
+  - PR merged: https://github.com/k1ddy/Truffles-AI-Employee/pull/744 (`Wave 0.2: outbox pending-tail unblock + actionable health KPI`).
 - next:
-  - Commit branch changes and open PR to main.
-  - Attach live evidence in PR description.
+  - None (session closed after PR merge).
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-18-wave0-outbox-unblock-a101.md
   - curl https://console.truffles.kz/api/health/full
   - SQL outbox breakdown (failed_24h raw vs actionable)
-- last_updated: 2026-02-19
+- last_updated: 2026-02-19T09:39:26Z
