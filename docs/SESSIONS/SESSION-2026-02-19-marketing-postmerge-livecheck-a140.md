@@ -1,0 +1,28 @@
+# SESSION 2026-02-19-marketing-postmerge-livecheck-a140 — Session 2026-02-19-marketing-postmerge-livecheck-a140
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-19-marketing-postmerge-livecheck-a140.md
+- branch: main
+- worktree: /home/zhan/truffles-main
+- base_ref: origin/main
+- scope: Post-merge runtime smoke for Wave 3 marketing + evidence sync to STATE.
+- done:
+  - Runtime smoke executed on `main`: `create -> preview -> execute(confirm_send=true)` for campaign `4c95e9e0-c42d-44e0-8f54-eebd27f4fb46`.
+  - Delivery row verified and moved to `replied` after inbound reply simulation.
+  - `decision_meta.marketing_reply_context=true` and `marketing_context` verified.
+  - GAP confirmed: `decision_trace` for same conversation does not contain `marketing_reply_context` stage.
+  - `STATE.md` updated with FACT/GAP evidence.
+- next:
+  - Open fix package for missing `marketing_reply_context` trace stage retention in runtime path.
+- evidence:
+  - /tmp/marketing-live-20260219-131840/create_response.json
+  - /tmp/marketing-live-20260219-131840/preview_response.json
+  - /tmp/marketing-live-20260219-131840/execute_response.json
+  - /tmp/marketing-live-20260219-131840/diagnostics_response.json
+  - /tmp/marketing-live-20260219-131840/sql_campaign_deliveries.tsv
+  - /tmp/marketing-live-20260219-131840/sql_campaign_deliveries_after_reply.tsv
+  - /tmp/marketing-live-20260219-131840/reply2_result.json
+  - /tmp/marketing-live-20260219-131840/reply2_context_summary.json
+  - /tmp/marketing-live-20260219-131840/sql_reply2_trace_full.json
+- last_updated: 2026-02-19

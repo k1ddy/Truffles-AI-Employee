@@ -4,6 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-02-19-marketing-postmerge-livecheck-a140 | done | main | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-19-marketing-postmerge-livecheck-a140.md | 2026-02-19 |
 | 2026-02-19-wave3-marketing-full-a140 | done | feat/2026-02-19-wave3-marketing-full-a140 | /home/zhan/worktrees/2026-02-19-wave-canon-context-marketing-mvp-a140 | docs/TASK_PACKAGES/TP-2026-02-19-wave3-marketing-full-a140.md | 2026-02-19 |
 | 2026-02-19-wave-canon-context-marketing-mvp-a140 | done | feat/2026-02-19-wave-canon-context-marketing-mvp-a140 | /home/zhan/worktrees/2026-02-19-wave-canon-context-marketing-mvp-a140 | docs/TASK_PACKAGES/TP-2026-02-19-wave-canon-context-marketing-mvp-a140.md | 2026-02-19 |
 | 2026-02-19-platform-health-remediation-a120 | done | feat/2026-02-19-platform-health-remediation-a120 | /home/zhan/worktrees/2026-02-19-platform-health-remediation-a120 | docs/TASK_PACKAGES/TP-2026-02-19-platform-health-remediation-a120.md | 2026-02-19 |
