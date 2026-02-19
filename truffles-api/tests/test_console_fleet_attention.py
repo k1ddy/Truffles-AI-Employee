@@ -333,6 +333,116 @@ async def test_list_fleet_attention_include_low_null_uses_default(monkeypatch) -
 
 
 @pytest.mark.asyncio
+async def test_list_fleet_attention_uses_reference_branches_only(monkeypatch) -> None:
+    client_id = uuid4()
+    company_id = uuid4()
+    reference_branch_id = uuid4()
+    noisy_branch_id = uuid4()
+    context = SimpleNamespace(
+        role="platform_admin",
+        accessible_clients=[SimpleNamespace(id=client_id, name="alpha", status="active", company_id=company_id)],
+        companies=[SimpleNamespace(id=company_id, name="Acme")],
+    )
+    db = Mock()
+
+    def _query_side_effect(*entities):
+        if len(entities) == 1 and entities[0] is console_router.Branch:
+            return _QueryMock(
+                [
+                    SimpleNamespace(
+                        id=reference_branch_id,
+                        client_id=client_id,
+                        is_active=True,
+                        instance_id="a-1",
+                        telegram_chat_id="100",
+                        webhook_secret="secret-a",
+                        integration_state="ok",
+                        integration_reason=None,
+                        integration_checked_at=None,
+                        integration_degraded_at=None,
+                        integration_recovered_at=None,
+                        slug="alpha-main",
+                        name="Alpha Main",
+                    ),
+                    SimpleNamespace(
+                        id=noisy_branch_id,
+                        client_id=client_id,
+                        is_active=True,
+                        instance_id="a-2",
+                        telegram_chat_id="200",
+                        webhook_secret="secret-b",
+                        integration_state="degraded",
+                        integration_reason=None,
+                        integration_checked_at=None,
+                        integration_degraded_at=None,
+                        integration_recovered_at=None,
+                        slug="alpha-test",
+                        name="Alpha Test",
+                    ),
+                ]
+            )
+        if len(entities) == 2:
+            return _QueryMock([(client_id, "token-a")])
+        raise AssertionError(f"unexpected query entities: {entities}")
+
+    db.query.side_effect = _query_side_effect
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(
+        console_router,
+        "_build_fleet_client_details_map",
+        lambda *_args, **_kwargs: {
+            client_id: console_router._FleetClientDetails(
+                lifecycle_state="active",
+                payment_status="confirmed",
+                commercial_state="payment_confirmed",
+                service_state="ok",
+                owner_name="Owner A",
+                next_action="monitor_sla_and_quality",
+                total_branches=1,
+                active_branches=1,
+                degraded_branches=0,
+                go_live_ready_branches=1,
+                reference_branch_ids=(reference_branch_id,),
+                reference_branch_reason="active_live_signals",
+            )
+        },
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_load_latest_branch_inbound_observations_for_clients",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(console_router, "_query_outbox_failed_24h_map", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(console_router, "_query_pending_handovers_map", lambda *_args, **_kwargs: {})
+    status_by_branch = {
+        reference_branch_id: SimpleNamespace(whatsapp_status="ok", status="ok"),
+        noisy_branch_id: SimpleNamespace(whatsapp_status="no_recent_inbound", status="error"),
+    }
+    monkeypatch.setattr(
+        console_router,
+        "_build_branch_integration_status",
+        lambda **kwargs: status_by_branch[kwargs["branch"].id],
+    )
+
+    request = SimpleNamespace(query_params={"include_low": "true"})
+    response = await console_router.list_fleet_attention(
+        request=request,
+        include_low="true",
+        db=db,
+    )
+
+    assert response.summary.active_clients_total == 1
+    assert response.summary.integration_error_branches_total == 0
+    assert response.summary.stale_branches_total == 0
+    assert len(response.items) == 1
+    assert response.items[0].integration_error_branches == 0
+    assert response.items[0].stale_branches == 0
+    assert response.items[0].reference_branch_ids == [reference_branch_id]
+    assert response.items[0].reference_branch_reason == "active_live_signals"
+
+
+@pytest.mark.asyncio
 async def test_list_fleet_attention_requires_platform_admin(monkeypatch) -> None:
     request = SimpleNamespace(query_params={})
     db = Mock()

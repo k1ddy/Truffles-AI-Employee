@@ -88,6 +88,40 @@ def test_parse_fleet_params_reject_invalid_values() -> None:
         console_router._parse_fleet_service_param("bad")
 
 
+def test_select_reference_active_branches_filters_to_reference_subset() -> None:
+    selected_id = uuid4()
+    ignored_id = uuid4()
+    inactive_id = uuid4()
+    branches = [
+        SimpleNamespace(id=selected_id, is_active=True),
+        SimpleNamespace(id=ignored_id, is_active=True),
+        SimpleNamespace(id=inactive_id, is_active=False),
+    ]
+
+    scoped = console_router._select_reference_active_branches(
+        branches,
+        reference_branch_ids=(selected_id,),
+    )
+
+    assert [branch.id for branch in scoped] == [selected_id]
+
+
+def test_select_reference_active_branches_falls_back_to_all_active() -> None:
+    first = uuid4()
+    second = uuid4()
+    branches = [
+        SimpleNamespace(id=first, is_active=True),
+        SimpleNamespace(id=second, is_active=True),
+    ]
+
+    scoped = console_router._select_reference_active_branches(
+        branches,
+        reference_branch_ids=(uuid4(),),
+    )
+
+    assert [branch.id for branch in scoped] == [first, second]
+
+
 def _build_list_query_mock() -> Mock:
     query = Mock()
     query.filter.return_value = query

@@ -1,3 +1,4 @@
+import json
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import SimpleNamespace
@@ -339,3 +340,96 @@ def test_delivery_reason_totals_aggregate_profiles():
     assert totals["provider_rate_limited"] == 2
     assert totals["provider_unavailable"] == 1
     assert totals["unknown"] == 1
+
+
+def test_parse_onboarding_fleet_check_args_supports_all_active_branches():
+    args = _module._parse_onboarding_fleet_check_args(["--all-active-branches"])
+    assert args.all_active_branches is True
+
+
+def test_onboarding_delivery_stabilize_uses_reference_rows_by_default(monkeypatch, capsys):
+    monkeypatch.setattr(_module, "_resolve_diagnose_container", lambda *_args, **_kwargs: "truffles-api")
+    monkeypatch.setattr(
+        _module,
+        "_run_onboarding_fleet_container",
+        lambda *_args, **_kwargs: {
+            "rows": [
+                {
+                    "branch_id": "b-ref",
+                    "branch_slug": "main",
+                    "client_slug": "demo",
+                    "is_active": True,
+                    "reference_branch": True,
+                    "readiness_blocker_codes": [],
+                    "delivery_failure_profile": {"total_failed_24h": 0},
+                    "delivery_primary_reason_code": None,
+                },
+                {
+                    "branch_id": "b-noise",
+                    "branch_slug": "test",
+                    "client_slug": "demo",
+                    "is_active": True,
+                    "reference_branch": False,
+                    "readiness_blocker_codes": ["delivery:provider_billing_blocked_critical"],
+                    "delivery_failure_profile": {
+                        "total_failed_24h": 5,
+                        "provider_billing_blocked": 5,
+                    },
+                    "delivery_primary_reason_code": "provider_billing_blocked",
+                },
+            ],
+            "summary": {},
+        },
+    )
+
+    args = _module._parse_onboarding_delivery_stabilize_args(["--json"])
+    _module._run_onboarding_delivery_stabilize(args)
+    payload = json.loads(capsys.readouterr().out.strip())
+
+    assert payload["summary"]["reference_mode"] == "normalized"
+    assert payload["summary"]["active_branches"] == 1
+    assert payload["summary"]["active_delivery_critical"] == 0
+
+
+def test_onboarding_delivery_stabilize_all_active_branches_opt_in(monkeypatch, capsys):
+    monkeypatch.setattr(_module, "_resolve_diagnose_container", lambda *_args, **_kwargs: "truffles-api")
+    monkeypatch.setattr(
+        _module,
+        "_run_onboarding_fleet_container",
+        lambda *_args, **_kwargs: {
+            "rows": [
+                {
+                    "branch_id": "b-ref",
+                    "branch_slug": "main",
+                    "client_slug": "demo",
+                    "is_active": True,
+                    "reference_branch": True,
+                    "readiness_blocker_codes": [],
+                    "delivery_failure_profile": {"total_failed_24h": 0},
+                    "delivery_primary_reason_code": None,
+                },
+                {
+                    "branch_id": "b-noise",
+                    "branch_slug": "test",
+                    "client_slug": "demo",
+                    "is_active": True,
+                    "reference_branch": False,
+                    "readiness_blocker_codes": ["delivery:provider_billing_blocked_critical"],
+                    "delivery_failure_profile": {
+                        "total_failed_24h": 5,
+                        "provider_billing_blocked": 5,
+                    },
+                    "delivery_primary_reason_code": "provider_billing_blocked",
+                },
+            ],
+            "summary": {},
+        },
+    )
+
+    args = _module._parse_onboarding_delivery_stabilize_args(["--all-active-branches", "--json"])
+    _module._run_onboarding_delivery_stabilize(args)
+    payload = json.loads(capsys.readouterr().out.strip())
+
+    assert payload["summary"]["reference_mode"] == "all_active"
+    assert payload["summary"]["active_branches"] == 2
+    assert payload["summary"]["active_delivery_critical"] == 1
