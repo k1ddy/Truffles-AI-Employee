@@ -62,6 +62,11 @@
 - Для каждой волны фиксировать: run-команды, run-id, summary/brief, `decision_trace`, `decision_meta`, PR/CI ссылки.
 - Любой вывод без evidence считается `PLAN/GAP`, а не `FACT`.
 
+6. `Plan-vs-final delta gate`:
+- Для каждого inbound с `llm_policy_core.payload.tool_action` обязателен audit `plan -> final`.
+- Любой post-LLM override допускается только по whitelist reason-code (см. раздел `Override whitelist (contract v1)`).
+- Override без reason-code или вне whitelist = `NO_GO` для релиза.
+
 ## Problem decomposition
 1. Semantic misroute:
 - mixed-intent turns с ложным доминированием non-target intent.
@@ -131,7 +136,8 @@
 
 3. DoD:
 - На контрольном non-replay сценарии блокирующий `master`-defect закрыт.
-- `tool_action_mismatch` и `info_section_miss` не растут.
+- `master_control_failures == 0` на lock/replay контрольном наборе.
+- `tool_action_mismatch_rate` и `info_section_miss_rate` не хуже baseline более чем на `+0.5pp`.
 - Нет новых hard-fail по LAW/contract.
 
 ### Track B — LLM-first arbitration redesign (7 days)
@@ -150,8 +156,9 @@
 - Добавить confidence-aware arbitration и fallback policy.
 
 3. DoD:
-- Доля post-LLM semantic rewrites резко снижена.
-- Классовая устойчивость на перефразах стабилизирована.
+- `post_llm_semantic_rewrite_rate <= 2%` на сопоставимом replay.
+- `post_llm_semantic_rewrite_rate <= 5%` на multilingual/chaos battery.
+- 100% rewrites имеют whitelist reason-code + trace evidence.
 
 ### Track C — Tool governance hardening (7-10 days)
 1. Цель:
@@ -164,7 +171,8 @@
 - Нормализованный `tool_outcome taxonomy` для наблюдаемости и triage.
 
 3. DoD:
-- Снижение `tool_action_mismatch` и `contract_invalid` в replay/prod.
+- `tool_action_mismatch_rate` снижен минимум на `30%` от lock-baseline.
+- `tool_contract_invalid_rate` снижен минимум на `25%` от lock-baseline.
 
 ### Track D — Chaos continuity engine (7-14 days)
 1. Цель:
@@ -177,7 +185,8 @@
 - Явная state-machine таблица переходов с invariant tests.
 
 3. DoD:
-- Снижение `expected_reply_stall` и повторных циклов без прогресса.
+- `expected_reply_stall_rate` снижен минимум на `40%` от lock-baseline.
+- `booking_progression_success_rate` улучшен минимум на `+15pp` на chaos suite.
 
 ### Track E — Quality & anti-drift operating system (постоянно)
 1. Цель:
@@ -190,7 +199,45 @@
 - Weekly forensic review топ-провалов с owner sign-off.
 
 3. DoD:
-- Релизы без blind spots по core behavior.
+- Нет релизов без lock/replay + multilingual battery + forensic sign-off.
+- Weekly forensic review закрывается owner sign-off с action items.
+
+## Override whitelist (contract v1)
+Разрешённые deterministic override reason-codes:
+1. `safety_policy_block`:
+- Нарушение LAW/policy/safety, подтверждённое валидатором.
+2. `contract_validation_failure`:
+- Невалидные/неполные аргументы tool_action, без безопасного auto-fix.
+3. `required_slot_missing`:
+- Для выбранного tool отсутствует обязательный слот, fallback только в `clarify/collect`.
+4. `tool_unavailable`:
+- Tool disabled/down/timeout budget exceeded, переход в controlled degrade.
+5. `timeout_degrade`:
+- LLM/tool timeout, разрешён только `clarify` или `handoff`, запрещён silent semantic reroute.
+6. `idempotency_replay_guard`:
+- Дедупликация/защита от повторной отправки, без изменения пользовательского смысла.
+
+Запрещено:
+- Любой override по keyword-only эвристике без reason-code.
+- Подмена `catalog.service_query -> catalog.location` без explicit location/hours сигнала.
+
+## Timeout & Degrade policy
+1. При timeout `multi_intent_llm` или `policy_core_llm`:
+- Не выполнять keyword-driven semantic reroute.
+- Разрешены только `clarify` или `handoff` с reason-code `timeout_degrade`.
+2. При timeout tool executor:
+- Один контролируемый retry по policy.
+- При повторном fail перевод в `handoff` или безопасный FACT fallback без выдуманных данных.
+3. Все timeout/degrade события обязаны писать trace/meta и участвовать в KPI (`timeout_fallback_rate`).
+
+## Multilingual adversarial battery (mandatory)
+Минимальные классы покрытий для каждого wave release:
+1. `RU`, `KK`, `mixed RU+KK` в одном сообщении.
+2. Транслит и code-switch (`ru+en`, `kk+ru`, mixed slot names).
+3. ASR/noise: опечатки, пропуски, перестановки, шумные токены.
+4. Interruptions: booking -> info -> booking, booking -> handoff -> booking resume.
+5. Adversarial phrasing: подмена букв/слов, синонимы, сокращения, многосмысленные вопрос-утверждения.
+6. Long dialogs: 10-15 turns с перебивками и media turns.
 
 ## Architecture decisions (принципы реализации)
 1. LLM принимает semantic решение; deterministic подтверждает корректность и безопасность.
@@ -213,27 +260,31 @@
 
 ## Metrics (SLO/KPI)
 1. Semantic routing:
-- `semantic_misroute_rate` (target downtrend wave-to-wave).
+- `semantic_misroute_rate` (target: минимум `-30%` от lock-baseline на wave).
 
 2. Tool correctness:
-- `tool_action_mismatch_rate`
-- `tool_contract_invalid_rate`
+- `tool_action_mismatch_rate` (target: минимум `-30%` от lock-baseline).
+- `tool_contract_invalid_rate` (target: минимум `-25%` от lock-baseline).
 
 3. Continuity:
-- `booking_progression_success_rate`
-- `expected_reply_stall_rate`
+- `booking_progression_success_rate` (target: `+15pp` на chaos suite).
+- `expected_reply_stall_rate` (target: минимум `-40%` от lock-baseline).
 
 4. Reliability:
-- `timeout_fallback_rate`
-- `policy_core_degraded_rate`
+- `timeout_fallback_rate` (target: не выше baseline `+0.5pp`).
+- `policy_core_degraded_rate` (target: не выше baseline `+0.5pp`).
 
 5. User-impact:
-- `hard_fail_rate`
-- `handoff_correct_rate`
+- `hard_fail_rate` (target: не выше baseline `+0.2pp`).
+- `handoff_correct_rate` (target: не ниже baseline `-0.5pp`).
 
 6. Observability integrity:
-- `decision_meta_coverage`
-- `decision_trace_coverage`
+- `decision_meta_coverage` (target: `>= 99%` inbound turns).
+- `decision_trace_coverage` (target: `>= 99%` inbound turns).
+
+7. Arbitration integrity:
+- `post_llm_semantic_rewrite_rate` (target: `<= 2%` overall, `<= 5%` chaos battery).
+- `rewrite_reason_coverage` (target: `100%` whitelist reason-code coverage).
 
 ## Execution plan (phased)
 1. Phase 0 (Day 0-1):
@@ -261,6 +312,7 @@
 - `pytest -q truffles-api/tests/test_booking_chaos_dialogs.py`
 - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py`
 - `pytest -q truffles-api/tests/test_demo_salon_eval.py`
+- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode all --fail-on-thresholds --run-id booking-lock-<id>`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality ... --scenarios-file <lock> --baseline-summary <lock_summary> --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression`
 
 ## Evidence package (for each wave)
@@ -272,11 +324,19 @@
 
 ## Rollout
 1. Canary on controlled scenario set and selected tenants.
-2. Progressive rollout with kill-switches:
+2. Canary `GO`:
+- Нет `P0`/LAW regressions.
+- Все release gates в пределах порогов.
+- `rewrite_reason_coverage == 100%`.
+3. Canary `NO_GO`:
+- Любой override без whitelist reason-code.
+- Рост `hard_fail_rate` выше `+0.2pp` от baseline.
+- Рост `post_llm_semantic_rewrite_rate` выше порога.
+4. Progressive rollout with kill-switches:
 - semantic arbitration mode
 - strict explicit routing mode
 - fallback policy mode
-3. Stop-the-line on regression breach.
+5. Stop-the-line on regression breach.
 
 ## Rollback
 - Feature-flag rollback for arbitration changes.
