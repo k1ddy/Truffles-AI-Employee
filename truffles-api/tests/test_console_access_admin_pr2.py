@@ -1397,6 +1397,11 @@ async def test_get_onboarding_scorecard_returns_fail_payload(monkeypatch):
     monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         console_router,
+        "_ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS",
+        {str(branch.id).lower()},
+    )
+    monkeypatch.setattr(
+        console_router,
         "build_onboarding_scorecard",
         lambda *_args, **_kwargs: SimpleNamespace(
             ready=False,
@@ -1512,6 +1517,7 @@ async def test_get_onboarding_scorecard_returns_fail_payload(monkeypatch):
     assert response.readiness_kernel.status == "fail"
     assert "go_no_go:payment_confirmed" in response.readiness_kernel.blocker_codes
     assert response.readiness_kernel.shadow_hard_gate.status == "fail"
+    assert response.readiness_kernel.shadow_hard_gate.enforced is True
     assert "delivery:backlog_critical" in response.readiness_kernel.shadow_hard_gate.blocker_codes
 
 
@@ -1536,6 +1542,7 @@ def test_require_branch_scorecard_ready_allows_shadow_blockers_when_hard_gate_di
     )
     monkeypatch.setattr(console_router, "build_onboarding_scorecard", lambda *_args, **_kwargs: scorecard)
     monkeypatch.setattr(console_router, "_ONBOARDING_READINESS_HARD_GATE_ENABLED", False)
+    monkeypatch.setattr(console_router, "_ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS", set())
     monkeypatch.setattr(
         console_router,
         "_ONBOARDING_READINESS_HARD_GATE_CODES",
@@ -1570,6 +1577,7 @@ def test_require_branch_scorecard_ready_blocks_when_hard_gate_enabled(monkeypatc
     )
     monkeypatch.setattr(console_router, "build_onboarding_scorecard", lambda *_args, **_kwargs: scorecard)
     monkeypatch.setattr(console_router, "_ONBOARDING_READINESS_HARD_GATE_ENABLED", True)
+    monkeypatch.setattr(console_router, "_ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS", set())
     monkeypatch.setattr(
         console_router,
         "_ONBOARDING_READINESS_HARD_GATE_CODES",
@@ -1580,6 +1588,52 @@ def test_require_branch_scorecard_ready_blocks_when_hard_gate_enabled(monkeypatc
         console_router._require_branch_scorecard_ready(
             db=Mock(),
             branch=SimpleNamespace(client_id=uuid4(), id=uuid4()),
+            operation="branch_activate",
+        )
+
+    assert exc_info.value.code == "GO_LIVE_GATE_REQUIRED"
+    assert exc_info.value.details["missing"] == ["delivery:backlog_critical"]
+    assert exc_info.value.details["scorecard_status"] == "pass"
+    assert exc_info.value.details["readiness_kernel"]["shadow_hard_gate"]["enforced"] is True
+
+
+def test_require_branch_scorecard_ready_blocks_when_canary_branch_enforced(monkeypatch):
+    branch_id = uuid4()
+    scorecard = SimpleNamespace(
+        ready=True,
+        missing=[],
+        checks=[
+            SimpleNamespace(
+                id=console_router.OnboardingStep.GO_NO_GO,
+                required=True,
+                passed=True,
+                missing=[],
+            )
+        ],
+        readiness_kernel=SimpleNamespace(
+            status="fail",
+            blocker_codes=["delivery:backlog_critical"],
+            next_action_codes=["run_outbox_process_and_review_failed"],
+            shadow_hard_gate_blockers=["delivery:backlog_critical"],
+        ),
+    )
+    monkeypatch.setattr(console_router, "build_onboarding_scorecard", lambda *_args, **_kwargs: scorecard)
+    monkeypatch.setattr(console_router, "_ONBOARDING_READINESS_HARD_GATE_ENABLED", False)
+    monkeypatch.setattr(
+        console_router,
+        "_ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS",
+        {str(branch_id).lower()},
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_ONBOARDING_READINESS_HARD_GATE_CODES",
+        {"delivery:backlog_critical"},
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._require_branch_scorecard_ready(
+            db=Mock(),
+            branch=SimpleNamespace(client_id=uuid4(), id=branch_id),
             operation="branch_activate",
         )
 
@@ -1829,6 +1883,9 @@ async def test_list_onboarding_blueprints_returns_catalog(monkeypatch):
     assert len(response.items) >= 4
     assert {item.domain_slug for item in response.items} >= {"beauty", "clinic", "legal", "ecom"}
     assert all(item.question_templates for item in response.items)
+    assert all(item.required_fields_profile.fields for item in response.items)
+    assert all(item.required_fields_profile.checksum for item in response.items)
+    assert all(item.readiness_weights for item in response.items)
 
 
 @pytest.mark.asyncio
@@ -1848,6 +1905,8 @@ async def test_list_onboarding_blueprints_filters_domain(monkeypatch):
 
     assert [item.domain_slug for item in response.items] == ["legal"]
     assert response.items[0].payload.domain_slug == "legal"
+    assert "client_pack.booking.collect_fields" not in response.items[0].required_fields_profile.fields
+    assert response.items[0].readiness_weights["go_no_go_contract"] >= 1
 
 
 @pytest.mark.asyncio

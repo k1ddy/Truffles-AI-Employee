@@ -1,0 +1,35 @@
+# SESSION 2026-02-19-onboarding-any-niche-step123-a131 — Session 2026-02-19-onboarding-any-niche-step123-a131
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-19-onboarding-delivery-contour-step2-a131.md
+- branch: feat/2026-02-19-onboarding-any-niche-step123-a131
+- worktree: /home/zhan/worktrees/2026-02-19-onboarding-any-niche-step123-a131
+- base_ref: origin/main
+- scope: Реализовать шаг 2 (Delivery Contour Stabilization): reason-aware delivery blockers + ops delivery stabilization diagnose flow.
+- done:
+  - Добавлены reason-aware delivery blockers в readiness dimension: `delivery:provider_billing_blocked_critical`, `delivery:provider_auth_critical`.
+  - Добавлены targeted next actions: `release_stale_processing_queue`, `resolve_provider_billing_block`, `rotate_provider_credentials`.
+  - Расширены hard-gate default codes в console/ops для критичных delivery provider ошибок.
+  - Добавлена команда `ops/diagnose.py onboarding-delivery-stabilize` (summary, critical rows, remediation actions, `--fail-on-critical`).
+  - Добавлены unit tests для onboarding delivery classification/stabilization helpers.
+  - Подтверждены проверки: py_compile, ruff, pytest (`test_console_onboarding_state`, `test_diagnose_onboarding_fleet`, `test_console_access_admin_pr2` hard_gate subset).
+  - Реализован canary hard-gate rollout (`ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS`) с per-branch enforced semantics.
+  - Расширен blueprint contract: `required_fields_profile` + `readiness_weights`, синхронизированы API/schema/types/OpenAPI.
+  - Добавлен тестовый модуль `truffles-api/tests/test_onboarding_blueprints.py` и расширены тесты admin onboarding.
+  - Добавлен валидный fixture `ops/fixtures/onboarding_pack_quality_beauty_valid.yaml`.
+  - Выполнен ops remediation `onboarding-fleet-remediate --sync-reference-pack-integrity --apply` и подтвержден PASS по fleet-check/smoke/pack-quality.
+  - Исправлена красная CI-проверка `unit-tests` в PR #758 через обновление openapi контракт-тестов под канонический `/console/v1` и `ConsoleReminder*` schema aliases.
+  - Реализован rollout diagnostics шага 1: `ops/diagnose.py onboarding-hard-gate-rollout` + helper/tests + runtime evidence для `actual/shadow/canary/enforced`.
+- next:
+  - Step 3: Reference Branch Normalization.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-19-onboarding-delivery-contour-step2-a131.md
+  - docs/REPORTS/2026-02-19-onboarding-delivery-contour-step2-a131.md
+  - /tmp/onboarding_delivery_step2_a131/
+  - docs/TASK_PACKAGES/TP-2026-02-19-onboarding-any-niche-step123-a131.md
+  - docs/REPORTS/2026-02-19-onboarding-any-niche-step123-a131.md
+  - docs/REPORTS/2026-02-19-onboarding-hard-gate-rollout-a131.md
+  - /tmp/onboarding_any_niche_step123_a131/
+  - /tmp/onboarding_hard_gate_rollout_a131/
+- last_updated: 2026-02-19

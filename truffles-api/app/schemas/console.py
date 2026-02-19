@@ -205,6 +205,7 @@ class ConsoleBranchListResponse(BaseModel):
 
 ConsoleMarketingCampaignStatus = Literal["draft", "ready", "executed", "paused"]
 ConsoleMarketingAudienceMode = Literal["branch_active_conversations"]
+ConsoleMarketingDeliveryStatus = Literal["queued", "sent", "failed", "replied"]
 
 
 class ConsoleMarketingCampaign(BaseModel):
@@ -260,6 +261,37 @@ class ConsoleMarketingCampaignExecuteResponse(BaseModel):
     queued_count: int
     skipped_count: int
     status: Literal["queued", "skipped"]
+
+
+class ConsoleMarketingDeliverySample(BaseModel):
+    delivery_id: UUID
+    conversation_id: Optional[UUID] = None
+    recipient_jid: Optional[str] = None
+    status: ConsoleMarketingDeliveryStatus
+    outbox_status: Optional[str] = None
+    last_error: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleMarketingCampaignDiagnosticsResponse(BaseModel):
+    campaign_id: UUID
+    queued_count: int
+    sent_count: int
+    failed_count: int
+    replied_count: int
+    total_count: int
+    sample_failed: list[ConsoleMarketingDeliverySample]
+
+
+class ConsoleMarketingCampaignRetryRequest(ConsoleRequestModel):
+    confirm_retry: bool
+    limit: Optional[int] = 100
+
+
+class ConsoleMarketingCampaignRetryResponse(BaseModel):
+    campaign_id: UUID
+    retried_count: int
+    skipped_count: int
 
 
 class ConsoleMacro(BaseModel):
@@ -1430,6 +1462,11 @@ class ConsoleOnboardingBlueprintQuestionTemplate(BaseModel):
     blocking_go_live: bool = False
 
 
+class ConsoleOnboardingBlueprintRequiredFieldsProfile(BaseModel):
+    fields: list[str] = []
+    checksum: str
+
+
 class ConsoleOnboardingBlueprint(BaseModel):
     id: str
     domain_slug: str
@@ -1438,6 +1475,8 @@ class ConsoleOnboardingBlueprint(BaseModel):
     payload: CapabilitiesPayload
     go_live_blockers_profile: list[str] = []
     question_templates: list[ConsoleOnboardingBlueprintQuestionTemplate] = []
+    required_fields_profile: ConsoleOnboardingBlueprintRequiredFieldsProfile
+    readiness_weights: dict[str, int] = {}
 
 
 class ConsoleOnboardingBlueprintListResponse(BaseModel):

@@ -1,0 +1,65 @@
+# TP-2026-02-19-onboarding-delivery-contour-step2-a131
+
+- Название/цель: Реализовать этап 4 (Delivery Contour Stabilization) для onboarding any-niche: reason-aware delivery blockers в readiness kernel + ops diagnose контур `onboarding-delivery-stabilize` с remediation summary и fail-gate.
+- Canon refs: `docs/TASK_PACKAGES/TP-2026-02-19-onboarding-any-niche-step123-a131.md`, `AGENTS.md`, `STATE.md`, `SPECS/SYSTEM_REFERENCE.md`, `TECH.md`.
+- Invariant:
+  - Не ослаблять go-live fail-closed semantics.
+  - Не вводить client-specific hardcode.
+  - Использовать единые provider rules (`provider_error_policy`) вместо ad-hoc regex.
+- Scope:
+  - Добавить reason-aware delivery blockers в `onboarding_state`:
+    - `delivery:provider_billing_blocked_critical`
+    - `delivery:provider_auth_critical`
+  - Добавить целевые `next_action_codes` для stale/billing/auth remediation.
+  - Расширить hard-gate defaults (console + ops diagnose) новыми критичными delivery кодами.
+  - Добавить diagnose-команду `onboarding-delivery-stabilize`:
+    - aggregation delivery failure profile,
+    - critical rows + remediation actions,
+    - `--fail-on-critical`.
+  - Добавить/обновить unit tests.
+- Out of scope:
+  - Этап 5 Reference Branch Normalization.
+  - Изменение webhook runtime decision pipeline.
+  - Автоматическое mutate-сценарии в outbox без явного operator action.
+- Touch-list:
+  - `truffles-api/app/services/onboarding_state.py`
+  - `truffles-api/app/routers/console.py`
+  - `ops/diagnose.py`
+  - `truffles-api/tests/test_console_onboarding_state.py`
+  - `truffles-api/tests/test_diagnose_onboarding_fleet.py`
+  - `docs/REPORTS/2026-02-19-onboarding-delivery-contour-step2-a131.md`
+  - `docs/SESSIONS/SESSION-2026-02-19-onboarding-any-niche-step123-a131.md`
+- Plan:
+  1) Внести reason-aware delivery классификацию в readiness dimension и hard-gate defaults.
+  2) Реализовать diagnose command `onboarding-delivery-stabilize` с JSON summary и fail-gate.
+  3) Покрыть helper/behavior unit tests и прогнать целевые проверки.
+  4) Сформировать evidence/report и обновить session log.
+- DoD:
+  - `onboarding_state` выставляет billing/auth delivery critical blockers при соответствующих failed причинах.
+  - `onboarding-delivery-stabilize --json` возвращает summary + critical rows + remediation actions.
+  - `--fail-on-critical` дает non-zero при active critical rows.
+  - Unit tests зеленые для onboarding_state + diagnose + admin hard-gate path.
+- Checks:
+  - `python3 -m py_compile truffles-api/app/services/onboarding_state.py truffles-api/app/routers/console.py ops/diagnose.py truffles-api/tests/test_console_onboarding_state.py truffles-api/tests/test_diagnose_onboarding_fleet.py`
+  - `ruff check truffles-api/app/services/onboarding_state.py truffles-api/app/routers/console.py ops/diagnose.py truffles-api/tests/test_console_onboarding_state.py truffles-api/tests/test_diagnose_onboarding_fleet.py`
+  - `pytest -q truffles-api/tests/test_console_onboarding_state.py`
+  - `pytest -q truffles-api/tests/test_diagnose_onboarding_fleet.py`
+  - `pytest -q truffles-api/tests/test_console_access_admin_pr2.py -k "hard_gate or onboarding_scorecard or go_live or require_branch_scorecard"`
+  - `python3 ops/diagnose.py onboarding-delivery-stabilize --window-hours 24 --json`
+- Evidence:
+  - `/tmp/onboarding_delivery_step2_a131/onboarding_delivery_stabilize.json`
+  - `/tmp/onboarding_delivery_step2_a131/onboarding_delivery_stabilize_fail_on_critical.json`
+  - `/tmp/onboarding_delivery_step2_a131/onboarding_delivery_stabilize_fail_on_critical.exit`
+  - `docs/REPORTS/2026-02-19-onboarding-delivery-contour-step2-a131.md`
+- Rollback:
+  - `git revert COMMIT_SHA`.
+- No-go:
+  - Не отключать hard-gate ради прохода.
+  - Не менять БД вручную как основной путь remediation.
+  - Не добавлять demo/client-specific ветвления.
+- Branch/worktree/base/merge/cleanup:
+  - Branch: `feat/2026-02-19-onboarding-any-niche-step123-a131`
+  - Worktree: `/home/zhan/worktrees/2026-02-19-onboarding-any-niche-step123-a131`
+  - Base: `origin/main`
+  - Merge policy: merge commit via PR (no rebase)
+  - Cleanup: после merge.

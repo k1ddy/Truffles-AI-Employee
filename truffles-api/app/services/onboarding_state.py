@@ -32,6 +32,7 @@ from app.services.onboarding_contract_service import (
     find_capability_mismatches,
     merge_onboarding_contract,
 )
+from app.services.provider_error_policy import classify_provider_error
 from app.services.reference_pack_integrity import evaluate_reference_pack_integrity
 
 
@@ -83,11 +84,14 @@ _READINESS_FAILED_24H_WARN = 30
 _READINESS_FAILED_24H_FAIL = 100
 _READINESS_STALE_24H_WARN = 5
 _READINESS_STALE_24H_FAIL = 20
+_READINESS_PROVIDER_AUTH_24H_FAIL = 1
 _READINESS_BLOCKER_PREFIX_GO_NO_GO = "go_no_go:"
 _READINESS_CRITICAL_BLOCKERS = {
     "delivery:backlog_critical",
     "delivery:failed_24h_critical",
     "delivery:stale_processing_critical",
+    "delivery:provider_billing_blocked_critical",
+    "delivery:provider_auth_critical",
     "traffic:whatsapp_capability_mismatch",
     "traffic:telegram_capability_mismatch",
 }
@@ -98,6 +102,8 @@ _READINESS_BLOCKER_QUESTIONS = {
     "delivery:failed_24h_warn": "Какие причины ошибок доставки за 24 часа приоритетны для устранения?",
     "delivery:stale_processing_critical": "Почему сообщения застряли в stale_processing и как устраняем это сейчас?",
     "delivery:stale_processing_warn": "Какая причина stale_processing и какой план превентивного контроля?",
+    "delivery:provider_billing_blocked_critical": "Провайдер заблокировал биллинг: когда будет продление и кто подтверждает?",
+    "delivery:provider_auth_critical": "Ошибка авторизации у провайдера: какие ключи/токены нужно обновить сейчас?",
     "traffic:whatsapp_capability_mismatch": "Почему идет WhatsApp трафик при отключенном capability WhatsApp?",
     "traffic:telegram_capability_mismatch": "Почему идет Telegram трафик при отключенном capability Telegram?",
 }
@@ -922,6 +928,24 @@ def _build_go_no_go_readiness_dimension(go_no_go_missing: list[str]) -> Onboardi
     )
 
 
+def _classify_delivery_failure_reason(last_error: Optional[str]) -> str:
+    normalized = str(last_error or "").strip().lower()
+    if not normalized:
+        return "unknown"
+    if normalized.startswith("stale_processing"):
+        return "stale_processing"
+    classified = classify_provider_error(last_error)
+    if classified.kind == "billing_blocked":
+        return "provider_billing_blocked"
+    if classified.kind == "auth":
+        return "provider_auth"
+    if classified.kind == "rate_limited":
+        return "provider_rate_limited"
+    if classified.kind == "unavailable":
+        return "provider_unavailable"
+    return "unknown"
+
+
 def _build_delivery_health_readiness_dimension(
     db: Session,
     branch: Branch,
@@ -937,29 +961,24 @@ def _build_delivery_health_readiness_dimension(
         .scalar()
         or 0
     )
-    failed_24h_total = (
-        db.query(func.count(OutboxMessage.id))
+    failed_rows = (
+        db.query(OutboxMessage.last_error)
         .filter(
             OutboxMessage.client_id == branch.client_id,
             OutboxMessage.branch_id == branch.id,
             OutboxMessage.status == "FAILED",
             OutboxMessage.updated_at >= cutoff,
         )
-        .scalar()
-        or 0
+        .all()
     )
-    stale_processing_24h_total = (
-        db.query(func.count(OutboxMessage.id))
-        .filter(
-            OutboxMessage.client_id == branch.client_id,
-            OutboxMessage.branch_id == branch.id,
-            OutboxMessage.status == "FAILED",
-            OutboxMessage.updated_at >= cutoff,
-            OutboxMessage.last_error.ilike("stale_processing%"),
-        )
-        .scalar()
-        or 0
-    )
+    failed_24h_total = len(failed_rows)
+    delivery_reason_counts: dict[str, int] = {}
+    for row in failed_rows:
+        reason = _classify_delivery_failure_reason(getattr(row, "last_error", None))
+        delivery_reason_counts[reason] = int(delivery_reason_counts.get(reason, 0)) + 1
+    stale_processing_24h_total = int(delivery_reason_counts.get("stale_processing", 0))
+    billing_blocked_24h_total = int(delivery_reason_counts.get("provider_billing_blocked", 0))
+    provider_auth_24h_total = int(delivery_reason_counts.get("provider_auth", 0))
 
     blocker_codes: list[str] = []
     if backlog_total >= _READINESS_BACKLOG_FAIL:
@@ -977,6 +996,12 @@ def _build_delivery_health_readiness_dimension(
     elif stale_processing_24h_total >= _READINESS_STALE_24H_WARN:
         blocker_codes.append("delivery:stale_processing_warn")
 
+    if billing_blocked_24h_total > 0:
+        blocker_codes.append("delivery:provider_billing_blocked_critical")
+
+    if provider_auth_24h_total >= _READINESS_PROVIDER_AUTH_24H_FAIL:
+        blocker_codes.append("delivery:provider_auth_critical")
+
     if any(code.endswith("_critical") for code in blocker_codes):
         status = "fail"
     elif blocker_codes:
@@ -984,19 +1009,25 @@ def _build_delivery_health_readiness_dimension(
     else:
         status = "pass"
 
-    next_action_codes = (
-        [
-            "run_outbox_process_and_review_failed",
-            "classify_delivery_errors_and_apply_remediation",
-        ]
-        if blocker_codes
-        else []
-    )
+    next_action_codes: list[str] = []
+    if blocker_codes:
+        next_action_codes.extend(
+            [
+                "run_outbox_process_and_review_failed",
+                "classify_delivery_errors_and_apply_remediation",
+            ]
+        )
+    if stale_processing_24h_total > 0:
+        next_action_codes.append("release_stale_processing_queue")
+    if billing_blocked_24h_total > 0:
+        next_action_codes.append("resolve_provider_billing_block")
+    if provider_auth_24h_total >= _READINESS_PROVIDER_AUTH_24H_FAIL:
+        next_action_codes.append("rotate_provider_credentials")
     return OnboardingReadinessDimension(
         id="delivery_health",
         status=status,
         blocker_codes=_deduplicate_strings(blocker_codes),
-        next_action_codes=next_action_codes,
+        next_action_codes=_deduplicate_strings(next_action_codes),
     )
 
 
