@@ -2466,6 +2466,13 @@ def _is_env_enabled(value: str | None, default: bool = True) -> bool:
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _semantic_arbitration_enabled() -> bool:
+    return _is_env_enabled(
+        os.environ.get("LLM_POLICY_CORE_SEMANTIC_ARBITRATION"),
+        default=True,
+    )
+
+
 MEDIA_TYPE_ALIASES = {
     "image": "photo",
     "photo": "photo",
@@ -4262,6 +4269,7 @@ def _has_explicit_location_or_hours_request(
     message_text: str | None,
     *,
     client_slug: str | None,
+    strict: bool = False,
 ) -> bool:
     if not message_text:
         return False
@@ -4270,11 +4278,46 @@ def _has_explicit_location_or_hours_request(
         intent_decomp_set=set(),
         client_slug=client_slug,
     )
+    anchor_intents: set[str] = set()
+    if isinstance(info_meta, dict):
+        raw_anchor_intents = info_meta.get("anchor_intents")
+        if isinstance(raw_anchor_intents, list):
+            anchor_intents = {
+                intent.strip().casefold()
+                for intent in raw_anchor_intents
+                if isinstance(intent, str) and intent.strip()
+            }
+    if {"location", "hours", "parking"} & anchor_intents:
+        return True
     if {"location", "hours", "parking"} & info_intents:
+        if strict:
+            return False
         return True
     info_signals = info_meta.get("info_signals") if isinstance(info_meta, dict) else None
     if isinstance(info_signals, dict):
-        if info_signals.get("location") or info_signals.get("hours") or info_signals.get("parking"):
+        if info_signals.get("location_address_hint"):
+            return True
+        if (
+            not strict
+            and (info_signals.get("location") or info_signals.get("hours") or info_signals.get("parking"))
+        ):
+            return True
+    if strict:
+        normalized = normalize_for_matching(message_text)
+        strict_markers = (
+            "адрес",
+            "где",
+            "находит",
+            "как добрат",
+            "парков",
+            "часы",
+            "график",
+            "режим работы",
+            "работаете",
+            "до скольки",
+            "во сколько",
+        )
+        if any(marker in normalized for marker in strict_markers):
             return True
     return _looks_like_hours_followup(message_text)
 
@@ -10121,7 +10164,7 @@ async def _handle_webhook_payload(
                     if intent in INFO_INTENTS and intent not in info_sections_hint:
                         info_sections_hint.append(intent)
             # Guard parking/location/hours asks from being routed to service_query.
-            if policy_tool_action == "catalog.service_query":
+            if _semantic_arbitration_enabled() and policy_tool_action == "catalog.service_query":
                 info_route_set = set(info_sections_hint)
                 if {"parking", "location", "hours", "contact"} & info_route_set:
                     policy_tool_action = "catalog.location"
@@ -11299,6 +11342,7 @@ async def _handle_webhook_payload(
                 has_explicit_location_or_hours = _has_explicit_location_or_hours_request(
                     message_text,
                     client_slug=payload.client_slug,
+                    strict=not _semantic_arbitration_enabled(),
                 )
                 if (
                     policy_tool_action in {"catalog.service_query", "catalog.location"}
