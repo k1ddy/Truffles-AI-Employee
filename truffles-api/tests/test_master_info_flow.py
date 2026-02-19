@@ -1,4 +1,9 @@
-from app.routers.webhook.info import _build_info_intent_reply, _detect_info_class_intents
+from app.routers.webhook.info import (
+    _anchor_group_hit,
+    _build_info_intent_reply,
+    _detect_info_class_intents,
+    _tokenize_for_matching,
+)
 from app.services.demo_salon_knowledge import get_demo_salon_decision
 
 
@@ -22,6 +27,28 @@ def test_detect_info_class_intents_master_signal_who_will_do_procedure():
 
     assert "master" in intents
     assert meta.get("info_signals", {}).get("master") is True
+
+
+def test_anchor_group_hit_short_prefix_requires_exact_token_boundary():
+    tokens = _tokenize_for_matching("у вас есть мастера которые работают с долгими стрижками")
+    assert _anchor_group_hit(tokens, ("работ", "до")) is False
+
+    explicit_tokens = _tokenize_for_matching("какие мастера работают до скольки")
+    assert _anchor_group_hit(explicit_tokens, ("работ", "до")) is True
+
+
+def test_detect_info_class_intents_master_phrase_no_false_hours_anchor():
+    intents, meta = _detect_info_class_intents(
+        "У вас есть мастера, которые работают с долгими стрижками?",
+        intent_decomp_set=set(),
+        client_slug="demo_salon",
+    )
+
+    assert "master" in intents
+    assert meta.get("info_signals", {}).get("master") is True
+    assert meta.get("info_signals", {}).get("hours") is False
+    anchor_intents = set(meta.get("anchor_intents") or [])
+    assert "hours" not in anchor_intents
 
 
 def test_detect_info_class_intents_parking_signal():

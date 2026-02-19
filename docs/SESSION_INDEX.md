@@ -4,6 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-02-19-llm-first-firebreak-a1 | active | fix/llm-first-firebreak-2026-02-19 | /home/zhan/worktrees/fix-llm-first-firebreak-2026-02-19 | docs/TASK_PACKAGES/TP-2026-02-19-booking-routing-transition-a120.md | 2026-02-19 |
 | 2026-02-19-wave-canon-context-marketing-mvp-a140 | done | feat/2026-02-19-wave-canon-context-marketing-mvp-a140 | /home/zhan/worktrees/2026-02-19-wave-canon-context-marketing-mvp-a140 | docs/TASK_PACKAGES/TP-2026-02-19-wave-canon-context-marketing-mvp-a140.md | 2026-02-19 |
 | 2026-02-19-platform-health-remediation-a120 | done | feat/2026-02-19-platform-health-remediation-a120 | /home/zhan/worktrees/2026-02-19-platform-health-remediation-a120 | docs/TASK_PACKAGES/TP-2026-02-19-platform-health-remediation-a120.md | 2026-02-19 |
 | 2026-02-19-onboarding-readiness-kernel-a131 | done | feat/2026-02-19-onboarding-readiness-kernel-a131 | /home/zhan/worktrees/2026-02-19-onboarding-readiness-kernel-a131 | docs/TASK_PACKAGES/TP-2026-02-19-onboarding-readiness-kernel-a131.md | 2026-02-19 |
