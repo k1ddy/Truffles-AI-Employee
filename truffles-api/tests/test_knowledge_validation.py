@@ -122,6 +122,36 @@ def test_domain_legal_can_force_booking_required_fields():
     assert "client_pack.booking.bot_can_confirm" in missing
 
 
+def test_domain_legal_skips_beauty_specific_required_fields():
+    payload = _base_payload()
+    payload["client_pack"].pop("guest_policy", None)
+    payload["client_pack"].pop("safety", None)
+    payload["client_pack"].pop("pricing", None)
+    payload["client_pack"].pop("quality", None)
+
+    missing = get_missing_required_fields(payload, domain_slug="legal")
+
+    assert "client_pack.guest_policy" not in missing
+    assert "client_pack.safety.medical_note" not in missing
+    assert "client_pack.pricing.price_from_reason" not in missing
+    assert "client_pack.quality.expectations_photo" not in missing
+
+
+def test_unknown_domain_keeps_fail_closed_profile_for_beauty_fields():
+    payload = _base_payload()
+    payload["client_pack"].pop("guest_policy", None)
+    payload["client_pack"].pop("safety", None)
+    payload["client_pack"].pop("pricing", None)
+    payload["client_pack"].pop("quality", None)
+
+    missing = get_missing_required_fields(payload, domain_slug="unknown")
+
+    assert "client_pack.guest_policy" in missing
+    assert "client_pack.safety.medical_note" in missing
+    assert "client_pack.pricing.price_from_reason" in missing
+    assert "client_pack.quality.expectations_photo" in missing
+
+
 def test_domain_legal_accepts_neutral_business_alias_fields():
     payload = _base_payload()
     payload["client_pack"]["business"] = {"name": "Demo Legal"}

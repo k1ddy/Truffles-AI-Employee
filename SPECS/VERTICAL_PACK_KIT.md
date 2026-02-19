@@ -39,13 +39,6 @@
 - `client_pack.services_catalog.services`
 - `client_pack.price_list`
 
-**Длительности**
-- `client_pack.service_duration_estimates` (каноническая карта длительностей).
-
-**Booking базовые поля**
-- `client_pack.booking.collect_fields`
-- `client_pack.booking.bot_can_confirm`
-
 **Policy‑gates**
 - `client_pack.policy.hard_law`
 - `client_pack.policy.payment_info`
@@ -57,12 +50,15 @@
 - `client_pack.policy.discounts`
 - `client_pack.policy.guard_topics.refund`
 
-**Guest rules**
-- `client_pack.guest_policy`
+**Booking profile (для доменов/фич с booking)**
+- `client_pack.service_duration_estimates` (каноническая карта длительностей)
+- `client_pack.booking.collect_fields`
+- `client_pack.booking.bot_can_confirm`
 
-**Required disclaimers**
-- `client_pack.safety.medical_note` (медицинские/противопоказания → только администратор/мастер)
-- `client_pack.pricing.price_from_reason` (объяснение цены “от”)
+**Domain profile (beauty/clinic; fail-closed default для неизвестного домена)**
+- `client_pack.guest_policy`
+- `client_pack.safety.medical_note` (медицинские/противопоказания -> только администратор/мастер)
+- `client_pack.pricing.price_from_reason` (объяснение цены "от")
 - `client_pack.quality.expectations_photo` (ожидания/референс и ограничения результата)
 
 ---

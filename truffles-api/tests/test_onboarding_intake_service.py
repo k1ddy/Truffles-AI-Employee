@@ -144,10 +144,6 @@ def test_evaluate_intake_payload_skips_booking_for_non_booking_domain():
             "catalog": {"summary": "Legal consultations"},
             "communication": {"languages": ["ru", "kk"]},
             "services_catalog": {"services": [{"name": "Consultation"}]},
-            "guest_policy": {"allowed_guests": "no"},
-            "safety": {"medical_note": "n/a"},
-            "pricing": {"price_from_reason": "depends on case"},
-            "quality": {"expectations_photo": "n/a"},
             "price_list": [{"category": "Legal", "items": [{"name": "Consultation", "price": 10000}]}],
             "policy": {
                 "hard_law": {"intents": ["refund"]},
@@ -168,6 +164,10 @@ def test_evaluate_intake_payload_skips_booking_for_non_booking_domain():
     assert "client_pack.booking.collect_fields" not in missing
     assert "client_pack.booking.bot_can_confirm" not in missing
     assert "client_pack.service_duration_estimates" not in missing
+    assert "client_pack.guest_policy" not in missing
+    assert "client_pack.safety.medical_note" not in missing
+    assert "client_pack.pricing.price_from_reason" not in missing
+    assert "client_pack.quality.expectations_photo" not in missing
     assert all("записи" not in question.casefold() for question in questions)
 
 
