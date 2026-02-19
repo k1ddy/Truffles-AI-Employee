@@ -27,6 +27,7 @@ from app.routers.webhook.decision import (
     _classify_policy_core_degrade_reason,
     _policy_core_reason_supports_info_rescue,
     _policy_has_style_reference_hint,
+    _validate_policy_check_confirm_contract,
 )
 from app.routers.webhook.session_memory import _is_session_reset_only_message
 from app.schemas.consult import ConsultControllerOutput
@@ -15832,6 +15833,52 @@ def test_policy_has_style_reference_hint_from_intent_or_reason():
         is True
     )
     assert _policy_has_style_reference_hint(policy_intent="booking", policy_reason="booking_flow") is False
+
+
+def test_validate_policy_check_confirm_contract_allows_valid_paths():
+    assert (
+        _validate_policy_check_confirm_contract(
+            policy_intent="check_booking",
+            policy_action="fact",
+            policy_tool_action="calendar.get_booking",
+        )
+        is None
+    )
+    assert (
+        _validate_policy_check_confirm_contract(
+            policy_intent="confirm_booking",
+            policy_action="collect",
+            policy_tool_action="calendar.book_slot",
+        )
+        is None
+    )
+    assert (
+        _validate_policy_check_confirm_contract(
+            policy_intent="verify_booking",
+            policy_action="handoff",
+            policy_tool_action="handoff",
+        )
+        is None
+    )
+
+
+def test_validate_policy_check_confirm_contract_rejects_mismatch():
+    assert (
+        _validate_policy_check_confirm_contract(
+            policy_intent="check_booking",
+            policy_action="fact",
+            policy_tool_action="calendar.book_slot",
+        )
+        == "check_confirm_tool_mismatch"
+    )
+    assert (
+        _validate_policy_check_confirm_contract(
+            policy_intent="confirm_booking",
+            policy_action="handoff",
+            policy_tool_action="calendar.book_slot",
+        )
+        == "check_confirm_action_mismatch"
+    )
 
 
 def test_unknown_state_fallback_sends_reply():

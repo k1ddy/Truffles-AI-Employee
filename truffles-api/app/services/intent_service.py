@@ -191,6 +191,26 @@ POLICY_CORE_TIMEOUT_FALLBACK_MODEL = os.environ.get(
 POLICY_CORE_CONFIDENCE_THRESHOLD = float(
     os.environ.get("LLM_POLICY_CORE_CONFIDENCE_THRESHOLD", "0.3")
 )
+POLICY_CORE_COMPACT_TRIGGER_TIMEOUT_SECONDS = max(
+    float(os.environ.get("LLM_POLICY_CORE_COMPACT_TRIGGER_TIMEOUT_SECONDS", "1.8")),
+    0.2,
+)
+POLICY_CORE_COMPACT_MESSAGE_MAX_CHARS = max(
+    int(os.environ.get("LLM_POLICY_CORE_COMPACT_MESSAGE_MAX_CHARS", "420")),
+    120,
+)
+POLICY_CORE_COMPACT_MEMORY_SUMMARY_MAX_CHARS = max(
+    int(os.environ.get("LLM_POLICY_CORE_COMPACT_MEMORY_SUMMARY_MAX_CHARS", "180")),
+    80,
+)
+POLICY_CORE_COMPACT_PROFILE_ITEMS_MAX = max(
+    int(os.environ.get("LLM_POLICY_CORE_COMPACT_PROFILE_ITEMS_MAX", "3")),
+    1,
+)
+POLICY_CORE_COMPACT_REF_LIMIT = max(
+    int(os.environ.get("LLM_POLICY_CORE_COMPACT_REF_LIMIT", "6")),
+    1,
+)
 POLICY_CORE_MEMORY_SUMMARY_MAX_CHARS = max(
     int(os.environ.get("LLM_POLICY_CORE_MEMORY_SUMMARY_MAX_CHARS", "360")),
     80,
@@ -389,6 +409,66 @@ def _build_policy_core_response_format(allowed_tool_actions: list[str]) -> dict[
             "schema": schema,
         },
     }
+
+
+def _build_policy_core_messages(prompt: str, payload: dict[str, Any]) -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+
+def _build_policy_core_compact_input(policy_input: dict[str, Any]) -> dict[str, Any]:
+    compact_input: dict[str, Any] = dict(policy_input)
+
+    raw_message = compact_input.get("message")
+    if isinstance(raw_message, str):
+        compact_input["message"] = " ".join(raw_message.split())[
+            :POLICY_CORE_COMPACT_MESSAGE_MAX_CHARS
+        ]
+
+    allowed_payload = compact_input.get("allowed")
+    if isinstance(allowed_payload, dict):
+        normalized_allowed = dict(allowed_payload)
+        for refs_key in ("info_refs", "consult_refs"):
+            refs = normalized_allowed.get(refs_key)
+            if isinstance(refs, list):
+                cleaned_refs = [
+                    ref.strip()
+                    for ref in refs
+                    if isinstance(ref, str) and ref.strip()
+                ]
+                normalized_allowed[refs_key] = cleaned_refs[:POLICY_CORE_COMPACT_REF_LIMIT]
+        compact_input["allowed"] = normalized_allowed
+
+    memory_payload = compact_input.get("memory")
+    if isinstance(memory_payload, dict):
+        normalized_memory = dict(memory_payload)
+        summary = normalized_memory.get("summary")
+        if isinstance(summary, str):
+            normalized_memory["summary"] = " ".join(summary.split())[
+                :POLICY_CORE_COMPACT_MEMORY_SUMMARY_MAX_CHARS
+            ]
+        profile = normalized_memory.get("profile")
+        if isinstance(profile, dict):
+            normalized_profile = dict(profile)
+            retrieved_items = normalized_profile.get("retrieved_items")
+            if isinstance(retrieved_items, list):
+                normalized_profile["retrieved_items"] = retrieved_items[
+                    :POLICY_CORE_COMPACT_PROFILE_ITEMS_MAX
+                ]
+            stored_keys = normalized_profile.get("stored_keys")
+            if isinstance(stored_keys, list):
+                normalized_profile["stored_keys"] = stored_keys[
+                    :POLICY_CORE_COMPACT_PROFILE_ITEMS_MAX
+                ]
+            active_slots = normalized_profile.get("active_slots")
+            if isinstance(active_slots, list):
+                normalized_profile["active_slots"] = active_slots[:3]
+            normalized_memory["profile"] = normalized_profile
+        compact_input["memory"] = normalized_memory
+
+    return compact_input
 
 
 def _resolve_specialist_hint_timeout_seconds(timing_context: dict | None) -> float:
@@ -1963,6 +2043,8 @@ def route_llm_policy_core(
         "raw": None,
         "attempted": False,
         "elapsed_ms": 0.0,
+        "compact_input_used": False,
+        "compact_retry_used": False,
     }
     normalized = (message or "").strip()
     if not normalized:
@@ -2062,10 +2144,14 @@ def route_llm_policy_core(
     if model_name.startswith("gpt-5"):
         temperature = 1.0
 
-    messages = [
-        {"role": "system", "content": prompt},
-        {"role": "user", "content": json.dumps(policy_input, ensure_ascii=False)},
-    ]
+    messages = _build_policy_core_messages(prompt, policy_input)
+    compact_messages: list[dict[str, str]] | None = None
+    compact_input_used = False
+    compact_retry_used = False
+    compact_first_attempt = (
+        policy_timeout_seconds <= POLICY_CORE_COMPACT_TRIGGER_TIMEOUT_SECONDS
+    )
+    use_compact_messages = compact_first_attempt
     structured_output_enabled = _policy_core_structured_output_enabled()
     policy_response_format = (
         _build_policy_core_response_format(allowed_tool_actions)
@@ -2102,6 +2188,13 @@ def route_llm_policy_core(
         attempt_count = attempt_idx + 1
         timeout_seconds_used = timeout_seconds
         max_tokens_used = _resolve_policy_core_max_tokens(timeout_seconds)
+        attempt_uses_compact = use_compact_messages
+        if attempt_uses_compact and compact_messages is None:
+            compact_input = _build_policy_core_compact_input(policy_input)
+            compact_messages = _build_policy_core_messages(prompt, compact_input)
+        messages_for_attempt = compact_messages if attempt_uses_compact else messages
+        if attempt_uses_compact:
+            compact_input_used = True
         if attempt_idx > 0 and not _should_attempt_llm(
             timing_context,
             timeout_seconds=timeout_seconds,
@@ -2111,7 +2204,7 @@ def route_llm_policy_core(
             break
         try:
             response = llm.generate(
-                messages=messages,
+                messages=messages_for_attempt,
                 max_tokens=max_tokens_used,
                 model=POLICY_CORE_MODEL,
                 timeout_seconds=timeout_seconds,
@@ -2126,6 +2219,9 @@ def route_llm_policy_core(
             if not retry_on_timeout:
                 break
             if attempt_idx + 1 < len(timeout_attempts):
+                if not attempt_uses_compact:
+                    use_compact_messages = True
+                    compact_retry_used = True
                 logger.warning(
                     "LLM policy core timeout; retrying",
                     extra={
@@ -2146,7 +2242,7 @@ def route_llm_policy_core(
             ):
                 try:
                     response = llm.generate(
-                        messages=messages,
+                        messages=messages_for_attempt,
                         max_tokens=max_tokens_used,
                         model=POLICY_CORE_MODEL,
                         timeout_seconds=timeout_seconds,
@@ -2161,6 +2257,9 @@ def route_llm_policy_core(
                     if not retry_on_timeout:
                         break
                     if attempt_idx + 1 < len(timeout_attempts):
+                        if not attempt_uses_compact:
+                            use_compact_messages = True
+                            compact_retry_used = True
                         logger.warning(
                             "LLM policy core timeout after response_format fallback; retrying",
                             extra={
@@ -2221,6 +2320,16 @@ def route_llm_policy_core(
 
     if error == "timeout" and fallback_model:
         fallback_timeout_seconds = min(POLICY_CORE_RETRY_TIMEOUT_SECONDS, policy_timeout_seconds)
+        fallback_use_compact = use_compact_messages or compact_input_used
+        if not fallback_use_compact:
+            fallback_use_compact = True
+            compact_retry_used = True
+        if fallback_use_compact and compact_messages is None:
+            compact_input = _build_policy_core_compact_input(policy_input)
+            compact_messages = _build_policy_core_messages(prompt, compact_input)
+        fallback_messages = compact_messages if fallback_use_compact else messages
+        if fallback_use_compact:
+            compact_input_used = True
         if _should_attempt_llm(
             timing_context,
             timeout_seconds=fallback_timeout_seconds,
@@ -2232,7 +2341,7 @@ def route_llm_policy_core(
             fallback_model_attempted = True
             try:
                 response = llm.generate(
-                    messages=messages,
+                    messages=fallback_messages,
                     max_tokens=max_tokens_used,
                     model=fallback_model,
                     timeout_seconds=fallback_timeout_seconds,
@@ -2253,7 +2362,7 @@ def route_llm_policy_core(
                 ):
                     try:
                         response = llm.generate(
-                            messages=messages,
+                            messages=fallback_messages,
                             max_tokens=max_tokens_used,
                             model=fallback_model,
                             timeout_seconds=fallback_timeout_seconds,
@@ -2278,6 +2387,8 @@ def route_llm_policy_core(
     elapsed_ms = round((time.monotonic() - llm_start) * 1000, 2)
     result["attempted"] = True
     result["elapsed_ms"] = elapsed_ms
+    result["compact_input_used"] = compact_input_used
+    result["compact_retry_used"] = compact_retry_used
     _log_timing(
         "policy_core_llm_ms",
         elapsed_ms,
@@ -2297,6 +2408,10 @@ def route_llm_policy_core(
             "timeout_budgeted": policy_timeout_seconds,
             "temperature": temperature,
             "micro_deadline_mode": micro_deadline_mode,
+            "compact_first_attempt": compact_first_attempt,
+            "compact_input_used": compact_input_used,
+            "compact_retry_used": compact_retry_used,
+            "compact_trigger_timeout_seconds": POLICY_CORE_COMPACT_TRIGGER_TIMEOUT_SECONDS,
             "structured_output_enabled": structured_output_enabled,
             "structured_output_fallback_used": structured_output_fallback_used,
         },

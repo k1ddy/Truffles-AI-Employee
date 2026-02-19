@@ -1,0 +1,54 @@
+# SESSION 2026-02-18-booking-stability-runtime-a102 — Session 2026-02-18-booking-stability-runtime-a102
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-18-booking-stability-runtime-a102.md
+- branch: feat/2026-02-18-booking-stability-runtime-a102
+- worktree: /home/zhan/worktrees/2026-02-18-booking-stability-runtime-a102
+- base_ref: origin/main
+- scope: booking runtime quality stabilization (Redis diagnostics + timeout stability + check/confirm contract + residual booking_slot_stall audit/fix + manual per-dialog artifact audit)
+- done:
+  - Completed T0-T7 with r12 clean ON/Fallback replay and manual per-dialog audit.
+  - Session created.
+  - Implemented Redis dedup diagnostics path and propagated `dedup_backend` / `dedup_fallback_reason` / `dedup_latency_ms` into `decision_meta`.
+  - Added LLM timeout-budget controls and compact payload retry/first-attempt logic in policy core path.
+  - Added check/confirm policy contract validation and rescue path in decision flow.
+  - Added dedup aggregates and booking stall guardrails in `ops/diagnose.py`.
+  - Added/updated tests:
+    - `truffles-api/tests/test_webhook_dedup.py`
+    - `truffles-api/tests/test_intent.py`
+    - `truffles-api/tests/test_message_endpoint.py`
+    - `truffles-api/tests/test_booking_quality_response_guard.py`
+  - Validated container code freshness by rebuilding image `truffles-api:a102-20260218` and running isolated API containers:
+    - Redis ON: `http://127.0.0.1:18086`
+    - Redis forced fallback: `http://127.0.0.1:18087`
+  - Completed clean replay runs (judge off + allow-judge-off, manual audit required):
+    - `booking-stability-a102-r11b-redis-on-clean`
+    - `booking-stability-a102-r11b-redis-fallback-clean`
+    - `booking-stability-a102-style-r11b-clean`
+  - Root-caused residual `booking_slot_stall` as evaluator false-positive for successful `calendar.list_slots` turn with slot list output.
+  - Implemented evaluator fix in `ops/diagnose.py` and added regression test `test_booking_slot_stall_not_reported_for_calendar_list_slots_with_success_signal`.
+  - Replayed post-fix validation:
+    - `booking-stability-a102-r12-redis-on-clean2`
+    - `booking-stability-a102-r12-redis-fallback-clean2`
+  - Verified post-fix outcome: no `booking_slot_stall` in r12 ON/Fallback (`pass_rate=1.0`, `strict_pass_rate=1.0`, `degraded_fallback_rate=0.0`).
+  - Produced manual audit artifacts with per-dialog/per-trace coverage and per-file checklist.
+- next:
+  - Optional follow-up: style timeout-degraded turn hardening.
+  - Optional follow-up: reduce style timeout-degraded residual (`policy_core_failure.code=timeout`) on `booking-stability-a102-style-r11b-clean` turn `style-1-text-then-photo/5`.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-18-booking-stability-runtime-a102.md
+  - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18086 --scenarios-file /tmp/booking_quality/booking-stability-a102-r10-redis-on/scenarios.json --count 10 --manager-mode simulate --pending-mode ack --tool-hooks auto --tool-evidence-policy auto --reset-before-dialog --timeout-profile fast-replay --poll-timeout 35 --trace-timeout 35 --poll-interval 2 --trace-interval 2 --judge-mode off --allow-judge-off --fail-on-thresholds --max-failures 20 --run-id booking-stability-a102-r12-redis-on-clean2`
+  - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18087 --scenarios-file /tmp/booking_quality/booking-stability-a102-r10-redis-on/scenarios.json --count 10 --manager-mode simulate --pending-mode ack --tool-hooks auto --tool-evidence-policy auto --reset-before-dialog --timeout-profile fast-replay --poll-timeout 35 --trace-timeout 35 --poll-interval 2 --trace-interval 2 --judge-mode off --allow-judge-off --fail-on-thresholds --max-failures 20 --run-id booking-stability-a102-r12-redis-fallback-clean2`
+  - `/tmp/booking_quality/booking-stability-runtime-a102/summary.json`
+  - `/tmp/booking_quality/booking-stability-runtime-a102/brief.md`
+  - `/tmp/booking_quality/booking-stability-runtime-a102/responses.jsonl`
+  - `/tmp/booking_quality/booking-stability-runtime-a102/trace_bundle.jsonl`
+  - `/tmp/booking_quality/booking-stability-runtime-a102/manual_dialog_audit.tsv`
+  - `/tmp/booking_quality/booking-stability-runtime-a102/manual_trace_audit.tsv`
+  - `/tmp/booking_quality/booking-stability-runtime-a102/manual_file_checklist.tsv`
+  - `/tmp/booking_quality/booking-stability-runtime-a102/manual_findings.md`
+  - `/tmp/booking_quality/booking-stability-runtime-a102-redis-off/summary.json`
+  - `/tmp/booking_quality/booking-stability-runtime-a102-redis-off/manual_findings.md`
+  - `/tmp/booking_quality/booking-stability-runtime-a102-style/summary.json`
+- last_updated: 2026-02-19
