@@ -39,6 +39,14 @@ def _load_scenario_error_normalizer():
     return namespace["_normalize_scenario_generation_error"]
 
 
+def test_llm_quality_source_requires_openai_key_for_all_llm_mode_runs():
+    script_path = Path(__file__).resolve().parents[2] / "ops" / "diagnose.py"
+    source = script_path.read_text(encoding="utf-8")
+
+    assert 'elif args.mode == "llm":' in source
+    assert "llm-quality: missing OPENAI_API_KEY for llm-mode run" in source
+
+
 def test_openai_key_resolver_reads_local_truffles_api_env(monkeypatch, tmp_path):
     resolver, _ = _load_openai_key_helpers()
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

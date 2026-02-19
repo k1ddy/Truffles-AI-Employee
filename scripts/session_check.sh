@@ -7,6 +7,117 @@ repo_root=$(git rev-parse --show-toplevel)
 branch=$(git rev-parse --abbrev-ref HEAD)
 canonical_repo_root="${TRUFFLES_CANONICAL_REPO_ROOT:-/home/zhan/truffles-main}"
 allowed_doc_regex='^(docs/|STATE.md$|STRUCTURE.md$|AGENTS.md$)'
+core_behavior_regex='^(truffles-api/app/routers/webhook/|truffles-api/app/services/(intent_service|ai_service)\.py$|truffles-api/app/schemas/intent\.py$|prompts/llm_policy_core\.md$|contracts/llm/)'
+
+collect_scope_changed_files() {
+  local changed_files
+  changed_files=$(git diff --name-only --cached)
+  if [[ -n "$changed_files" ]]; then
+    printf '%s\n' "$changed_files"
+    return 0
+  fi
+
+  if git rev-parse --verify --quiet "@{u}" >/dev/null; then
+    git diff --name-only "@{u}"..HEAD || true
+    return 0
+  fi
+
+  if git rev-parse --verify --quiet "origin/main" >/dev/null; then
+    local merge_base
+    merge_base=$(git merge-base HEAD origin/main || true)
+    if [[ -n "$merge_base" ]]; then
+      git diff --name-only "$merge_base"..HEAD || true
+      return 0
+    fi
+  fi
+}
+
+summary_gate_validate_candidate() {
+  local candidate="$1"
+  local summary_path="$candidate"
+  if [[ "$summary_path" != /* ]]; then
+    summary_path="$repo_root/$summary_path"
+  fi
+  if [[ ! -f "$summary_path" ]]; then
+    echo "${candidate}: file_not_found"
+    return 1
+  fi
+  if ! jq -e '.infra_valid == true and .semantic_valid == true' "$summary_path" >/dev/null 2>&1; then
+    echo "${candidate}: infra_or_semantic_invalid"
+    return 1
+  fi
+  if ! jq -e '(.judge.enabled // false) == true' "$summary_path" >/dev/null 2>&1; then
+    echo "${candidate}: judge_disabled"
+    return 1
+  fi
+  if ! jq -e '(.config.mode // "") == "llm"' "$summary_path" >/dev/null 2>&1; then
+    echo "${candidate}: mode_is_not_llm"
+    return 1
+  fi
+  if ! jq -e '((.openai_preflight // []) | any(.purpose == "llm" and .valid == true))' "$summary_path" >/dev/null 2>&1; then
+    echo "${candidate}: missing_valid_llm_openai_preflight"
+    return 1
+  fi
+  echo "$summary_path"
+  return 0
+}
+
+enforce_llm_evidence_gate() {
+  local changed_files="$1"
+  local requires_gate="false"
+  while read -r file; do
+    [[ -z "$file" ]] && continue
+    if echo "$file" | grep -Eq "$core_behavior_regex"; then
+      requires_gate="true"
+      break
+    fi
+  done <<< "$changed_files"
+
+  if [[ "$requires_gate" != "true" ]]; then
+    return 0
+  fi
+
+  if [[ "$status" != "done" && "${SESSION_ENFORCE_LLM_EVIDENCE:-}" != "1" ]]; then
+    return 0
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "ERROR: jq is required for LLM evidence gate validation." >&2
+    exit 1
+  fi
+
+  mapfile -t summary_candidates < <(
+    grep -Eo '[^[:space:]]*summary\.json' "$session_file" \
+      | sed 's/[),.;]$//' \
+      | sort -u
+  )
+  if [[ ${#summary_candidates[@]} -eq 0 ]]; then
+    echo "ERROR: Core behavior change requires LLM-quality evidence in session log." >&2
+    echo "Add a summary path under '- evidence:' (example: /tmp/booking_quality/<run-id>/summary.json)." >&2
+    exit 1
+  fi
+
+  local valid_summary=""
+  local candidate
+  local check_result=""
+  declare -a errors=()
+  for candidate in "${summary_candidates[@]}"; do
+    if check_result=$(summary_gate_validate_candidate "$candidate"); then
+      valid_summary="$check_result"
+      break
+    fi
+    errors+=("$check_result")
+  done
+
+  if [[ -z "$valid_summary" ]]; then
+    echo "ERROR: Core behavior change requires valid LLM-quality evidence." >&2
+    echo "Expected: infra_valid=true, semantic_valid=true, judge.enabled=true, config.mode=llm, llm openai_preflight valid." >&2
+    for item in "${errors[@]}"; do
+      echo "  - $item" >&2
+    done
+    exit 1
+  fi
+}
 
 if [[ "$branch" == "HEAD" ]]; then
   echo "ERROR: Detached HEAD; session check requires a named branch." >&2
@@ -143,5 +254,8 @@ if ! grep -q "^| ${session_id} |" "$index_file"; then
   echo "ERROR: Session ID missing in SESSION_INDEX: ${session_id}" >&2
   exit 1
 fi
+
+scope_changed_files=$(collect_scope_changed_files)
+enforce_llm_evidence_gate "$scope_changed_files"
 
 echo "Session OK: ${session_id} (${branch})"
