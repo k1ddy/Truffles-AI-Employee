@@ -353,6 +353,7 @@ from app.services.outbox_service import build_inbound_message_id, enqueue_outbox
 from app.services.pack_runtime_service import (
     PackDecision,
     _detect_promotion_intent,
+    _format_service_not_found_reply,
     _has_duration_signal,
     _has_price_signal,
     _match_service,
@@ -496,7 +497,10 @@ def _detect_intent_signals(message_text: str, *, timing_context: dict | None = N
     is_status_question = legacy.is_bot_status_question(message_text)
     is_human_request = is_human_request_message(message_text)
 
-    if intent_hint == Intent.GREETING:
+    if is_human_request:
+        intent = Intent.HUMAN_REQUEST
+        legacy.logger.info("Intent shortcut: human_request (lexicon)")
+    elif intent_hint == Intent.GREETING:
         intent = Intent.GREETING
         legacy.logger.info("Intent shortcut: greeting (llm hint)")
     elif intent_hint == Intent.THANKS:
@@ -511,9 +515,6 @@ def _detect_intent_signals(message_text: str, *, timing_context: dict | None = N
     elif is_thanks:
         intent = Intent.THANKS
         legacy.logger.info("Intent shortcut: thanks")
-    elif is_human_request:
-        intent = Intent.HUMAN_REQUEST
-        legacy.logger.info("Intent shortcut: human_request (lexicon)")
     elif is_ack or is_low_signal:
         intent = Intent.OTHER
         legacy.logger.info("Intent shortcut: acknowledgement/low-signal -> other")
@@ -521,7 +522,7 @@ def _detect_intent_signals(message_text: str, *, timing_context: dict | None = N
         intent = legacy.classify_intent(message_text, timing_context=timing_context)
         legacy.logger.info(f"Intent classified: {intent.value}")
 
-    if intent_hint in {Intent.GREETING, Intent.THANKS, Intent.QUESTION}:
+    if intent_hint in {Intent.GREETING, Intent.THANKS, Intent.QUESTION} and intent != Intent.HUMAN_REQUEST:
         is_greeting = intent_hint == Intent.GREETING
         is_thanks = intent_hint == Intent.THANKS
         is_ack = False
@@ -605,6 +606,10 @@ def _should_block_expected_reply_by_info(
     price_signal = legacy._has_price_signal(normalized_message, message_text)
     duration_signal = legacy._has_duration_signal(normalized_message, message_text)
     style_reference_signal = _is_style_reference_request(message_text, has_media=False)
+    tokens = normalized_message.split()
+    question_like = "?" in message_text
+    if not question_like and tokens:
+        question_like = any(tokens[0].startswith(prefix) for prefix in legacy.QUESTION_WORD_PREFIXES)
     expected_reply_candidate = None
     if expected_reply_type == legacy.EXPECTED_REPLY_TIME:
         expected_reply_candidate = _validate_expected_reply_value(
@@ -622,10 +627,6 @@ def _should_block_expected_reply_by_info(
         legacy.EXPECTED_REPLY_TIME,
         legacy.EXPECTED_REPLY_NAME,
     }:
-        tokens = normalized_message.split()
-        question_like = "?" in message_text
-        if not question_like and tokens:
-            question_like = any(tokens[0].startswith(prefix) for prefix in legacy.QUESTION_WORD_PREFIXES)
         if question_like:
             blocked = True
     if (
@@ -633,18 +634,44 @@ def _should_block_expected_reply_by_info(
         and expected_reply_type == legacy.EXPECTED_REPLY_TIME
     ):
         booking_signal = _is_booking_request(message_text, client_slug=client_slug)
+        has_clock_time_signal = bool(
+            re.search(r"\b(?:[01]?\d|2[0-3])[:.][0-5]\d\b", message_text)
+        )
+        try:
+            has_datetime_signal = bool(
+                legacy._extract_datetime(message_text, client_slug=client_slug)
+            )
+        except TypeError:
+            # Some tests patch _extract_datetime with a positional-only stub.
+            has_datetime_signal = bool(legacy._extract_datetime(message_text))
         if (
             isinstance(expected_reply_candidate, str)
             and expected_reply_candidate.strip()
             and not price_signal
             and not style_reference_signal
+            and (has_datetime_signal or booking_signal)
             and (booking_signal or not info_query)
+            and (not question_like or booking_signal or has_clock_time_signal)
         ):
             # Accept grounded booking-time replies like "на 3 часа" even when
             # duration markers are present in wording.
             return False
-        if not legacy._extract_datetime(message_text):
+        if not has_datetime_signal:
             return blocked
+        if (
+            question_like
+            and has_datetime_signal
+            and not info_query
+            and not price_signal
+            and not duration_signal
+            and not style_reference_signal
+            and (booking_signal or has_clock_time_signal)
+        ):
+            # Accept explicit booking-time questions like "Можно на 18:30?"
+            # while still blocking info/price/duration interruptions.
+            return False
+        if question_like:
+            return True
         # Keep info interrupts (address/hours/price/duration) in the info path
         # even when the message also contains a time-like token.
         return bool(info_query or price_signal or duration_signal)
@@ -893,6 +920,18 @@ def _apply_expected_reply_contract(
                     "error": answer_error,
                 },
             )
+        blocked_question_like = False
+        if expected_reply_blocked_by_info and message_text:
+            normalized_message = legacy._normalize_service_text(message_text)
+            tokens = normalized_message.split()
+            blocked_question_like = "?" in message_text
+            if not blocked_question_like and tokens:
+                blocked_question_like = any(
+                    tokens[0].startswith(prefix) for prefix in legacy.QUESTION_WORD_PREFIXES
+                )
+        if blocked_question_like:
+            deterministic_available = False
+            deterministic_value = None
         answer_confidence_floor = 0.65
         answer_value_ok = isinstance(answer_value, str) and answer_value.strip()
         answer_slot_ok = isinstance(answer_slot, str) and answer_slot.strip()
@@ -1761,6 +1800,23 @@ def _run_intent_decomposition(
         if not bypass_domain_flows
         else False
     )
+    if message_text and is_human_request_message(message_text):
+        if booking_signal or booking_wants_flow:
+            booking_signal = False
+            booking_wants_flow = False
+            legacy._record_decision_trace(
+                conversation,
+                {
+                    "stage": "booking_gate",
+                    "decision": "booking_bypass_human_request",
+                    "booking_bypassed_reason": "human_request",
+                },
+            )
+            if saved_message:
+                legacy._update_message_decision_metadata(
+                    saved_message,
+                    {"booking_bypassed_reason": "human_request"},
+                )
     if guest_policy_signal and not booking_active:
         booking_signal = False
         booking_wants_flow = False
@@ -3461,6 +3517,18 @@ def _is_booking_request(text: str, *, client_slug: str | None) -> bool:
         or _matches_service_request_lexicon(normalized_service, client_slug)
     ):
         return False
+    try:
+        has_datetime_signal = bool(
+            _extract_datetime(
+                cleaned_text,
+                client_slug=client_slug,
+            )
+        )
+    except TypeError:
+        # Some tests patch _extract_datetime with a positional-only stub.
+        has_datetime_signal = bool(_extract_datetime(cleaned_text))
+    if not has_datetime_signal:
+        return False
     info_intents, _ = _detect_info_class_intents(
         cleaned_text,
         intent_decomp_set=set(),
@@ -3979,7 +4047,34 @@ def _derive_policy_info_refs(
             intent_decomp_set=set(),
             client_slug=client_slug,
         )
-        for ref in fallback_intents:
+
+        # Always keep fallback info refs deterministic to avoid cross-process drift.
+        fallback_refs = sorted(
+            (ref for ref in fallback_intents if ref in INFO_INTENTS),
+            key=lambda ref: (
+                INFO_INTENT_PRIORITY_GENERIC.index(ref)
+                if ref in INFO_INTENT_PRIORITY_GENERIC
+                else len(INFO_INTENT_PRIORITY_GENERIC),
+                ref,
+            ),
+        )
+
+        mixed_master_location_hours = bool(
+            "master" in fallback_intents
+            and {"location", "hours", "parking"} & fallback_intents
+        )
+        if (
+            _semantic_arbitration_enabled()
+            and mixed_master_location_hours
+            and not _has_explicit_location_or_hours_request(
+                message_text,
+                client_slug=client_slug,
+                strict=True,
+            )
+        ):
+            fallback_refs = ["master"] + [ref for ref in fallback_refs if ref != "master"]
+
+        for ref in fallback_refs:
             _append_ref(ref)
 
     return derived
@@ -4355,7 +4450,7 @@ def _has_explicit_location_or_hours_request(
 ) -> bool:
     if not message_text:
         return False
-    info_intents, info_meta = _detect_info_class_intents(
+    _info_intents, info_meta = _detect_info_class_intents(
         message_text,
         intent_decomp_set=set(),
         client_slug=client_slug,
@@ -4371,36 +4466,30 @@ def _has_explicit_location_or_hours_request(
             }
     if {"location", "hours", "parking"} & anchor_intents:
         return True
-    if {"location", "hours", "parking"} & info_intents:
-        if strict:
-            return False
-        return True
     info_signals = info_meta.get("info_signals") if isinstance(info_meta, dict) else None
     if isinstance(info_signals, dict):
         if info_signals.get("location_address_hint"):
             return True
-        if (
-            not strict
-            and (info_signals.get("location") or info_signals.get("hours") or info_signals.get("parking"))
-        ):
-            return True
+
+    normalized = normalize_for_matching(message_text)
+    explicit_markers = (
+        "адрес",
+        "где",
+        "находит",
+        "как добрат",
+        "парков",
+        "часы",
+        "график",
+        "режим работы",
+        "работаете",
+        "до скольки",
+        "во сколько",
+    )
+    if any(marker in normalized for marker in explicit_markers):
+        return True
+
     if strict:
-        normalized = normalize_for_matching(message_text)
-        strict_markers = (
-            "адрес",
-            "где",
-            "находит",
-            "как добрат",
-            "парков",
-            "часы",
-            "график",
-            "режим работы",
-            "работаете",
-            "до скольки",
-            "во сколько",
-        )
-        if any(marker in normalized for marker in strict_markers):
-            return True
+        return False
     return _looks_like_hours_followup(message_text)
 
 
@@ -9720,6 +9809,65 @@ async def _handle_webhook_payload(
             clarify_intent = current_goal or "info"
             context = _get_conversation_context(conversation)
             context_manager = _get_context_manager(context)
+            unknown_service_request_signal = False
+            if isinstance(message_text, str) and message_text.strip():
+                normalized_invalid_choice = normalize_for_matching(message_text)
+                unknown_service_request_signal = any(
+                    marker in normalized_invalid_choice
+                    for marker in ("хочу", "можно", "нужн", "надо", "сдела", "подравн")
+                )
+            service_not_found_reply = None
+            if unknown_service_request_signal:
+                service_not_found_reply = _format_service_not_found_reply(load_yaml_truth(payload.client_slug))
+            if service_not_found_reply:
+                context = _set_expected_reply_context(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    context=context,
+                    expected_reply_type=EXPECTED_REPLY_SERVICE,
+                    reason="invalid_choice",
+                    now=now,
+                )
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "question_contract",
+                        "decision": "invalid_choice_service_not_found",
+                        "state": conversation.state,
+                        "expected_reply_type": expected_reply_type,
+                        "expected_reply_reason": "invalid_choice",
+                    },
+                )
+                _record_message_decision_meta(
+                    saved_message,
+                    action="reply",
+                    intent="service_not_found",
+                    source="question_contract",
+                    fast_intent=False,
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "expected_reply_type": expected_reply_type,
+                            "expected_reply_matched": False,
+                            "expected_reply_reason": "invalid_choice",
+                        },
+                    )
+                bot_response = service_not_found_reply
+                bot_response, sent = _send_and_save(bot_response)
+                result_message = (
+                    "Expected reply invalid choice service_not_found response sent"
+                    if sent
+                    else "Expected reply invalid choice service_not_found response failed"
+                )
+                db.commit()
+                return WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                )
             if _should_escalate_for_clarify(context_manager, clarify_intent):
                 clarify_count, _ = _get_clarify_attempt_state(context_manager, clarify_intent)
                 clarify_reason = "consult_no_service" if clarify_intent == "consult" else "invalid_choice"
@@ -10253,10 +10401,29 @@ async def _handle_webhook_payload(
                 for intent in fallback_info_intents:
                     if intent in INFO_INTENTS and intent not in info_sections_hint:
                         info_sections_hint.append(intent)
-            # Guard parking/location/hours asks from being routed to service_query.
+            # Guard explicit parking/location/hours asks from being routed to service_query.
             if _semantic_arbitration_enabled() and policy_tool_action == "catalog.service_query":
                 info_route_set = set(info_sections_hint)
-                if {"parking", "location", "hours", "contact"} & info_route_set:
+                explicit_location_or_hours = bool(
+                    message_text
+                    and _has_explicit_location_or_hours_request(
+                        message_text,
+                        client_slug=payload.client_slug,
+                        strict=True,
+                    )
+                )
+                should_route_to_location = bool(
+                    explicit_location_or_hours
+                    and ({"parking", "location", "hours"} & info_route_set)
+                )
+                # Keep existing contact routing behavior but avoid stealing master asks.
+                if (
+                    not should_route_to_location
+                    and "contact" in info_route_set
+                    and "master" not in info_route_set
+                ):
+                    should_route_to_location = True
+                if should_route_to_location:
                     policy_tool_action = "catalog.location"
                     policy_tool_args = {}
                     policy_service_query = None
@@ -11432,7 +11599,7 @@ async def _handle_webhook_payload(
                 has_explicit_location_or_hours = _has_explicit_location_or_hours_request(
                     message_text,
                     client_slug=payload.client_slug,
-                    strict=not _semantic_arbitration_enabled(),
+                    strict=_semantic_arbitration_enabled(),
                 )
                 if (
                     policy_tool_action in {"catalog.service_query", "catalog.location"}
@@ -11919,6 +12086,7 @@ async def _handle_webhook_payload(
                 booking=policy_booking_state,
                 expected_reply_type=expected_reply_type,
                 expected_reply_matched=expected_reply_matched,
+                expected_reply_blocked_by_info=expected_reply_blocked_by_info,
                 basic_info_message=basic_info_message,
                 session_memory_reset_reason=session_memory_reset_reason,
                 memory_expected_reply_type=memory_expected_reply_type,
@@ -12788,6 +12956,7 @@ async def _handle_webhook_payload(
         booking=booking,
         expected_reply_type=expected_reply_type,
         expected_reply_matched=expected_reply_matched,
+        expected_reply_blocked_by_info=expected_reply_blocked_by_info,
         basic_info_message=basic_info_message,
         session_memory_reset_reason=session_memory_reset_reason,
         memory_expected_reply_type=memory_expected_reply_type,
