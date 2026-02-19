@@ -138,11 +138,15 @@ from app.schemas.console import (
     ConsoleMarketingCampaign,
     ConsoleMarketingCampaignCreateRequest,
     ConsoleMarketingCampaignCreateResponse,
+    ConsoleMarketingCampaignDiagnosticsResponse,
     ConsoleMarketingCampaignExecuteRequest,
     ConsoleMarketingCampaignExecuteResponse,
     ConsoleMarketingCampaignListResponse,
     ConsoleMarketingCampaignPreviewRequest,
     ConsoleMarketingCampaignPreviewResponse,
+    ConsoleMarketingCampaignRetryRequest,
+    ConsoleMarketingCampaignRetryResponse,
+    ConsoleMarketingDeliverySample,
     ConsoleMembershipCreateRequest,
     ConsoleMembershipListResponse,
     ConsoleMembershipUpdateRequest,
@@ -1821,6 +1825,8 @@ _MARKETING_ALLOWED_ROLES = {"platform_admin", "owner", "admin"}
 _MARKETING_SAMPLE_LIMIT_DEFAULT = 5
 _MARKETING_SAMPLE_LIMIT_MAX = 20
 _MARKETING_EXECUTE_MAX_LIMIT = 500
+_MARKETING_RETRY_LIMIT_DEFAULT = 100
+_MARKETING_RETRY_LIMIT_MAX = 500
 
 
 def _require_marketing_access(context: ConsoleAuthContext, *, action: str) -> None:
@@ -1888,6 +1894,71 @@ def _normalize_marketing_max_recipients(max_recipients: Optional[int]) -> Option
             f"max_recipients must be between 1 and {_MARKETING_EXECUTE_MAX_LIMIT}",
         )
     return max_recipients
+
+
+def _normalize_marketing_retry_limit(limit: Optional[int]) -> int:
+    if limit is None:
+        return _MARKETING_RETRY_LIMIT_DEFAULT
+    if limit < 1 or limit > _MARKETING_RETRY_LIMIT_MAX:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"limit must be between 1 and {_MARKETING_RETRY_LIMIT_MAX}",
+        )
+    return limit
+
+
+def _resolve_marketing_campaign(
+    context: ConsoleAuthContext,
+    db: Session,
+    campaign_id: UUID,
+) -> MarketingCampaign:
+    campaign = db.query(MarketingCampaign).filter(MarketingCampaign.id == campaign_id).first()
+    if not campaign:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Campaign not found")
+    if campaign.client_id != context.client.id:
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Campaign belongs to another tenant")
+    return campaign
+
+
+def _effective_marketing_delivery_status(
+    *,
+    delivery_status: Optional[str],
+    outbox_status: Optional[str],
+) -> str:
+    normalized_delivery = (delivery_status or "").strip().lower()
+    if normalized_delivery == "replied":
+        return "replied"
+
+    normalized_outbox = (outbox_status or "").strip().upper()
+    if normalized_outbox == "FAILED":
+        return "failed"
+    if normalized_outbox == "SENT":
+        return "sent"
+    if normalized_outbox in {"PENDING", "PROCESSING"}:
+        return "queued"
+
+    if normalized_delivery in {"queued", "sent", "failed", "replied"}:
+        return normalized_delivery
+    return "queued"
+
+
+def _serialize_marketing_delivery_sample(
+    delivery: MarketingCampaignDelivery,
+    *,
+    status: Literal["queued", "sent", "failed", "replied"],
+    outbox_status: Optional[str],
+    last_error: Optional[str],
+) -> ConsoleMarketingDeliverySample:
+    return ConsoleMarketingDeliverySample(
+        delivery_id=delivery.id,
+        conversation_id=delivery.conversation_id,
+        recipient_jid=delivery.recipient_jid,
+        status=status,
+        outbox_status=outbox_status,
+        last_error=last_error,
+        updated_at=delivery.updated_at.isoformat() if delivery.updated_at else None,
+    )
 
 
 def _ensure_unique_oidc_subject(
@@ -11787,11 +11858,7 @@ async def preview_marketing_campaign(
     if campaign_uuid is None:
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
 
-    campaign = db.query(MarketingCampaign).filter(MarketingCampaign.id == campaign_uuid).first()
-    if not campaign:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Campaign not found")
-    if campaign.client_id != context.client.id:
-        raise ConsoleAPIError(403, "ACCESS_DENIED", "Campaign belongs to another tenant")
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
 
     branch = _resolve_marketing_branch(context, db, campaign.branch_id)
     sample_limit = _normalize_marketing_sample_limit(payload.sample_limit)
@@ -11852,11 +11919,7 @@ async def execute_marketing_campaign(
     if campaign_uuid is None:
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
 
-    campaign = db.query(MarketingCampaign).filter(MarketingCampaign.id == campaign_uuid).first()
-    if not campaign:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Campaign not found")
-    if campaign.client_id != context.client.id:
-        raise ConsoleAPIError(403, "ACCESS_DENIED", "Campaign belongs to another tenant")
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
     if campaign.status == "paused":
         raise ConsoleAPIError(409, "INVALID_STATE", "Campaign is paused")
 
@@ -11967,6 +12030,150 @@ async def execute_marketing_campaign(
         queued_count=queued_count,
         skipped_count=skipped_count,
         status="queued" if queued_count > 0 else "skipped",
+    )
+
+
+@router.get(
+    "/admin/marketing/campaigns/{campaign_id}/diagnostics",
+    response_model=ConsoleMarketingCampaignDiagnosticsResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_marketing_campaign_diagnostics(
+    campaign_id: str,
+    request: Request,
+    sample_limit: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignDiagnosticsResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="view diagnostics")
+
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
+    sample_limit_value = _normalize_marketing_sample_limit(sample_limit)
+
+    rows = (
+        db.query(
+            MarketingCampaignDelivery,
+            OutboxMessage.status.label("outbox_status"),
+            OutboxMessage.last_error.label("outbox_last_error"),
+        )
+        .outerjoin(OutboxMessage, OutboxMessage.id == MarketingCampaignDelivery.outbox_id)
+        .filter(MarketingCampaignDelivery.campaign_id == campaign.id)
+        .order_by(MarketingCampaignDelivery.created_at.desc(), MarketingCampaignDelivery.id.desc())
+        .all()
+    )
+
+    counts = {"queued": 0, "sent": 0, "failed": 0, "replied": 0}
+    sample_failed: list[ConsoleMarketingDeliverySample] = []
+    for delivery, outbox_status, outbox_last_error in rows:
+        status_value = _effective_marketing_delivery_status(
+            delivery_status=delivery.status,
+            outbox_status=outbox_status,
+        )
+        counts[status_value] += 1
+        if status_value == "failed" and len(sample_failed) < sample_limit_value:
+            sample_failed.append(
+                _serialize_marketing_delivery_sample(
+                    delivery,
+                    status=status_value,
+                    outbox_status=outbox_status,
+                    last_error=outbox_last_error or delivery.error_reason,
+                )
+            )
+
+    return ConsoleMarketingCampaignDiagnosticsResponse(
+        campaign_id=campaign.id,
+        queued_count=counts["queued"],
+        sent_count=counts["sent"],
+        failed_count=counts["failed"],
+        replied_count=counts["replied"],
+        total_count=sum(counts.values()),
+        sample_failed=sample_failed,
+    )
+
+
+@router.post(
+    "/admin/marketing/campaigns/{campaign_id}/retry-failed",
+    response_model=ConsoleMarketingCampaignRetryResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def retry_failed_marketing_campaign_deliveries(
+    campaign_id: str,
+    request: Request,
+    payload: ConsoleMarketingCampaignRetryRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignRetryResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="retry")
+
+    if not payload.confirm_retry:
+        raise ConsoleAPIError(409, "CONFIRMATION_REQUIRED", "Use confirm_retry=true to retry failed deliveries")
+
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    branch = _resolve_marketing_branch(context, db, campaign.branch_id)
+    retry_limit = _normalize_marketing_retry_limit(payload.limit)
+
+    failed_query = (
+        db.query(MarketingCampaignDelivery, OutboxMessage)
+        .join(OutboxMessage, OutboxMessage.id == MarketingCampaignDelivery.outbox_id)
+        .filter(
+            MarketingCampaignDelivery.campaign_id == campaign.id,
+            OutboxMessage.status == "FAILED",
+        )
+    )
+    total_failed = failed_query.count()
+    rows = (
+        failed_query.order_by(
+            OutboxMessage.updated_at.desc().nullslast(),
+            OutboxMessage.id.desc(),
+        )
+        .limit(retry_limit)
+        .all()
+    )
+
+    now = datetime.now(timezone.utc)
+    retried_count = 0
+    for delivery, outbox_row in rows:
+        outbox_row.status = "PENDING"
+        outbox_row.next_attempt_at = None
+        outbox_row.last_error = None
+        outbox_row.updated_at = now
+        delivery.status = "queued"
+        delivery.error_reason = None
+        delivery.updated_at = now
+        retried_count += 1
+
+    skipped_count = max(total_failed - retried_count, 0)
+
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=branch.id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="marketing_campaign_retry_failed",
+        entity_type="marketing_campaign",
+        entity_id=campaign.id,
+        payload={
+            "retried_count": retried_count,
+            "skipped_count": skipped_count,
+            "limit": retry_limit,
+        },
+    )
+    db.commit()
+
+    return ConsoleMarketingCampaignRetryResponse(
+        campaign_id=campaign.id,
+        retried_count=retried_count,
+        skipped_count=skipped_count,
     )
 
 
