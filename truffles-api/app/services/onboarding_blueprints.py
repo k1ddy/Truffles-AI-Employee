@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.schemas.capabilities import CapabilitiesPayload
+from app.services.knowledge_validation import get_required_fields_for_domain
+from app.services.reference_pack_integrity import build_required_fields_checksum
 
 
 @dataclass(frozen=True)
@@ -10,6 +12,12 @@ class OnboardingBlueprintQuestionTemplate:
     code: str
     question: str
     blocking_go_live: bool
+
+
+@dataclass(frozen=True)
+class OnboardingBlueprintRequiredFieldsProfile:
+    fields: tuple[str, ...]
+    checksum: str
 
 
 @dataclass(frozen=True)
@@ -21,6 +29,8 @@ class OnboardingBlueprint:
     payload: CapabilitiesPayload
     go_live_blockers_profile: tuple[str, ...]
     question_templates: tuple[OnboardingBlueprintQuestionTemplate, ...]
+    required_fields_profile: OnboardingBlueprintRequiredFieldsProfile
+    readiness_weights: tuple[tuple[str, int], ...]
 
 
 _BLOCKING_QUESTION_CODES = {
@@ -114,6 +124,31 @@ _GO_LIVE_BLOCKERS_BOOKING = (
     "specialists",
 )
 
+_DEFAULT_READINESS_WEIGHTS = (
+    ("go_no_go_contract", 60),
+    ("delivery_health", 25),
+    ("traffic_capability_alignment", 15),
+)
+
+_READINESS_WEIGHTS_BY_DOMAIN = {
+    "beauty": _DEFAULT_READINESS_WEIGHTS,
+    "clinic": (
+        ("go_no_go_contract", 65),
+        ("delivery_health", 20),
+        ("traffic_capability_alignment", 15),
+    ),
+    "legal": (
+        ("go_no_go_contract", 70),
+        ("delivery_health", 20),
+        ("traffic_capability_alignment", 10),
+    ),
+    "ecom": (
+        ("go_no_go_contract", 55),
+        ("delivery_health", 30),
+        ("traffic_capability_alignment", 15),
+    ),
+}
+
 
 def _normalize_domain_slug(domain_slug: str | None) -> str | None:
     if not isinstance(domain_slug, str):
@@ -134,6 +169,19 @@ def _build_question_templates(domain_slug: str) -> tuple[OnboardingBlueprintQues
         )
         for code in ordered_codes
     )
+
+
+def _build_required_fields_profile(domain_slug: str) -> OnboardingBlueprintRequiredFieldsProfile:
+    required_fields = get_required_fields_for_domain(domain_slug=domain_slug)
+    return OnboardingBlueprintRequiredFieldsProfile(
+        fields=tuple(required_fields),
+        checksum=build_required_fields_checksum(required_fields),
+    )
+
+
+def _build_readiness_weights(domain_slug: str) -> tuple[tuple[str, int], ...]:
+    weights = _READINESS_WEIGHTS_BY_DOMAIN.get(domain_slug, _DEFAULT_READINESS_WEIGHTS)
+    return tuple(weights)
 
 
 def _build_blueprints() -> tuple[OnboardingBlueprint, ...]:
@@ -166,6 +214,8 @@ def _build_blueprints() -> tuple[OnboardingBlueprint, ...]:
             ),
             go_live_blockers_profile=_GO_LIVE_BLOCKERS_CORE + _GO_LIVE_BLOCKERS_BOOKING,
             question_templates=_build_question_templates("beauty"),
+            required_fields_profile=_build_required_fields_profile("beauty"),
+            readiness_weights=_build_readiness_weights("beauty"),
         ),
         OnboardingBlueprint(
             id="clinic",
@@ -195,6 +245,8 @@ def _build_blueprints() -> tuple[OnboardingBlueprint, ...]:
             ),
             go_live_blockers_profile=_GO_LIVE_BLOCKERS_CORE + _GO_LIVE_BLOCKERS_BOOKING,
             question_templates=_build_question_templates("clinic"),
+            required_fields_profile=_build_required_fields_profile("clinic"),
+            readiness_weights=_build_readiness_weights("clinic"),
         ),
         OnboardingBlueprint(
             id="legal",
@@ -224,6 +276,8 @@ def _build_blueprints() -> tuple[OnboardingBlueprint, ...]:
             ),
             go_live_blockers_profile=_GO_LIVE_BLOCKERS_CORE,
             question_templates=_build_question_templates("legal"),
+            required_fields_profile=_build_required_fields_profile("legal"),
+            readiness_weights=_build_readiness_weights("legal"),
         ),
         OnboardingBlueprint(
             id="ecom",
@@ -253,6 +307,8 @@ def _build_blueprints() -> tuple[OnboardingBlueprint, ...]:
             ),
             go_live_blockers_profile=_GO_LIVE_BLOCKERS_CORE,
             question_templates=_build_question_templates("ecom"),
+            required_fields_profile=_build_required_fields_profile("ecom"),
+            readiness_weights=_build_readiness_weights("ecom"),
         ),
     )
 
@@ -282,4 +338,3 @@ def get_onboarding_question_templates(domain_slug: str | None) -> dict[str, str]
         item.code: item.question
         for item in blueprint.question_templates
     }
-

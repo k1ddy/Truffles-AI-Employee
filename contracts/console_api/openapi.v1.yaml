@@ -7851,6 +7851,17 @@ components:
         blocking_go_live:
           type: boolean
 
+    OnboardingBlueprintRequiredFieldsProfile:
+      type: object
+      required: [fields, checksum]
+      properties:
+        fields:
+          type: array
+          items:
+            type: string
+        checksum:
+          type: string
+
     OnboardingBlueprint:
       type: object
       required:
@@ -7861,6 +7872,8 @@ components:
         - payload
         - go_live_blockers_profile
         - question_templates
+        - required_fields_profile
+        - readiness_weights
       properties:
         id:
           type: string
@@ -7880,6 +7893,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/OnboardingBlueprintQuestionTemplate"
+        required_fields_profile:
+          $ref: "#/components/schemas/OnboardingBlueprintRequiredFieldsProfile"
+        readiness_weights:
+          type: object
+          additionalProperties:
+            type: integer
 
     OnboardingBlueprintListResponse:
       type: object

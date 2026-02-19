@@ -1371,6 +1371,11 @@ class ConsoleOnboardingBlueprintQuestionTemplate(BaseModel):
     blocking_go_live: bool = False
 
 
+class ConsoleOnboardingBlueprintRequiredFieldsProfile(BaseModel):
+    fields: list[str] = []
+    checksum: str
+
+
 class ConsoleOnboardingBlueprint(BaseModel):
     id: str
     domain_slug: str
@@ -1379,6 +1384,8 @@ class ConsoleOnboardingBlueprint(BaseModel):
     payload: CapabilitiesPayload
     go_live_blockers_profile: list[str] = []
     question_templates: list[ConsoleOnboardingBlueprintQuestionTemplate] = []
+    required_fields_profile: ConsoleOnboardingBlueprintRequiredFieldsProfile
+    readiness_weights: dict[str, int] = {}
 
 
 class ConsoleOnboardingBlueprintListResponse(BaseModel):
