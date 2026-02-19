@@ -217,6 +217,26 @@ def test_build_intake_question_queue_prioritizes_blockers():
     assert queue[2].priority == "medium"
 
 
+def test_build_intake_question_queue_uses_domain_blueprint_overrides():
+    queue = build_intake_question_queue(
+        ["client_pack.catalog.summary"],
+        domain_slug="legal",
+    )
+
+    assert len(queue) == 1
+    assert queue[0].question == "Какие юридические услуги/направления консультаций доступны?"
+
+
+def test_build_intake_question_queue_uses_base_templates_for_unknown_domain():
+    queue = build_intake_question_queue(
+        ["client_pack.catalog.summary"],
+        domain_slug="unknown",
+    )
+
+    assert len(queue) == 1
+    assert queue[0].question == "Кратко перечислите основные услуги."
+
+
 def test_build_capabilities_from_purchased_services_maps_flags():
     result = console_router._build_capabilities_from_purchased_services(
         purchased_services=[

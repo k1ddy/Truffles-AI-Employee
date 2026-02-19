@@ -1,0 +1,23 @@
+# SESSION 2026-02-19-onboarding-blueprint-v1-a131 — Session 2026-02-19-onboarding-blueprint-v1-a131
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-19-onboarding-blueprint-v1-a131.md
+- branch: feat/2026-02-19-onboarding-blueprint-v1-a131
+- worktree: /home/zhan/worktrees/2026-02-19-onboarding-blueprint-v1-a131
+- base_ref: origin/main
+- scope: Onboarding Blueprint v1 (backend registry + admin API + ProvisioningWizard wiring + tests/contract sync)
+- done:
+  - Added backend onboarding blueprint registry (`beauty`, `clinic`, `legal`, `ecom`) with payload/question/blocker profiles.
+  - Added admin API endpoint `GET /console/v1/admin/onboarding-blueprints` with optional `domain_slug` filter.
+  - Updated intake question queue to use domain-aware templates (`build_intake_question_queue(..., domain_slug=...)`).
+  - Switched `ProvisioningWizard` template selector to backend API (`adminApi.listOnboardingBlueprints`) with deterministic fallback.
+  - Added backend tests for endpoint filtering/validation and intake question template overrides.
+  - Updated OpenAPI contract for onboarding blueprints endpoint + schemas.
+  - Added implementation report `docs/REPORTS/2026-02-19-onboarding-blueprint-v1-a131.md`.
+- next:
+  - Open PR and run review against TP DoD/evidence.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-19-onboarding-blueprint-v1-a131.md
+  - docs/REPORTS/2026-02-19-onboarding-blueprint-v1-a131.md
+- last_updated: 2026-02-19

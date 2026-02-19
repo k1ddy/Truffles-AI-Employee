@@ -3456,6 +3456,33 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /admin/onboarding-blueprints:
+    get:
+      operationId: listAdminOnboardingBlueprints
+      tags: [admin]
+      summary: List onboarding blueprints
+      parameters:
+        - name: domain_slug
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Onboarding blueprints list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingBlueprintListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /admin/reference-packs:
     get:
       operationId: listAdminReferencePacks
@@ -7812,6 +7839,56 @@ components:
           type: string
         webhook_url:
           type: string
+
+    OnboardingBlueprintQuestionTemplate:
+      type: object
+      required: [code, question, blocking_go_live]
+      properties:
+        code:
+          type: string
+        question:
+          type: string
+        blocking_go_live:
+          type: boolean
+
+    OnboardingBlueprint:
+      type: object
+      required:
+        - id
+        - domain_slug
+        - label
+        - summary
+        - payload
+        - go_live_blockers_profile
+        - question_templates
+      properties:
+        id:
+          type: string
+        domain_slug:
+          type: string
+        label:
+          type: string
+        summary:
+          type: string
+        payload:
+          $ref: "#/components/schemas/CapabilitiesPayload"
+        go_live_blockers_profile:
+          type: array
+          items:
+            type: string
+        question_templates:
+          type: array
+          items:
+            $ref: "#/components/schemas/OnboardingBlueprintQuestionTemplate"
+
+    OnboardingBlueprintListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OnboardingBlueprint"
 
     ReferencePack:
       type: object

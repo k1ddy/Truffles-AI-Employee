@@ -14,6 +14,7 @@ import {
     type BranchGoLiveWaiverRequest,
     type ConsoleRole,
     type ConsoleSection,
+    type OnboardingBlueprintListResponse,
 } from "@/lib/api-client";
 import { useInlineErrorSummary } from "@/lib/use-inline-error-summary";
 
@@ -79,10 +80,9 @@ type OnboardingScorecardEnterprise = OnboardingScorecard & {
 
 type AgentRole = ConsoleRole;
 type OnboardingMode = "autopilot" | "manual";
-type DomainTemplateId = "beauty" | "clinic" | "legal" | "ecom";
 
 type DomainTemplatePreset = {
-    id: DomainTemplateId;
+    id: string;
     label: string;
     summary: string;
     payload: CapabilitiesPayload;
@@ -256,7 +256,7 @@ const AUTOPILOT_SERVICE_OPTIONS: Array<{
     { id: "provider_bitrix", label: "Bitrix" },
 ];
 
-const DOMAIN_TEMPLATE_PRESETS: DomainTemplatePreset[] = [
+const FALLBACK_DOMAIN_TEMPLATE_PRESETS: DomainTemplatePreset[] = [
     {
         id: "beauty",
         label: "Beauty / Salon",
@@ -891,7 +891,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const [purchasedCapabilitiesDraft, setPurchasedCapabilitiesDraft] = useState<CapabilitiesPayload>(() => normalizeCapabilities());
     const [purchasedJsonDraft, setPurchasedJsonDraft] = useState("{}");
     const [purchasedJsonDirty, setPurchasedJsonDirty] = useState(false);
-    const [selectedDomainTemplate, setSelectedDomainTemplate] = useState<DomainTemplateId>("beauty");
+    const [selectedDomainTemplate, setSelectedDomainTemplate] = useState("beauty");
     const [paymentStatusDraft, setPaymentStatusDraft] = useState<"pending" | "confirmed" | "rejected">("pending");
     const [referencePackTitle, setReferencePackTitle] = useState("");
     const [specialistsConfirmed, setSpecialistsConfirmed] = useState(false);
@@ -1250,8 +1250,48 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         setPurchasedJsonDirty(false);
     };
 
+    const {
+        data: onboardingBlueprintsData,
+        error: onboardingBlueprintsError,
+    } = useQuery({
+        queryKey: ["admin-onboarding-blueprints"],
+        queryFn: async () => {
+            const response = await adminApi.listOnboardingBlueprints();
+            return response.data as OnboardingBlueprintListResponse;
+        },
+        enabled: !!session,
+    });
+
+    const domainTemplatePresets = useMemo<DomainTemplatePreset[]>(() => {
+        const items = onboardingBlueprintsData?.items ?? [];
+        if (items.length > 0) {
+            return items.map((item) => ({
+                id: item.id,
+                label: item.label,
+                summary: item.summary,
+                payload: normalizeCapabilities(item.payload),
+            }));
+        }
+        return FALLBACK_DOMAIN_TEMPLATE_PRESETS.map((item) => ({
+            id: item.id,
+            label: item.label,
+            summary: item.summary,
+            payload: normalizeCapabilities(item.payload),
+        }));
+    }, [onboardingBlueprintsData]);
+
+    useEffect(() => {
+        if (!domainTemplatePresets.length) {
+            return;
+        }
+        if (domainTemplatePresets.some((template) => template.id === selectedDomainTemplate)) {
+            return;
+        }
+        setSelectedDomainTemplate(domainTemplatePresets[0].id);
+    }, [domainTemplatePresets, selectedDomainTemplate]);
+
     const handleApplyDomainTemplate = () => {
-        const selected = DOMAIN_TEMPLATE_PRESETS.find((template) => template.id === selectedDomainTemplate);
+        const selected = domainTemplatePresets.find((template) => template.id === selectedDomainTemplate);
         if (!selected) {
             reportValidationError("Выберите валидный template");
             return;
@@ -4607,11 +4647,11 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             <select
                                                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                                                 value={selectedDomainTemplate}
-                                                onChange={(event) => setSelectedDomainTemplate(event.target.value as DomainTemplateId)}
+                                                onChange={(event) => setSelectedDomainTemplate(event.target.value)}
                                                 disabled={!canEdit}
                                                 data-testid="onboarding-domain-template-select"
                                             >
-                                                {DOMAIN_TEMPLATE_PRESETS.map((template) => (
+                                                {domainTemplatePresets.map((template) => (
                                                     <option key={template.id} value={template.id}>
                                                         {template.label}
                                                     </option>
@@ -4628,8 +4668,13 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                             </button>
                                         </div>
                                         <p className="text-[11px] text-muted-foreground">
-                                            {DOMAIN_TEMPLATE_PRESETS.find((item) => item.id === selectedDomainTemplate)?.summary ?? "—"}
+                                            {domainTemplatePresets.find((item) => item.id === selectedDomainTemplate)?.summary ?? "—"}
                                         </p>
+                                        {onboardingBlueprintsError ? (
+                                            <p className="text-[11px] text-warning">
+                                                Используется fallback шаблонов: backend blueprints временно недоступны.
+                                            </p>
+                                        ) : null}
                                     </div>
                                     <div>
                                         <label className="text-xs text-muted-foreground">domain_slug (ниша)</label>
