@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, Mock
 
 import app.services.health_service as health_service
-from app.services.health_service import check_and_heal_conversations, get_system_health
+from app.services.health_service import check_and_alert_health, check_and_heal_conversations, get_system_health
 from app.services.state_machine import ConversationState
 
 
@@ -158,3 +158,46 @@ class TestGetSystemHealth:
 
         assert result["safety"]["status"] == "danger"
         assert result["safety"]["danger_flags"] == ["test_mode_outbox_worker_on_nonlocal_db"]
+
+
+def test_check_and_alert_health_ignores_failed_total_without_actionable_failures():
+    checks = {
+        "outbox": {
+            "pending": 120,
+            "failed_total": 3200,
+            "failed": 3200,
+            "failed_24h": 4,
+            "thresholds": {
+                "pending_warning": 500,
+                "pending_critical": 1000,
+                "failed_24h_warning": 30,
+                "failed_24h_critical": 100,
+            },
+        }
+    }
+
+    alerts = check_and_alert_health(checks)
+
+    assert alerts == []
+
+
+def test_check_and_alert_health_critical_on_failed_24h_threshold():
+    checks = {
+        "outbox": {
+            "pending": 120,
+            "failed_total": 3200,
+            "failed": 3200,
+            "failed_24h": 140,
+            "thresholds": {
+                "pending_warning": 500,
+                "pending_critical": 1000,
+                "failed_24h_warning": 30,
+                "failed_24h_critical": 100,
+            },
+        }
+    }
+
+    alerts = check_and_alert_health(checks)
+
+    assert len(alerts) == 1
+    assert "Outbox critical" in alerts[0]

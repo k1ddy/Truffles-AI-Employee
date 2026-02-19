@@ -325,6 +325,7 @@ from app.services.onboarding_state import (
     build_onboarding_status,
     ensure_onboarding_step,
 )
+from app.services.outbox_service import archive_pending_outbox
 from app.services.pack_compiler_service import (
     PackCompilerError,
     build_compiled_pack_meta,
@@ -1454,6 +1455,9 @@ _FLEET_ATTENTION_OUTBOX_WINDOW_HOURS = 24
 _FLEET_ATTENTION_HANDOVER_PENDING_STATUSES = {"pending", "active"}
 _FLEET_ATTENTION_HIGH_THRESHOLD = 70
 _FLEET_ATTENTION_MEDIUM_THRESHOLD = 35
+_OUTBOX_ARCHIVED_REASON_PREFIX = "archived_pending:"
+_OUTBOX_CALENDAR_SYNC_REASON_PREFIX = "calendar_sync_failed:"
+_OUTBOX_SYSTEM_EVENT_TYPES = {"calendar.sync_inbound", "calendar.sync_outbound"}
 
 
 @dataclass
@@ -3448,6 +3452,21 @@ def _resolve_fleet_attention_profile(
     return score, level, reasons, suggested_actions
 
 
+def _outbox_actionable_failure_filter():
+    event_type = OutboxMessage.payload_json["event_type"].astext
+    return or_(
+        and_(
+            OutboxMessage.last_error.is_(None),
+            or_(event_type.is_(None), ~event_type.in_(_OUTBOX_SYSTEM_EVENT_TYPES)),
+        ),
+        and_(
+            ~OutboxMessage.last_error.ilike(f"{_OUTBOX_ARCHIVED_REASON_PREFIX}%"),
+            ~OutboxMessage.last_error.ilike(f"{_OUTBOX_CALENDAR_SYNC_REASON_PREFIX}%"),
+            or_(event_type.is_(None), ~event_type.in_(_OUTBOX_SYSTEM_EVENT_TYPES)),
+        ),
+    )
+
+
 def _query_outbox_failed_24h_map(
     db: Session,
     *,
@@ -3466,6 +3485,7 @@ def _query_outbox_failed_24h_map(
             OutboxMessage.client_id.in_(client_ids),
             OutboxMessage.status == "FAILED",
             OutboxMessage.created_at >= cutoff,
+            _outbox_actionable_failure_filter(),
         )
         .group_by(OutboxMessage.client_id)
         .all()
@@ -3561,6 +3581,7 @@ def _query_latest_failed_error_map(
             OutboxMessage.status == "FAILED",
             OutboxMessage.last_error.isnot(None),
             OutboxMessage.updated_at >= cutoff,
+            ~OutboxMessage.last_error.ilike(f"{_OUTBOX_ARCHIVED_REASON_PREFIX}%"),
         )
         .order_by(
             OutboxMessage.client_id.asc(),
@@ -4201,6 +4222,28 @@ def _parse_ops_job_int_param(
     return value
 
 
+def _parse_ops_job_bool_param(
+    params: dict,
+    *,
+    name: str,
+    default: bool = False,
+) -> bool:
+    raw = params.get(name, default)
+    if isinstance(raw, bool):
+        return raw
+    if raw is None:
+        return default
+    if isinstance(raw, (int, float)) and raw in {0, 1}:
+        return bool(raw)
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    raise ConsoleAPIError(400, "INVALID_PARAM", f"{name} must be a boolean")
+
+
 def _parse_ops_job_uuid_list_param(
     params: dict,
     *,
@@ -4257,10 +4300,21 @@ def _build_outbox_dry_run_summary(
     limit: int,
     idle_seconds: int,
     max_wait_seconds: int,
+    include_without_conversation: bool,
+    archive_preview: Optional[dict] = None,
 ) -> dict:
-    pending = len(_query_scoped_outbox_message_rows(db, context=context, status="PENDING"))
+    pending_rows = _query_scoped_outbox_message_rows(db, context=context, status="PENDING")
+    pending = len(pending_rows)
     processing = len(_query_scoped_outbox_message_rows(db, context=context, status="PROCESSING"))
     failed = len(_query_scoped_outbox_message_rows(db, context=context, status="FAILED"))
+    pending_with_conversation = sum(1 for row in pending_rows if row.conversation_id is not None)
+    pending_without_conversation = pending - pending_with_conversation
+    stale_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    pending_older_than_7d = sum(
+        1
+        for row in pending_rows
+        if row.created_at and row.created_at <= stale_cutoff
+    )
     return {
         "mode": "dry_run",
         "scope": {
@@ -4271,12 +4325,65 @@ def _build_outbox_dry_run_summary(
             "limit": limit,
             "idle_seconds": idle_seconds,
             "max_wait_seconds": max_wait_seconds,
+            "include_without_conversation": include_without_conversation,
         },
         "counts": {
             "pending": pending,
             "processing": processing,
             "failed": failed,
+            "pending_with_conversation": pending_with_conversation,
+            "pending_without_conversation": pending_without_conversation,
+            "pending_older_than_7d": pending_older_than_7d,
         },
+        "archive_preview": archive_preview,
+    }
+
+
+def _build_outbox_archive_preview(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    older_than_hours: int,
+    limit: int,
+    only_without_conversation: bool,
+) -> dict:
+    if older_than_hours <= 0:
+        return {"enabled": False}
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=older_than_hours)
+    query = db.query(OutboxMessage).filter(
+        OutboxMessage.client_id == context.client.id,
+        OutboxMessage.status == "PENDING",
+        OutboxMessage.created_at <= cutoff,
+    )
+    if only_without_conversation:
+        query = query.filter(OutboxMessage.conversation_id.is_(None))
+
+    allowed_branch_ids = _resolve_branch_scope(context)
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            return {
+                "enabled": True,
+                "candidates_total": 0,
+                "candidates_capped": 0,
+                "older_than_hours": older_than_hours,
+                "limit": limit,
+                "only_without_conversation": only_without_conversation,
+            }
+        query = query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
+
+    total = query.count()
+    oldest_row = query.order_by(OutboxMessage.created_at.asc(), OutboxMessage.id.asc()).first()
+    newest_row = query.order_by(OutboxMessage.created_at.desc(), OutboxMessage.id.desc()).first()
+    return {
+        "enabled": True,
+        "candidates_total": total,
+        "candidates_capped": min(total, limit),
+        "older_than_hours": older_than_hours,
+        "limit": limit,
+        "only_without_conversation": only_without_conversation,
+        "oldest_created_at": oldest_row.created_at.isoformat() if oldest_row and oldest_row.created_at else None,
+        "newest_created_at": newest_row.created_at.isoformat() if newest_row and newest_row.created_at else None,
     }
 
 
@@ -4287,6 +4394,7 @@ def _claim_scoped_outbox_rows(
     limit: int,
     idle_seconds: int,
     max_wait_seconds: int,
+    include_without_conversation: bool = True,
 ) -> list[dict]:
     now = datetime.now(timezone.utc)
     idle_cutoff = now - timedelta(seconds=idle_seconds)
@@ -4324,15 +4432,43 @@ def _claim_scoped_outbox_rows(
         if is_idle or is_max_wait:
             conversation_ids.append(batch.conversation_id)
 
-    if not conversation_ids:
+    single_message_ids: list[UUID] = []
+    remaining_slots = max(0, limit - len(conversation_ids))
+    if include_without_conversation and remaining_slots > 0:
+        age_filters = [OutboxMessage.created_at <= idle_cutoff]
+        if max_wait_seconds > 0:
+            age_filters.append(OutboxMessage.created_at <= max_wait_cutoff)
+        singles_query = (
+            db.query(OutboxMessage.id)
+            .filter(
+                OutboxMessage.client_id == context.client.id,
+                OutboxMessage.status == "PENDING",
+                OutboxMessage.conversation_id.is_(None),
+                or_(OutboxMessage.next_attempt_at.is_(None), OutboxMessage.next_attempt_at <= now),
+                or_(*age_filters),
+            )
+            .order_by(OutboxMessage.created_at.asc(), OutboxMessage.id.asc())
+            .limit(remaining_slots)
+        )
+        if allowed_branch_ids is not None:
+            singles_query = singles_query.filter(OutboxMessage.branch_id.in_(allowed_branch_ids))
+        single_message_ids = [row.id for row in singles_query.all()]
+
+    if not conversation_ids and not single_message_ids:
         return []
+
+    filters = []
+    if conversation_ids:
+        filters.append(OutboxMessage.conversation_id.in_(conversation_ids))
+    if single_message_ids:
+        filters.append(OutboxMessage.id.in_(single_message_ids))
 
     rows_query = (
         db.query(OutboxMessage)
         .filter(
             OutboxMessage.client_id == context.client.id,
             OutboxMessage.status == "PENDING",
-            OutboxMessage.conversation_id.in_(conversation_ids),
+            or_(*filters),
         )
         .order_by(OutboxMessage.created_at.asc(), OutboxMessage.id.asc())
     )
@@ -4405,16 +4541,62 @@ async def _run_outbox_process_job(
         min_value=0,
         max_value=3600,
     )
+    include_without_conversation = _parse_ops_job_bool_param(
+        params,
+        name="include_without_conversation",
+        default=True,
+    )
+    archive_pending_older_than_hours = _parse_ops_job_int_param(
+        params,
+        name="archive_pending_older_than_hours",
+        default=0,
+        min_value=0,
+        max_value=24 * 365,
+    )
+    archive_pending_limit = _parse_ops_job_int_param(
+        params,
+        name="archive_pending_limit",
+        default=limit,
+        min_value=1,
+        max_value=1000,
+    )
+    archive_pending_without_conversation_only = _parse_ops_job_bool_param(
+        params,
+        name="archive_pending_without_conversation_only",
+        default=True,
+    )
     max_attempts = int(os.environ.get("OUTBOX_MAX_ATTEMPTS", "5"))
     retry_backoff_seconds = float(os.environ.get("OUTBOX_RETRY_BACKOFF_SECONDS", "2"))
 
     if mode == "dry_run":
+        archive_preview = _build_outbox_archive_preview(
+            db,
+            context=context,
+            older_than_hours=archive_pending_older_than_hours,
+            limit=archive_pending_limit,
+            only_without_conversation=archive_pending_without_conversation_only,
+        )
         return _build_outbox_dry_run_summary(
             db,
             context=context,
             limit=limit,
             idle_seconds=idle_seconds,
             max_wait_seconds=max_wait_seconds,
+            include_without_conversation=include_without_conversation,
+            archive_preview=archive_preview,
+        )
+
+    archive_result = None
+    if archive_pending_older_than_hours > 0:
+        archive_reason = f"archived_pending:older_than_{archive_pending_older_than_hours}h"
+        archive_result = archive_pending_outbox(
+            db,
+            client_id=context.client.id,
+            older_than_seconds=archive_pending_older_than_hours * 3600,
+            limit=archive_pending_limit,
+            reason=archive_reason,
+            branch_ids=_resolve_branch_scope(context),
+            only_without_conversation=archive_pending_without_conversation_only,
         )
 
     claimed_rows = _claim_scoped_outbox_rows(
@@ -4423,14 +4605,18 @@ async def _run_outbox_process_job(
         limit=limit,
         idle_seconds=idle_seconds,
         max_wait_seconds=max_wait_seconds,
+        include_without_conversation=include_without_conversation,
     )
     if not claimed_rows:
-        return {
+        response = {
             "mode": "execute",
             "scope": {"client_id": str(context.client.id)},
             "processed": 0,
             "results": {"processed": 0, "failed": 0},
         }
+        if archive_result is not None:
+            response["archive"] = archive_result
+        return response
 
     from app.routers.webhook import _process_outbox_rows
 
@@ -4440,12 +4626,15 @@ async def _run_outbox_process_job(
         max_attempts=max_attempts,
         retry_backoff_seconds=retry_backoff_seconds,
     )
-    return {
+    response = {
         "mode": "execute",
         "scope": {"client_id": str(context.client.id)},
         "processed": len(claimed_rows),
         "results": results,
     }
+    if archive_result is not None:
+        response["archive"] = archive_result
+    return response
 
 
 async def _run_heal_job(
@@ -6651,6 +6840,7 @@ async def get_business_summary(
                 OutboxMessage.status == "FAILED",
                 OutboxMessage.created_at >= outbox_failed_window_start,
                 OutboxMessage.created_at < day_end,
+                _outbox_actionable_failure_filter(),
             ).count()
     else:
         outbox_backlog = outbox_query.filter(
@@ -6660,6 +6850,7 @@ async def get_business_summary(
             OutboxMessage.status == "FAILED",
             OutboxMessage.created_at >= outbox_failed_window_start,
             OutboxMessage.created_at < day_end,
+            _outbox_actionable_failure_filter(),
         ).count()
 
     appointments_query = db.query(
@@ -6987,11 +7178,13 @@ async def list_business_incidents(
             outbox_failed_24h = outbox_query.filter(
                 OutboxMessage.status == "FAILED",
                 OutboxMessage.created_at >= outbox_failed_window_start,
+                _outbox_actionable_failure_filter(),
             ).count()
             latest_failed_row = (
                 outbox_query.filter(
                     OutboxMessage.status == "FAILED",
                     OutboxMessage.last_error.isnot(None),
+                    ~OutboxMessage.last_error.ilike(f"{_OUTBOX_ARCHIVED_REASON_PREFIX}%"),
                 )
                 .order_by(OutboxMessage.updated_at.desc(), OutboxMessage.created_at.desc())
                 .first()
@@ -7008,11 +7201,13 @@ async def list_business_incidents(
         outbox_failed_24h = outbox_query.filter(
             OutboxMessage.status == "FAILED",
             OutboxMessage.created_at >= outbox_failed_window_start,
+            _outbox_actionable_failure_filter(),
         ).count()
         latest_failed_row = (
             outbox_query.filter(
                 OutboxMessage.status == "FAILED",
                 OutboxMessage.last_error.isnot(None),
+                ~OutboxMessage.last_error.ilike(f"{_OUTBOX_ARCHIVED_REASON_PREFIX}%"),
             )
             .order_by(OutboxMessage.updated_at.desc(), OutboxMessage.created_at.desc())
             .first()

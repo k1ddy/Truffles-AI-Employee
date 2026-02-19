@@ -6,7 +6,7 @@ import httpx
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import func, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, engine, get_db
@@ -330,29 +330,13 @@ async def _compute_admin_health_payload(db: Session) -> dict:
         checks["qdrant"] = {"status": "unhealthy", "error": str(e)[:100]}
         overall_healthy = False
     
-    # Outbox check via a single grouped query.
-    try:
-        from app.models import OutboxMessage
+    from app.services.health_service import build_outbox_health_snapshot, check_and_alert_health
 
-        counts_rows = (
-            db.query(
-                OutboxMessage.status,
-                func.count(OutboxMessage.id).label("count"),
-            )
-            .filter(OutboxMessage.status.in_(["PENDING", "FAILED"]))
-            .group_by(OutboxMessage.status)
-            .all()
-        )
-        pending = 0
-        failed = 0
-        for status_value, count in counts_rows:
-            normalized = str(status_value or "").upper()
-            if normalized == "PENDING":
-                pending = int(count or 0)
-            elif normalized == "FAILED":
-                failed = int(count or 0)
-        checks["outbox"] = {"status": "healthy" if failed < 100 else "warning", "pending": pending, "failed": failed}
-        if failed >= 100:
+    # Outbox check uses pending + actionable failed_24h gates while still exposing failed_total.
+    try:
+        outbox_check = build_outbox_health_snapshot(db)
+        checks["outbox"] = outbox_check
+        if outbox_check.get("status") == "critical":
             overall_healthy = False
     except Exception as e:
         checks["outbox"] = {"status": "error", "error": str(e)[:100]}
@@ -367,7 +351,6 @@ async def _compute_admin_health_payload(db: Session) -> dict:
     total_latency = int((time.time() - start_total) * 1000)
     
     # Send alerts for critical issues
-    from app.services.health_service import check_and_alert_health
     alerts_sent = check_and_alert_health(checks)
     
     response = {

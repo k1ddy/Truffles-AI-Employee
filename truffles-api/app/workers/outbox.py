@@ -265,6 +265,7 @@ async def run_worker():
                         limit=limit,
                         idle_seconds=idle_seconds,
                         max_wait_seconds=max_wait_seconds,
+                        include_without_conversation=True,
                     )
                     if not rows:
                         break

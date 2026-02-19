@@ -6,8 +6,12 @@ from sqlalchemy import text
 
 from app.database import SessionLocal
 from app.logging_config import get_logger, setup_logging, start_span
-from app.models import Handover, OutboxMessage
-from app.services.health_service import check_and_alert_health, check_and_heal_conversations
+from app.models import Handover
+from app.services.health_service import (
+    build_outbox_health_snapshot,
+    check_and_alert_health,
+    check_and_heal_conversations,
+)
 from app.services.integration_guardrails_service import run_integration_watchdog
 
 setup_logging()
@@ -99,9 +103,7 @@ async def _run_sentinel_health_checks(db) -> dict:
     
     # Outbox check
     try:
-        pending = db.query(OutboxMessage).filter(OutboxMessage.status == "PENDING").count()
-        failed = db.query(OutboxMessage).filter(OutboxMessage.status == "FAILED").count()
-        checks["outbox"] = {"pending": pending, "failed": failed}
+        checks["outbox"] = build_outbox_health_snapshot(db)
     except Exception:
         pass
     
