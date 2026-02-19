@@ -815,6 +815,7 @@ function ContextBar({
     onSelectCompany,
     onSelectClient,
     onSelectBranch,
+    showActiveScopeHint,
     isBusy,
 }: {
     me: ConsoleMe;
@@ -823,6 +824,7 @@ function ContextBar({
     onSelectCompany: (companyId: string) => void;
     onSelectClient: (clientId: string) => void;
     onSelectBranch: (branchId: string | null) => void;
+    showActiveScopeHint: boolean;
     isBusy: boolean;
 }) {
     const companies = me.companies ?? [];
@@ -835,7 +837,7 @@ function ContextBar({
     const branchName = findBranchName(branches, branchId, allowAllBranches);
 
     return (
-        <div className="flex flex-wrap items-center gap-6 text-sm" data-testid="context-bar">
+        <div className="flex flex-wrap items-start gap-x-5 gap-y-2 text-sm" data-testid="context-bar">
             <div className="flex flex-col gap-1 min-w-[140px]">
                 <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Компания</span>
                 {companies.length > 1 ? (
@@ -902,6 +904,19 @@ function ContextBar({
                     </span>
                 )}
             </div>
+            {showActiveScopeHint && (
+                <div className="flex min-w-[160px] flex-col gap-1">
+                    <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Режим</span>
+                    <span
+                        className="inline-flex w-fit rounded-full border border-sky-300/80 bg-sky-50 px-2 py-1 text-[12px] text-sky-900"
+                        data-testid="context-active-scope-hint"
+                        title="Показаны только активные сущности. Архивные и деактивированные доступны в Тенанты."
+                        aria-label="Показаны только активные сущности"
+                    >
+                        Показаны: активные
+                    </span>
+                </div>
+            )}
         </div>
     );
 }
@@ -926,7 +941,6 @@ function ContextHealthStrip({
     const companies = me.companies ?? [];
     const clients = me.clients ?? [];
     const branches = me.branches ?? [];
-    const role = me.agent?.role ?? null;
     const warningMessages: ContextHealthMessage[] = [];
     const infoMessages: ContextHealthMessage[] = [];
 
@@ -958,8 +972,7 @@ function ContextHealthStrip({
         });
     }
     const messages = warningMessages.length > 0 ? warningMessages : infoMessages;
-    const showPlatformActiveHint = role === "platform_admin";
-    const showHealthBadges = messages.length > 0 || showPlatformActiveHint;
+    const showHealthBadges = messages.length > 0;
     const showMobileActions = canReadOps || canReadTenants;
 
     return (
@@ -975,16 +988,6 @@ function ContextHealthStrip({
                             {message.text}
                         </span>
                     ))}
-                    {showPlatformActiveHint && (
-                        <span
-                            className="inline-flex rounded-full border border-sky-300/80 bg-sky-50 px-2 py-1 text-sky-900"
-                            data-testid="context-health-platform_active_filter"
-                            title="Контекст показывает только активные сущности. Архивные и деактивированные доступны в Тенанты."
-                            aria-label="Только активные сущности в контексте"
-                        >
-                            Только активные
-                        </span>
-                    )}
                 </div>
             )}
             {showMobileActions && (
@@ -1469,7 +1472,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         <div className="min-h-screen bg-background">
             <div className="flex min-h-screen">
                 <aside
-                    className={`hidden ${navCollapsed ? "w-16" : "w-52"} flex-col border-r border-border/60 bg-card/40 px-2 py-6 transition-[width] duration-200 md:flex`}
+                    className={`hidden ${navCollapsed ? "w-16" : "w-52"} flex-col border-r border-border/60 bg-card/40 px-2 py-3 transition-[width] duration-200 md:flex`}
                 >
                     <div
                         className={`flex px-2 ${
@@ -1514,7 +1517,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                         </button>
                     </div>
                     {!navCollapsed && (
-                        <div className="mt-6 px-2 text-xs uppercase tracking-[0.3em] text-muted-foreground">
+                        <div className="mt-2 px-2 text-[11px] uppercase tracking-[0.2em] leading-tight text-muted-foreground">
                             {ROLE_LABELS[role]}
                         </div>
                     )}
@@ -1539,7 +1542,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                             </p>
                         </div>
                     )}
-                    <nav className={`mt-6 flex flex-col gap-2 text-sm font-medium ${navCollapsed ? "items-center" : ""}`}>
+                    <nav className={`mt-2 flex flex-col gap-1.5 text-sm font-medium ${navCollapsed ? "items-center" : ""}`}>
                         {navItems.map((item) => {
                             const isActive = isNavItemCurrent(pathname, item.href);
                             return (
@@ -1576,7 +1579,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                         className="sticky top-0 z-20 border-b border-border/60 bg-background/80 backdrop-blur"
                         data-testid="console-header"
                     >
-                        <div className="flex flex-col gap-4 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex flex-col gap-3 px-5 py-3 lg:flex-row lg:items-center lg:justify-between">
                             <div className="flex items-center gap-3 md:hidden">
                                 <Image
                                     src="/brand/truffles-logo.png"
@@ -1591,7 +1594,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                             </div>
                             {data && (
                                 <div className="w-full lg:w-auto lg:flex-1">
-                                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground md:hidden">
+                                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground md:hidden">
                                         Контекст:{" "}
                                         <span className="font-semibold text-foreground">
                                             {data.client?.company_name ?? "Компания"}
@@ -1607,6 +1610,15 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                         <Link href="/company-workspace" className="ml-2 underline">
                                             изменить
                                         </Link>
+                                        {role === "platform_admin" && (
+                                            <span
+                                                className="ml-2 inline-flex rounded-full border border-sky-300/80 bg-sky-50 px-2 py-0.5 text-[10px] text-sky-900"
+                                                data-testid="context-active-scope-hint-mobile"
+                                                title="Показаны только активные сущности. Архивные и деактивированные доступны в Тенанты."
+                                            >
+                                                Показаны: активные
+                                            </span>
+                                        )}
                                     </div>
                                     <div className="hidden md:block">
                                         <ContextBar
@@ -1616,6 +1628,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                             onSelectCompany={handleContextCompanyChange}
                                             onSelectClient={handleContextClientChange}
                                             onSelectBranch={handleContextBranchChange}
+                                            showActiveScopeHint={role === "platform_admin"}
                                             isBusy={contextBusy}
                                         />
                                     </div>
@@ -1758,7 +1771,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                         </nav>
                     </header>
 
-                    <main className="flex-1 px-6 py-8">
+                    <main className="flex-1 px-6 py-6">
                         <div className={`mx-auto w-full ${contentWidthClass}`}>
                             {status === "loading" && (
                                 <div className="card-surface p-8">
