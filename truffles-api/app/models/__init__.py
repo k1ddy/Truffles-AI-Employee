@@ -20,9 +20,9 @@ from app.models.handover import Handover
 from app.models.inbox_event import InboxEvent
 from app.models.knowledge_version import KnowledgeVersion
 from app.models.learned_response import LearnedResponse
-from app.models.message import Message
 from app.models.marketing_campaign import MarketingCampaign
 from app.models.marketing_campaign_delivery import MarketingCampaignDelivery
+from app.models.message import Message
 from app.models.outbox_message import OutboxMessage
 from app.models.outbox_status_event import OutboxStatusEvent
 from app.models.prompt import Prompt
