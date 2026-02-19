@@ -9334,6 +9334,14 @@ components:
           type: array
           title: Question Templates
           default: []
+        required_fields_profile:
+          $ref: '#/components/schemas/ConsoleOnboardingBlueprintRequiredFieldsProfile'
+        readiness_weights:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Readiness Weights
+          default: {}
       type: object
       required:
       - id
@@ -9341,6 +9349,7 @@ components:
       - label
       - summary
       - payload
+      - required_fields_profile
       title: ConsoleOnboardingBlueprint
     ConsoleOnboardingBlueprintListResponse:
       properties:
@@ -9370,6 +9379,21 @@ components:
       - code
       - question
       title: ConsoleOnboardingBlueprintQuestionTemplate
+    ConsoleOnboardingBlueprintRequiredFieldsProfile:
+      properties:
+        fields:
+          items:
+            type: string
+          type: array
+          title: Fields
+          default: []
+        checksum:
+          type: string
+          title: Checksum
+      type: object
+      required:
+      - checksum
+      title: ConsoleOnboardingBlueprintRequiredFieldsProfile
     ConsoleOnboardingContractPatchRequest:
       properties:
         scope:

@@ -1,0 +1,78 @@
+# TP-2026-02-19-onboarding-any-niche-step123-a131
+
+- Название/цель: Закрыть пункты 1/2/3 из `TP-2026-02-19-onboarding-any-niche-end2end-tz.md`: (1) довести Ops acceptance до PASS, (2) добавить управляемый rollout hard-gate (shadow/canary/enforced), (3) расширить Onboarding Blueprint до полного data-contract (`required_fields_profile` + `readiness_weights`).
+- Canon refs: `docs/TASK_PACKAGES/TP-2026-02-19-onboarding-any-niche-end2end-tz.md`, `docs/REPORTS/2026-02-19-onboarding-any-niche-acceptance-a131.md`, `AGENTS.md`, `STATE.md`, `SPECS/SYSTEM_REFERENCE.md`, `TECH.md`.
+- Invariant:
+  - Не ослаблять fail-closed semantics go-live gate.
+  - Не добавлять client-specific hardcode.
+  - Все rollout изменения управляются env/config, не ручными DB bypass.
+- Scope:
+  - Item 1: сделать ops acceptance green:
+    - remediation active branch integrity (`reference_pack_required_fields*`) через controlled ops path,
+    - добавить production-grade fixture для `onboarding-pack-quality`,
+    - повторно прогнать `onboarding-fleet-check`, `onboarding-quality-smoke`, `onboarding-pack-quality` и зафиксировать PASS evidence.
+  - Item 2: добавить canary rollout mode для hard-gate:
+    - env-driven branch canary list,
+    - readiness payload отражает фактическое `enforced` per-branch,
+    - тесты на shadow/canary/enforced поведение.
+  - Item 3: расширить onboarding blueprints:
+    - `required_fields_profile` (fields + checksum) на основе domain contract,
+    - `readiness_weights` (data-defined dimension weights),
+    - API/schema/types/tests sync.
+- Out of scope:
+  - Этап 4 Delivery Contour Stabilization.
+  - Этап 5 Reference Branch Normalization.
+  - Глобальное принудительное включение hard-gate для всех branch в runtime.
+- Touch-list:
+  - `truffles-api/app/routers/console.py`
+  - `truffles-api/app/schemas/console.py`
+  - `truffles-api/app/services/onboarding_blueprints.py`
+  - `truffles-api/tests/test_console_access_admin_pr2.py`
+  - `truffles-api/tests/test_onboarding_blueprints.py` (new)
+  - `console-web/src/lib/api-client.ts`
+  - `contracts/console_api/openapi.v1.yaml`
+  - `ops/fixtures/onboarding_pack_quality_beauty_valid.yaml` (new)
+  - `docs/REPORTS/2026-02-19-onboarding-any-niche-step123-a131.md` (new)
+  - `docs/SESSIONS/SESSION-2026-02-19-onboarding-any-niche-step123-a131.md`
+  - `docs/SESSION_INDEX.md`
+- Plan:
+  1) Реализовать canary hard-gate enforcement и покрыть тестами.
+  2) Расширить blueprint contract и API response, синхронизировать openapi/types/tests.
+  3) Добавить/проверить валидный pack-quality fixture для beauty.
+  4) Запустить ops remediation + acceptance команды из item 1 и собрать raw evidence.
+  5) Сформировать report с фактическим PASS/FAIL по item 1/2/3, commit/push/PR.
+- DoD:
+  - `onboarding-fleet-check --fail-on-active-missing --json` -> exit 0.
+  - `onboarding-quality-smoke --domains beauty,clinic,legal,ecom --fail-on-regression --json` -> exit 0.
+  - `onboarding-pack-quality ... --client-data-text-file ops/fixtures/onboarding_pack_quality_beauty_valid.yaml --json` -> exit 0.
+  - Hard-gate canary поведение покрыто unit-tests.
+  - Onboarding blueprint API возвращает `required_fields_profile` + `readiness_weights` и это покрыто тестами.
+- Checks:
+  - `python3 -m py_compile truffles-api/app/routers/console.py truffles-api/app/schemas/console.py truffles-api/app/services/onboarding_blueprints.py ops/diagnose.py`
+  - `ruff check truffles-api/app/routers/console.py truffles-api/app/schemas/console.py truffles-api/app/services/onboarding_blueprints.py truffles-api/tests/test_console_access_admin_pr2.py truffles-api/tests/test_onboarding_blueprints.py`
+  - `pytest -q truffles-api/tests/test_console_access_admin_pr2.py -k "hard_gate or onboarding_blueprints"`
+  - `pytest -q truffles-api/tests/test_onboarding_blueprints.py`
+  - `python3 truffles-api/scripts/generate_openapi.py --check`
+  - `python3 ops/diagnose.py onboarding-fleet-check --fail-on-active-missing --json`
+  - `python3 ops/diagnose.py onboarding-quality-smoke --domains beauty,clinic,legal,ecom --fail-on-regression --json`
+  - `python3 ops/diagnose.py onboarding-pack-quality --domain-slug beauty --require-booking auto --client-data-text-file ops/fixtures/onboarding_pack_quality_beauty_valid.yaml --save-summary /tmp/onboarding_any_niche_step123_a131/onboarding_pack_quality_summary.json --json`
+- Evidence:
+  - `/tmp/onboarding_any_niche_step123_a131/*` (raw logs + exit codes + json snapshots)
+  - `docs/REPORTS/2026-02-19-onboarding-any-niche-step123-a131.md`
+  - при необходимости runtime remediation evidence из `onboarding-fleet-remediate --json`.
+- Rollback:
+  - `git revert COMMIT_SHA`.
+  - Откат canary rollout: очистить env `ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS`.
+- No-go:
+  - Не включать глобальный enforced gate без evidence.
+  - Не править БД вручную SQL как основной путь устранения blocker-ов.
+  - Не менять продуктовый контракт outcome FACT/COLLECT/HANDOFF.
+- Branch/worktree/base/merge/cleanup:
+  - Branch: `feat/2026-02-19-onboarding-any-niche-step123-a131`
+  - Worktree: `/home/zhan/worktrees/2026-02-19-onboarding-any-niche-step123-a131`
+  - Base: `origin/main`
+  - Merge policy: merge commit via PR (no rebase)
+  - Cleanup: `scripts/session_end.sh --status done` в финальном коммите; cleanup после merge.
+- Риски/блокеры:
+  - Ops acceptance зависит от текущего runtime state (может измениться между прогонами).
+  - Canary rollout требует аккуратного отражения enforced-статуса в API и error payload.

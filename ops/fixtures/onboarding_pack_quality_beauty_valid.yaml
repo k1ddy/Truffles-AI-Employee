@@ -1,0 +1,73 @@
+client_pack:
+  business:
+    name: "Demo Salon"
+  location:
+    city: "Almaty"
+    address:
+      full: "Abay 10"
+  operations:
+    hours:
+      days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+      open: "09:00"
+      close: "21:00"
+  catalog:
+    summary: "Nails and lashes"
+  communication:
+    languages: ["ru", "kk"]
+  services_catalog:
+    services:
+      - name: "Manicure"
+        price: 12000
+        duration_minutes: 60
+  service_duration_estimates:
+    - service: "Manicure"
+      duration_minutes: 60
+  booking:
+    collect_fields: ["service", "time", "name", "phone"]
+    bot_can_confirm: true
+  guest_policy:
+    allowed: "yes"
+  safety:
+    medical_note: "consult specialist"
+  pricing:
+    price_from_reason: "depends on scope"
+  quality:
+    expectations_photo: "reference required"
+  price_list:
+    - category: "Nails"
+      items:
+        - name: "Manicure"
+          price: 12000
+  policy:
+    hard_law:
+      intent: "hard_law"
+      keywords: ["law"]
+    payment_info:
+      intent: "payment"
+      keywords: ["pay"]
+    reschedule:
+      intent: "reschedule"
+      keywords: ["move"]
+    cancel:
+      intent: "cancel"
+      keywords: ["cancel"]
+    medical:
+      intent: "medical"
+      keywords: ["medical"]
+    legal:
+      intent: "legal"
+      keywords: ["legal"]
+    complaint:
+      intent: "complaint"
+      keywords: ["complaint"]
+    discounts:
+      intent: "discounts"
+      keywords: ["discount"]
+    guard_topics:
+      refund: ["refund", "money_back"]
+domain_pack:
+  version: "1.0.0"
+  ood_anchors:
+    in_domain: ["manicure", "pedicure"]
+    out_of_domain: ["credit"]
+    strict_in: ["salon"]

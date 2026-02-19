@@ -877,6 +877,10 @@ export type OnboardingBlueprintQuestionTemplate = {
     question: string;
     blocking_go_live: boolean;
 };
+export type OnboardingBlueprintRequiredFieldsProfile = {
+    fields: string[];
+    checksum: string;
+};
 export type OnboardingBlueprint = {
     id: string;
     domain_slug: string;
@@ -885,6 +889,8 @@ export type OnboardingBlueprint = {
     payload: components["schemas"]["CapabilitiesPayload"];
     go_live_blockers_profile: string[];
     question_templates: OnboardingBlueprintQuestionTemplate[];
+    required_fields_profile: OnboardingBlueprintRequiredFieldsProfile;
+    readiness_weights: Record<string, number>;
 };
 export type OnboardingBlueprintListResponse = {
     items: OnboardingBlueprint[];
