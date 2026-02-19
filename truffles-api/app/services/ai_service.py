@@ -234,6 +234,8 @@ SERVICE_REWRITE_MAX_TOKENS = int(os.environ.get("SERVICE_REWRITE_MAX_TOKENS", "8
 RAG_REWRITE_TIMEOUT_SECONDS = float(os.environ.get("RAG_REWRITE_TIMEOUT_SECONDS", "1.0"))
 RAG_REWRITE_MAX_TOKENS = int(os.environ.get("RAG_REWRITE_MAX_TOKENS", "80"))
 MULTI_INTENT_TIMEOUT_SECONDS = float(os.environ.get("MULTI_INTENT_TIMEOUT_SECONDS", "1.2"))
+MULTI_INTENT_RETRY_TIMEOUT_SECONDS = float(os.environ.get("MULTI_INTENT_RETRY_TIMEOUT_SECONDS", "2.4"))
+MULTI_INTENT_RETRY_ON_TIMEOUT = os.environ.get("MULTI_INTENT_RETRY_ON_TIMEOUT")
 MULTI_INTENT_MAX_TOKENS = int(os.environ.get("MULTI_INTENT_MAX_TOKENS", "120"))
 CONSULT_CONTROLLER_TIMEOUT_SECONDS = float(
     os.environ.get("CONSULT_CONTROLLER_TIMEOUT_SECONDS", "1.8")
@@ -378,6 +380,11 @@ def _is_transient_generation_error(error_code: str | None) -> bool:
 def _resolve_generation_retry_timeout(base_timeout: float) -> float:
     retry_timeout = max(0.1, LLM_RETRY_TIMEOUT_SECONDS)
     return min(retry_timeout, max(base_timeout, 0.1))
+
+
+def _resolve_multi_intent_retry_timeout(base_timeout: float) -> float:
+    retry_timeout = max(0.1, MULTI_INTENT_RETRY_TIMEOUT_SECONDS)
+    return max(base_timeout, retry_timeout)
 
 
 def _log_timing(
@@ -1370,6 +1377,22 @@ def detect_multi_intent(
     timing_context: dict | None = None,
     reserve_ms: float = 0.0,
 ) -> dict | None:
+    explicit_location_markers = (
+        "адрес",
+        "где",
+        "находит",
+        "как добрат",
+        "парков",
+    )
+    explicit_hours_markers = (
+        "часы",
+        "график",
+        "режим работы",
+        "работаете",
+        "до скольки",
+        "во сколько",
+    )
+
     def _clean_service_query(value: str | None) -> str:
         if not isinstance(value, str):
             return ""
@@ -1409,7 +1432,7 @@ def detect_multi_intent(
             return False
         return any(keyword in normalized for keyword in consult_intent_cues)
 
-    def _fallback_payload() -> dict:
+    def _fallback_payload(*, timeout_safe: bool = False) -> dict:
         normalized = normalize_for_matching(text)
         intents: list[str] = []
 
@@ -1423,7 +1446,10 @@ def detect_multi_intent(
             intents.append("booking")
 
         hours_keywords = get_system_lexicon_list("hours_keywords")
-        if any(keyword in normalized for keyword in hours_keywords):
+        has_explicit_hours_signal = any(marker in normalized for marker in explicit_hours_markers)
+        if timeout_safe and has_explicit_hours_signal:
+            intents.append("hours")
+        elif not timeout_safe and any(keyword in normalized for keyword in hours_keywords):
             intents.append("hours")
 
         price_keywords = get_system_lexicon_list("price_keywords")
@@ -1435,11 +1461,16 @@ def detect_multi_intent(
             intents.append("duration")
 
         location_keywords = get_system_lexicon_list("location_keywords")
-        if any(keyword in normalized for keyword in location_keywords):
+        has_explicit_location_signal = any(marker in normalized for marker in explicit_location_markers)
+        if timeout_safe and has_explicit_location_signal:
+            intents.append("location")
+        elif not timeout_safe and any(keyword in normalized for keyword in location_keywords):
             intents.append("location")
 
         if not intents:
             intents = ["other"]
+        else:
+            intents = list(dict.fromkeys(intents))
 
         primary_intent = intents[0]
         secondary_intents = [intent for intent in intents[1:] if intent != primary_intent]
@@ -1455,16 +1486,6 @@ def detect_multi_intent(
             "consult_intent": consult_intent,
             "consult_topic": consult_topic,
             "consult_question": consult_question,
-        }
-        return {
-            "multi_intent": False,
-            "primary_intent": "other",
-            "secondary_intents": [],
-            "intents": ["other"],
-            "service_query": "",
-            "consult_intent": False,
-            "consult_topic": "",
-            "consult_question": "",
         }
 
     normalized = (text or "").strip()
@@ -1527,16 +1548,68 @@ def detect_multi_intent(
 
     llm = get_llm_provider()
     temperature = 1.0 if FAST_MODEL.strip().lower().startswith("gpt-5") else 0.0
-    llm_start = time.monotonic()
-    try:
-        response = llm.generate(
-            messages,
-            temperature=temperature,
-            max_tokens=MULTI_INTENT_MAX_TOKENS,
-            model=FAST_MODEL,
-            timeout_seconds=MULTI_INTENT_TIMEOUT_SECONDS,
-        )
-    except httpx.TimeoutException as exc:
+    retry_on_timeout = _is_env_enabled(MULTI_INTENT_RETRY_ON_TIMEOUT, default=True)
+    retry_timeout_seconds = _resolve_multi_intent_retry_timeout(MULTI_INTENT_TIMEOUT_SECONDS)
+    timeout_attempts: list[float] = [MULTI_INTENT_TIMEOUT_SECONDS]
+    if retry_on_timeout and retry_timeout_seconds > MULTI_INTENT_TIMEOUT_SECONDS:
+        timeout_attempts.append(retry_timeout_seconds)
+
+    response = None
+    for attempt_idx, timeout_seconds in enumerate(timeout_attempts):
+        if (
+            attempt_idx > 0
+            and not _should_attempt_llm(
+                timing_context,
+                timeout_seconds=timeout_seconds,
+                stage="multi_intent_llm_retry",
+            )
+        ):
+            return _fallback_payload(timeout_safe=True)
+        llm_start = time.monotonic()
+        try:
+            response = llm.generate(
+                messages,
+                temperature=temperature,
+                max_tokens=MULTI_INTENT_MAX_TOKENS,
+                model=FAST_MODEL,
+                timeout_seconds=timeout_seconds,
+            )
+        except httpx.TimeoutException as exc:
+            _log_timing(
+                "multi_intent_llm_ms",
+                (time.monotonic() - llm_start) * 1000,
+                timing_context=timing_context,
+                extra={
+                    "model_name": FAST_MODEL,
+                    "model_tier": "fast",
+                    "timeout": True,
+                    "timeout_seconds": timeout_seconds,
+                    "attempt": attempt_idx + 1,
+                },
+            )
+            logger.warning(f"Multi-intent timeout after {timeout_seconds}s: {exc}")
+            if attempt_idx + 1 < len(timeout_attempts):
+                logger.warning(
+                    f"Retrying multi-intent with timeout {timeout_attempts[attempt_idx + 1]}s"
+                )
+                continue
+            return _fallback_payload(timeout_safe=True)
+        except Exception as exc:
+            _log_timing(
+                "multi_intent_llm_ms",
+                (time.monotonic() - llm_start) * 1000,
+                timing_context=timing_context,
+                extra={
+                    "model_name": FAST_MODEL,
+                    "model_tier": "fast",
+                    "timeout": False,
+                    "attempt": attempt_idx + 1,
+                    "error": str(exc),
+                },
+            )
+            logger.warning(f"Multi-intent failed: {exc}")
+            return _fallback_payload(timeout_safe=True)
+
         _log_timing(
             "multi_intent_llm_ms",
             (time.monotonic() - llm_start) * 1000,
@@ -1544,28 +1617,15 @@ def detect_multi_intent(
             extra={
                 "model_name": FAST_MODEL,
                 "model_tier": "fast",
-                "timeout": True,
-                "timeout_seconds": MULTI_INTENT_TIMEOUT_SECONDS,
+                "timeout": False,
+                "timeout_seconds": timeout_seconds,
+                "attempt": attempt_idx + 1,
             },
         )
-        logger.warning(f"Multi-intent timeout after {MULTI_INTENT_TIMEOUT_SECONDS}s: {exc}")
-        return _fallback_payload()
-    except Exception as exc:
-        _log_timing(
-            "multi_intent_llm_ms",
-            (time.monotonic() - llm_start) * 1000,
-            timing_context=timing_context,
-            extra={"model_name": FAST_MODEL, "model_tier": "fast", "timeout": False, "error": str(exc)},
-        )
-        logger.warning(f"Multi-intent failed: {exc}")
-        return _fallback_payload()
+        break
 
-    _log_timing(
-        "multi_intent_llm_ms",
-        (time.monotonic() - llm_start) * 1000,
-        timing_context=timing_context,
-        extra={"model_name": FAST_MODEL, "model_tier": "fast", "timeout": False},
-    )
+    if response is None:
+        return _fallback_payload(timeout_safe=True)
 
     content = (response.content or "").strip()
     if not content:
