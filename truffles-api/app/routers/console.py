@@ -158,6 +158,7 @@ from app.schemas.console import (
     ConsoleOnboardingBlueprint,
     ConsoleOnboardingBlueprintListResponse,
     ConsoleOnboardingBlueprintQuestionTemplate,
+    ConsoleOnboardingBlueprintRequiredFieldsProfile,
     ConsoleOnboardingContractPatchRequest,
     ConsoleOnboardingContractRecord,
     ConsoleOnboardingContractResponse,
@@ -968,7 +969,17 @@ def _resolve_readiness_hard_gate_blockers(readiness_kernel) -> list[str]:
     return _dedupe_list(selected)
 
 
-def _serialize_onboarding_readiness_kernel(readiness_kernel):
+def _is_readiness_hard_gate_enforced_for_branch(branch: Branch) -> bool:
+    if _ONBOARDING_READINESS_HARD_GATE_ENABLED:
+        return True
+    branch_id = getattr(branch, "id", None)
+    if branch_id is None:
+        return False
+    normalized_branch_id = str(branch_id).strip().lower()
+    return normalized_branch_id in _ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS
+
+
+def _serialize_onboarding_readiness_kernel(readiness_kernel, *, hard_gate_enforced: bool):
     if readiness_kernel is None:
         return None
     hard_gate_blockers = _resolve_readiness_hard_gate_blockers(readiness_kernel)
@@ -994,7 +1005,7 @@ def _serialize_onboarding_readiness_kernel(readiness_kernel):
             for item in readiness_kernel.dimensions
         ],
         shadow_hard_gate=ConsoleOnboardingReadinessHardGate(
-            enforced=_ONBOARDING_READINESS_HARD_GATE_ENABLED,
+            enforced=hard_gate_enforced,
             status="fail" if hard_gate_blockers else "pass",
             blocker_codes=hard_gate_blockers,
         ),
@@ -1009,6 +1020,7 @@ def _serialize_onboarding_scorecard(
     sla_control_loop = getattr(scorecard, "sla_control_loop", None)
     operational_pipeline = getattr(scorecard, "operational_pipeline", None)
     readiness_kernel = getattr(scorecard, "readiness_kernel", None)
+    hard_gate_enforced = _is_readiness_hard_gate_enforced_for_branch(branch)
     document_ingestion_payload = None
     if document_ingestion is not None:
         document_ingestion_payload = ConsoleOnboardingDocumentIngestion(
@@ -1073,7 +1085,10 @@ def _serialize_onboarding_scorecard(
         document_ingestion=document_ingestion_payload,
         sla_control_loop=sla_control_loop_payload,
         operational_pipeline=operational_pipeline_payload,
-        readiness_kernel=_serialize_onboarding_readiness_kernel(readiness_kernel),
+        readiness_kernel=_serialize_onboarding_readiness_kernel(
+            readiness_kernel,
+            hard_gate_enforced=hard_gate_enforced,
+        ),
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -1509,6 +1524,14 @@ _ONBOARDING_READINESS_HARD_GATE_CODES = _parse_env_csv_set(
     "ONBOARDING_READINESS_HARD_GATE_CODES",
     default=_ONBOARDING_READINESS_HARD_GATE_DEFAULT_CODES,
 )
+_ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS = {
+    item.strip().lower()
+    for item in _parse_env_csv_set(
+        "ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS",
+        default=set(),
+    )
+    if item.strip()
+}
 _INTEGRATION_DEFAULT_STALE_MINUTES = 60
 _INTEGRATION_MIN_STALE_MINUTES = 5
 _INTEGRATION_MAX_STALE_MINUTES = 24 * 60
@@ -1705,11 +1728,12 @@ def _require_branch_scorecard_ready(
     operation: str,
 ) -> None:
     scorecard = build_onboarding_scorecard(db, branch)
+    hard_gate_enforced = _is_readiness_hard_gate_enforced_for_branch(branch)
     readiness_kernel = getattr(scorecard, "readiness_kernel", None)
     hard_gate_blockers: list[str] = []
     if readiness_kernel is not None:
         hard_gate_blockers = _resolve_readiness_hard_gate_blockers(readiness_kernel)
-    if _ONBOARDING_READINESS_HARD_GATE_ENABLED and readiness_kernel is None:
+    if hard_gate_enforced and readiness_kernel is None:
         readiness_kernel = build_onboarding_readiness_kernel(
             db,
             branch,
@@ -1724,14 +1748,14 @@ def _require_branch_scorecard_ready(
             "blocker_codes": readiness_kernel.blocker_codes,
             "next_action_codes": readiness_kernel.next_action_codes,
             "shadow_hard_gate": {
-                "enforced": _ONBOARDING_READINESS_HARD_GATE_ENABLED,
+                "enforced": hard_gate_enforced,
                 "status": hard_gate_status,
                 "blocker_codes": hard_gate_blockers,
             },
         }
-    if scorecard.ready and not _ONBOARDING_READINESS_HARD_GATE_ENABLED:
+    if scorecard.ready and not hard_gate_enforced:
         return
-    if scorecard.ready and _ONBOARDING_READINESS_HARD_GATE_ENABLED and not hard_gate_blockers:
+    if scorecard.ready and hard_gate_enforced and not hard_gate_blockers:
         return
     failed_checks = [
         check.id.value
@@ -1741,7 +1765,7 @@ def _require_branch_scorecard_ready(
     message = "Onboarding scorecard failed"
     missing = scorecard.missing
     scorecard_status = "fail"
-    if scorecard.ready and _ONBOARDING_READINESS_HARD_GATE_ENABLED and hard_gate_blockers:
+    if scorecard.ready and hard_gate_enforced and hard_gate_blockers:
         message = "Onboarding readiness hard gate failed"
         missing = hard_gate_blockers
         scorecard_status = "pass"
@@ -15263,6 +15287,11 @@ def _serialize_onboarding_blueprint(record) -> ConsoleOnboardingBlueprint:
             )
             for item in record.question_templates
         ],
+        required_fields_profile=ConsoleOnboardingBlueprintRequiredFieldsProfile(
+            fields=list(record.required_fields_profile.fields),
+            checksum=record.required_fields_profile.checksum,
+        ),
+        readiness_weights={key: weight for key, weight in record.readiness_weights},
     )
 
 

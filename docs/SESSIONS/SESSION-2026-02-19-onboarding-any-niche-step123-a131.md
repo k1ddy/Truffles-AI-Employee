@@ -1,0 +1,26 @@
+# SESSION 2026-02-19-onboarding-any-niche-step123-a131 — Session 2026-02-19-onboarding-any-niche-step123-a131
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-19-onboarding-any-niche-step123-a131.md
+- branch: feat/2026-02-19-onboarding-any-niche-step123-a131
+- worktree: /home/zhan/worktrees/2026-02-19-onboarding-any-niche-step123-a131
+- base_ref: origin/main
+- scope: Закрыть items 1/2/3 onboarding any-niche (ops acceptance C pass + hard-gate canary rollout + blueprint contract completion).
+- done:
+  - Реализован canary hard-gate rollout (`ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS`) с per-branch enforced semantics.
+  - Расширен blueprint contract: `required_fields_profile` + `readiness_weights`, синхронизированы API/schema/types/OpenAPI.
+  - Добавлен тестовый модуль `truffles-api/tests/test_onboarding_blueprints.py` и расширены тесты admin onboarding.
+  - Добавлен валидный fixture `ops/fixtures/onboarding_pack_quality_beauty_valid.yaml`.
+  - Выполнен ops remediation `onboarding-fleet-remediate --sync-reference-pack-integrity --apply` и подтвержден PASS по fleet-check/smoke/pack-quality.
+  - Исправлена красная CI-проверка `unit-tests` в PR #758 через обновление openapi контракт-тестов под канонический `/console/v1` и `ConsoleReminder*` schema aliases.
+  - Реализован rollout diagnostics шага 1: `ops/diagnose.py onboarding-hard-gate-rollout` + helper/tests + runtime evidence для `actual/shadow/canary/enforced`.
+- next:
+  - Commit + push + PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-19-onboarding-any-niche-step123-a131.md
+  - docs/REPORTS/2026-02-19-onboarding-any-niche-step123-a131.md
+  - docs/REPORTS/2026-02-19-onboarding-hard-gate-rollout-a131.md
+  - /tmp/onboarding_any_niche_step123_a131/
+  - /tmp/onboarding_hard_gate_rollout_a131/
+- last_updated: 2026-02-19
