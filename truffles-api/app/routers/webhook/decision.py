@@ -624,6 +624,9 @@ def _should_block_expected_reply_by_info(
         and expected_reply_type == legacy.EXPECTED_REPLY_TIME
     ):
         booking_signal = _is_booking_request(message_text, client_slug=client_slug)
+        has_clock_time_signal = bool(
+            re.search(r"\b(?:[01]?\d|2[0-3])[:.][0-5]\d\b", message_text)
+        )
         try:
             has_datetime_signal = bool(
                 legacy._extract_datetime(message_text, client_slug=client_slug)
@@ -634,11 +637,11 @@ def _should_block_expected_reply_by_info(
         if (
             isinstance(expected_reply_candidate, str)
             and expected_reply_candidate.strip()
-            and has_datetime_signal
             and not price_signal
             and not style_reference_signal
-            and not question_like
+            and (has_datetime_signal or booking_signal)
             and (booking_signal or not info_query)
+            and (not question_like or booking_signal or has_clock_time_signal)
         ):
             # Accept grounded booking-time replies like "на 3 часа" even when
             # duration markers are present in wording.
@@ -647,12 +650,15 @@ def _should_block_expected_reply_by_info(
             return blocked
         if (
             question_like
-            and booking_signal
+            and has_datetime_signal
             and not info_query
             and not price_signal
             and not duration_signal
             and not style_reference_signal
+            and (booking_signal or has_clock_time_signal)
         ):
+            # Accept explicit booking-time questions like "Можно на 18:30?"
+            # while still blocking info/price/duration interruptions.
             return False
         if question_like:
             return True
