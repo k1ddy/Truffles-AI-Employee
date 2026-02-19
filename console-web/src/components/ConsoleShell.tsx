@@ -10,7 +10,9 @@ import toast from "react-hot-toast";
 
 import LoginButton from "@/components/LoginButton";
 import {
+    adminApi,
     authApi,
+    businessApi,
     canAccessConsole,
     opsApi,
     parseApiError,
@@ -18,6 +20,8 @@ import {
     type ConsoleRole,
     type ConsoleSection,
     type HealthResponse,
+    type IncidentItem,
+    type IncidentListResponse,
 } from "@/lib/api-client";
 import {
     clearConsoleContextScope,
@@ -38,6 +42,7 @@ const HEALTH_INCIDENT_CRITICAL_BACKLOG = 1000;
 const HEALTH_INCIDENT_WARN_BACKLOG = 500;
 const HEALTH_INCIDENT_STALE_WARN_MINUTES = 3;
 const HEALTH_INCIDENT_HIDE_MS = 30 * 60 * 1000;
+const HEALTH_INCIDENT_REFRESH_TIMEOUT_MS = 5000;
 const OWNER_ADMIN_PRIMARY_NAV_TEST_IDS = new Set<string>([
     "nav-cases",
     "nav-calendar",
@@ -121,6 +126,7 @@ const CONTEXT_AWARE_QUERY_KEY_PREFIXES = [
     "cases",
     "company-workspace-",
     "console-health-banner",
+    "console-health-incident-feed",
     "console-me",
     "health",
     "inbox-macros",
@@ -342,6 +348,7 @@ type HealthIncident = {
     status: string;
     backlog: number;
     fingerprint: string;
+    reasonCode: IncidentItem["reason_code"] | "redis_mandatory";
     title: string;
     summary: string;
     reasons: string[];
@@ -350,7 +357,6 @@ type HealthIncident = {
 };
 
 type HealthIncidentUiState = {
-    compactByFingerprint: Record<string, boolean>;
     hiddenUntilByFingerprint: Record<string, number>;
 };
 
@@ -384,44 +390,142 @@ function readHealthIncidentUiState(): HealthIncidentUiState {
     const raw = readBrowserStorage(HEALTH_INCIDENT_UI_STORAGE_KEY);
     if (!raw) {
         return {
-            compactByFingerprint: {},
             hiddenUntilByFingerprint: {},
         };
     }
     try {
         const parsed = JSON.parse(raw) as Partial<HealthIncidentUiState>;
-        const compactByFingerprint = parsed.compactByFingerprint && typeof parsed.compactByFingerprint === "object"
-            ? parsed.compactByFingerprint
-            : {};
         const hiddenUntilByFingerprint = parsed.hiddenUntilByFingerprint && typeof parsed.hiddenUntilByFingerprint === "object"
             ? parsed.hiddenUntilByFingerprint
             : {};
         return {
-            compactByFingerprint,
             hiddenUntilByFingerprint,
         };
     } catch {
         return {
-            compactByFingerprint: {},
             hiddenUntilByFingerprint: {},
         };
     }
 }
 
-function formatAbsoluteTimeLabel(timestampMs: number): string {
-    if (!Number.isFinite(timestampMs) || timestampMs <= 0) {
-        return "";
+function pickTopIncident(incidentList?: IncidentListResponse | null): IncidentItem | null {
+    const items = incidentList?.items ?? [];
+    if (items.length === 0) {
+        return null;
     }
-    const timestamp = new Date(timestampMs);
-    if (Number.isNaN(timestamp.getTime())) {
-        return "";
+    const severityWeight: Record<IncidentItem["severity"], number> = {
+        critical: 3,
+        warn: 2,
+        info: 1,
+    };
+    return [...items].sort((left, right) => {
+        const bySeverity = severityWeight[right.severity] - severityWeight[left.severity];
+        if (bySeverity !== 0) {
+            return bySeverity;
+        }
+        return new Date(right.detected_at).getTime() - new Date(left.detected_at).getTime();
+    })[0] ?? null;
+}
+
+function incidentHref(basePath: string, incident?: IncidentItem | null): string {
+    if (!incident) {
+        return basePath;
     }
-    return timestamp.toLocaleString("ru-RU", {
-        day: "2-digit",
-        month: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-    });
+    const params = new URLSearchParams();
+    params.set("incident_id", incident.id);
+    params.set("reason", incident.reason_code);
+    params.set("severity", incident.severity);
+    if (incident.client_id) {
+        params.set("client_id", incident.client_id);
+    }
+    if (incident.branch_id) {
+        params.set("branch_id", incident.branch_id);
+    }
+    return `${basePath}?${params.toString()}`;
+}
+
+function incidentRunbook(reasonCode: IncidentItem["reason_code"] | "redis_mandatory", ownerAdminView: boolean): string[] {
+    if (reasonCode === "redis_mandatory") {
+        return ownerAdminView
+            ? [
+                "Откройте «Статус» и проверьте, что Redis в состоянии connected.",
+                "Если Redis error, проверьте REDIS_URL и сетевой доступ до инстанса Redis.",
+                "После восстановления нажмите «Обновить health» и убедитесь, что риск снят.",
+            ]
+            : [
+                "Откройте OPS и проверьте карточку компонента Redis.",
+                "Если Redis недоступен, проверьте REDIS_URL/credentials и сетевую связность контейнера API.",
+                "После фикса обновите health и зафиксируйте remediation в журнале.",
+            ];
+    }
+
+    if (reasonCode === "integration_degraded") {
+        return ownerAdminView
+            ? [
+                "Откройте Workspace и проверьте branch-лидеры с интеграционной деградацией.",
+                "Для проблемного филиала выполните dry-run сверки интеграции.",
+                "После подтверждения примените execute и проверьте стабилизацию failed_24h.",
+            ]
+            : [
+                "Откройте OPS и посмотрите failed_24h + последний error.",
+                "Откройте Workspace и выполните integration_reconcile в dry-run для проблемного филиала.",
+                "Если dry-run чистый, выполните execute и перепроверьте тренд ошибок.",
+            ];
+    }
+
+    if (reasonCode === "outbox_backlog") {
+        return ownerAdminView
+            ? [
+                "Откройте «Статус» и проверьте рост pending/failed за последние минуты.",
+                "Запустите dry-run outbox_process и оцените готовность к execute.",
+                "Если backlog растет, эскалируйте инцидент до P0.",
+            ]
+            : [
+                "Откройте OPS и разберите outbox failed/pending.",
+                "Запустите outbox_process dry-run, затем execute при безопасном результате.",
+                "Проверьте, что после выполнения backlog идет вниз.",
+            ];
+    }
+
+    if (reasonCode === "provider_billing_blocked" || reasonCode === "provider_unavailable" || reasonCode === "provider_auth" || reasonCode === "provider_rate_limited") {
+        return ownerAdminView
+            ? [
+                "Откройте Workspace и проверьте связку provider по проблемному филиалу.",
+                "Сделайте dry-run remedation действия из карточки инцидента.",
+                "После execute убедитесь, что нет роста failed_24h и интеграция стабилизирована.",
+            ]
+            : [
+                "Откройте OPS и зафиксируйте тип provider-деградации.",
+                "В Workspace выполните рекомендуемое действие сначала в dry-run.",
+                "После execute проверьте, что риск снят и ошибки больше не растут.",
+            ];
+    }
+
+    if (reasonCode === "handover_backlog") {
+        return ownerAdminView
+            ? [
+                "Откройте «Заявки» и проверьте объем неразобранных handoff.",
+                "Увеличьте покрытие менеджеров и перераспределите SLA-очередь.",
+                "Если старение заявок растет, поднимите приоритет инцидента.",
+            ]
+            : [
+                "Откройте очередь handoff в Inbox и проверьте oldest age.",
+                "Разгрузите backlog приоритетными ответами.",
+                "Проверьте, что новые handoff закрываются в SLA.",
+            ];
+    }
+
+    return ownerAdminView
+        ? [
+            "Откройте «Статус» и проверьте фактическую динамику сигналов риска.",
+            "Перейдите в Workspace по проблемному филиалу и выполните dry-run remediation.",
+            "Если причина не ясна, зафиксируйте инцидент в журнале и эскалируйте до platform admin.",
+        ]
+        : [
+            "Откройте OPS и проверьте детальные метрики инцидента.",
+            "Перейдите в Workspace и выполните безопасную диагностику по филиалу.",
+            "При отсутствии эффекта эскалируйте с trace/job evidence.",
+        ];
 }
 
 function contextHealthToneClass(tone: ContextHealthTone): string {
@@ -437,16 +541,18 @@ function contextHealthToneClass(tone: ContextHealthTone): string {
 function deriveHealthIncident(
     health?: HealthResponse | null,
     updatedAtMs?: number,
-    options?: { ownerAdminView?: boolean },
+    options?: { ownerAdminView?: boolean; topIncident?: IncidentItem | null },
 ): HealthIncident | null {
     if (!health) {
         return null;
     }
 
     const ownerAdminView = options?.ownerAdminView ?? false;
+    const topIncident = options?.topIncident ?? null;
     const statusRaw = health.status ?? "healthy";
     const status = statusRaw === "healthy" ? "ok" : statusRaw;
     const backlog = health.outbox_backlog ?? 0;
+    const redisStatus = health.redis ?? "unknown";
     const reasons: string[] = [];
     let severity: "critical" | "warn" | null = null;
 
@@ -458,8 +564,20 @@ function deriveHealthIncident(
         severity = "warn";
     }
 
+    const redisDegraded = redisStatus !== "connected";
+    if (!severity && redisDegraded) {
+        severity = "warn";
+    }
+
     if (statusRaw === "unhealthy" || statusRaw === "degraded") {
         reasons.push(ownerAdminView ? `Статус сервиса: ${status}` : `health.status=${status}`);
+    }
+    if (redisDegraded) {
+        reasons.push(
+            ownerAdminView
+                ? `Redis обязателен: состояние ${redisStatus}`
+                : `redis.status=${redisStatus} (mandatory)`,
+        );
     }
     if (backlog >= HEALTH_INCIDENT_CRITICAL_BACKLOG) {
         reasons.push(
@@ -494,39 +612,33 @@ function deriveHealthIncident(
         return null;
     }
 
-    if (reasons.length === 0) {
-        reasons.push(`status=${status}, outbox_backlog=${backlog}`);
+    const reasonCode: IncidentItem["reason_code"] | "redis_mandatory" = redisDegraded
+        ? "redis_mandatory"
+        : (topIncident?.reason_code ?? "unknown");
+    const runbook = incidentRunbook(reasonCode, ownerAdminView);
+
+    if (topIncident) {
+        reasons.push(ownerAdminView ? `Причина: ${topIncident.reason_label}` : `incident.reason_code=${topIncident.reason_code}`);
+        reasons.push(ownerAdminView ? `Деталь: ${topIncident.summary}` : `incident.summary=${topIncident.summary}`);
+        if (topIncident.severity === "critical") {
+            severity = "critical";
+        } else if (!severity) {
+            severity = "warn";
+        }
     }
 
-    const runbook = ownerAdminView
-        ? severity === "critical"
-            ? [
-                "Откройте «Статус» и проверьте очередь отправки (failed/pending).",
-                "Проверьте, нет ли задержек ответов менеджеров по срочным заявкам.",
-                "После стабилизации обновите health и убедитесь, что риск снят.",
-            ]
-            : [
-                "Откройте «Статус» и проверьте динамику очереди за последние минуты.",
-                "Оцените, растёт ли число неразобранных заявок в Inbox.",
-                "Если показатели ухудшаются, эскалируйте инцидент до P0.",
-            ]
-        : severity === "critical"
-            ? [
-                "P0 triage: откройте OPS и разберите failed/pending outbox.",
-                "Если backlog растёт, проверьте provider lifecycle и выполните rebind/remediation в Workspace.",
-                "После действий обновите health и зафиксируйте trace/audit evidence.",
-            ]
-            : [
-                "Откройте OPS и проверьте динамику очереди за последние минуты.",
-                "Проверьте branch-лидеров по риску в Company Workspace.",
-                "Если риск растёт, поднимите инцидент до P0.",
-            ];
+    const uniqueReasons = Array.from(new Set(reasons));
+
+    if (reasons.length === 0) {
+        uniqueReasons.push(`status=${status}, outbox_backlog=${backlog}`);
+    }
 
     return {
         severity,
         status,
         backlog,
-        fingerprint: `${severity}:${status}:${backlog}`,
+        fingerprint: `${severity}:${status}:${backlog}:${redisStatus}:${topIncident?.reason_code ?? "none"}:${topIncident?.id ?? "none"}`,
+        reasonCode,
         title: severity === "critical"
             ? ownerAdminView
                 ? "Критичный риск для клиентских сообщений (P0)"
@@ -537,7 +649,7 @@ function deriveHealthIncident(
         summary: ownerAdminView
             ? `Статус сервиса: ${status} · очередь отправки: ${backlog}`
             : `status=${status}, outbox_backlog=${backlog}`,
-        reasons,
+        reasons: uniqueReasons,
         runbook,
         updatedAtLabel: updatedAgeLabel,
     };
@@ -795,12 +907,16 @@ function ContextHealthStrip({
     visibleClients,
     canReadOps,
     canReadTenants,
+    onOpenOps,
+    onOpenTenants,
 }: {
     me: ConsoleMe;
     companyId: string;
     visibleClients: ClientSummary[];
     canReadOps: boolean;
     canReadTenants: boolean;
+    onOpenOps: () => void;
+    onOpenTenants: () => void;
 }) {
     const companies = me.companies ?? [];
     const clients = me.clients ?? [];
@@ -862,14 +978,24 @@ function ContextHealthStrip({
                 </span>
             ))}
             {canReadOps && (
-                <Link href="/ops" className="btn-ghost text-[11px]" data-testid="context-health-open-ops">
+                <button
+                    type="button"
+                    className="btn-ghost text-[11px]"
+                    data-testid="context-health-open-ops"
+                    onClick={onOpenOps}
+                >
                     Открыть Ops
-                </Link>
+                </button>
             )}
             {canReadTenants && (
-                <Link href="/tenants" className="btn-ghost text-[11px]" data-testid="context-health-open-tenants">
+                <button
+                    type="button"
+                    className="btn-ghost text-[11px]"
+                    data-testid="context-health-open-tenants"
+                    onClick={onOpenTenants}
+                >
                     Открыть Тенанты
-                </Link>
+                </button>
             )}
         </div>
     );
@@ -957,6 +1083,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const role = data?.agent?.role ?? "manager";
     const canReadOps = canAccessConsole(role, "ops", "read");
     const canReadTenants = canAccessConsole(role, "tenants", "read");
+    const isPlatformAdmin = role === "platform_admin";
     const ownerAdminView = role === "owner" || role === "admin";
     const [ownerAdminAdvancedNav, setOwnerAdminAdvancedNav] = useState(
         () => readBrowserStorage(OWNER_ADMIN_ADVANCED_NAV_STORAGE_KEY) === "1"
@@ -986,7 +1113,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         },
         [ownerAdminAdvancedNav, ownerAdminView, pathname, role]
     );
-    const { data: healthData, dataUpdatedAt: healthDataUpdatedAt, isFetching: healthFetching, refetch: refetchHealth } = useQuery({
+    const { data: healthData, dataUpdatedAt: healthDataUpdatedAt, refetch: refetchHealth } = useQuery({
         queryKey: ["console-health-banner"],
         queryFn: async () => {
             const response = await opsApi.getHealth();
@@ -996,18 +1123,43 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         refetchInterval: 30000,
         staleTime: 10000,
     });
+    const { data: incidentFeed, refetch: refetchIncidentFeed } = useQuery({
+        queryKey: ["console-health-incident-feed", role],
+        queryFn: async () => {
+            if (isPlatformAdmin) {
+                const response = await adminApi.listIncidents({ limit: 20 });
+                return response.data;
+            }
+            if (ownerAdminView) {
+                const response = await businessApi.getIncidents();
+                return response.data;
+            }
+            return null;
+        },
+        enabled: hasSession && canReadOps && (isPlatformAdmin || ownerAdminView),
+        refetchInterval: 30000,
+        staleTime: 10000,
+    });
+    const topIncident = useMemo(() => pickTopIncident(incidentFeed ?? null), [incidentFeed]);
     const healthIncident = useMemo(
-        () => deriveHealthIncident(healthData ?? null, healthDataUpdatedAt, { ownerAdminView }),
-        [healthData, healthDataUpdatedAt, ownerAdminView],
+        () => deriveHealthIncident(healthData ?? null, healthDataUpdatedAt, { ownerAdminView, topIncident }),
+        [healthData, healthDataUpdatedAt, ownerAdminView, topIncident],
     );
     const healthIncidentClass = healthIncident?.severity === "critical"
         ? "border-red-300/80 bg-red-50 text-red-900"
         : "border-amber-300/80 bg-amber-50 text-amber-900";
+    const healthIncidentOpsHref = useMemo(() => incidentHref("/ops", topIncident), [topIncident]);
+    const healthIncidentWorkspaceHref = useMemo(
+        () => (canReadTenants ? incidentHref("/company-workspace", topIncident) : null),
+        [canReadTenants, topIncident],
+    );
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [contextNotice, setContextNotice] = useState<string | null>(null);
     const [navTransitioning, setNavTransitioning] = useState(false);
     const navFallbackTimeoutRef = useRef<number | null>(null);
+    const healthRefreshTimeoutRef = useRef<number | null>(null);
+    const [manualHealthRefreshing, setManualHealthRefreshing] = useState(false);
     const [navCollapsed, setNavCollapsed] = useState(
         () => readBrowserStorage(NAV_COLLAPSED_STORAGE_KEY) === "1"
     );
@@ -1016,9 +1168,6 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     );
     const navToggleLabel = navCollapsed ? "Развернуть меню" : "Свернуть меню";
     const healthIncidentFingerprint = healthIncident?.fingerprint ?? null;
-    const healthIncidentCompact = healthIncidentFingerprint
-        ? healthIncidentUiState.compactByFingerprint[healthIncidentFingerprint] ?? true
-        : true;
     const healthIncidentHiddenUntil = healthIncidentFingerprint
         ? healthIncidentUiState.hiddenUntilByFingerprint[healthIncidentFingerprint] ?? 0
         : 0;
@@ -1039,6 +1188,30 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         });
     };
     const healthIncidentHidden = !!healthIncidentFingerprint && healthIncidentHiddenUntil > Date.now();
+    const navigateToRoute = (href: string) => {
+        if (typeof window === "undefined") {
+            return;
+        }
+        const currentPathWithQuery = `${window.location.pathname}${window.location.search}`;
+        if (href === currentPathWithQuery) {
+            return;
+        }
+        const previousPathWithQuery = currentPathWithQuery;
+        setNavTransitioning(true);
+        router.push(href);
+        // Guard against rare App Router no-op transitions: fall back to hard navigation.
+        if (navFallbackTimeoutRef.current !== null) {
+            window.clearTimeout(navFallbackTimeoutRef.current);
+            navFallbackTimeoutRef.current = null;
+        }
+        navFallbackTimeoutRef.current = window.setTimeout(() => {
+            navFallbackTimeoutRef.current = null;
+            const currentAfterPush = `${window.location.pathname}${window.location.search}`;
+            if (currentAfterPush === previousPathWithQuery && href.startsWith("/")) {
+                window.location.assign(href);
+            }
+        }, 800);
+    };
 
     const navigateFromNav = (event: MouseEvent<HTMLAnchorElement>, href: string) => {
         if (
@@ -1054,23 +1227,29 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             return;
         }
         event.preventDefault();
-        if (href === pathname) {
-            return;
+        navigateToRoute(href);
+    };
+
+    const refreshHealthBanner = () => {
+        setManualHealthRefreshing(true);
+        if (healthRefreshTimeoutRef.current !== null) {
+            window.clearTimeout(healthRefreshTimeoutRef.current);
+            healthRefreshTimeoutRef.current = null;
         }
-        const previousPathname = pathname;
-        setNavTransitioning(true);
-        router.push(href);
-        // Guard against rare App Router no-op transitions: fall back to hard navigation.
-        if (navFallbackTimeoutRef.current !== null) {
-            window.clearTimeout(navFallbackTimeoutRef.current);
-            navFallbackTimeoutRef.current = null;
-        }
-        navFallbackTimeoutRef.current = window.setTimeout(() => {
-            navFallbackTimeoutRef.current = null;
-            if (window.location.pathname === previousPathname && href.startsWith("/")) {
-                window.location.assign(href);
+        healthRefreshTimeoutRef.current = window.setTimeout(() => {
+            healthRefreshTimeoutRef.current = null;
+            setManualHealthRefreshing(false);
+        }, HEALTH_INCIDENT_REFRESH_TIMEOUT_MS);
+        void Promise.all([
+            refetchHealth(),
+            (isPlatformAdmin || ownerAdminView) ? refetchIncidentFeed() : Promise.resolve(null),
+        ]).finally(() => {
+            if (healthRefreshTimeoutRef.current !== null) {
+                window.clearTimeout(healthRefreshTimeoutRef.current);
+                healthRefreshTimeoutRef.current = null;
             }
-        }, 800);
+            setManualHealthRefreshing(false);
+        });
     };
 
     useEffect(() => {
@@ -1090,6 +1269,15 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     }, [pathname]);
 
     useEffect(() => {
+        return () => {
+            if (healthRefreshTimeoutRef.current !== null) {
+                window.clearTimeout(healthRefreshTimeoutRef.current);
+                healthRefreshTimeoutRef.current = null;
+            }
+        };
+    }, []);
+
+    useEffect(() => {
         writeBrowserStorage(NAV_COLLAPSED_STORAGE_KEY, navCollapsed ? "1" : null);
     }, [navCollapsed]);
 
@@ -1102,50 +1290,22 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     }, [ownerAdminAdvancedNav, ownerAdminView]);
 
     useEffect(() => {
-        const hasCompact = Object.keys(healthIncidentUiState.compactByFingerprint).length > 0;
         const hasHiddenUntil = Object.keys(healthIncidentUiState.hiddenUntilByFingerprint).length > 0;
-        if (!hasCompact && !hasHiddenUntil) {
+        if (!hasHiddenUntil) {
             writeBrowserStorage(HEALTH_INCIDENT_UI_STORAGE_KEY, null);
             return;
         }
         writeBrowserStorage(HEALTH_INCIDENT_UI_STORAGE_KEY, JSON.stringify(healthIncidentUiState));
     }, [healthIncidentUiState]);
 
-    const setHealthIncidentCompact = (compact: boolean) => {
-        if (!healthIncidentFingerprint) {
-            return;
-        }
-        setHealthIncidentUiState((prev) => ({
-            compactByFingerprint: {
-                ...prev.compactByFingerprint,
-                [healthIncidentFingerprint]: compact,
-            },
-            hiddenUntilByFingerprint: prev.hiddenUntilByFingerprint,
-        }));
-    };
-
     const snoozeHealthIncident = () => {
         if (!healthIncidentFingerprint) {
             return;
         }
         setHealthIncidentUiState((prev) => ({
-            compactByFingerprint: prev.compactByFingerprint,
             hiddenUntilByFingerprint: {
                 ...prev.hiddenUntilByFingerprint,
                 [healthIncidentFingerprint]: Date.now() + HEALTH_INCIDENT_HIDE_MS,
-            },
-        }));
-    };
-
-    const showHealthIncidentNow = () => {
-        if (!healthIncidentFingerprint) {
-            return;
-        }
-        setHealthIncidentUiState((prev) => ({
-            compactByFingerprint: prev.compactByFingerprint,
-            hiddenUntilByFingerprint: {
-                ...prev.hiddenUntilByFingerprint,
-                [healthIncidentFingerprint]: 0,
             },
         }));
     };
@@ -1452,6 +1612,8 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                         visibleClients={visibleClients}
                                         canReadOps={canReadOps}
                                         canReadTenants={canReadTenants}
+                                        onOpenOps={() => navigateToRoute("/ops")}
+                                        onOpenTenants={() => navigateToRoute("/tenants")}
                                     />
                                 </div>
                             )}
@@ -1483,133 +1645,83 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                 <LoginButton />
                             </div>
                         </div>
-                        {healthIncident && (
-                            healthIncidentHidden ? (
-                                <div
-                                    className={`mx-6 mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-2 text-xs ${healthIncidentClass}`}
-                                    data-testid="global-health-incident-hidden"
-                                >
-                                    <div className="min-w-[280px] flex-1">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <span
-                                                className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                                    healthIncident.severity === "critical"
-                                                        ? "bg-red-200/80 text-red-900"
-                                                        : "bg-amber-200/80 text-amber-900"
-                                                }`}
-                                                data-testid="global-health-incident-severity"
-                                            >
-                                                {healthIncident.severity === "critical" ? "P0" : "P1"}
-                                            </span>
-                                            <p className="font-mono" data-testid="global-health-incident-summary">
-                                                {healthIncident.summary}
-                                            </p>
-                                        </div>
-                                        <p className="mt-1 text-[11px] text-current/80">
-                                            Скрыто до {formatAbsoluteTimeLabel(healthIncidentHiddenUntil)}. {healthIncident.updatedAtLabel}
-                                        </p>
-                                    </div>
+                        {healthIncident && !healthIncidentHidden && (
+                            <div
+                                className={`mx-6 mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border px-4 py-3 text-xs ${healthIncidentClass}`}
+                                data-testid="global-health-incident-banner"
+                            >
+                                <div className="min-w-[280px] flex-1">
                                     <div className="flex flex-wrap items-center gap-2">
-                                        <button
-                                            type="button"
-                                            className="btn-ghost"
-                                            onClick={showHealthIncidentNow}
-                                            data-testid="global-health-incident-show"
+                                        <span
+                                            className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                                healthIncident.severity === "critical"
+                                                    ? "bg-red-200/80 text-red-900"
+                                                    : "bg-amber-200/80 text-amber-900"
+                                            }`}
+                                            data-testid="global-health-incident-severity"
                                         >
-                                            Показать
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="btn-ghost"
-                                            onClick={() => {
-                                                void refetchHealth();
-                                            }}
-                                            disabled={healthFetching}
-                                            data-testid="global-health-incident-refresh"
-                                        >
-                                            {healthFetching ? "Обновление..." : "Обновить health"}
-                                        </button>
+                                            {healthIncident.severity === "critical" ? "P0" : "P1"}
+                                        </span>
+                                        <p className="text-sm font-semibold">{healthIncident.title}</p>
+                                        <span className="rounded-full border border-current/30 px-2 py-0.5 font-mono text-[10px]">
+                                            {healthIncident.reasonCode}
+                                        </span>
                                     </div>
+                                    <p className="mt-1 font-mono" data-testid="global-health-incident-summary">
+                                        {healthIncident.summary}
+                                    </p>
+                                    <p className="mt-1 text-[11px] text-current/80" data-testid="global-health-incident-updated">
+                                        {healthIncident.updatedAtLabel}
+                                    </p>
+                                    <ul className="mt-2 list-disc space-y-1 pl-4 text-[11px]" data-testid="global-health-incident-reasons">
+                                        {healthIncident.reasons.map((reason) => (
+                                            <li key={reason}>{reason}</li>
+                                        ))}
+                                    </ul>
+                                    <ol className="mt-2 space-y-1 text-[11px]" data-testid="global-health-incident-runbook">
+                                        {healthIncident.runbook.map((step, index) => (
+                                            <li key={step}>{index + 1}. {step}</li>
+                                        ))}
+                                    </ol>
                                 </div>
-                            ) : (
-                                <div
-                                    className={`mx-6 mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border px-4 py-3 text-xs ${healthIncidentClass}`}
-                                    data-testid="global-health-incident-banner"
-                                >
-                                    <div className="min-w-[280px] flex-1">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <span
-                                                className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                                    healthIncident.severity === "critical"
-                                                        ? "bg-red-200/80 text-red-900"
-                                                        : "bg-amber-200/80 text-amber-900"
-                                                }`}
-                                                data-testid="global-health-incident-severity"
-                                            >
-                                                {healthIncident.severity === "critical" ? "P0" : "P1"}
-                                            </span>
-                                            <p className="text-sm font-semibold">{healthIncident.title}</p>
-                                        </div>
-                                        <p className="mt-1 font-mono" data-testid="global-health-incident-summary">
-                                            {healthIncident.summary}
-                                        </p>
-                                        <p className="mt-1 text-[11px] text-current/80" data-testid="global-health-incident-updated">
-                                            {healthIncident.updatedAtLabel}
-                                        </p>
-                                        {!healthIncidentCompact && (
-                                            <>
-                                                <ul className="mt-2 list-disc space-y-1 pl-4 text-[11px]" data-testid="global-health-incident-reasons">
-                                                    {healthIncident.reasons.map((reason) => (
-                                                        <li key={reason}>{reason}</li>
-                                                    ))}
-                                                </ul>
-                                                <ol className="mt-2 space-y-1 text-[11px]" data-testid="global-health-incident-runbook">
-                                                    {healthIncident.runbook.map((step, index) => (
-                                                        <li key={step}>{index + 1}. {step}</li>
-                                                    ))}
-                                                </ol>
-                                            </>
-                                        )}
-                                    </div>
-                                    <div className="flex flex-wrap items-center gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                        type="button"
+                                        className="btn-ghost"
+                                        onClick={snoozeHealthIncident}
+                                        data-testid="global-health-incident-snooze"
+                                    >
+                                        Скрыть на 30м
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="btn-ghost"
+                                        onClick={refreshHealthBanner}
+                                        disabled={manualHealthRefreshing}
+                                        data-testid="global-health-incident-refresh"
+                                    >
+                                        {manualHealthRefreshing ? "Обновляю..." : "Обновить health"}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="btn-ghost"
+                                        onClick={() => navigateToRoute(healthIncidentOpsHref)}
+                                        data-testid="global-health-incident-open-ops"
+                                    >
+                                        Открыть OPS
+                                    </button>
+                                    {healthIncidentWorkspaceHref && (
                                         <button
                                             type="button"
                                             className="btn-ghost"
-                                            onClick={() => setHealthIncidentCompact(!healthIncidentCompact)}
-                                            data-testid="global-health-incident-toggle"
+                                            onClick={() => navigateToRoute(healthIncidentWorkspaceHref)}
+                                            data-testid="global-health-incident-open-workspace"
                                         >
-                                            {healthIncidentCompact ? "Развернуть" : "Свернуть"}
+                                            Открыть Workspace
                                         </button>
-                                        <button
-                                            type="button"
-                                            className="btn-ghost"
-                                            onClick={snoozeHealthIncident}
-                                            data-testid="global-health-incident-snooze"
-                                        >
-                                            Скрыть на 30м
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="btn-ghost"
-                                            onClick={() => {
-                                                void refetchHealth();
-                                            }}
-                                            disabled={healthFetching}
-                                            data-testid="global-health-incident-refresh"
-                                        >
-                                            {healthFetching ? "Обновление..." : "Обновить health"}
-                                        </button>
-                                        <Link href="/ops" className="btn-ghost">
-                                            Открыть OPS
-                                        </Link>
-                                        {canReadTenants && (
-                                            <Link href="/company-workspace" className="btn-ghost">
-                                                Открыть Workspace
-                                            </Link>
-                                        )}
-                                    </div>
+                                    )}
                                 </div>
-                            )
+                            </div>
                         )}
                         <nav className="flex gap-2 overflow-x-auto px-4 pb-3 text-xs font-medium md:hidden">
                             {navItems.map((item) => {
