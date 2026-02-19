@@ -1,0 +1,39 @@
+# SESSION 2026-02-19-wave-canon-context-marketing-mvp-a140 — Session 2026-02-19-wave-canon-context-marketing-mvp-a140
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-19-wave-canon-context-marketing-mvp-a140.md
+- branch: feat/2026-02-19-wave-canon-context-marketing-mvp-a140
+- worktree: /home/zhan/worktrees/2026-02-19-wave-canon-context-marketing-mvp-a140
+- base_ref: origin/main
+- scope: Canon wave-status cleanup + context header UX dedupe + explicit data-mode indicator + Wave3 narrow marketing MVP (branch scope, dry_run preview, confirm execute).
+- done:
+  - Session created.
+  - Added dedicated TP for requested package `1-4` and synced it into the session branch.
+  - Fixed `STATE.md` merge-conflict markers and refreshed NOW with current Wave 0.2 runtime fact (`healthy`, guard `ok`).
+  - Synced Wave session statuses to merged PR reality (`wave0/wave1/wave2/waveA/waveB`) and rebuilt `docs/SESSION_INDEX.md`.
+  - Simplified context UX in `ConsoleShell`: header keeps `Компания/Клиент/Филиал`, indicator now uses explicit copy `Режим данных: Активные` with tooltip `Архив и деактивированные в Тенантах.`.
+  - Reduced excess top whitespace in left sidebar (`py/mt` compaction before nav).
+  - Implemented Wave3 narrow backend MVP:
+    - new models `MarketingCampaign` + `MarketingCampaignDelivery`,
+    - migration `032_add_marketing_campaigns.sql`,
+    - API endpoints:
+      - `GET /console/v1/admin/marketing/campaigns`
+      - `POST /console/v1/admin/marketing/campaigns`
+      - `POST /console/v1/admin/marketing/campaigns/{campaign_id}/preview`
+      - `POST /console/v1/admin/marketing/campaigns/{campaign_id}/execute`
+    - enforced branch scope, preview-before-send contract, explicit `confirm_send=true`.
+  - Added deterministic tests `truffles-api/tests/test_console_marketing_campaigns.py`.
+- next:
+  - Open PR and attach evidence summary.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-19-wave-canon-context-marketing-mvp-a140.md
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/744
+  - /tmp/platform_admin_wave_check_20260219.json
+  - /tmp/owner_admin_wave_check_20260219.json
+  - pytest -q truffles-api/tests/test_console_marketing_campaigns.py truffles-api/tests/test_console_rbac.py truffles-api/tests/test_console_owner_business.py
+  - python3 truffles-api/scripts/generate_openapi.py --check
+  - npm --prefix console-web run lint -- --file src/components/ConsoleShell.tsx
+  - npm --prefix console-web run build
+  - scripts/session_check.sh
+- last_updated: 2026-02-19
