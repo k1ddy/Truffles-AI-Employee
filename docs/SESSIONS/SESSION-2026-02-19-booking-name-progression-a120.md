@@ -1,0 +1,23 @@
+# SESSION 2026-02-19-booking-name-progression-a120 — Session 2026-02-19-booking-name-progression-a120
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-19-booking-name-progression-a120.md
+- branch: feat/2026-02-19-booking-name-progression-a120
+- worktree: /home/zhan/worktrees/2026-02-19-booking-name-progression-a120
+- base_ref: origin/main
+- scope: Booking name progression guard + LLM-quality anti-fake process gates.
+- done:
+  - Session created.
+  - Added booking transition guard to normalize list_slots drift on name stage.
+  - Added regression tests for name-stage normalization.
+  - Added process gates to block fake no-LLM quality acceptance.
+- next:
+  - Open PR and run full llm-quality realism with judge evidence.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-19-booking-name-progression-a120.md
+  - truffles-api/app/routers/webhook/decision.py
+  - truffles-api/tests/test_message_endpoint.py
+  - scripts/session_check.sh
+  - ops/diagnose.py
+- last_updated: 2026-02-19
