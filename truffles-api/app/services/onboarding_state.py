@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
@@ -16,6 +17,8 @@ from app.models.client_settings import ClientSettings
 from app.models.conversation import Conversation
 from app.models.handover import Handover
 from app.models.knowledge_version import KnowledgeVersion
+from app.models.message import Message
+from app.models.outbox_message import OutboxMessage
 from app.models.reference_pack import ReferencePack
 from app.models.specialist import Specialist
 from app.schemas.capabilities import CapabilitiesPayload
@@ -72,6 +75,51 @@ _DEFAULT_REMINDER_1_MINUTES = 10
 _DEFAULT_REMINDER_2_MINUTES = 45
 _DEFAULT_ESCALATION_TIMEOUT_MINUTES = 120
 _SLA_ACTIVE_HANDOVER_STATUSES = ("pending", "active")
+_READINESS_DELIVERY_WINDOW_HOURS = 24
+_READINESS_TRAFFIC_WINDOW_HOURS = 24
+_READINESS_BACKLOG_WARN = 500
+_READINESS_BACKLOG_FAIL = 1000
+_READINESS_FAILED_24H_WARN = 30
+_READINESS_FAILED_24H_FAIL = 100
+_READINESS_STALE_24H_WARN = 5
+_READINESS_STALE_24H_FAIL = 20
+_READINESS_BLOCKER_PREFIX_GO_NO_GO = "go_no_go:"
+_READINESS_CRITICAL_BLOCKERS = {
+    "delivery:backlog_critical",
+    "delivery:failed_24h_critical",
+    "delivery:stale_processing_critical",
+    "traffic:whatsapp_capability_mismatch",
+    "traffic:telegram_capability_mismatch",
+}
+_READINESS_BLOCKER_QUESTIONS = {
+    "delivery:backlog_critical": "Почему backlog outbox критичный и какой план разгрузки на сегодня?",
+    "delivery:backlog_warn": "Какие шаги нужны, чтобы backlog outbox не вырос до критичного?",
+    "delivery:failed_24h_critical": "Почему ошибок доставки за 24 часа критично много и как закрываем причину?",
+    "delivery:failed_24h_warn": "Какие причины ошибок доставки за 24 часа приоритетны для устранения?",
+    "delivery:stale_processing_critical": "Почему сообщения застряли в stale_processing и как устраняем это сейчас?",
+    "delivery:stale_processing_warn": "Какая причина stale_processing и какой план превентивного контроля?",
+    "traffic:whatsapp_capability_mismatch": "Почему идет WhatsApp трафик при отключенном capability WhatsApp?",
+    "traffic:telegram_capability_mismatch": "Почему идет Telegram трафик при отключенном capability Telegram?",
+}
+_GO_NO_GO_BLOCKER_QUESTIONS = {
+    "capabilities": "Заполнены ли capabilities клиента и филиала перед go-live?",
+    "onboarding_contract": "Заполнен ли onboarding contract для клиента/филиала?",
+    "payment_confirmed": "Подтверждена ли оплата по договору перед запуском?",
+    "webhook_secret": "Настроен ли webhook secret для безопасного inbound?",
+    "reference_pack_domain": "Указан ли domain_slug для reference pack?",
+    "reference_pack": "Подключен ли active reference pack для выбранного домена?",
+    "reference_pack_integrity": "Прошла ли проверка integrity у reference pack?",
+    "instance_id": "Указан ли instance_id для активного канала?",
+    "phone": "Указан ли номер филиала для канала?",
+    "branch_active": "Активирован ли филиал только после прохождения go-live gate?",
+    "telegram_chat_id": "Подключен ли telegram_chat_id для канала Telegram?",
+    "knowledge_tag": "Настроен ли knowledge_tag для филиала?",
+    "knowledge_published": "Опубликована ли актуальная версия знаний?",
+    "document_ingestion_invalid": "Почему document ingestion невалиден и какие данные нужно дозаполнить?",
+    "working_hours": "Заполнены ли рабочие часы филиала для booking?",
+    "booking_settings": "Заполнены ли booking settings для сценариев записи?",
+    "specialists": "Добавлены ли специалисты для booking сценариев?",
+}
 
 
 @dataclass(frozen=True)
@@ -194,6 +242,31 @@ class OnboardingOperationalPipeline:
 
 
 @dataclass(frozen=True)
+class OnboardingReadinessDimension:
+    id: str
+    status: str
+    blocker_codes: list[str]
+    next_action_codes: list[str]
+
+
+@dataclass(frozen=True)
+class OnboardingReadinessQuestion:
+    code: str
+    question: str
+    blocking_go_live: bool
+
+
+@dataclass(frozen=True)
+class OnboardingReadinessKernel:
+    status: str
+    blocker_codes: list[str]
+    next_action_codes: list[str]
+    auto_questions: list[OnboardingReadinessQuestion]
+    dimensions: list[OnboardingReadinessDimension]
+    shadow_hard_gate_blockers: list[str]
+
+
+@dataclass(frozen=True)
 class OnboardingScorecard:
     ready: bool
     checks: list[OnboardingScorecardCheck]
@@ -201,6 +274,7 @@ class OnboardingScorecard:
     document_ingestion: Optional[OnboardingDocumentIngestion] = None
     sla_control_loop: Optional[OnboardingSlaControlLoop] = None
     operational_pipeline: Optional[OnboardingOperationalPipeline] = None
+    readiness_kernel: Optional[OnboardingReadinessKernel] = None
 
 
 def _parse_onboarding_state(value: Optional[str]) -> Optional[OnboardingStep]:
@@ -799,6 +873,259 @@ def _deduplicate_strings(values: list[str]) -> list[str]:
     return unique
 
 
+def _prefixed_go_no_go_blockers(missing_codes: list[str]) -> list[str]:
+    return [f"{_READINESS_BLOCKER_PREFIX_GO_NO_GO}{code}" for code in missing_codes]
+
+
+def _is_go_no_go_blocker(code: str) -> bool:
+    return code.startswith(_READINESS_BLOCKER_PREFIX_GO_NO_GO)
+
+
+def _question_for_blocker(code: str) -> str:
+    if code in _READINESS_BLOCKER_QUESTIONS:
+        return _READINESS_BLOCKER_QUESTIONS[code]
+    if _is_go_no_go_blocker(code):
+        suffix = code[len(_READINESS_BLOCKER_PREFIX_GO_NO_GO) :]
+        if suffix in _GO_NO_GO_BLOCKER_QUESTIONS:
+            return _GO_NO_GO_BLOCKER_QUESTIONS[suffix]
+        if suffix.startswith("client_pack."):
+            return f"Какое значение отсутствует для обязательного поля pack: {suffix}?"
+        if suffix.startswith("provider_binding.whatsapp"):
+            return "Какие поля provider binding WhatsApp нужно дозаполнить для go-live?"
+        if suffix.startswith("capability_mismatch:"):
+            return "Где конфликт между купленными и включенными capabilities?"
+        if suffix.startswith("reference_pack_"):
+            return "Что не так с integrity reference pack и как это исправить?"
+        return f"Какая причина блокера go-live: {suffix}?"
+    return f"Какая причина блокера readiness: {code}?"
+
+
+def _build_auto_questions(blocker_codes: list[str], *, shadow_hard_gate_blockers: list[str]) -> list[OnboardingReadinessQuestion]:
+    shadow_set = set(shadow_hard_gate_blockers)
+    return [
+        OnboardingReadinessQuestion(
+            code=code,
+            question=_question_for_blocker(code),
+            blocking_go_live=code in shadow_set,
+        )
+        for code in blocker_codes
+    ]
+
+
+def _build_go_no_go_readiness_dimension(go_no_go_missing: list[str]) -> OnboardingReadinessDimension:
+    blocker_codes = _prefixed_go_no_go_blockers(go_no_go_missing)
+    return OnboardingReadinessDimension(
+        id="go_no_go_contract",
+        status="fail" if blocker_codes else "pass",
+        blocker_codes=blocker_codes,
+        next_action_codes=(["resolve_go_no_go_missing"] if blocker_codes else []),
+    )
+
+
+def _build_delivery_health_readiness_dimension(
+    db: Session,
+    branch: Branch,
+) -> OnboardingReadinessDimension:
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=_READINESS_DELIVERY_WINDOW_HOURS)
+    backlog_total = (
+        db.query(func.count(OutboxMessage.id))
+        .filter(
+            OutboxMessage.client_id == branch.client_id,
+            OutboxMessage.branch_id == branch.id,
+            OutboxMessage.status.in_(["PENDING", "PROCESSING"]),
+        )
+        .scalar()
+        or 0
+    )
+    failed_24h_total = (
+        db.query(func.count(OutboxMessage.id))
+        .filter(
+            OutboxMessage.client_id == branch.client_id,
+            OutboxMessage.branch_id == branch.id,
+            OutboxMessage.status == "FAILED",
+            OutboxMessage.updated_at >= cutoff,
+        )
+        .scalar()
+        or 0
+    )
+    stale_processing_24h_total = (
+        db.query(func.count(OutboxMessage.id))
+        .filter(
+            OutboxMessage.client_id == branch.client_id,
+            OutboxMessage.branch_id == branch.id,
+            OutboxMessage.status == "FAILED",
+            OutboxMessage.updated_at >= cutoff,
+            OutboxMessage.last_error.ilike("stale_processing%"),
+        )
+        .scalar()
+        or 0
+    )
+
+    blocker_codes: list[str] = []
+    if backlog_total >= _READINESS_BACKLOG_FAIL:
+        blocker_codes.append("delivery:backlog_critical")
+    elif backlog_total >= _READINESS_BACKLOG_WARN:
+        blocker_codes.append("delivery:backlog_warn")
+
+    if failed_24h_total >= _READINESS_FAILED_24H_FAIL:
+        blocker_codes.append("delivery:failed_24h_critical")
+    elif failed_24h_total >= _READINESS_FAILED_24H_WARN:
+        blocker_codes.append("delivery:failed_24h_warn")
+
+    if stale_processing_24h_total >= _READINESS_STALE_24H_FAIL:
+        blocker_codes.append("delivery:stale_processing_critical")
+    elif stale_processing_24h_total >= _READINESS_STALE_24H_WARN:
+        blocker_codes.append("delivery:stale_processing_warn")
+
+    if any(code.endswith("_critical") for code in blocker_codes):
+        status = "fail"
+    elif blocker_codes:
+        status = "warn"
+    else:
+        status = "pass"
+
+    next_action_codes = (
+        [
+            "run_outbox_process_and_review_failed",
+            "classify_delivery_errors_and_apply_remediation",
+        ]
+        if blocker_codes
+        else []
+    )
+    return OnboardingReadinessDimension(
+        id="delivery_health",
+        status=status,
+        blocker_codes=_deduplicate_strings(blocker_codes),
+        next_action_codes=next_action_codes,
+    )
+
+
+def _count_recent_inbound_by_channel(
+    db: Session,
+    branch: Branch,
+    *,
+    channel: str,
+) -> int:
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=_READINESS_TRAFFIC_WINDOW_HOURS)
+    return (
+        db.query(func.count(Message.id))
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .filter(
+            Message.client_id == branch.client_id,
+            Conversation.branch_id == branch.id,
+            Conversation.channel == channel,
+            Message.role == "user",
+            Message.created_at >= cutoff,
+        )
+        .scalar()
+        or 0
+    )
+
+
+def _build_traffic_alignment_readiness_dimension(
+    db: Session,
+    branch: Branch,
+    *,
+    inputs: OnboardingInputs,
+) -> OnboardingReadinessDimension:
+    blocker_codes: list[str] = []
+    whatsapp_inbound_24h = _count_recent_inbound_by_channel(db, branch, channel="whatsapp")
+    if whatsapp_inbound_24h > 0 and (
+        not inputs.has_capabilities
+        or inputs.capabilities.channels.whatsapp is not True
+    ):
+        blocker_codes.append("traffic:whatsapp_capability_mismatch")
+
+    telegram_inbound_24h = _count_recent_inbound_by_channel(db, branch, channel="telegram")
+    if telegram_inbound_24h > 0 and (
+        not inputs.has_capabilities
+        or inputs.capabilities.channels.telegram is not True
+    ):
+        blocker_codes.append("traffic:telegram_capability_mismatch")
+
+    status = "fail" if blocker_codes else "pass"
+    next_action_codes = (
+        ["align_channels_with_live_traffic"] if blocker_codes else []
+    )
+    return OnboardingReadinessDimension(
+        id="traffic_capability_alignment",
+        status=status,
+        blocker_codes=_deduplicate_strings(blocker_codes),
+        next_action_codes=next_action_codes,
+    )
+
+
+def build_onboarding_readiness_kernel(
+    db: Session,
+    branch: Branch,
+    *,
+    inputs: Optional[OnboardingInputs] = None,
+    scorecard: Optional[OnboardingScorecard] = None,
+) -> OnboardingReadinessKernel:
+    resolved_inputs = inputs if inputs is not None else build_onboarding_inputs(db, branch)
+    resolved_scorecard = scorecard
+    if resolved_scorecard is None:
+        resolved_sla = _build_sla_control_loop(db, branch, inputs=resolved_inputs)
+        resolved_scorecard = build_onboarding_scorecard_from_inputs(
+            resolved_inputs,
+            sla_control_loop=resolved_sla,
+        )
+
+    go_no_go_dimension = _build_go_no_go_readiness_dimension(resolved_scorecard.missing)
+    delivery_dimension = _build_delivery_health_readiness_dimension(db, branch)
+    traffic_dimension = _build_traffic_alignment_readiness_dimension(
+        db,
+        branch,
+        inputs=resolved_inputs,
+    )
+    dimensions = [go_no_go_dimension, delivery_dimension, traffic_dimension]
+
+    blocker_codes = _deduplicate_strings(
+        [
+            code
+            for dimension in dimensions
+            for code in dimension.blocker_codes
+        ]
+    )
+    next_action_codes = _deduplicate_strings(
+        [
+            code
+            for dimension in dimensions
+            for code in dimension.next_action_codes
+        ]
+    )
+    if not next_action_codes:
+        next_action_codes = ["monitor_readiness"]
+
+    has_fail = any(dimension.status == "fail" for dimension in dimensions)
+    has_warn = any(dimension.status == "warn" for dimension in dimensions)
+    if has_fail:
+        status = "fail"
+    elif has_warn:
+        status = "warn"
+    else:
+        status = "pass"
+
+    shadow_hard_gate_blockers = _deduplicate_strings(
+        [
+            code
+            for code in blocker_codes
+            if _is_go_no_go_blocker(code) or code in _READINESS_CRITICAL_BLOCKERS
+        ]
+    )
+    return OnboardingReadinessKernel(
+        status=status,
+        blocker_codes=blocker_codes,
+        next_action_codes=next_action_codes,
+        auto_questions=_build_auto_questions(
+            blocker_codes,
+            shadow_hard_gate_blockers=shadow_hard_gate_blockers,
+        ),
+        dimensions=dimensions,
+        shadow_hard_gate_blockers=shadow_hard_gate_blockers,
+    )
+
+
 def _collect_stage_blockers(
     missing_codes: list[str],
     *,
@@ -1070,9 +1397,24 @@ def build_onboarding_scorecard(db: Session, branch: Branch) -> OnboardingScoreca
         branch,
         inputs=inputs,
     )
-    return build_onboarding_scorecard_from_inputs(
+    scorecard = build_onboarding_scorecard_from_inputs(
         inputs,
         sla_control_loop=sla_control_loop,
+    )
+    readiness_kernel = build_onboarding_readiness_kernel(
+        db,
+        branch,
+        inputs=inputs,
+        scorecard=scorecard,
+    )
+    return OnboardingScorecard(
+        ready=scorecard.ready,
+        checks=scorecard.checks,
+        missing=scorecard.missing,
+        document_ingestion=scorecard.document_ingestion,
+        sla_control_loop=scorecard.sla_control_loop,
+        operational_pipeline=scorecard.operational_pipeline,
+        readiness_kernel=readiness_kernel,
     )
 
 
