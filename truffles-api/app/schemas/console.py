@@ -1365,6 +1365,26 @@ class ConsoleReferencePackUpsertRequest(BaseModel):
     metadata: Optional[dict] = None
 
 
+class ConsoleOnboardingBlueprintQuestionTemplate(BaseModel):
+    code: str
+    question: str
+    blocking_go_live: bool = False
+
+
+class ConsoleOnboardingBlueprint(BaseModel):
+    id: str
+    domain_slug: str
+    label: str
+    summary: str
+    payload: CapabilitiesPayload
+    go_live_blockers_profile: list[str] = []
+    question_templates: list[ConsoleOnboardingBlueprintQuestionTemplate] = []
+
+
+class ConsoleOnboardingBlueprintListResponse(BaseModel):
+    items: list[ConsoleOnboardingBlueprint]
+
+
 OnboardingPurchasedService = Literal[
     "whatsapp",
     "telegram",
