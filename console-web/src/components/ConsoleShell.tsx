@@ -42,7 +42,7 @@ const HEALTH_INCIDENT_CRITICAL_BACKLOG = 1000;
 const HEALTH_INCIDENT_WARN_BACKLOG = 500;
 const HEALTH_INCIDENT_STALE_WARN_MINUTES = 3;
 const HEALTH_INCIDENT_HIDE_MS = 30 * 60 * 1000;
-const HEALTH_INCIDENT_REFRESH_TIMEOUT_MS = 5000;
+const HEALTH_INCIDENT_REFRESH_TIMEOUT_MS = 1500;
 const OWNER_ADMIN_PRIMARY_NAV_TEST_IDS = new Set<string>([
     "nav-cases",
     "nav-calendar",
@@ -347,7 +347,6 @@ type HealthIncident = {
     severity: "critical" | "warn";
     status: string;
     backlog: number;
-    fingerprint: string;
     reasonCode: IncidentItem["reason_code"] | "redis_mandatory";
     title: string;
     summary: string;
@@ -357,7 +356,7 @@ type HealthIncident = {
 };
 
 type HealthIncidentUiState = {
-    hiddenUntilByFingerprint: Record<string, number>;
+    hiddenUntilTs: number;
 };
 
 type ContextHealthTone = "ok" | "info" | "warn";
@@ -390,20 +389,27 @@ function readHealthIncidentUiState(): HealthIncidentUiState {
     const raw = readBrowserStorage(HEALTH_INCIDENT_UI_STORAGE_KEY);
     if (!raw) {
         return {
-            hiddenUntilByFingerprint: {},
+            hiddenUntilTs: 0,
         };
     }
     try {
-        const parsed = JSON.parse(raw) as Partial<HealthIncidentUiState>;
-        const hiddenUntilByFingerprint = parsed.hiddenUntilByFingerprint && typeof parsed.hiddenUntilByFingerprint === "object"
-            ? parsed.hiddenUntilByFingerprint
-            : {};
+        const parsed = JSON.parse(raw) as Partial<HealthIncidentUiState> & { hiddenUntilByFingerprint?: Record<string, unknown> };
+        let hiddenUntilTs = Number.isFinite(parsed.hiddenUntilTs) ? Number(parsed.hiddenUntilTs) : 0;
+        // Backward compatibility with older per-fingerprint storage.
+        if (!hiddenUntilTs && parsed.hiddenUntilByFingerprint && typeof parsed.hiddenUntilByFingerprint === "object") {
+            const values = Object.values(parsed.hiddenUntilByFingerprint)
+                .map((value) => (Number.isFinite(value) ? Number(value) : 0))
+                .filter((value) => value > 0);
+            if (values.length > 0) {
+                hiddenUntilTs = Math.max(...values);
+            }
+        }
         return {
-            hiddenUntilByFingerprint,
+            hiddenUntilTs,
         };
     } catch {
         return {
-            hiddenUntilByFingerprint: {},
+            hiddenUntilTs: 0,
         };
     }
 }
@@ -637,7 +643,6 @@ function deriveHealthIncident(
         severity,
         status,
         backlog,
-        fingerprint: `${severity}:${status}:${backlog}:${redisStatus}:${topIncident?.reason_code ?? "none"}:${topIncident?.id ?? "none"}`,
         reasonCode,
         title: severity === "critical"
             ? ownerAdminView
@@ -1167,9 +1172,8 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         () => readHealthIncidentUiState()
     );
     const navToggleLabel = navCollapsed ? "Развернуть меню" : "Свернуть меню";
-    const healthIncidentFingerprint = healthIncident?.fingerprint ?? null;
-    const healthIncidentHiddenUntil = healthIncidentFingerprint
-        ? healthIncidentUiState.hiddenUntilByFingerprint[healthIncidentFingerprint] ?? 0
+    const healthIncidentHiddenUntil = Number.isFinite(healthIncidentUiState.hiddenUntilTs)
+        ? healthIncidentUiState.hiddenUntilTs
         : 0;
 
     const markContextAwareQueriesStale = async () => {
@@ -1187,7 +1191,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
             type: "active",
         });
     };
-    const healthIncidentHidden = !!healthIncidentFingerprint && healthIncidentHiddenUntil > Date.now();
+    const healthIncidentHidden = !!healthIncident && healthIncidentHiddenUntil > Date.now();
     const navigateToRoute = (href: string) => {
         if (typeof window === "undefined") {
             return;
@@ -1231,6 +1235,9 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     };
 
     const refreshHealthBanner = () => {
+        if (manualHealthRefreshing) {
+            return;
+        }
         setManualHealthRefreshing(true);
         if (healthRefreshTimeoutRef.current !== null) {
             window.clearTimeout(healthRefreshTimeoutRef.current);
@@ -1290,24 +1297,21 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     }, [ownerAdminAdvancedNav, ownerAdminView]);
 
     useEffect(() => {
-        const hasHiddenUntil = Object.keys(healthIncidentUiState.hiddenUntilByFingerprint).length > 0;
-        if (!hasHiddenUntil) {
+        if (healthIncidentUiState.hiddenUntilTs <= Date.now()) {
             writeBrowserStorage(HEALTH_INCIDENT_UI_STORAGE_KEY, null);
             return;
         }
-        writeBrowserStorage(HEALTH_INCIDENT_UI_STORAGE_KEY, JSON.stringify(healthIncidentUiState));
-    }, [healthIncidentUiState]);
+        writeBrowserStorage(
+            HEALTH_INCIDENT_UI_STORAGE_KEY,
+            JSON.stringify({ hiddenUntilTs: healthIncidentUiState.hiddenUntilTs }),
+        );
+    }, [healthIncidentUiState.hiddenUntilTs]);
 
     const snoozeHealthIncident = () => {
-        if (!healthIncidentFingerprint) {
+        if (!healthIncident) {
             return;
         }
-        setHealthIncidentUiState((prev) => ({
-            hiddenUntilByFingerprint: {
-                ...prev.hiddenUntilByFingerprint,
-                [healthIncidentFingerprint]: Date.now() + HEALTH_INCIDENT_HIDE_MS,
-            },
-        }));
+        setHealthIncidentUiState({ hiddenUntilTs: Date.now() + HEALTH_INCIDENT_HIDE_MS });
     };
 
     const companies = data?.companies ?? [];

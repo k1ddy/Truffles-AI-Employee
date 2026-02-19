@@ -1458,6 +1458,7 @@ _FLEET_ATTENTION_MEDIUM_THRESHOLD = 35
 _OUTBOX_ARCHIVED_REASON_PREFIX = "archived_pending:"
 _OUTBOX_CALENDAR_SYNC_REASON_PREFIX = "calendar_sync_failed:"
 _OUTBOX_SYSTEM_EVENT_TYPES = {"calendar.sync_inbound", "calendar.sync_outbound"}
+_DEFAULT_RUNTIME_REDIS_URL = "redis://truffles_redis_1:6379/0"
 
 
 @dataclass
@@ -8913,15 +8914,14 @@ async def get_health(db: Session = Depends(get_db)) -> ConsoleHealthResponse:
 
     # Redis is mandatory for runtime reliability (dedupe/state/queues).
     redis_status = "error"
-    redis_url = (os.getenv("REDIS_URL") or "").strip()
-    if redis_url:
-        try:
-            import redis  # type: ignore
+    redis_url = ((os.getenv("REDIS_URL") or "").strip() or _DEFAULT_RUNTIME_REDIS_URL)
+    try:
+        import redis  # type: ignore
 
-            redis.Redis.from_url(redis_url, socket_connect_timeout=1, socket_timeout=1).ping()
-            redis_status = "connected"
-        except Exception:
-            redis_status = "error"
+        redis.Redis.from_url(redis_url, socket_connect_timeout=1, socket_timeout=1).ping()
+        redis_status = "connected"
+    except Exception:
+        redis_status = "error"
 
     # Count outbox backlog
     try:
