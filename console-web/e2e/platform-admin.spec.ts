@@ -163,6 +163,11 @@ async function openIntegrations(page: import('@playwright/test').Page) {
 }
 
 async function mockCriticalHealthIncident(page: import('@playwright/test').Page, backlog = 1656) {
+    const payload = {
+        status: 'ok',
+        outbox_backlog: backlog,
+        version: 'e2e-mock',
+    };
     await page.route('**/api/proxy/health**', async (route) => {
         if (route.request().method() !== 'GET') {
             await route.fallback();
@@ -171,18 +176,19 @@ async function mockCriticalHealthIncident(page: import('@playwright/test').Page,
         await route.fulfill({
             status: 200,
             contentType: 'application/json',
-            body: JSON.stringify({
-                status: 'ok',
-                outbox_backlog: backlog,
-                version: 'e2e-mock',
-            }),
+            body: JSON.stringify(payload),
         });
     });
+    return {
+        setBacklog(nextBacklog: number) {
+            payload.outbox_backlog = nextBacklog;
+        },
+    };
 }
 
 test.describe('Platform Admin Incident Banner', () => {
     test('should render full incident details, allow 30m hide, and navigate via CTA @smoke', async ({ page }) => {
-        await mockCriticalHealthIncident(page);
+        const healthMock = await mockCriticalHealthIncident(page);
         await ensureLoggedIn(page);
         await page.evaluate(() => {
             window.localStorage.removeItem('console:health_incident_ui');
@@ -201,6 +207,12 @@ test.describe('Platform Admin Incident Banner', () => {
 
         await gotoConsoleRoot(page);
         await page.getByTestId('global-health-incident-snooze').click();
+        await expect(page.getByTestId('global-health-incident-banner')).toHaveCount(0);
+
+        // Snooze state must survive health changes and not re-open before 30m.
+        healthMock.setBacklog(2200);
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await resolveSelectionGate(page);
         await expect(page.getByTestId('global-health-incident-banner')).toHaveCount(0);
     });
 });

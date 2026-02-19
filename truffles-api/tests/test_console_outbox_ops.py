@@ -1,3 +1,4 @@
+import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -191,8 +192,22 @@ async def test_retry_reminders_sets_pending_and_commits(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_console_health_marks_redis_as_mandatory_when_url_missing(monkeypatch):
+async def test_console_health_uses_runtime_redis_fallback_when_url_missing(monkeypatch):
     monkeypatch.delenv("REDIS_URL", raising=False)
+    captured: dict[str, object] = {}
+
+    class _RedisClient:
+        def ping(self):
+            return True
+
+    class _RedisFactory:
+        @staticmethod
+        def from_url(url: str, **kwargs):
+            captured["url"] = url
+            captured["kwargs"] = kwargs
+            return _RedisClient()
+
+    monkeypatch.setitem(sys.modules, "redis", SimpleNamespace(Redis=_RedisFactory))
 
     db = Mock()
     db.execute.return_value = None
@@ -204,13 +219,25 @@ async def test_console_health_marks_redis_as_mandatory_when_url_missing(monkeypa
     response = await console_router.get_health(db=db)
 
     assert response.database == "connected"
-    assert response.redis == "error"
-    assert response.status == "degraded"
+    assert response.redis == "connected"
+    assert response.status == "ok"
+    assert captured["url"] == console_router._DEFAULT_RUNTIME_REDIS_URL
 
 
 @pytest.mark.asyncio
 async def test_console_health_sets_unhealthy_when_database_is_unavailable(monkeypatch):
-    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.setenv("REDIS_URL", "redis://unit-test:6379/0")
+
+    class _RedisClient:
+        def ping(self):
+            return True
+
+    class _RedisFactory:
+        @staticmethod
+        def from_url(_url: str, **_kwargs):
+            return _RedisClient()
+
+    monkeypatch.setitem(sys.modules, "redis", SimpleNamespace(Redis=_RedisFactory))
 
     db = Mock()
     db.execute.side_effect = RuntimeError("db down")
