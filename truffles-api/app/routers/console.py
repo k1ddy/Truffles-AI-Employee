@@ -8911,8 +8911,9 @@ async def get_health(db: Session = Depends(get_db)) -> ConsoleHealthResponse:
     except Exception:
         db_status = "error"
 
-    redis_status = "unknown"
-    redis_url = os.getenv("REDIS_URL")
+    # Redis is mandatory for runtime reliability (dedupe/state/queues).
+    redis_status = "error"
+    redis_url = (os.getenv("REDIS_URL") or "").strip()
     if redis_url:
         try:
             import redis  # type: ignore
@@ -8932,8 +8933,15 @@ async def get_health(db: Session = Depends(get_db)) -> ConsoleHealthResponse:
     except Exception:
         backlog = -1
 
+    if db_status != "connected":
+        overall_status = "unhealthy"
+    elif redis_status != "connected":
+        overall_status = "degraded"
+    else:
+        overall_status = "ok"
+
     return ConsoleHealthResponse(
-        status="ok" if db_status == "connected" and redis_status == "connected" else "degraded",
+        status=overall_status,
         version=os.getenv("APP_VERSION", "dev"),
         database=db_status,
         redis=redis_status,

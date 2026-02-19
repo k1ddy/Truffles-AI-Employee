@@ -181,31 +181,27 @@ async function mockCriticalHealthIncident(page: import('@playwright/test').Page,
 }
 
 test.describe('Platform Admin Incident Banner', () => {
-    test('should collapse, snooze, and restore incident banner @smoke', async ({ page }) => {
+    test('should render full incident details, allow 30m hide, and navigate via CTA @smoke', async ({ page }) => {
         await mockCriticalHealthIncident(page);
         await ensureLoggedIn(page);
+        await page.evaluate(() => {
+            window.localStorage.removeItem('console:health_incident_ui');
+        });
         await gotoConsoleRoot(page);
 
         const banner = page.getByTestId('global-health-incident-banner');
         await expect(banner).toBeVisible();
         await expect(page.getByTestId('global-health-incident-summary')).toContainText('status=ok');
         await expect(page.getByTestId('global-health-incident-summary')).toContainText('outbox_backlog=1656');
-        await expect(page.getByTestId('global-health-incident-toggle')).toHaveText(/Развернуть/i);
-
-        await expect(page.getByTestId('global-health-incident-reasons')).toHaveCount(0);
-        await expect(page.getByTestId('global-health-incident-runbook')).toHaveCount(0);
-
-        await page.getByTestId('global-health-incident-toggle').click();
-        await expect(page.getByTestId('global-health-incident-toggle')).toHaveText(/Свернуть/i);
         await expect(page.getByTestId('global-health-incident-reasons')).toBeVisible();
         await expect(page.getByTestId('global-health-incident-runbook')).toBeVisible();
 
-        await page.getByTestId('global-health-incident-snooze').click();
-        await expect(page.getByTestId('global-health-incident-hidden')).toBeVisible();
-        await expect(page.getByTestId('global-health-incident-banner')).toHaveCount(0);
+        await page.getByTestId('global-health-incident-open-ops').click();
+        await expect(page).toHaveURL(urlPathPattern('/ops'));
 
-        await page.getByTestId('global-health-incident-show').click();
-        await expect(page.getByTestId('global-health-incident-banner')).toBeVisible();
+        await gotoConsoleRoot(page);
+        await page.getByTestId('global-health-incident-snooze').click();
+        await expect(page.getByTestId('global-health-incident-banner')).toHaveCount(0);
     });
 });
 
