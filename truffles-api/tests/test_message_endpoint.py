@@ -15360,6 +15360,209 @@ def test_llm_policy_core_catalog_location_reply_normalized_to_master_info(monkey
     assert meta.get("intent") == "master"
 
 
+def test_has_explicit_location_or_hours_request_strict_mode_ignores_derived_hours(monkeypatch):
+    from app.routers.webhook import decision as decision_router
+
+    def _fake_detect(*_args, **_kwargs):
+        return {
+            "master",
+            "hours",
+        }, {
+            "info_signals": {
+                "master": True,
+                "hours": True,
+                "location": False,
+                "parking": False,
+                "location_address_hint": False,
+            },
+            "anchor_intents": [],
+        }
+
+    monkeypatch.setattr(decision_router, "_detect_info_class_intents", _fake_detect)
+
+    assert (
+        decision_router._has_explicit_location_or_hours_request(
+            "У вас есть мастера, которые работают с долгими стрижками?",
+            client_slug="demo_salon",
+            strict=True,
+        )
+        is False
+    )
+
+
+def test_llm_policy_core_semantic_arbitration_off_keeps_master_without_location_rewrite(monkeypatch):
+    monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
+    monkeypatch.setenv("LLM_POLICY_CORE_SEMANTIC_ARBITRATION", "0")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="У вас есть мастера, которые работают с долгими стрижками?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-llm-policy-core-semantic-arb-off",
+                timestamp=1234567905,
+            ),
+        ),
+    )
+
+    policy_payload = {
+        "intent": "info",
+        "action": "fact",
+        "tool_action": "catalog.service_query",
+        "tool_args": {"service_query": "долгие стрижки"},
+        "pack_refs": ["hours"],
+        "language": "ru",
+        "confidence": 0.75,
+        "reason": "mixed_master_hours",
+        "goal": "info",
+        "slots": {"service": "", "datetime": "", "name": ""},
+        "next_question": None,
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+    }
+    policy_result = {
+        "ok": True,
+        "payload": policy_payload,
+        "error": None,
+        "raw": json.dumps(policy_payload, ensure_ascii=False),
+        "attempted": True,
+        "elapsed_ms": 10.0,
+    }
+    domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
+
+    def _fake_tool_action(*_args, **_kwargs):
+        return SimpleNamespace(
+            handled=True,
+            ok=True,
+            response_text="Долгие стрижки доступны по прайсу.",
+            error_code=None,
+            decision_meta={
+                "tool_action": "catalog.service_query",
+                "tool_decision": "truth_fallback",
+            },
+            trace={
+                "stage": "tool_registry",
+                "decision": "truth_fallback",
+                "tool_action": "catalog.service_query",
+            },
+            expected_reply_type=None,
+        )
+
+    def _fake_detect_info_class_intents(_message_text, *, intent_decomp_set, client_slug=None):
+        _ = client_slug
+        if intent_decomp_set:
+            return set(), {"info_signals": {"master": False}}
+        return {"master", "hours"}, {
+            "info_signals": {"master": True, "hours": True, "location": False, "parking": False},
+            "anchor_intents": [],
+        }
+
+    with patch(
+        "app.routers.webhook.decision.route_llm_policy_core",
+        return_value=policy_result,
+    ), patch(
+        "app.routers.webhook.decision._collect_plan_consult_refs",
+        return_value=([], None),
+    ), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores",
+        return_value=domain_result,
+    ), patch(
+        "app.services.tool_registry_service.execute_tool_action",
+        side_effect=_fake_tool_action,
+    ) as execute_tool_action_mock, patch(
+        "app.routers.webhook.decision._detect_info_class_intents",
+        side_effect=_fake_detect_info_class_intents,
+    ), patch(
+        "app.routers.webhook.decision._build_info_intent_reply",
+        return_value=("По мастерам: Айгерим и Дана работают с длинными стрижками.", {"info_sections": ["master"]}),
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler",
+        return_value={"truth_gate": Mock(), "service_matcher": Mock()},
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response",
+        return_value=True,
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id",
+        return_value=saved_message,
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message",
+        AsyncMock(return_value=True),
+    ), patch(
+        "app.routers.webhook._legacy.semantic_service_match",
+        return_value=None,
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert "мастер" in (response.bot_response or "").casefold()
+    assert execute_tool_action_mock.call_count == 1
+    assert execute_tool_action_mock.call_args.kwargs.get("tool_action") == "catalog.service_query"
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("intent") == "master"
+
+
 def test_llm_policy_core_consult_tool_normalized_to_info_by_info_signals(monkeypatch):
     monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
