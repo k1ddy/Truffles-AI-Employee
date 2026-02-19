@@ -14349,6 +14349,100 @@ def _parse_branch_domain_pairs(values):
     return mapping
 
 
+_ONBOARDING_HARD_GATE_DEFAULT_CODES = {
+    "delivery:backlog_critical",
+    "delivery:failed_24h_critical",
+    "delivery:stale_processing_critical",
+    "traffic:whatsapp_capability_mismatch",
+    "traffic:telegram_capability_mismatch",
+}
+
+
+def _parse_env_bool_token(value, *, default=False):
+    token = str(value).strip().lower()
+    if token in {"1", "true", "yes", "on"}:
+        return True
+    if token in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _normalize_branch_id(value):
+    return str(value or "").strip().lower()
+
+
+def _parse_branch_ids(values):
+    result = set()
+    for raw in values or []:
+        token = str(raw or "").strip()
+        if not token:
+            continue
+        for part in token.split(","):
+            normalized = _normalize_branch_id(part)
+            if normalized:
+                result.add(normalized)
+    return result
+
+
+def _resolve_hard_gate_enforced(
+    *,
+    mode,
+    branch_id,
+    actual_global_enabled,
+    actual_canary_ids,
+    canary_branch_ids,
+):
+    if mode == "enforced":
+        return True
+    if mode == "shadow":
+        return False
+    if mode == "canary":
+        return branch_id in canary_branch_ids
+    return bool(actual_global_enabled) or branch_id in actual_canary_ids
+
+
+def _project_hard_gate_row(
+    row,
+    *,
+    mode,
+    actual_global_enabled,
+    actual_canary_ids,
+    canary_branch_ids,
+):
+    branch_id = _normalize_branch_id(row.get("branch_id"))
+    scorecard_ready = bool(row.get("scorecard_ready"))
+    hard_gate_blockers = list(row.get("hard_gate_blockers") or [])
+    scorecard_missing = list(row.get("scorecard_missing") or [])
+    enforced = _resolve_hard_gate_enforced(
+        mode=mode,
+        branch_id=branch_id,
+        actual_global_enabled=actual_global_enabled,
+        actual_canary_ids=actual_canary_ids,
+        canary_branch_ids=canary_branch_ids,
+    )
+
+    projected_status = "pass"
+    projected_blockers = []
+    if not scorecard_ready:
+        projected_status = "blocked_scorecard"
+        projected_blockers = scorecard_missing
+    elif enforced and hard_gate_blockers:
+        projected_status = "blocked_hard_gate"
+        projected_blockers = hard_gate_blockers
+
+    projected = dict(row)
+    projected.update(
+        {
+            "rollout_mode": mode,
+            "hard_gate_enforced": bool(enforced),
+            "hard_gate_blockers": hard_gate_blockers,
+            "projected_status": projected_status,
+            "projected_blockers": projected_blockers,
+        }
+    )
+    return projected
+
+
 def _resolve_diagnose_container(explicit_name):
     if explicit_name:
         return explicit_name
@@ -14399,6 +14493,7 @@ branch_domain_map = payload.get("branch_domain_map") or {{}}
 confirm_payment = bool(payload.get("confirm_payment", False))
 ensure_contract = bool(payload.get("ensure_contract", True))
 sync_reference_pack = bool(payload.get("sync_reference_pack", False))
+hard_gate_codes = set(payload.get("hard_gate_codes") or [])
 
 session = SessionLocal()
 try:
@@ -14650,6 +14745,25 @@ try:
         missing = list(scorecard.missing or [])
         sla_loop = getattr(scorecard, "sla_control_loop", None)
         pipeline = getattr(scorecard, "operational_pipeline", None)
+        readiness_kernel = getattr(scorecard, "readiness_kernel", None)
+        readiness_status = getattr(readiness_kernel, "status", None) if readiness_kernel is not None else None
+        readiness_blocker_codes = (
+            list(getattr(readiness_kernel, "blocker_codes", []) or [])
+            if readiness_kernel is not None
+            else []
+        )
+        hard_gate_candidates = (
+            list(getattr(readiness_kernel, "shadow_hard_gate_blockers", []) or [])
+            if readiness_kernel is not None
+            else []
+        )
+        if not hard_gate_candidates:
+            hard_gate_candidates = list(readiness_blocker_codes)
+        hard_gate_blockers = [
+            code
+            for code in hard_gate_candidates
+            if isinstance(code, str) and (code.startswith("go_no_go:") or code in hard_gate_codes)
+        ]
         for code in missing:
             missing_counts[code] = int(missing_counts.get(code, 0)) + 1
 
@@ -14671,6 +14785,9 @@ try:
                 "pipeline_blocked": bool(getattr(pipeline, "blocked", False)) if pipeline is not None else None,
                 "pipeline_current_stage_id": getattr(pipeline, "current_stage_id", None),
                 "pipeline_blockers": list(getattr(pipeline, "blockers", []) or []),
+                "readiness_status": readiness_status,
+                "readiness_blocker_codes": readiness_blocker_codes,
+                "hard_gate_blockers": hard_gate_blockers,
                 "cap_domain": cap_domain,
                 "contract_domain": contract_domain,
                 "resolved_domain": effective_domain,
@@ -14885,6 +15002,122 @@ def _run_onboarding_fleet_remediate(args):
     for row in (result.get("unresolved") or []):
         print(
             f"- unresolved {row.get('branch_slug')} ({row.get('branch_id')}): {row.get('reason')}"
+        )
+
+
+def _parse_onboarding_hard_gate_rollout_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py onboarding-hard-gate-rollout",
+        description="Evaluate onboarding hard-gate rollout modes (shadow/canary/enforced).",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["actual", "shadow", "canary", "enforced"],
+        default="actual",
+        help="Rollout mode projection.",
+    )
+    parser.add_argument(
+        "--canary-branch-id",
+        action="append",
+        default=[],
+        help="Branch UUID(s) for canary mode (repeatable, comma-separated allowed).",
+    )
+    parser.add_argument(
+        "--hard-gate-codes",
+        default=None,
+        help="CSV hard-gate blocker codes; default is readiness hard-gate baseline set.",
+    )
+    parser.add_argument(
+        "--include-inactive",
+        action="store_true",
+        help="Include inactive branches in report (default: active only).",
+    )
+    parser.add_argument(
+        "--fail-on-blocked-active",
+        action="store_true",
+        help="Exit non-zero when active branches are blocked for selected rollout mode.",
+    )
+    parser.add_argument("--container-name", default=None)
+    parser.add_argument("--json", action="store_true")
+    return parser.parse_args(argv)
+
+
+def _run_onboarding_hard_gate_rollout(args):
+    container_name = _resolve_diagnose_container(args.container_name)
+    hard_gate_codes = (
+        set(_parse_csv_values(args.hard_gate_codes))
+        if args.hard_gate_codes
+        else set(_ONBOARDING_HARD_GATE_DEFAULT_CODES)
+    )
+    if not hard_gate_codes:
+        hard_gate_codes = set(_ONBOARDING_HARD_GATE_DEFAULT_CODES)
+    payload = {
+        "mode": "check",
+        "active_only": not args.include_inactive,
+        "apply_changes": False,
+        "hard_gate_codes": sorted(hard_gate_codes),
+    }
+    result = _run_onboarding_fleet_container(payload, container_name=container_name)
+
+    actual_global_enabled = _parse_env_bool_token(
+        os.environ.get("ONBOARDING_READINESS_HARD_GATE_ENABLED", "0"),
+        default=False,
+    )
+    actual_canary_ids = _parse_branch_ids(
+        [os.environ.get("ONBOARDING_READINESS_HARD_GATE_CANARY_BRANCH_IDS", "")]
+    )
+    canary_branch_ids = _parse_branch_ids(args.canary_branch_id)
+
+    projected_rows = [
+        _project_hard_gate_row(
+            row,
+            mode=args.mode,
+            actual_global_enabled=actual_global_enabled,
+            actual_canary_ids=actual_canary_ids,
+            canary_branch_ids=canary_branch_ids,
+        )
+        for row in (result.get("rows") or [])
+    ]
+
+    active_rows = [row for row in projected_rows if row.get("is_active")]
+    active_blocked_rows = [row for row in active_rows if row.get("projected_status") != "pass"]
+    summary = {
+        "mode": args.mode,
+        "hard_gate_codes": sorted(hard_gate_codes),
+        "actual_global_enabled": bool(actual_global_enabled),
+        "actual_canary_branch_ids": sorted(actual_canary_ids),
+        "input_canary_branch_ids": sorted(canary_branch_ids),
+        "total_branches": len(projected_rows),
+        "active_branches": len(active_rows),
+        "active_blocked": len(active_blocked_rows),
+        "active_blocked_scorecard": sum(
+            1 for row in active_blocked_rows if row.get("projected_status") == "blocked_scorecard"
+        ),
+        "active_blocked_hard_gate": sum(
+            1 for row in active_blocked_rows if row.get("projected_status") == "blocked_hard_gate"
+        ),
+    }
+
+    payload_out = {
+        "summary": summary,
+        "rows": projected_rows,
+        "active_blocked_rows": active_blocked_rows,
+        "fleet_summary": result.get("summary") or {},
+    }
+    if args.json:
+        print(json.dumps(payload_out, ensure_ascii=False))
+    else:
+        print(json.dumps(summary, ensure_ascii=False))
+        for row in active_blocked_rows:
+            print(
+                f"- {row.get('client_slug')}/{row.get('branch_slug')} "
+                f"status={row.get('projected_status')} "
+                f"enforced={row.get('hard_gate_enforced')} "
+                f"blockers={','.join(row.get('projected_blockers') or [])}"
+            )
+    if args.fail_on_blocked_active and active_blocked_rows:
+        raise SystemExit(
+            f"onboarding-hard-gate-rollout: active branches blocked ({len(active_blocked_rows)})"
         )
 
 
@@ -16809,6 +17042,9 @@ if len(sys.argv) > 1 and sys.argv[1] == "onboarding-fleet-check":
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "onboarding-fleet-remediate":
     _run_onboarding_fleet_remediate(_parse_onboarding_fleet_remediate_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "onboarding-hard-gate-rollout":
+    _run_onboarding_hard_gate_rollout(_parse_onboarding_hard_gate_rollout_args(sys.argv[2:]))
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "onboarding-quality-smoke":
     _run_onboarding_quality_smoke(_parse_onboarding_quality_smoke_args(sys.argv[2:]))
