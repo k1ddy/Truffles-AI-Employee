@@ -656,6 +656,31 @@ def _apply_expected_reply_slot(context: dict, *, expected_reply_type: str | None
         return context
     from . import _legacy as legacy
 
+    def _merge_datetime_slot(existing_value: str, incoming_value: str) -> str | None:
+        existing = existing_value.strip()
+        incoming = incoming_value.strip()
+        if not existing or not incoming:
+            return None
+        if legacy.TIME_PATTERN.search(existing) or legacy.TIME_HOUR_PATTERN.search(existing):
+            return None
+        if not (legacy.TIME_PATTERN.search(incoming) or legacy.TIME_HOUR_PATTERN.search(incoming)):
+            return None
+        existing_normalized = legacy.normalize_for_matching(existing)
+        incoming_normalized = legacy.normalize_for_matching(incoming)
+        if (
+            existing_normalized
+            and incoming_normalized
+            and existing_normalized in incoming_normalized
+        ):
+            return incoming
+        if (
+            existing_normalized
+            and incoming_normalized
+            and incoming_normalized in existing_normalized
+        ):
+            return existing
+        return f"{existing} {incoming}".strip()
+
     if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:
         slot_key = "service"
     elif expected_reply_type == legacy.EXPECTED_REPLY_TIME:
@@ -667,8 +692,14 @@ def _apply_expected_reply_slot(context: dict, *, expected_reply_type: str | None
     booking_state = _get_booking_context(context)
     if not isinstance(booking_state, dict) or not booking_state:
         return context
-    if booking_state.get(slot_key):
-        return context
+    existing_slot_value = booking_state.get(slot_key)
+    if isinstance(existing_slot_value, str) and existing_slot_value.strip():
+        if slot_key != "datetime":
+            return context
+        merged_datetime = _merge_datetime_slot(existing_slot_value, value)
+        if not merged_datetime:
+            return context
+        value = merged_datetime
     last_question = booking_state.get("last_question")
     if not booking_state.get("active") and last_question != slot_key:
         return context

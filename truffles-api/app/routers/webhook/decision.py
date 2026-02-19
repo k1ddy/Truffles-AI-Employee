@@ -1041,7 +1041,23 @@ def _apply_expected_reply_contract(
                     context = legacy._set_booking_context(context, booking_state)
                     legacy._set_conversation_context(conversation, context)
         if matched and not slot_confirmation_required:
-            next_expected = legacy.EXPECTED_REPLY_INTENT_CHOICE if intent_queue else None
+            next_expected = None
+            if intent_queue:
+                context = _set_intent_queue(context, None)
+                intent_queue = None
+                legacy._record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "intent_queue",
+                        "decision": "reset_for_booking_reply",
+                        "expected_reply_type": expected_reply_type,
+                    },
+                )
+                if saved_message:
+                    legacy._update_message_decision_metadata(
+                        saved_message,
+                        {"intent_queue_cleared": "booking_expected_reply"},
+                    )
             context = legacy._set_expected_reply_type(context, next_expected)
             legacy._set_conversation_context(conversation, context)
         if matched and not slot_confirmation_required and isinstance(value, str) and isinstance(expected_reply_type, str):
@@ -4240,6 +4256,27 @@ def _looks_like_hours_followup(message_text: str | None) -> bool:
         return False
     phrases = get_system_lexicon_list("hours_followup_phrases")
     return bool(phrases) and _contains_any(normalized, phrases)
+
+
+def _has_explicit_location_or_hours_request(
+    message_text: str | None,
+    *,
+    client_slug: str | None,
+) -> bool:
+    if not message_text:
+        return False
+    info_intents, info_meta = _detect_info_class_intents(
+        message_text,
+        intent_decomp_set=set(),
+        client_slug=client_slug,
+    )
+    if {"location", "hours", "parking"} & info_intents:
+        return True
+    info_signals = info_meta.get("info_signals") if isinstance(info_meta, dict) else None
+    if isinstance(info_signals, dict):
+        if info_signals.get("location") or info_signals.get("hours") or info_signals.get("parking"):
+            return True
+    return _looks_like_hours_followup(message_text)
 
 
 def _looks_like_carryover_followup(message_text: str | None) -> bool:
@@ -11196,9 +11233,29 @@ async def _handle_webhook_payload(
                         conversation_id=conversation.id,
                         bot_response=bot_response,
                     )
+                master_request_signal = "master" in info_sections
+                if not master_request_signal and message_text:
+                    detected_master_intents, detected_master_meta = _detect_info_class_intents(
+                        message_text,
+                        intent_decomp_set=set(),
+                        client_slug=payload.client_slug,
+                    )
+                    if "master" in detected_master_intents:
+                        master_request_signal = True
+                    elif isinstance(detected_master_meta, dict):
+                        info_signals = detected_master_meta.get("info_signals")
+                        master_request_signal = bool(
+                            isinstance(info_signals, dict)
+                            and info_signals.get("master")
+                        )
+                has_explicit_location_or_hours = _has_explicit_location_or_hours_request(
+                    message_text,
+                    client_slug=payload.client_slug,
+                )
                 if (
-                    policy_tool_action == "catalog.service_query"
-                    and "master" in info_sections
+                    policy_tool_action in {"catalog.service_query", "catalog.location"}
+                    and master_request_signal
+                    and not has_explicit_location_or_hours
                 ):
                     master_reply, master_meta = _build_info_intent_reply(
                         "master",
@@ -11237,9 +11294,9 @@ async def _handle_webhook_payload(
                         bot_response = master_reply
                         bot_response, sent = _send_and_save(bot_response)
                         result_message = (
-                            "LLM policy core service reply normalized to master info"
+                            "LLM policy core tool reply normalized to master info"
                             if sent
-                            else "LLM policy core service->master normalization failed"
+                            else "LLM policy core tool->master normalization failed"
                         )
                         db.commit()
                         return WebhookResponse(

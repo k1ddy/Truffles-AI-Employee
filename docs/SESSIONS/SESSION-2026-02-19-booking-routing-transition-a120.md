@@ -1,0 +1,40 @@
+# SESSION 2026-02-19-booking-routing-transition-a120 — Session 2026-02-19-booking-routing-transition-a120
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-19-booking-routing-transition-a120.md
+- branch: feat/2026-02-19-booking-routing-transition-a120
+- worktree: /home/zhan/worktrees/2026-02-19-booking-routing-transition-a120
+- base_ref: origin/main
+- scope: booking hard-defect fixes from manual non-replay audit (master/location misroute + expected-reply time transition)
+- done:
+  - Implemented booking routing/transition hard-fix with regression tests and validation evidence
+  - Session created.
+  - Added booking transition fix in `truffles-api/app/routers/webhook/booking.py`:
+    - expected-reply `time` now merges into existing date-only datetime slot (e.g. `среду` + `19:00`).
+  - Added expected-reply queue cleanup guard in `truffles-api/app/routers/webhook/decision.py`:
+    - successful booking slot match clears stale `intent_queue` and prevents fallback to `expected_reply_type=intent_choice`.
+  - Added master/specialist routing guard in `truffles-api/app/routers/webhook/decision.py`:
+    - `catalog.location` response is normalized to master reply when master signal is present without explicit location/hours request.
+  - Added regression tests in `truffles-api/tests/test_message_endpoint.py`:
+    - `test_expected_reply_time_merges_datetime_and_clears_stale_intent_queue`
+    - `test_llm_policy_core_catalog_location_reply_normalized_to_master_info`
+  - Checks run:
+    - `python3 -m py_compile truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/booking.py truffles-api/tests/test_message_endpoint.py`
+    - `ruff check truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py`
+    - `pytest -q truffles-api/tests/test_message_endpoint.py -k "catalog_location_reply_normalized_to_master_info or expected_reply_time_merges_datetime_and_clears_stale_intent_queue"` -> `2 passed`
+    - `pytest -q truffles-api/tests/test_message_endpoint.py -k "master or expected_reply"` -> `13 passed`
+    - `pytest -q truffles-api/tests/test_message_endpoint.py` -> `206 passed`
+    - `pytest -q truffles-api/tests/test_booking_chaos_dialogs.py` -> `1 passed`
+    - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py` -> `30 passed`
+    - `pytest -q truffles-api/tests/test_demo_salon_eval.py` -> `1 failed (E542 legacy expectation; known residual in STATE)`
+- next:
+  - Open PR and run non-replay replay to confirm hard-finding closure
+  - Re-run non-replay booking quality bundle on same scenario profile and confirm closure of hard findings #1/#2.
+  - If needed, isolate remaining name/commit defect as follow-up TP (#3 from manual audit).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-19-booking-routing-transition-a120.md
+  - truffles-api/app/routers/webhook/booking.py
+  - truffles-api/app/routers/webhook/decision.py
+  - truffles-api/tests/test_message_endpoint.py
+- last_updated: 2026-02-19
