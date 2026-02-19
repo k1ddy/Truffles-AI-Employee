@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import toast from "react-hot-toast";
+import { useSearchParams } from "next/navigation";
 import type { components } from "@/types/api.generated";
 
 import AccessDenied from "@/components/AccessDenied";
@@ -15,6 +16,7 @@ import {
     confirmationsApi,
     onboardingApi,
     parseApiError,
+    type IncidentItem,
     type IntegrationBranchActionRequest,
     type ProviderOpsAction,
 } from "@/lib/api-client";
@@ -227,8 +229,38 @@ function statusCardClass(ok: boolean): string {
         : "border-red-300/70 bg-red-50 text-red-900";
 }
 
+function workspaceIncidentSteps(item: IncidentItem): string[] {
+    if (item.reason_code === "integration_degraded") {
+        return [
+            "Проверьте webhook/instance_id в панели WhatsApp для выбранного филиала.",
+            "Запустите «Проверить без записи» (integration_reconcile dry-run).",
+            "Если результат подтверждает drift, выполните execute и перепроверьте метрики в OPS.",
+        ];
+    }
+    if (item.reason_code === "provider_auth" || item.reason_code === "provider_unavailable" || item.reason_code === "provider_rate_limited" || item.reason_code === "provider_billing_blocked") {
+        return [
+            "Проверьте provider binding facts (owner, paid_until, webhook_status).",
+            "Выполните целевое provider-действие в режиме dry-run/execute.",
+            "После действия откройте OPS и проверьте снижение failed_24h.",
+        ];
+    }
+    if (item.reason_code === "outbox_backlog") {
+        return [
+            "Откройте OPS для очереди отправки и текущего backlog.",
+            "Запустите outbox_process в dry-run/execute в OPS.",
+            "Вернитесь в Workspace и проверьте, что интеграция филиала не в деградации.",
+        ];
+    }
+    return [
+        "Зафиксируйте branch/client контекст инцидента.",
+        "Выполните безопасную диагностику через dry-run действие.",
+        "Подтвердите эффект в OPS и зафиксируйте evidence в журнале.",
+    ];
+}
+
 export default function CompanyWorkspacePage() {
     const { data: session } = useSession();
+    const searchParams = useSearchParams();
     const { errors: inlineErrors, reportError, reportInlineError, clearErrors } = useInlineErrorSummary();
     const reportValidationError = (message: string, code = "VALIDATION_ERROR") => {
         reportInlineError({ code, message });
@@ -254,6 +286,9 @@ export default function CompanyWorkspacePage() {
     const [branchSaving, setBranchSaving] = useState(false);
     const [goLiveSaving, setGoLiveSaving] = useState<"approve" | "reject" | "waive" | null>(null);
     const [recommendedActionContext, setRecommendedActionContext] = useState<WorkspaceRecommendedActionContext | null>(null);
+    const focusedIncidentId = (searchParams?.get("incident_id") ?? "").trim();
+    const focusedIncidentReason = (searchParams?.get("reason") ?? "").trim();
+    const focusedIncidentBranchId = (searchParams?.get("branch_id") ?? "").trim();
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -279,6 +314,7 @@ export default function CompanyWorkspacePage() {
     const canReadTenants = canAccessConsole(role, "tenants", "read");
     const canWriteTenants = canAccessConsole(role, "tenants", "write");
     const canReadIntegrations = canAccessConsole(role, "integrations", "read");
+    const canReadOps = canAccessConsole(role, "ops", "read");
     const companyOptions = useMemo<components["schemas"]["Company"][]>(
         () => meData?.companies ?? [],
         [meData?.companies],
@@ -363,6 +399,16 @@ export default function CompanyWorkspacePage() {
             return response.data;
         },
         enabled: !!session && canReadIntegrations,
+        refetchInterval: 60000,
+    });
+
+    const { data: incidentsData, refetch: refetchIncidents } = useQuery({
+        queryKey: ["company-workspace-incidents", scopeCompanyId, scopeClientId],
+        queryFn: async () => {
+            const response = await adminApi.listIncidents({ limit: 50 });
+            return response.data;
+        },
+        enabled: !!session && canReadTenants,
         refetchInterval: 60000,
     });
 
@@ -456,6 +502,38 @@ export default function CompanyWorkspacePage() {
         return providerLifecycleData?.items?.[0] ?? null;
     }, [providerLifecycleData?.items]);
 
+    const workspaceIncident = useMemo<IncidentItem | null>(() => {
+        const items = incidentsData?.items ?? [];
+        if (items.length === 0) {
+            return null;
+        }
+        if (focusedIncidentId) {
+            const byId = items.find((item) => item.id === focusedIncidentId);
+            if (byId) {
+                return byId;
+            }
+        }
+        if (scopeBranchId) {
+            const byScopeBranch = items.find((item) => item.branch_id === scopeBranchId);
+            if (byScopeBranch) {
+                return byScopeBranch;
+            }
+        }
+        if (focusedIncidentBranchId) {
+            const byQueryBranch = items.find((item) => item.branch_id === focusedIncidentBranchId);
+            if (byQueryBranch) {
+                return byQueryBranch;
+            }
+        }
+        if (focusedIncidentReason) {
+            const byReason = items.find((item) => item.reason_code === focusedIncidentReason);
+            if (byReason) {
+                return byReason;
+            }
+        }
+        return items[0] ?? null;
+    }, [focusedIncidentBranchId, focusedIncidentId, focusedIncidentReason, incidentsData?.items, scopeBranchId]);
+
     useEffect(() => {
         setBranchPhone(selectedBranch?.phone ?? "");
         setBranchInstanceId(selectedBranch?.instance_id ?? "");
@@ -540,7 +618,7 @@ export default function CompanyWorkspacePage() {
                 writeBrowserStorage(WORKSPACE_RECOMMENDED_ACTION_KEY, null);
                 setRecommendedActionContext(null);
             }
-            await Promise.all([refetchIntegrations(), refetchProviderLifecycle(), refetchScorecard()]);
+            await Promise.all([refetchIntegrations(), refetchProviderLifecycle(), refetchScorecard(), refetchIncidents()]);
         } catch (error) {
             const parsed = parseApiError(error);
             if (
@@ -1008,6 +1086,98 @@ export default function CompanyWorkspacePage() {
                 ) : (
                     <div className="mt-3 rounded-lg border border-emerald-300/60 bg-emerald-50 p-3 text-xs text-emerald-800">
                         Для текущего контекста нет активной подсказки. Используйте Integrations Queue/Matrix для выбора филиала с проблемой.
+                    </div>
+                )}
+            </section>
+
+            <section className="mt-4 rounded-lg border border-border/60 bg-card p-4" data-testid="company-workspace-incident-guide">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <h2 className="text-lg font-semibold">Инцидентный гайд для филиала</h2>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                            Быстрый путь: что исправлять в Workspace, когда идти в OPS и как закрыть причину с evidence.
+                        </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        {canReadOps && (
+                            <Link
+                                href={`/ops${workspaceIncident ? `?incident_id=${encodeURIComponent(workspaceIncident.id)}&reason=${encodeURIComponent(workspaceIncident.reason_code)}&severity=${encodeURIComponent(workspaceIncident.severity)}` : ""}`}
+                                className="btn-ghost"
+                            >
+                                Открыть OPS
+                            </Link>
+                        )}
+                        <button
+                            className="btn-ghost"
+                            onClick={() => {
+                                void refetchIncidents();
+                            }}
+                        >
+                            Обновить инциденты
+                        </button>
+                    </div>
+                </div>
+
+                {workspaceIncident ? (
+                    <div className="mt-3 space-y-3">
+                        <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-xs text-amber-900">
+                            <div className="font-semibold">{workspaceIncident.title}</div>
+                            <div className="mt-1">{workspaceIncident.reason_label}</div>
+                            <div className="mt-1 font-mono">reason={workspaceIncident.reason_code} · severity={workspaceIncident.severity}</div>
+                            <div className="mt-1 text-amber-900/80">{workspaceIncident.summary}</div>
+                        </div>
+                        <div className="rounded-lg border border-border/60 bg-muted/10 p-3 text-xs">
+                            <div className="font-semibold uppercase tracking-[0.12em] text-muted-foreground">Что делать сейчас</div>
+                            <ol className="mt-2 list-decimal space-y-1 pl-4 text-muted-foreground" data-testid="workspace-incident-fast-steps">
+                                {workspaceIncidentSteps(workspaceIncident).map((step) => (
+                                    <li key={step}>{step}</li>
+                                ))}
+                            </ol>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {workspaceIncident.actions.map((action) => (
+                                action.href ? (
+                                    <Link
+                                        key={action.id}
+                                        href={`${action.href}${action.href.includes("?") ? "&" : "?"}incident_id=${encodeURIComponent(workspaceIncident.id)}&reason=${encodeURIComponent(workspaceIncident.reason_code)}&severity=${encodeURIComponent(workspaceIncident.severity)}`}
+                                        className="btn-ghost text-xs"
+                                    >
+                                        {action.title}
+                                    </Link>
+                                ) : action.job_type === "integration_reconcile" ? (
+                                    <button
+                                        key={action.id}
+                                        className="btn-ghost text-xs"
+                                        onClick={() => openProviderActionDialog("integration_reconcile", action.mode ?? "dry_run")}
+                                        disabled={!scopeBranchId || !!runningAction}
+                                        data-testid={`workspace-incident-action-${action.id}`}
+                                    >
+                                        {action.title} ({action.mode ?? "dry_run"})
+                                    </button>
+                                ) : action.job_type === "outbox_process" ? (
+                                    <Link
+                                        key={action.id}
+                                        href={`/ops?incident_id=${encodeURIComponent(workspaceIncident.id)}&reason=${encodeURIComponent(workspaceIncident.reason_code)}&severity=${encodeURIComponent(workspaceIncident.severity)}`}
+                                        className="btn-ghost text-xs"
+                                    >
+                                        {action.title} (в OPS)
+                                    </Link>
+                                ) : (
+                                    <span key={action.id} className="rounded-full border border-border/60 px-2 py-1 text-[11px] text-muted-foreground">
+                                        {action.title}
+                                    </span>
+                                )
+                            ))}
+                        </div>
+                        {!scopeBranchId && (
+                            <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-2 text-xs text-amber-800">
+                                Выберите филиал в контексте, чтобы выполнить remediation-действия прямо из Workspace.
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    <div className="mt-3 rounded-lg border border-emerald-300/60 bg-emerald-50 p-3 text-xs text-emerald-800">
+                        Для текущего контекста нет активного инцидента. Если этот раздел не даёт действий, значит сейчас нет branch-level проблемы: работайте через обычные панели Integrations/OPS по факту сигнала.
                     </div>
                 )}
             </section>

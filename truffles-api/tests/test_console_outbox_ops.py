@@ -188,3 +188,38 @@ async def test_retry_reminders_sets_pending_and_commits(monkeypatch):
     assert row_a.last_error is None
     assert row_a.next_attempt_at is None
     db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_console_health_marks_redis_as_mandatory_when_url_missing(monkeypatch):
+    monkeypatch.delenv("REDIS_URL", raising=False)
+
+    db = Mock()
+    db.execute.return_value = None
+    outbox_query = Mock()
+    outbox_query.filter.return_value = outbox_query
+    outbox_query.count.return_value = 0
+    db.query.return_value = outbox_query
+
+    response = await console_router.get_health(db=db)
+
+    assert response.database == "connected"
+    assert response.redis == "error"
+    assert response.status == "degraded"
+
+
+@pytest.mark.asyncio
+async def test_console_health_sets_unhealthy_when_database_is_unavailable(monkeypatch):
+    monkeypatch.delenv("REDIS_URL", raising=False)
+
+    db = Mock()
+    db.execute.side_effect = RuntimeError("db down")
+    outbox_query = Mock()
+    outbox_query.filter.return_value = outbox_query
+    outbox_query.count.return_value = 0
+    db.query.return_value = outbox_query
+
+    response = await console_router.get_health(db=db)
+
+    assert response.database == "error"
+    assert response.status == "unhealthy"

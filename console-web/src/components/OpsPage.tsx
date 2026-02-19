@@ -9,10 +9,13 @@ import {
     canAccessConsole,
     opsApi,
     telegramApi,
+    type IncidentAction,
+    type IncidentItem,
     type OpsJobRunRequest,
 } from "@/lib/api-client";
 import { useErrorHandler } from "@/lib/api-hooks";
 import { useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import AccessDenied from "@/components/AccessDenied";
@@ -219,6 +222,7 @@ function StatusBadge({ status }: { status: string }) {
         connected: "bg-green-100 text-green-800",
         degraded: "bg-yellow-100 text-yellow-800",
         error: "bg-red-100 text-red-800",
+        unhealthy: "bg-red-100 text-red-800",
     };
     return (
         <span className={`px-2 py-1 rounded text-xs font-medium ${styles[status] || "bg-muted text-muted-foreground"}`}>
@@ -271,8 +275,61 @@ function formatJsonPreview(payload: Record<string, unknown> | null, limit = 160)
     return `${raw.slice(0, limit - 3)}...`;
 }
 
+function incidentFastSteps(item: IncidentItem): string[] {
+    if (item.reason_code === "integration_degraded") {
+        return [
+            "Проверьте branch из инцидента и запустите dry-run integration_reconcile.",
+            "Если dry-run подтверждает проблему, выполните execute для целевого филиала.",
+            "Перепроверьте failed_24h и последний error через 3-5 минут.",
+        ];
+    }
+    if (item.reason_code === "outbox_backlog") {
+        return [
+            "Проверьте pending/processing/failed и тренд за последние минуты.",
+            "Запустите dry-run outbox_process, затем execute при безопасном результате.",
+            "Подтвердите, что backlog снижается, а новые failed не растут.",
+        ];
+    }
+    if (item.reason_code === "provider_auth" || item.reason_code === "provider_unavailable" || item.reason_code === "provider_rate_limited" || item.reason_code === "provider_billing_blocked") {
+        return [
+            "Сверьте provider состояние и reason_label по филиалу.",
+            "Перейдите в Workspace/Integrations и выполните dry-run remediation.",
+            "После execute проверьте стабилизацию delivery без роста failed_24h.",
+        ];
+    }
+    if (item.reason_code === "handover_backlog") {
+        return [
+            "Проверьте нагрузку по handoff и oldest unresolved.",
+            "Приоритизируйте входящие handoff и снимите узкие места по SLA.",
+            "Подтвердите снижение pending handoff в следующем цикле обновления.",
+        ];
+    }
+    return [
+        "Проверьте summary + reason_label и выберите безопасное dry-run действие.",
+        "Если dry-run подтверждает проблему, выполните целевое execute с причиной.",
+        "После выполнения перепроверьте метрики и закройте инцидент evidence-данными.",
+    ];
+}
+
+function incidentFallbackWhereToLook(item: IncidentItem): string {
+    if (item.reason_code === "integration_degraded") {
+        return "Если после действий деградация осталась: откройте Workspace -> Панель WhatsApp/ChatFlow -> перепроверьте webhook/instance_id и provider lifecycle.";
+    }
+    if (item.reason_code === "outbox_backlog") {
+        return "Если backlog не падает: проверьте Ops Jobs результат outbox_process и ошибки в outbox last_error.";
+    }
+    if (item.reason_code === "provider_billing_blocked") {
+        return "Если проблема остается: проверьте Subscription + paid_until/renewal в Workspace и зафиксируйте действие в журнале.";
+    }
+    if (item.reason_code === "provider_auth" || item.reason_code === "provider_unavailable" || item.reason_code === "provider_rate_limited") {
+        return "Если ошибка повторяется: проверьте Integrations registry и webhook-contract, затем выполните integration_reconcile.";
+    }
+    return "Если причина не снимается: поднимите инцидент в журнале и приложите trace/job evidence.";
+}
+
 export default function OpsPage() {
     const { data: session } = useSession();
+    const searchParams = useSearchParams();
     const { handleError } = useErrorHandler();
     const [telegramAction, setTelegramAction] = useState<"verify" | "test" | null>(null);
     const [outboxStatus, setOutboxStatus] = useState<OutboxStatusFilter>("failed");
@@ -284,6 +341,9 @@ export default function OpsPage() {
     const [integrationReconcileBranchIds, setIntegrationReconcileBranchIds] = useState<string>("");
     const [metricsSnapshotDays, setMetricsSnapshotDays] = useState<number>(1);
     const [metricsSnapshotDate, setMetricsSnapshotDate] = useState<string>("");
+    const [incidentActionRunningId, setIncidentActionRunningId] = useState<string | null>(null);
+    const focusedIncidentId = (searchParams?.get("incident_id") ?? "").trim();
+    const focusedReasonCode = (searchParams?.get("reason") ?? "").trim();
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -414,6 +474,25 @@ export default function OpsPage() {
             handleError(incidentsError);
         }
     }, [incidentsError, handleError]);
+
+    const incidentItems = useMemo(() => {
+        const items = incidentsData?.items ?? [];
+        if (items.length === 0) {
+            return [];
+        }
+        const match = (item: IncidentItem) => (
+            (focusedIncidentId && item.id === focusedIncidentId)
+            || (focusedReasonCode && item.reason_code === focusedReasonCode)
+        );
+        return [...items].sort((left, right) => {
+            const leftFocused = match(left) ? 1 : 0;
+            const rightFocused = match(right) ? 1 : 0;
+            if (leftFocused !== rightFocused) {
+                return rightFocused - leftFocused;
+            }
+            return new Date(right.detected_at).getTime() - new Date(left.detected_at).getTime();
+        });
+    }, [focusedIncidentId, focusedReasonCode, incidentsData?.items]);
 
     const telegramVerify = useMutation({
         mutationFn: async () => {
@@ -578,6 +657,40 @@ export default function OpsPage() {
         };
     };
 
+    const runIncidentAction = async (incident: IncidentItem, action: IncidentAction) => {
+        if (!action.job_type || !action.mode) {
+            return;
+        }
+        if (action.mode === "execute") {
+            const confirmed = window.confirm(`Выполнить ${action.job_type} в execute для incident ${incident.id}?`);
+            if (!confirmed) {
+                return;
+            }
+        }
+        setIncidentActionRunningId(action.id);
+        try {
+            const payload: OpsJobRunRequest = {
+                job_type: action.job_type,
+                mode: action.mode,
+                params: (action.params ?? undefined) as Record<string, unknown> | undefined,
+            };
+            const response = await opsApi.runJob(payload);
+            const job = response.data.job;
+            if (job.status === "success") {
+                toast.success(`${action.title}: job ${job.id} выполнен`);
+            } else {
+                toast.error(job.error_message || `${action.title}: job завершился с ошибкой`);
+            }
+            void refetchOpsJobs();
+            void refetchOutbox();
+            void refetchIncidents();
+        } catch (error) {
+            handleError(error);
+        } finally {
+            setIncidentActionRunningId(null);
+        }
+    };
+
     const isLoading = healthLoading || (isFullOps && metricsLoading) || (!isFullOps && telegramLoading);
 
     if (!session) {
@@ -659,16 +772,22 @@ export default function OpsPage() {
                     </div>
                     {incidentsLoading ? (
                         <p className="text-sm text-muted-foreground">Загрузка инцидентов...</p>
-                    ) : !incidentsData?.items?.length ? (
+                    ) : !incidentItems.length ? (
                         <p className="text-sm text-muted-foreground">Критичных инцидентов не обнаружено.</p>
                     ) : (
                         <div className="space-y-3">
-                            {incidentsData.items.map((item) => {
+                            {incidentItems.map((item) => {
                                 const providerContract = getProviderErrorContract(item.reason_code);
+                                const fastSteps = incidentFastSteps(item);
+                                const fallbackGuide = incidentFallbackWhereToLook(item);
+                                const isFocused = Boolean(
+                                    (focusedIncidentId && item.id === focusedIncidentId)
+                                    || (focusedReasonCode && item.reason_code === focusedReasonCode),
+                                );
                                 return (
                                     <article
                                         key={item.id}
-                                        className="rounded-lg border border-border/60 bg-muted/20 p-3"
+                                        className={`rounded-lg border p-3 ${isFocused ? "border-amber-400/90 bg-amber-50/40" : "border-border/60 bg-muted/20"}`}
                                         data-testid={`ops-incident-${item.id}`}
                                     >
                                         {providerContract && (
@@ -688,6 +807,15 @@ export default function OpsPage() {
                                         <p className="mt-1 text-[11px] text-muted-foreground">
                                             client: {item.client_slug || "n/a"} · detected: {new Date(item.detected_at).toLocaleString("ru-RU")}
                                         </p>
+                                        <div className="mt-2 rounded-md border border-border/60 bg-background px-3 py-2 text-[11px]">
+                                            <p className="font-semibold text-foreground">Что сделать сейчас (5 минут)</p>
+                                            <ol className="mt-1 list-decimal space-y-1 pl-4 text-muted-foreground" data-testid={`ops-incident-fast-steps-${item.id}`}>
+                                                {fastSteps.map((step) => (
+                                                    <li key={step}>{step}</li>
+                                                ))}
+                                            </ol>
+                                            <p className="mt-2 text-muted-foreground">{fallbackGuide}</p>
+                                        </div>
                                         {providerContract && (
                                             <ol className="mt-2 list-decimal space-y-0.5 pl-4 text-[11px] text-muted-foreground" data-testid={`ops-provider-runbook-${item.id}`}>
                                                 {providerContract.runbook.map((step) => (
@@ -698,13 +826,34 @@ export default function OpsPage() {
                                         <div className="mt-2 flex flex-wrap gap-2">
                                             {item.actions.map((action) => (
                                                 action.href ? (
-                                                    <Link key={action.id} href={action.href} className="btn-ghost text-xs">
+                                                    <Link
+                                                        key={action.id}
+                                                        href={`${action.href}${action.href.includes("?") ? "&" : "?"}incident_id=${encodeURIComponent(item.id)}&reason=${encodeURIComponent(item.reason_code)}&severity=${encodeURIComponent(item.severity)}`}
+                                                        className="btn-ghost text-xs"
+                                                    >
                                                         {action.title}
                                                     </Link>
                                                 ) : (
-                                                    <span key={action.id} className="rounded-full border border-border/60 px-2 py-1 text-[11px] text-muted-foreground">
-                                                        {action.title} {action.job_type ? `(${action.job_type}:${action.mode})` : ""}
-                                                    </span>
+                                                    action.job_type && action.mode ? (
+                                                        <button
+                                                            key={action.id}
+                                                            type="button"
+                                                            className="btn-ghost text-xs"
+                                                            disabled={!canWriteOps || incidentActionRunningId === action.id}
+                                                            onClick={() => {
+                                                                void runIncidentAction(item, action);
+                                                            }}
+                                                            data-testid={`ops-incident-action-${item.id}-${action.id}`}
+                                                        >
+                                                            {incidentActionRunningId === action.id
+                                                                ? "Выполняю..."
+                                                                : `${action.title} (${action.job_type}:${action.mode})`}
+                                                        </button>
+                                                    ) : (
+                                                        <span key={action.id} className="rounded-full border border-border/60 px-2 py-1 text-[11px] text-muted-foreground">
+                                                            {action.title}
+                                                        </span>
+                                                    )
                                                 )
                                             ))}
                                         </div>
