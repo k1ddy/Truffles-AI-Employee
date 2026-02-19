@@ -2,7 +2,7 @@
 
 - status: active
 - owner: Brain | Top Architect | Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-02-19-booking-routing-transition-a120.md
+- task_package: docs/TASK_PACKAGES/TP-2026-02-19-llm-first-firebreak-program.md
 - branch: fix/llm-first-firebreak-2026-02-19
 - worktree: /home/zhan/worktrees/fix-llm-first-firebreak-2026-02-19
 - base_ref: origin/main
@@ -11,10 +11,18 @@
   - Pulled latest main and implemented firebreak fixes in booking/decision/info routing.
   - Added/updated tests for booking request semantics and info/master arbitration.
   - Re-ran required deterministic suites in worktree before PR.
+  - Updated program TP with unified LLM-first protocol, measurable gates, override whitelist, timeout/degrade policy, and multilingual adversarial battery.
+  - Implemented multi-intent timeout resilience in `ai_service.py` (retry with extended timeout + timeout-safe fallback for location/hours explicit-only).
+  - Added tests for multi-intent retry/fallback behavior in `truffles-api/tests/test_ai_service.py`.
+  - Opened PR `#763` with updated TP + timeout resilience fix.
 - next:
-  - Open PR with evidence and review notes.
-  - Run llm-quality lock/replay after OPENAI key is available.
+  - Close CI checks for PR `#763` and merge.
+  - Run lock/replay LLM quality suite on merged head and publish KPI delta table.
 - evidence:
   - pytest -q truffles-api/tests/test_demo_salon_eval.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_booking_chaos_dialogs.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_message_endpoint.py
   - 289 passed, 2 warnings
-- last_updated: 2026-02-19
+  - ruff check truffles-api/app/services/ai_service.py truffles-api/tests/test_ai_service.py
+  - pytest -q truffles-api/tests/test_ai_service.py
+  - pytest -q truffles-api/tests/test_booking_info_interrupt_contract.py
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "expected_reply_time_question_like_info_does_not_match_deterministic or is_booking_request_rejects_need_plus_service_without_datetime_or_booking_lexicon"
+- last_updated: 2026-02-19T19:00:00+05:00

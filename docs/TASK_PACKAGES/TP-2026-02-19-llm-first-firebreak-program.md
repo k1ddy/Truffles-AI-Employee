@@ -312,8 +312,8 @@
 - `pytest -q truffles-api/tests/test_booking_chaos_dialogs.py`
 - `pytest -q truffles-api/tests/test_booking_quality_response_guard.py`
 - `pytest -q truffles-api/tests/test_demo_salon_eval.py`
-- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode all --fail-on-thresholds --run-id booking-lock-<id>`
-- `TEST_MODE=1 python3 ops/diagnose.py llm-quality ... --scenarios-file <lock> --baseline-summary <lock_summary> --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression`
+- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode all --fail-on-thresholds --run-id booking-lock-42`
+- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression --max-failures 20`
 
 ## Evidence package (for each wave)
 - `summary.json`, `brief.md`, `responses.jsonl`, `trace_bundle.jsonl`
