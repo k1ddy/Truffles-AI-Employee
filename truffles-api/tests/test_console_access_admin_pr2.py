@@ -1458,6 +1458,27 @@ async def test_get_onboarding_scorecard_returns_fail_payload(monkeypatch):
                     missing=["payment_confirmed"],
                 )
             ],
+            readiness_kernel=SimpleNamespace(
+                status="fail",
+                blocker_codes=["go_no_go:payment_confirmed", "delivery:backlog_critical"],
+                next_action_codes=["resolve_go_no_go_missing"],
+                auto_questions=[
+                    SimpleNamespace(
+                        code="go_no_go:payment_confirmed",
+                        question="Подтвердите оплату по договору.",
+                        blocking_go_live=True,
+                    )
+                ],
+                dimensions=[
+                    SimpleNamespace(
+                        id="go_no_go_contract",
+                        status="fail",
+                        blocker_codes=["go_no_go:payment_confirmed"],
+                        next_action_codes=["resolve_go_no_go_missing"],
+                    )
+                ],
+                shadow_hard_gate_blockers=["go_no_go:payment_confirmed", "delivery:backlog_critical"],
+            ),
         ),
     )
 
@@ -1487,6 +1508,85 @@ async def test_get_onboarding_scorecard_returns_fail_payload(monkeypatch):
     assert response.operational_pipeline.current_stage_id == "contract_alignment"
     assert response.operational_pipeline.blockers == ["payment_confirmed"]
     assert response.operational_pipeline.stages[0].id == "contract_alignment"
+    assert response.readiness_kernel is not None
+    assert response.readiness_kernel.status == "fail"
+    assert "go_no_go:payment_confirmed" in response.readiness_kernel.blocker_codes
+    assert response.readiness_kernel.shadow_hard_gate.status == "fail"
+    assert "delivery:backlog_critical" in response.readiness_kernel.shadow_hard_gate.blocker_codes
+
+
+def test_require_branch_scorecard_ready_allows_shadow_blockers_when_hard_gate_disabled(monkeypatch):
+    scorecard = SimpleNamespace(
+        ready=True,
+        missing=[],
+        checks=[
+            SimpleNamespace(
+                id=console_router.OnboardingStep.GO_NO_GO,
+                required=True,
+                passed=True,
+                missing=[],
+            )
+        ],
+        readiness_kernel=SimpleNamespace(
+            status="fail",
+            blocker_codes=["delivery:backlog_critical"],
+            next_action_codes=["run_outbox_process_and_review_failed"],
+            shadow_hard_gate_blockers=["delivery:backlog_critical"],
+        ),
+    )
+    monkeypatch.setattr(console_router, "build_onboarding_scorecard", lambda *_args, **_kwargs: scorecard)
+    monkeypatch.setattr(console_router, "_ONBOARDING_READINESS_HARD_GATE_ENABLED", False)
+    monkeypatch.setattr(
+        console_router,
+        "_ONBOARDING_READINESS_HARD_GATE_CODES",
+        {"delivery:backlog_critical"},
+    )
+
+    console_router._require_branch_scorecard_ready(
+        db=Mock(),
+        branch=SimpleNamespace(client_id=uuid4(), id=uuid4()),
+        operation="branch_activate",
+    )
+
+
+def test_require_branch_scorecard_ready_blocks_when_hard_gate_enabled(monkeypatch):
+    scorecard = SimpleNamespace(
+        ready=True,
+        missing=[],
+        checks=[
+            SimpleNamespace(
+                id=console_router.OnboardingStep.GO_NO_GO,
+                required=True,
+                passed=True,
+                missing=[],
+            )
+        ],
+        readiness_kernel=SimpleNamespace(
+            status="fail",
+            blocker_codes=["delivery:backlog_critical"],
+            next_action_codes=["run_outbox_process_and_review_failed"],
+            shadow_hard_gate_blockers=["delivery:backlog_critical"],
+        ),
+    )
+    monkeypatch.setattr(console_router, "build_onboarding_scorecard", lambda *_args, **_kwargs: scorecard)
+    monkeypatch.setattr(console_router, "_ONBOARDING_READINESS_HARD_GATE_ENABLED", True)
+    monkeypatch.setattr(
+        console_router,
+        "_ONBOARDING_READINESS_HARD_GATE_CODES",
+        {"delivery:backlog_critical"},
+    )
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._require_branch_scorecard_ready(
+            db=Mock(),
+            branch=SimpleNamespace(client_id=uuid4(), id=uuid4()),
+            operation="branch_activate",
+        )
+
+    assert exc_info.value.code == "GO_LIVE_GATE_REQUIRED"
+    assert exc_info.value.details["missing"] == ["delivery:backlog_critical"]
+    assert exc_info.value.details["scorecard_status"] == "pass"
+    assert exc_info.value.details["readiness_kernel"]["shadow_hard_gate"]["enforced"] is True
 
 
 @pytest.mark.asyncio

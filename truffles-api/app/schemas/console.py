@@ -373,6 +373,8 @@ OnboardingSlaProviderStatusValue = Literal[
 ]
 OnboardingOperationalPipelineStatusValue = Literal["pass", "warn", "fail"]
 OnboardingOperationalStageStatusValue = Literal["pass", "warn", "fail", "skip"]
+OnboardingReadinessStatusValue = Literal["pass", "warn", "fail"]
+OnboardingReadinessHardGateStatusValue = Literal["pass", "fail"]
 
 
 class ConsoleOnboardingStepStatus(BaseModel):
@@ -439,6 +441,34 @@ class ConsoleOnboardingOperationalPipeline(BaseModel):
     stages: list[ConsoleOnboardingOperationalStage] = []
 
 
+class ConsoleOnboardingReadinessDimension(BaseModel):
+    id: str
+    status: OnboardingReadinessStatusValue
+    blocker_codes: list[str] = []
+    next_action_codes: list[str] = []
+
+
+class ConsoleOnboardingReadinessQuestion(BaseModel):
+    code: str
+    question: str
+    blocking_go_live: bool = False
+
+
+class ConsoleOnboardingReadinessHardGate(BaseModel):
+    enforced: bool
+    status: OnboardingReadinessHardGateStatusValue
+    blocker_codes: list[str] = []
+
+
+class ConsoleOnboardingReadinessKernel(BaseModel):
+    status: OnboardingReadinessStatusValue
+    blocker_codes: list[str] = []
+    next_action_codes: list[str] = []
+    auto_questions: list[ConsoleOnboardingReadinessQuestion] = []
+    dimensions: list[ConsoleOnboardingReadinessDimension] = []
+    shadow_hard_gate: ConsoleOnboardingReadinessHardGate
+
+
 class ConsoleOnboardingScorecardResponse(BaseModel):
     branch_id: UUID
     status: OnboardingScorecardStatusValue
@@ -448,6 +478,7 @@ class ConsoleOnboardingScorecardResponse(BaseModel):
     document_ingestion: Optional[ConsoleOnboardingDocumentIngestion] = None
     sla_control_loop: Optional[ConsoleOnboardingSlaControlLoop] = None
     operational_pipeline: Optional[ConsoleOnboardingOperationalPipeline] = None
+    readiness_kernel: Optional[ConsoleOnboardingReadinessKernel] = None
     generated_at: str
 
 

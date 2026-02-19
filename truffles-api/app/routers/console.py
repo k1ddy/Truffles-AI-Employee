@@ -154,6 +154,10 @@ from app.schemas.console import (
     ConsoleOnboardingIntakeQualityMatrix,
     ConsoleOnboardingOperationalPipeline,
     ConsoleOnboardingOperationalStage,
+    ConsoleOnboardingReadinessDimension,
+    ConsoleOnboardingReadinessHardGate,
+    ConsoleOnboardingReadinessKernel,
+    ConsoleOnboardingReadinessQuestion,
     ConsoleOnboardingScorecardCheck,
     ConsoleOnboardingScorecardResponse,
     ConsoleOnboardingSlaControlLoop,
@@ -321,6 +325,7 @@ from app.services.onboarding_state import (
     OnboardingStep,
     advance_onboarding_step,
     build_onboarding_inputs,
+    build_onboarding_readiness_kernel,
     build_onboarding_scorecard,
     build_onboarding_status,
     ensure_onboarding_step,
@@ -937,6 +942,51 @@ def _serialize_onboarding_status(
     )
 
 
+def _resolve_readiness_hard_gate_blockers(readiness_kernel) -> list[str]:
+    if readiness_kernel is None:
+        return []
+    candidates = list(getattr(readiness_kernel, "shadow_hard_gate_blockers", []) or [])
+    selected = [
+        code
+        for code in candidates
+        if code.startswith("go_no_go:") or code in _ONBOARDING_READINESS_HARD_GATE_CODES
+    ]
+    return _dedupe_list(selected)
+
+
+def _serialize_onboarding_readiness_kernel(readiness_kernel):
+    if readiness_kernel is None:
+        return None
+    hard_gate_blockers = _resolve_readiness_hard_gate_blockers(readiness_kernel)
+    return ConsoleOnboardingReadinessKernel(
+        status=readiness_kernel.status,
+        blocker_codes=list(readiness_kernel.blocker_codes),
+        next_action_codes=list(readiness_kernel.next_action_codes),
+        auto_questions=[
+            ConsoleOnboardingReadinessQuestion(
+                code=item.code,
+                question=item.question,
+                blocking_go_live=item.blocking_go_live,
+            )
+            for item in readiness_kernel.auto_questions
+        ],
+        dimensions=[
+            ConsoleOnboardingReadinessDimension(
+                id=item.id,
+                status=item.status,
+                blocker_codes=list(item.blocker_codes),
+                next_action_codes=list(item.next_action_codes),
+            )
+            for item in readiness_kernel.dimensions
+        ],
+        shadow_hard_gate=ConsoleOnboardingReadinessHardGate(
+            enforced=_ONBOARDING_READINESS_HARD_GATE_ENABLED,
+            status="fail" if hard_gate_blockers else "pass",
+            blocker_codes=hard_gate_blockers,
+        ),
+    )
+
+
 def _serialize_onboarding_scorecard(
     branch: Branch,
     scorecard,
@@ -944,6 +994,7 @@ def _serialize_onboarding_scorecard(
     document_ingestion = getattr(scorecard, "document_ingestion", None)
     sla_control_loop = getattr(scorecard, "sla_control_loop", None)
     operational_pipeline = getattr(scorecard, "operational_pipeline", None)
+    readiness_kernel = getattr(scorecard, "readiness_kernel", None)
     document_ingestion_payload = None
     if document_ingestion is not None:
         document_ingestion_payload = ConsoleOnboardingDocumentIngestion(
@@ -1008,6 +1059,7 @@ def _serialize_onboarding_scorecard(
         document_ingestion=document_ingestion_payload,
         sla_control_loop=sla_control_loop_payload,
         operational_pipeline=operational_pipeline_payload,
+        readiness_kernel=_serialize_onboarding_readiness_kernel(readiness_kernel),
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -1384,6 +1436,37 @@ def _parse_bool_param(name: str, value: Optional[str], default: bool = False) ->
     raise ConsoleAPIError(400, "INVALID_PARAM", f"Invalid {name}")
 
 
+def _parse_env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _parse_env_csv_set(name: str, *, default: set[str]) -> set[str]:
+    raw = os.getenv(name)
+    if raw is None:
+        return set(default)
+    values = [item.strip() for item in raw.split(",")]
+    return {value for value in values if value}
+
+
+def _dedupe_list(values: list[str]) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique
+
+
 _TENANT_LIFECYCLE_MODES = {"active", "archived", "all"}
 _CLIENT_STATUS_ACTIVE = "active"
 _CLIENT_STATUS_ARCHIVED = "deleted"
@@ -1397,6 +1480,21 @@ _BRANCH_GO_LIVE_STATES = {"pending", "approved", "rejected"}
 _BRANCH_GO_LIVE_DEFAULT_STATE = "pending"
 _GO_LIVE_WAIVER_MIN_HOURS = 1
 _GO_LIVE_WAIVER_MAX_HOURS = 24 * 30
+_ONBOARDING_READINESS_HARD_GATE_DEFAULT_CODES = {
+    "delivery:backlog_critical",
+    "delivery:failed_24h_critical",
+    "delivery:stale_processing_critical",
+    "traffic:whatsapp_capability_mismatch",
+    "traffic:telegram_capability_mismatch",
+}
+_ONBOARDING_READINESS_HARD_GATE_ENABLED = _parse_env_bool(
+    "ONBOARDING_READINESS_HARD_GATE_ENABLED",
+    default=False,
+)
+_ONBOARDING_READINESS_HARD_GATE_CODES = _parse_env_csv_set(
+    "ONBOARDING_READINESS_HARD_GATE_CODES",
+    default=_ONBOARDING_READINESS_HARD_GATE_DEFAULT_CODES,
+)
 _INTEGRATION_DEFAULT_STALE_MINUTES = 60
 _INTEGRATION_MIN_STALE_MINUTES = 5
 _INTEGRATION_MAX_STALE_MINUTES = 24 * 60
@@ -1593,24 +1691,60 @@ def _require_branch_scorecard_ready(
     operation: str,
 ) -> None:
     scorecard = build_onboarding_scorecard(db, branch)
-    if scorecard.ready:
+    readiness_kernel = getattr(scorecard, "readiness_kernel", None)
+    hard_gate_blockers: list[str] = []
+    if readiness_kernel is not None:
+        hard_gate_blockers = _resolve_readiness_hard_gate_blockers(readiness_kernel)
+    if _ONBOARDING_READINESS_HARD_GATE_ENABLED and readiness_kernel is None:
+        readiness_kernel = build_onboarding_readiness_kernel(
+            db,
+            branch,
+            scorecard=scorecard,
+        )
+        hard_gate_blockers = _resolve_readiness_hard_gate_blockers(readiness_kernel)
+    readiness_details = None
+    if readiness_kernel is not None:
+        hard_gate_status = "fail" if hard_gate_blockers else "pass"
+        readiness_details = {
+            "status": readiness_kernel.status,
+            "blocker_codes": readiness_kernel.blocker_codes,
+            "next_action_codes": readiness_kernel.next_action_codes,
+            "shadow_hard_gate": {
+                "enforced": _ONBOARDING_READINESS_HARD_GATE_ENABLED,
+                "status": hard_gate_status,
+                "blocker_codes": hard_gate_blockers,
+            },
+        }
+    if scorecard.ready and not _ONBOARDING_READINESS_HARD_GATE_ENABLED:
+        return
+    if scorecard.ready and _ONBOARDING_READINESS_HARD_GATE_ENABLED and not hard_gate_blockers:
         return
     failed_checks = [
         check.id.value
         for check in scorecard.checks
         if check.required and not check.passed
     ]
+    message = "Onboarding scorecard failed"
+    missing = scorecard.missing
+    scorecard_status = "fail"
+    if scorecard.ready and _ONBOARDING_READINESS_HARD_GATE_ENABLED and hard_gate_blockers:
+        message = "Onboarding readiness hard gate failed"
+        missing = hard_gate_blockers
+        scorecard_status = "pass"
+    error_details = {
+        "operation": operation,
+        "required_step": OnboardingStep.GO_NO_GO.value,
+        "missing": missing,
+        "scorecard_status": scorecard_status,
+        "failed_checks": failed_checks,
+    }
+    if readiness_details is not None:
+        error_details["readiness_kernel"] = readiness_details
     raise ConsoleAPIError(
         409,
         "GO_LIVE_GATE_REQUIRED",
-        "Onboarding scorecard failed",
-        {
-            "operation": operation,
-            "required_step": OnboardingStep.GO_NO_GO.value,
-            "missing": scorecard.missing,
-            "scorecard_status": "fail",
-            "failed_checks": failed_checks,
-        },
+        message,
+        error_details,
     )
 
 
@@ -13633,26 +13767,11 @@ async def approve_branch_go_live(
     _require_client_access(context, branch.client_id)
 
     reason = _normalize_access_reason(body.reason, required=True)
-    scorecard = build_onboarding_scorecard(db, branch)
-    if not scorecard.ready:
-        failed_checks = [
-            check.id.value
-            for check in scorecard.checks
-            if check.required and not check.passed
-        ]
-        raise ConsoleAPIError(
-            409,
-            "GO_LIVE_GATE_REQUIRED",
-            "Go-live prerequisites missing",
-            {
-                "operation": "branch_go_live_approve",
-                "go_live_state": _normalize_branch_go_live_state(branch.go_live_state),
-                "required_step": OnboardingStep.GO_NO_GO.value,
-                "missing": scorecard.missing,
-                "scorecard_status": "fail",
-                "failed_checks": failed_checks,
-            },
-        )
+    _require_branch_scorecard_ready(
+        db,
+        branch,
+        operation="branch_go_live_approve",
+    )
 
     now = datetime.now(timezone.utc)
     previous_state = _normalize_branch_go_live_state(branch.go_live_state)
@@ -13763,26 +13882,11 @@ async def waive_branch_go_live(
 
     reason = _normalize_access_reason(body.reason, required=True)
     ttl_hours = _normalize_go_live_waiver_ttl_hours(body.ttl_hours)
-    scorecard = build_onboarding_scorecard(db, branch)
-    if not scorecard.ready:
-        failed_checks = [
-            check.id.value
-            for check in scorecard.checks
-            if check.required and not check.passed
-        ]
-        raise ConsoleAPIError(
-            409,
-            "GO_LIVE_GATE_REQUIRED",
-            "Go-live prerequisites missing",
-            {
-                "operation": "branch_go_live_waive",
-                "go_live_state": _normalize_branch_go_live_state(branch.go_live_state),
-                "required_step": OnboardingStep.GO_NO_GO.value,
-                "missing": scorecard.missing,
-                "scorecard_status": "fail",
-                "failed_checks": failed_checks,
-            },
-        )
+    _require_branch_scorecard_ready(
+        db,
+        branch,
+        operation="branch_go_live_waive",
+    )
 
     now = datetime.now(timezone.utc)
     waiver_until = now + timedelta(hours=ttl_hours)

@@ -1,0 +1,23 @@
+# SESSION 2026-02-19-onboarding-readiness-kernel-a131 — Session 2026-02-19-onboarding-readiness-kernel-a131
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-19-onboarding-readiness-kernel-a131.md
+- branch: feat/2026-02-19-onboarding-readiness-kernel-a131
+- worktree: /home/zhan/worktrees/2026-02-19-onboarding-readiness-kernel-a131
+- base_ref: origin/main
+- scope: Onboarding Readiness Kernel v1 (scorecard payload + shadow hard-gate + feature-flagged enforcement)
+- done:
+  - Implemented onboarding readiness kernel v1 with shadow hard-gate and evidence
+  - Session/worktree initialized with TP.
+  - Added deterministic readiness kernel read-model in onboarding state service.
+  - Extended console scorecard schema/serializer with readiness payload.
+  - Wired shadow hard-gate diagnostics and optional enforcement into go-live gate.
+  - Updated tests for payload serialization and hard-gate behavior.
+  - Completed target checks (py_compile, pytest, ruff, OpenAPI check).
+- next:
+  - Await PR review and merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-19-onboarding-readiness-kernel-a131.md
+  - docs/REPORTS/2026-02-19-onboarding-readiness-kernel-a131.md
+- last_updated: 2026-02-19
