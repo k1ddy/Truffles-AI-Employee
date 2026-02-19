@@ -927,82 +927,91 @@ function ContextHealthStrip({
     const clients = me.clients ?? [];
     const branches = me.branches ?? [];
     const role = me.agent?.role ?? null;
-    const messages: ContextHealthMessage[] = [];
+    const warningMessages: ContextHealthMessage[] = [];
+    const infoMessages: ContextHealthMessage[] = [];
 
     if (companies.length > 1 && !companyId) {
-        messages.push({
+        warningMessages.push({
             id: "company_missing",
             tone: "warn",
             text: "Контекст компании не выбран. Данные могут выглядеть неполными.",
         });
     }
     if (companyId && clients.length > 0 && visibleClients.length === 0) {
-        messages.push({
+        warningMessages.push({
             id: "no_clients_for_company",
             tone: "warn",
             text: "Для выбранной компании нет активных клиентов.",
         });
     }
     if (branches.length === 0) {
-        messages.push({
+        warningMessages.push({
             id: "no_active_branches",
             tone: "warn",
             text: "В текущем контексте нет активных филиалов.",
         });
     } else if (!me.branch_selection_required && !me.selected_branch_id && branches.length > 1) {
-        messages.push({
+        infoMessages.push({
             id: "all_branches_mode",
             tone: "info",
             text: "Режим контекста: все активные филиалы.",
         });
     }
-    if (role === "platform_admin") {
-        messages.push({
-            id: "platform_active_filter",
-            tone: "info",
-            text: "Контекст показывает только активные сущности. Архивные и деактивированные доступны в Тенанты.",
-        });
-    }
-    if (messages.length === 0) {
-        messages.push({
-            id: "context_ok",
-            tone: "ok",
-            text: "Контекст согласован: компания, клиент и филиалы отображаются корректно.",
-        });
-    }
+    const messages = warningMessages.length > 0 ? warningMessages : infoMessages;
+    const showPlatformActiveHint = role === "platform_admin";
+    const showHealthBadges = messages.length > 0 || showPlatformActiveHint;
+    const showMobileActions = canReadOps || canReadTenants;
 
     return (
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]" data-testid="context-health-strip">
-            {messages.map((message) => (
-                <span
-                    key={message.id}
-                    className={`rounded-full border px-2 py-1 ${contextHealthToneClass(message.tone)}`}
-                    data-testid={`context-health-${message.id}`}
-                >
-                    {message.text}
-                </span>
-            ))}
-            {canReadOps && (
-                <button
-                    type="button"
-                    className="btn-ghost text-[11px]"
-                    data-testid="context-health-open-ops"
-                    onClick={onOpenOps}
-                >
-                    Открыть Ops
-                </button>
+        <>
+            {showHealthBadges && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]" data-testid="context-health-strip">
+                    {messages.map((message) => (
+                        <span
+                            key={message.id}
+                            className={`rounded-full border px-2 py-1 ${contextHealthToneClass(message.tone)}`}
+                            data-testid={`context-health-${message.id}`}
+                        >
+                            {message.text}
+                        </span>
+                    ))}
+                    {showPlatformActiveHint && (
+                        <span
+                            className="inline-flex rounded-full border border-sky-300/80 bg-sky-50 px-2 py-1 text-sky-900"
+                            data-testid="context-health-platform_active_filter"
+                            title="Контекст показывает только активные сущности. Архивные и деактивированные доступны в Тенанты."
+                            aria-label="Только активные сущности в контексте"
+                        >
+                            Только активные
+                        </span>
+                    )}
+                </div>
             )}
-            {canReadTenants && (
-                <button
-                    type="button"
-                    className="btn-ghost text-[11px]"
-                    data-testid="context-health-open-tenants"
-                    onClick={onOpenTenants}
-                >
-                    Открыть Тенанты
-                </button>
+            {showMobileActions && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] md:hidden">
+                    {canReadOps && (
+                        <button
+                            type="button"
+                            className="btn-ghost text-[12px]"
+                            data-testid="context-health-open-ops"
+                            onClick={onOpenOps}
+                        >
+                            Открыть Ops
+                        </button>
+                    )}
+                    {canReadTenants && (
+                        <button
+                            type="button"
+                            className="btn-ghost text-[12px]"
+                            data-testid="context-health-open-tenants"
+                            onClick={onOpenTenants}
+                        >
+                            Открыть Тенанты
+                        </button>
+                    )}
+                </div>
             )}
-        </div>
+        </>
     );
 }
 
