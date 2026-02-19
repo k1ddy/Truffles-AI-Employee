@@ -17,12 +17,15 @@ _COMMON_REQUIRED_FIELDS = [
     "client_pack.catalog.summary",
     "client_pack.communication.languages",
     "client_pack.services_catalog.services",
+    "client_pack.price_list",
+]
+
+_BEAUTY_REQUIRED_FIELDS = (
     "client_pack.guest_policy",
     "client_pack.safety.medical_note",
     "client_pack.pricing.price_from_reason",
     "client_pack.quality.expectations_photo",
-    "client_pack.price_list",
-]
+)
 
 _BOOKING_REQUIRED_FIELDS = [
     "client_pack.service_duration_estimates",
@@ -30,7 +33,11 @@ _BOOKING_REQUIRED_FIELDS = [
     "client_pack.booking.bot_can_confirm",
 ]
 
-REQUIRED_CLIENT_PACK_FIELDS = _COMMON_REQUIRED_FIELDS + _BOOKING_REQUIRED_FIELDS
+REQUIRED_CLIENT_PACK_FIELDS = (
+    _COMMON_REQUIRED_FIELDS
+    + list(_BEAUTY_REQUIRED_FIELDS)
+    + _BOOKING_REQUIRED_FIELDS
+)
 
 REQUIRED_POLICY_FIELDS = [
     "client_pack.policy.hard_law",
@@ -67,11 +74,12 @@ _DOMAIN_DEFAULT_BOOKING_REQUIRED = {
     "ecom": False,
 }
 _DOMAIN_EXTRA_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
-    "beauty": (),
-    "clinic": (),
+    "beauty": _BEAUTY_REQUIRED_FIELDS,
+    "clinic": _BEAUTY_REQUIRED_FIELDS,
     "legal": (),
     "ecom": (),
 }
+_DEFAULT_DOMAIN_EXTRA_REQUIRED_FIELDS = _BEAUTY_REQUIRED_FIELDS
 
 # Backward-compatible aliases: v2 canonical paths stay stable in validation output,
 # while legacy salon data still satisfies requirements.
@@ -139,6 +147,16 @@ def _booking_required_for_domain(
     return _DOMAIN_DEFAULT_BOOKING_REQUIRED.get(normalized_domain, True)
 
 
+def _extra_required_fields_for_domain(domain_slug: str | None) -> tuple[str, ...]:
+    normalized_domain = _normalize_domain_slug(domain_slug)
+    if not normalized_domain:
+        return _DEFAULT_DOMAIN_EXTRA_REQUIRED_FIELDS
+    return _DOMAIN_EXTRA_REQUIRED_FIELDS.get(
+        normalized_domain,
+        _DEFAULT_DOMAIN_EXTRA_REQUIRED_FIELDS,
+    )
+
+
 def get_required_fields_for_domain(
     *,
     domain_slug: str | None = None,
@@ -146,7 +164,7 @@ def get_required_fields_for_domain(
 ) -> list[str]:
     required_fields: list[str] = list(_COMMON_REQUIRED_FIELDS)
     normalized_domain = _normalize_domain_slug(domain_slug)
-    for field in _DOMAIN_EXTRA_REQUIRED_FIELDS.get(normalized_domain or "", ()):
+    for field in _extra_required_fields_for_domain(normalized_domain):
         if field not in required_fields:
             required_fields.append(field)
     if _booking_required_for_domain(
@@ -234,6 +252,18 @@ def _has_duration_data(payload: dict) -> bool:
     return False
 
 
+def _extract_domain_slug_from_payload(payload: dict) -> str | None:
+    normalized = _normalize_payload(payload)
+    for path in (
+        "client_pack.domain_slug",
+        "domain_slug",
+    ):
+        value = _get_nested_value(normalized, path)
+        if isinstance(value, str) and value.strip():
+            return _normalize_domain_slug(value)
+    return None
+
+
 def get_missing_required_fields(
     payload: dict,
     *,
@@ -281,11 +311,15 @@ def get_missing_required_fields(
 
 def get_missing_minimum_data_fields(payload: dict) -> list[str]:
     normalized = _normalize_payload(payload)
+    domain_slug = _extract_domain_slug_from_payload(normalized)
+    required_fields = get_required_fields_for_domain(domain_slug=domain_slug)
     missing = get_missing_required_fields(
         normalized,
-        required_fields=MINIMUM_DATA_REQUIRED_FIELDS,
+        required_fields=required_fields,
     )
     if (
+        "client_pack.service_duration_estimates" in required_fields
+        and
         "client_pack.services_catalog.services" not in missing
         and "client_pack.service_duration_estimates" not in missing
         and not _has_duration_data(normalized)

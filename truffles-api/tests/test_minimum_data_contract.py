@@ -74,3 +74,23 @@ def test_minimum_data_contract_missing_guest_policy():
     status = evaluate_minimum_data_contract(payload)
     assert status.ready is False
     assert "client_pack.guest_policy" in status.missing_fields
+
+
+def test_minimum_data_contract_uses_domain_specific_profile_when_domain_slug_present():
+    payload = _base_payload()
+    payload["client_pack"]["domain_slug"] = "legal"
+    payload["client_pack"].pop("guest_policy")
+    payload["client_pack"].pop("safety")
+    payload["client_pack"].pop("pricing")
+    payload["client_pack"].pop("quality")
+    payload["client_pack"].pop("service_duration_estimates")
+    payload["client_pack"].pop("booking")
+
+    status = evaluate_minimum_data_contract(payload)
+
+    assert status.ready is True
+    assert "client_pack.guest_policy" not in status.missing_fields
+    assert "client_pack.safety.medical_note" not in status.missing_fields
+    assert "client_pack.pricing.price_from_reason" not in status.missing_fields
+    assert "client_pack.quality.expectations_photo" not in status.missing_fields
+    assert "client_pack.service_duration_estimates" not in status.missing_fields
