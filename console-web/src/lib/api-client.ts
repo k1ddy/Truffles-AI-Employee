@@ -796,10 +796,28 @@ export type ListIntegrationsParams = operations["listAdminIntegrations"]["parame
 export type ListProviderLifecycleParams = operations["listAdminProviderLifecycle"]["parameters"]["query"];
 export type ListMembershipsParams = operations["listAdminMemberships"]["parameters"]["query"];
 export type ListReferencePacksParams = operations["listAdminReferencePacks"]["parameters"]["query"];
+export type ListOnboardingBlueprintsParams = { domain_slug?: string };
 export type ListOpsJobsParams = operations["listOpsJobs"]["parameters"]["query"];
 export type ListBranchChangesParams = operations["listAdminBranchChanges"]["parameters"]["query"];
 export type BranchGoLiveDecisionRequest = { reason: string };
 export type BranchGoLiveWaiverRequest = { reason: string; ttl_hours: number };
+export type OnboardingBlueprintQuestionTemplate = {
+    code: string;
+    question: string;
+    blocking_go_live: boolean;
+};
+export type OnboardingBlueprint = {
+    id: string;
+    domain_slug: string;
+    label: string;
+    summary: string;
+    payload: components["schemas"]["CapabilitiesPayload"];
+    go_live_blockers_profile: string[];
+    question_templates: OnboardingBlueprintQuestionTemplate[];
+};
+export type OnboardingBlueprintListResponse = {
+    items: OnboardingBlueprint[];
+};
 
 // ═══════════════════════════════════════════════════════════════════
 // API METHODS (typed)
@@ -1017,6 +1035,8 @@ export const adminApi = {
         apiClient.post<components["schemas"]["OnboardingAutopilotResponse"]>("/admin/onboarding/autopilot", data, {
             headers: buildClientHeader(clientId),
         }),
+    listOnboardingBlueprints: (params?: ListOnboardingBlueprintsParams) =>
+        apiClient.get<OnboardingBlueprintListResponse>("/admin/onboarding-blueprints", { params }),
     listReferencePacks: (params?: ListReferencePacksParams) =>
         apiClient.get<components["schemas"]["ReferencePackListResponse"]>("/admin/reference-packs", { params }),
     upsertReferencePack: (domainSlug: string, data: components["schemas"]["ReferencePackUpsertRequest"]) =>

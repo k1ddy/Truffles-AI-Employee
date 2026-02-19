@@ -1809,3 +1809,61 @@ async def test_waive_branch_go_live_requires_prerequisites(monkeypatch):
     assert exc_info.value.details["operation"] == "branch_go_live_waive"
     assert exc_info.value.details["missing"] == ["provider_binding.whatsapp.webhook_status"]
     assert "go_no_go" in exc_info.value.details["failed_checks"]
+
+
+@pytest.mark.asyncio
+async def test_list_onboarding_blueprints_returns_catalog(monkeypatch):
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(role="platform_admin"),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    response = await console_router.list_onboarding_blueprints_api(
+        request=Mock(),
+        domain_slug=None,
+        db=Mock(),
+    )
+
+    assert len(response.items) >= 4
+    assert {item.domain_slug for item in response.items} >= {"beauty", "clinic", "legal", "ecom"}
+    assert all(item.question_templates for item in response.items)
+
+
+@pytest.mark.asyncio
+async def test_list_onboarding_blueprints_filters_domain(monkeypatch):
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(role="platform_admin"),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    response = await console_router.list_onboarding_blueprints_api(
+        request=Mock(),
+        domain_slug="Legal",
+        db=Mock(),
+    )
+
+    assert [item.domain_slug for item in response.items] == ["legal"]
+    assert response.items[0].payload.domain_slug == "legal"
+
+
+@pytest.mark.asyncio
+async def test_list_onboarding_blueprints_rejects_invalid_domain_slug(monkeypatch):
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(role="platform_admin"),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_onboarding_blueprints_api(
+            request=Mock(),
+            domain_slug="legal!",
+            db=Mock(),
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"

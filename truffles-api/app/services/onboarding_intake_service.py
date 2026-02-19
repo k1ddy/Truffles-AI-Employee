@@ -7,6 +7,7 @@ from typing import Any
 import yaml
 
 from app.services.knowledge_validation import get_missing_required_fields, get_required_fields_for_domain
+from app.services.onboarding_blueprints import get_onboarding_question_templates
 from app.services.pack_compiler_service import PackCompilerError, compile_pack_payload
 from app.services.reference_pack_integrity import (
     REFERENCE_PACK_SCHEMA_VERSION,
@@ -662,14 +663,20 @@ def build_intake_field_states(
 
 def build_intake_question_queue(
     missing_fields: list[str],
+    *,
+    domain_slug: str | None = None,
 ) -> list[IntakeQuestionItem]:
+    question_templates = get_onboarding_question_templates(domain_slug)
     queue: list[IntakeQuestionItem] = []
     for field in missing_fields:
         priority = _field_priority(field)
         queue.append(
             IntakeQuestionItem(
                 field=field,
-                question=_MISSING_QUESTIONS.get(field, f"Уточните значение поля: {field}"),
+                question=question_templates.get(
+                    field,
+                    _MISSING_QUESTIONS.get(field, f"Уточните значение поля: {field}"),
+                ),
                 priority=priority,
                 blocking_go_live=priority == "critical",
             )

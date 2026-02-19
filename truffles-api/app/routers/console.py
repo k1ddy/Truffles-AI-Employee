@@ -145,6 +145,9 @@ from app.schemas.console import (
     ConsoleOnboardingAutopilotIntake,
     ConsoleOnboardingAutopilotRequest,
     ConsoleOnboardingAutopilotResponse,
+    ConsoleOnboardingBlueprint,
+    ConsoleOnboardingBlueprintListResponse,
+    ConsoleOnboardingBlueprintQuestionTemplate,
     ConsoleOnboardingContractPatchRequest,
     ConsoleOnboardingContractRecord,
     ConsoleOnboardingContractResponse,
@@ -308,6 +311,7 @@ from app.services.metrics_daily_service import (
     get_metrics_daily_default_date,
     run_metrics_daily_snapshot,
 )
+from app.services.onboarding_blueprints import list_onboarding_blueprints
 from app.services.onboarding_contract_service import (
     find_capability_mismatches,
     merge_onboarding_contract,
@@ -14869,6 +14873,25 @@ def _serialize_reference_pack(record: ReferencePack) -> ConsoleReferencePack:
     )
 
 
+def _serialize_onboarding_blueprint(record) -> ConsoleOnboardingBlueprint:
+    return ConsoleOnboardingBlueprint(
+        id=record.id,
+        domain_slug=record.domain_slug,
+        label=record.label,
+        summary=record.summary,
+        payload=record.payload,
+        go_live_blockers_profile=list(record.go_live_blockers_profile),
+        question_templates=[
+            ConsoleOnboardingBlueprintQuestionTemplate(
+                code=item.code,
+                question=item.question,
+                blocking_go_live=item.blocking_go_live,
+            )
+            for item in record.question_templates
+        ],
+    )
+
+
 _AUTOPILOT_DEFAULT_TIMEZONE = "Asia/Almaty"
 
 
@@ -15699,7 +15722,10 @@ async def run_onboarding_autopilot(
         missing_fields=missing_fields,
         client_data_json=body.client_data_json or {},
     )
-    question_queue = build_intake_question_queue(missing_fields)
+    question_queue = build_intake_question_queue(
+        missing_fields,
+        domain_slug=effective_domain_slug,
+    )
     pack_quality = build_intake_pack_quality_summary(
         effective_intake_payload,
         domain_slug=effective_domain_slug,
@@ -15826,6 +15852,34 @@ async def run_onboarding_autopilot(
             payload=intake_payload,
         ),
         actions=actions,
+    )
+
+
+@router.get(
+    "/admin/onboarding-blueprints",
+    response_model=ConsoleOnboardingBlueprintListResponse,
+    responses={403: {"model": ConsoleErrorResponse}},
+)
+async def list_onboarding_blueprints_api(
+    request: Request,
+    domain_slug: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+) -> ConsoleOnboardingBlueprintListResponse:
+    context = get_console_context(request, db, require_selection=False)
+    require_console_permission(
+        context,
+        "provisioning",
+        "read",
+        message="Only owner/admin can access provisioning",
+    )
+
+    items = list_onboarding_blueprints()
+    if domain_slug:
+        normalized_domain_slug = _normalize_slug(domain_slug, "domain_slug")
+        items = [item for item in items if item.domain_slug == normalized_domain_slug]
+
+    return ConsoleOnboardingBlueprintListResponse(
+        items=[_serialize_onboarding_blueprint(item) for item in items]
     )
 
 
