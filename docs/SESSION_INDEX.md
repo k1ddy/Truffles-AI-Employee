@@ -492,4 +492,8 @@
 | 2026-02-19-booking-name-progression-a120 | active | feat/2026-02-19-booking-name-progression-a120 | /home/zhan/worktrees/2026-02-19-booking-name-progression-a120 | docs/TASK_PACKAGES/TP-2026-02-19-booking-name-progression-a120.md | 2026-02-19 |
 | 2026-02-19-onboarding-readiness-kernel-a131 | done | feat/2026-02-19-onboarding-readiness-kernel-a131 | /home/zhan/worktrees/2026-02-19-onboarding-readiness-kernel-a131 | docs/TASK_PACKAGES/TP-2026-02-19-onboarding-readiness-kernel-a131.md | 2026-02-19 |
 | 2026-02-19-console-context-banner-dedupe-a130 | active | feat/2026-02-19-console-context-banner-dedupe-a130 | /home/zhan/worktrees/2026-02-19-console-context-banner-dedupe-a130 | docs/TASK_PACKAGES/TP-2026-02-19-console-context-banner-dedupe-a130.md | 2026-02-19 |
+<<<<<<< feat/2026-02-19-onboarding-any-niche-acceptance-a131
+| 2026-02-19-onboarding-any-niche-acceptance-a131 | done | feat/2026-02-19-onboarding-any-niche-acceptance-a131 | /home/zhan/worktrees/2026-02-19-onboarding-any-niche-acceptance-a131 | docs/TASK_PACKAGES/TP-2026-02-19-onboarding-any-niche-acceptance-a131.md | 2026-02-19 |
+=======
 | 2026-02-19-onboarding-blueprint-v1-a131 | done | feat/2026-02-19-onboarding-blueprint-v1-a131 | /home/zhan/worktrees/2026-02-19-onboarding-blueprint-v1-a131 | docs/TASK_PACKAGES/TP-2026-02-19-onboarding-blueprint-v1-a131.md | 2026-02-19 |
+>>>>>>> main
