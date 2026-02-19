@@ -203,6 +203,65 @@ class ConsoleBranchListResponse(BaseModel):
     has_more: bool
 
 
+ConsoleMarketingCampaignStatus = Literal["draft", "ready", "executed", "paused"]
+ConsoleMarketingAudienceMode = Literal["branch_active_conversations"]
+
+
+class ConsoleMarketingCampaign(BaseModel):
+    id: UUID
+    client_id: UUID
+    branch_id: UUID
+    name: str
+    message_text: str
+    status: ConsoleMarketingCampaignStatus
+    audience_mode: ConsoleMarketingAudienceMode
+    preview_total: int = 0
+    last_preview_at: Optional[str] = None
+    executed_at: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConsoleMarketingCampaignCreateRequest(ConsoleRequestModel):
+    branch_id: UUID
+    name: StrictStr
+    message_text: StrictStr
+    audience_mode: ConsoleMarketingAudienceMode = "branch_active_conversations"
+
+
+class ConsoleMarketingCampaignCreateResponse(BaseModel):
+    campaign: ConsoleMarketingCampaign
+
+
+class ConsoleMarketingCampaignListResponse(BaseModel):
+    items: list[ConsoleMarketingCampaign]
+
+
+class ConsoleMarketingCampaignPreviewRequest(ConsoleRequestModel):
+    sample_limit: Optional[int] = 5
+
+
+class ConsoleMarketingCampaignPreviewResponse(BaseModel):
+    campaign_id: UUID
+    branch_id: UUID
+    audience_mode: ConsoleMarketingAudienceMode
+    estimated_recipients: int
+    sample_conversation_ids: list[UUID]
+    sample_recipient_jids: list[str]
+
+
+class ConsoleMarketingCampaignExecuteRequest(ConsoleRequestModel):
+    confirm_send: bool
+    max_recipients: Optional[int] = None
+
+
+class ConsoleMarketingCampaignExecuteResponse(BaseModel):
+    campaign_id: UUID
+    queued_count: int
+    skipped_count: int
+    status: Literal["queued", "skipped"]
+
+
 class ConsoleMacro(BaseModel):
     id: UUID
     scope: Literal["personal", "team"]

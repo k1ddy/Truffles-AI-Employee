@@ -14,8 +14,9 @@
   - Updated calendar UI for explicit no-show follow-up actions: `Связались` and `Перезаписали` without extra screens.
   - Added one-page operating contract table to calendar audit doc (`role -> action -> fact -> KPI`).
   - Passed targeted checks (`pytest`, `ruff`, `openapi --check`, calendar page lint).
+  - PR merged: https://github.com/k1ddy/Truffles-AI-Employee/pull/742 (`Calendar: finalize no-show follow-up fact contract`).
 - next:
-  - Open PR with evidence and merge after review.
+  - None (session closed after PR merge).
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-18-waveb-visit-fact-finish-a101.md
   - pytest -q truffles-api/tests/test_calendar_noshow_followup_router.py
@@ -23,4 +24,4 @@
   - ruff check truffles-api/app/routers/calendar.py truffles-api/tests/test_calendar_noshow_followup_router.py truffles-api/tests/test_console_openapi_calendar_contract.py
   - python3 truffles-api/scripts/generate_openapi.py --check
   - npm --prefix console-web run lint -- --file src/app/calendar/page.tsx
-- last_updated: 2026-02-18
+- last_updated: 2026-02-19T09:39:26Z

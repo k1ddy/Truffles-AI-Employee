@@ -905,15 +905,14 @@ function ContextBar({
                 )}
             </div>
             {showActiveScopeHint && (
-                <div className="flex min-w-[160px] flex-col gap-1">
-                    <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Режим</span>
+                <div className="flex min-w-[200px] items-end">
                     <span
-                        className="inline-flex w-fit rounded-full border border-sky-300/80 bg-sky-50 px-2 py-1 text-[12px] text-sky-900"
+                        className="inline-flex w-fit rounded-full border border-sky-300/80 bg-sky-50 px-2 py-1 text-[11px] font-medium text-sky-900"
                         data-testid="context-active-scope-hint"
-                        title="Показаны только активные сущности. Архивные и деактивированные доступны в Тенанты."
-                        aria-label="Показаны только активные сущности"
+                        title="Архив и деактивированные в Тенантах."
+                        aria-label="Режим данных: Активные"
                     >
-                        Показаны: активные
+                        Режим данных: Активные
                     </span>
                 </div>
             )}
@@ -968,7 +967,7 @@ function ContextHealthStrip({
         infoMessages.push({
             id: "all_branches_mode",
             tone: "info",
-            text: "Режим контекста: все активные филиалы.",
+            text: "Все активные филиалы в текущем контексте.",
         });
     }
     const messages = warningMessages.length > 0 ? warningMessages : infoMessages;
@@ -1472,7 +1471,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         <div className="min-h-screen bg-background">
             <div className="flex min-h-screen">
                 <aside
-                    className={`hidden ${navCollapsed ? "w-16" : "w-52"} flex-col border-r border-border/60 bg-card/40 px-2 py-3 transition-[width] duration-200 md:flex`}
+                    className={`hidden ${navCollapsed ? "w-16" : "w-52"} flex-col border-r border-border/60 bg-card/40 px-2 py-2 transition-[width] duration-200 md:flex`}
                 >
                     <div
                         className={`flex px-2 ${
@@ -1517,12 +1516,12 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                         </button>
                     </div>
                     {!navCollapsed && (
-                        <div className="mt-2 px-2 text-[11px] uppercase tracking-[0.2em] leading-tight text-muted-foreground">
+                        <div className="mt-1 px-2 text-[10px] uppercase tracking-[0.16em] leading-tight text-muted-foreground">
                             {ROLE_LABELS[role]}
                         </div>
                     )}
                     {ownerAdminView && !navCollapsed && (
-                        <div className="mt-3 px-2">
+                        <div className="mt-2 px-2">
                             <button
                                 type="button"
                                 onClick={() => setOwnerAdminAdvancedNav((prev) => !prev)}
@@ -1542,7 +1541,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                             </p>
                         </div>
                     )}
-                    <nav className={`mt-2 flex flex-col gap-1.5 text-sm font-medium ${navCollapsed ? "items-center" : ""}`}>
+                    <nav className={`mt-1 flex flex-col gap-1.5 text-sm font-medium ${navCollapsed ? "items-center" : ""}`}>
                         {navItems.map((item) => {
                             const isActive = isNavItemCurrent(pathname, item.href);
                             return (
@@ -1614,9 +1613,10 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                             <span
                                                 className="ml-2 inline-flex rounded-full border border-sky-300/80 bg-sky-50 px-2 py-0.5 text-[10px] text-sky-900"
                                                 data-testid="context-active-scope-hint-mobile"
-                                                title="Показаны только активные сущности. Архивные и деактивированные доступны в Тенанты."
+                                                title="Архив и деактивированные в Тенантах."
+                                                aria-label="Режим данных: Активные"
                                             >
-                                                Показаны: активные
+                                                Режим данных: Активные
                                             </span>
                                         )}
                                     </div>
