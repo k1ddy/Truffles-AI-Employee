@@ -8260,9 +8260,9 @@ def _run_llm_quality(args):
     if llm_api_key:
         args.llm_api_key = llm_api_key
         _export_openai_api_key(llm_api_key)
-    elif args.mode == "llm" and not args.scenarios_file:
+    elif args.mode == "llm":
         raise SystemExit(
-            "llm-quality: missing OPENAI_API_KEY for scenario generation "
+            "llm-quality: missing OPENAI_API_KEY for llm-mode run "
             "(checked --llm-api-key, OPENAI_API_KEY aliases in env, *.env candidates, container env)"
         )
 

@@ -4897,6 +4897,14 @@ def _detect_name_provided(message_text: str, *, client_slug: str | None) -> bool
     return bool(_validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug))
 
 
+def _detect_explicit_name_provided(message_text: str, *, client_slug: str | None) -> bool:
+    if not message_text:
+        return False
+    if classify_confirmation(message_text) in {"yes", "no"}:
+        return False
+    return bool(_validate_name_slot(message_text, allow_freeform=False, client_slug=client_slug))
+
+
 def _detect_phone_provided(message_text: str) -> bool:
     if not message_text:
         return False
@@ -8717,6 +8725,46 @@ async def _handle_webhook_payload(
                         policy_slot_state_validated = merged_policy_slots
                     else:
                         policy_validation_error = "collect_slot_missing"
+
+            if policy_validation_error is None and policy_tool_action == "calendar.list_slots":
+                merged_policy_slots = _merge_booking_plan_slots(
+                    booking_state=booking if isinstance(booking, dict) else None,
+                    plan_slots=policy_slot_state_validated,
+                )
+                booking_last_question = None
+                if isinstance(booking, dict):
+                    raw_last_question = booking.get("last_question")
+                    if isinstance(raw_last_question, str) and raw_last_question.strip():
+                        booking_last_question = raw_last_question.strip().casefold()
+                name_turn_signal = bool(
+                    (
+                        isinstance(policy_slot_state_validated.get("name"), str)
+                        and policy_slot_state_validated.get("name").strip()
+                    )
+                    or _detect_explicit_name_provided(
+                        message_text,
+                        client_slug=payload.client_slug,
+                    )
+                )
+                ready_for_name_commit = bool(
+                    _plan_has_complete_booking_slots(merged_policy_slots)
+                    and (expected_reply_type == EXPECTED_REPLY_NAME or booking_last_question == "name")
+                    and name_turn_signal
+                )
+                if ready_for_name_commit:
+                    policy_action = "fact"
+                    policy_tool_action = "calendar.book_slot"
+                    policy_slot_state_validated = merged_policy_slots
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "booking_transition_guard",
+                            "decision": "normalize_list_slots_to_book_slot",
+                            "reason": "name_commit_ready",
+                            "expected_reply_type": expected_reply_type,
+                            "booking_last_question": booking_last_question,
+                        },
+                    )
 
             if policy_validation_error is None:
                 policy_valid = True
