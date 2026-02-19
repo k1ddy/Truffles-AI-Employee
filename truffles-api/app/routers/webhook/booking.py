@@ -42,7 +42,7 @@ DATETIME_DURATION_CONTEXT_MARKERS = (
     "по времени",
     "duration",
 )
-DATETIME_DAYPART_STEMS = ("утр", "дн", "веч", "ноч")
+DATETIME_DAYPART_STEMS = ("утр", "дн", "веч", "ноч", "обед")
 _LAYOUT_SWAP_MAP = str.maketrans(
     {
         "q": "й",
@@ -957,6 +957,9 @@ def _is_datetime_grounded_for_prompt(
     from . import _legacy as legacy
 
     if legacy.TIME_PATTERN.search(value) or legacy.TIME_HOUR_PATTERN.search(value):
+        return True
+    normalized_value = legacy.normalize_for_matching(value)
+    if normalized_value and any(stem in normalized_value for stem in DATETIME_DAYPART_STEMS):
         return True
 
     parsed = _resolve_datetime_offline(value, client_slug=client_slug)
@@ -2514,6 +2517,7 @@ def _handle_booking_flow(
     booking: dict | None,
     expected_reply_type: str | None,
     expected_reply_matched: bool | None,
+    expected_reply_blocked_by_info: bool = False,
     basic_info_message: bool,
     session_memory_reset_reason: str | None,
     memory_expected_reply_type: str | None,
@@ -2659,6 +2663,110 @@ def _handle_booking_flow(
         )
         booking_state = booking if isinstance(booking, dict) else legacy._get_booking_context(context)
         booking_active = bool(booking_state.get("active"))
+
+        # If expected-reply/booking flow was bypassed for a manager request, do not
+        # re-enter booking prompts from active context; route to handoff instead.
+        if (
+            booking_active
+            and message_text
+            and legacy.is_human_request_message(message_text)
+            and not booking_wants_flow
+        ):
+            _, reused, telegram_sent = legacy._reuse_active_handover(
+                db=db,
+                conversation=conversation,
+                user=user,
+                message=message_text,
+                source="booking",
+                intent="human_request",
+            )
+            if reused:
+                bot_response = legacy.MSG_ESCALATED
+                result_message = (
+                    f"Booking human-request handoff reused, telegram={'sent' if telegram_sent else 'failed'}"
+                )
+            elif conversation.state == legacy.ConversationState.BOT_ACTIVE.value and routing.get(
+                "allow_handover_create", False
+            ):
+                record_escalation_metric("intent")
+                result = legacy.escalate_to_pending(
+                    db=db,
+                    conversation=conversation,
+                    user_message=message_text,
+                    trigger_type="intent",
+                    trigger_value="human_request",
+                )
+                if result.ok:
+                    handover = result.value
+                    telegram_sent = legacy.send_telegram_notification(
+                        db=db,
+                        handover=handover,
+                        conversation=conversation,
+                        user=user,
+                        message=message_text,
+                    )
+                    bot_response = legacy.MSG_ESCALATED
+                    result_message = (
+                        f"Booking human-request handoff, telegram={'sent' if telegram_sent else 'failed'}"
+                    )
+                else:
+                    bot_response = legacy.MSG_AI_ERROR
+                    result_message = "Booking human-request handoff failed"
+            else:
+                bot_response = legacy.MSG_PENDING_ESCALATION
+                result_message = "Booking human-request handoff skipped (already pending)"
+
+            legacy._record_decision_trace(
+                conversation,
+                {
+                    "stage": "booking",
+                    "decision": "human_request_handoff",
+                    "state": conversation.state,
+                    "booking_wants_flow": booking_wants_flow,
+                },
+            )
+            legacy._record_message_decision_meta(
+                saved_message,
+                action="escalate",
+                intent="human_request",
+                source="booking",
+                fast_intent=False,
+            )
+            bot_response, sent = send_and_save(bot_response)
+            if not sent:
+                result_message = f"{result_message}; response_send=failed"
+            log_timing("booking_ms", (time.monotonic() - booking_t0) * 1000)
+            booking_logged = True
+            db.commit()
+            return BookingFlowResult(
+                response=WebhookResponse(
+                    success=True,
+                    message=result_message,
+                    conversation_id=conversation.id,
+                    bot_response=bot_response,
+                ),
+                booking_t0=booking_t0,
+                booking_logged=booking_logged,
+            )
+
+        if booking_active and expected_reply_blocked_by_info and not booking_wants_flow:
+            legacy._record_decision_trace(
+                conversation,
+                {
+                    "stage": "booking",
+                    "decision": "defer_expected_reply_info_interrupt",
+                    "state": conversation.state,
+                },
+            )
+            if saved_message:
+                legacy._update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "booking_flow_deferred": True,
+                        "booking_flow_deferred_reason": "expected_reply_info_interrupt",
+                    },
+                )
+            return BookingFlowResult(response=None, booking_t0=booking_t0, booking_logged=booking_logged)
 
         if booking_active and legacy._is_booking_cancel(message_text, policy_pack=policy_pack):
             booking_state = {"active": False}
@@ -3028,6 +3136,37 @@ def _handle_booking_flow(
                 prompt,
                 message_text,
             )
+            if (
+                prompt
+                and booking_state.get("last_question") == "service"
+                and expected_reply_matched is not True
+                and isinstance(message_text, str)
+                and message_text.strip()
+            ):
+                normalized_invalid_choice = legacy.normalize_for_matching(message_text)
+                booking_like_signal = "запис" in normalized_invalid_choice
+                if not booking_like_signal:
+                    booking_like_signal = bool(
+                        legacy._extract_datetime(message_text, client_slug=client_slug)
+                    )
+                unknown_service_request_signal = any(
+                    marker in normalized_invalid_choice
+                    for marker in ("хочу", "можно", "нужн", "надо", "сдела", "подравн")
+                ) and not booking_like_signal
+                if unknown_service_request_signal:
+                    service_not_found_reply = legacy._format_service_not_found_reply(
+                        legacy.load_yaml_truth(client_slug)
+                    )
+                    if service_not_found_reply:
+                        prompt = service_not_found_reply
+                        legacy._record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "booking",
+                                "decision": "invalid_choice_service_not_found",
+                                "state": conversation.state,
+                            },
+                        )
             slot_lock_reprompt = bool(slot_lock_active and not booking_related and not booking_signal)
             if slot_lock_reprompt and prompt:
                 if expected_reply_type == legacy.EXPECTED_REPLY_SERVICE:

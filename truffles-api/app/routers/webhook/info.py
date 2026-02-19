@@ -65,8 +65,15 @@ def _has_token_prefix(tokens: list[str], prefix: str) -> bool:
     return any(token.startswith(prefix) for token in tokens)
 
 
+def _has_anchor_prefix(tokens: list[str], prefix: str) -> bool:
+    """Anchor matching must avoid false positives on very short stems like 'до' in 'долгими'."""
+    if len(prefix) <= 2:
+        return any(token == prefix for token in tokens)
+    return any(token.startswith(prefix) for token in tokens)
+
+
 def _anchor_group_hit(tokens: list[str], group: tuple[str, ...]) -> bool:
-    return all(_has_token_prefix(tokens, prefix) for prefix in group)
+    return all(_has_anchor_prefix(tokens, prefix) for prefix in group)
 
 
 def _count_anchor_hits(tokens: list[str], groups: list[tuple[str, ...]]) -> int:
