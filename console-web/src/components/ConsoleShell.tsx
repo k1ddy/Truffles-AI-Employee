@@ -46,6 +46,7 @@ const HEALTH_INCIDENT_REFRESH_TIMEOUT_MS = 1500;
 const OWNER_ADMIN_PRIMARY_NAV_TEST_IDS = new Set<string>([
     "nav-cases",
     "nav-calendar",
+    "nav-marketing",
     "nav-ops",
     "nav-business",
     "nav-data-trust",
@@ -103,6 +104,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: "Интеграции", href: "/integrations", section: "integrations", action: "read", testId: "nav-integrations" },
     { label: "Заявки", href: "/", section: "inbox", action: "read", testId: "nav-cases" },
     { label: "Записи", href: "/calendar", section: "calendar", action: "read", testId: "nav-calendar" },
+    { label: "Маркетинг", href: "/marketing", section: "marketing", action: "read", testId: "nav-marketing" },
     { label: "Знания", href: "/knowledge", section: "knowledge", action: "read", testId: "nav-knowledge" },
     { label: "Команда", href: "/team", section: "team", action: "read", testId: "nav-team" },
     { label: "Статус", href: "/ops", section: "ops", action: "read", testId: "nav-ops" },
@@ -133,6 +135,7 @@ const CONTEXT_AWARE_QUERY_KEY_PREFIXES = [
     "insights-",
     "integrations-",
     "knowledge-",
+    "marketing-",
     "learning-candidates",
     "membership-",
     "messages",
@@ -215,6 +218,14 @@ const NAV_ICONS: Partial<Record<ConsoleSection, ReactNode>> = {
         <NavIcon>
             <rect x="4" y="5" width="16" height="15" rx="2" />
             <path d="M8 3v4M16 3v4M4 9h16" />
+        </NavIcon>
+    ),
+    marketing: (
+        <NavIcon>
+            <path d="M4 11l13-6v14L4 13z" />
+            <path d="M17 10h3" />
+            <path d="M8 14v4" />
+            <path d="M6 18h4" />
         </NavIcon>
     ),
     knowledge: (

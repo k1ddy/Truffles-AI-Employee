@@ -76,6 +76,7 @@ export type ConsoleSection =
     | "knowledge"
     | "team"
     | "calendar"
+    | "marketing"
     | "insights"
     | "business"
     | "subscription"
@@ -103,6 +104,10 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
     calendar: {
         read: ["platform_admin", "owner", "admin", "manager", "viewer"],
         write: ["platform_admin", "owner", "admin", "manager"],
+    },
+    marketing: {
+        read: ["platform_admin", "owner", "admin"],
+        write: ["platform_admin", "owner", "admin"],
     },
     insights: {
         read: ["platform_admin", "owner", "admin"],
@@ -782,6 +787,71 @@ export type KnowledgeRollbackResponse = {
 export type LearningCandidate = components["schemas"]["LearningCandidate"];
 export type LearningCandidateListResponse = components["schemas"]["LearningCandidateListResponse"];
 export type LearningCandidateActionResponse = components["schemas"]["LearningCandidateActionResponse"];
+export type MarketingCampaignStatus = "draft" | "ready" | "executed" | "paused";
+export type MarketingDeliveryStatus = "queued" | "sent" | "failed" | "replied";
+export type MarketingAudienceMode = "branch_active_conversations";
+export type MarketingCampaign = {
+    id: string;
+    client_id: string;
+    branch_id: string;
+    name: string;
+    message_text: string;
+    status: MarketingCampaignStatus;
+    audience_mode: MarketingAudienceMode;
+    preview_total: number;
+    last_preview_at?: string | null;
+    executed_at?: string | null;
+    created_at?: string | null;
+    updated_at?: string | null;
+};
+export type MarketingCampaignListResponse = { items: MarketingCampaign[] };
+export type MarketingCampaignCreateRequest = {
+    branch_id: string;
+    name: string;
+    message_text: string;
+    audience_mode?: MarketingAudienceMode;
+};
+export type MarketingCampaignCreateResponse = { campaign: MarketingCampaign };
+export type MarketingCampaignPreviewRequest = { sample_limit?: number };
+export type MarketingCampaignPreviewResponse = {
+    campaign_id: string;
+    branch_id: string;
+    audience_mode: MarketingAudienceMode;
+    estimated_recipients: number;
+    sample_conversation_ids: string[];
+    sample_recipient_jids: string[];
+};
+export type MarketingCampaignExecuteRequest = { confirm_send: boolean; max_recipients?: number | null };
+export type MarketingCampaignExecuteResponse = {
+    campaign_id: string;
+    queued_count: number;
+    skipped_count: number;
+    status: "queued" | "skipped";
+};
+export type MarketingDeliverySample = {
+    delivery_id: string;
+    conversation_id?: string | null;
+    recipient_jid?: string | null;
+    status: MarketingDeliveryStatus;
+    outbox_status?: string | null;
+    last_error?: string | null;
+    updated_at?: string | null;
+};
+export type MarketingCampaignDiagnosticsResponse = {
+    campaign_id: string;
+    queued_count: number;
+    sent_count: number;
+    failed_count: number;
+    replied_count: number;
+    total_count: number;
+    sample_failed: MarketingDeliverySample[];
+};
+export type MarketingCampaignRetryRequest = { confirm_retry: boolean; limit?: number | null };
+export type MarketingCampaignRetryResponse = {
+    campaign_id: string;
+    retried_count: number;
+    skipped_count: number;
+};
 
 // Query params
 export type ListCasesParams = operations["listCases"]["parameters"]["query"];
@@ -799,6 +869,7 @@ export type ListReferencePacksParams = operations["listAdminReferencePacks"]["pa
 export type ListOnboardingBlueprintsParams = { domain_slug?: string };
 export type ListOpsJobsParams = operations["listOpsJobs"]["parameters"]["query"];
 export type ListBranchChangesParams = operations["listAdminBranchChanges"]["parameters"]["query"];
+export type ListMarketingCampaignsParams = { branch_id?: string; status?: MarketingCampaignStatus };
 export type BranchGoLiveDecisionRequest = { reason: string };
 export type BranchGoLiveWaiverRequest = { reason: string; ttl_hours: number };
 export type OnboardingBlueprintQuestionTemplate = {
@@ -952,6 +1023,21 @@ export const adminApi = {
         apiClient.get<components["schemas"]["IntegrationsListResponse"]>("/admin/integrations", { params }),
     listProviderLifecycle: (params?: ListProviderLifecycleParams) =>
         apiClient.get<components["schemas"]["ProviderLifecycleListResponse"]>("/admin/provider-lifecycle", { params }),
+    listMarketingCampaigns: (params?: ListMarketingCampaignsParams) =>
+        apiClient.get<MarketingCampaignListResponse>("/admin/marketing/campaigns", { params }),
+    createMarketingCampaign: (data: MarketingCampaignCreateRequest) =>
+        apiClient.post<MarketingCampaignCreateResponse>("/admin/marketing/campaigns", data),
+    previewMarketingCampaign: (campaignId: string, data?: MarketingCampaignPreviewRequest) =>
+        apiClient.post<MarketingCampaignPreviewResponse>(`/admin/marketing/campaigns/${campaignId}/preview`, data ?? {}),
+    executeMarketingCampaign: (campaignId: string, data: MarketingCampaignExecuteRequest) =>
+        apiClient.post<MarketingCampaignExecuteResponse>(`/admin/marketing/campaigns/${campaignId}/execute`, data),
+    getMarketingCampaignDiagnostics: (campaignId: string, params?: { sample_limit?: number }) =>
+        apiClient.get<MarketingCampaignDiagnosticsResponse>(
+            `/admin/marketing/campaigns/${campaignId}/diagnostics`,
+            { params },
+        ),
+    retryFailedMarketingCampaignDeliveries: (campaignId: string, data: MarketingCampaignRetryRequest) =>
+        apiClient.post<MarketingCampaignRetryResponse>(`/admin/marketing/campaigns/${campaignId}/retry-failed`, data),
     reconcileIntegrationBranch: (branchId: string, data: IntegrationBranchActionRequest) =>
         apiClient.post<IntegrationBranchActionResponse>(`/admin/integrations/${branchId}/reconcile`, data),
     listMemberships: (params?: ListMembershipsParams) =>

@@ -45,7 +45,17 @@ from app.logging_config import (
     record_policy_count,
     start_span,
 )
-from app.models import Branch, Client, ClientSettings, Conversation, Handover, Message, User
+from app.models import (
+    Branch,
+    Client,
+    ClientSettings,
+    Conversation,
+    Handover,
+    MarketingCampaign,
+    MarketingCampaignDelivery,
+    Message,
+    User,
+)
 from app.ports.messaging import MessageOptions
 from app.routers.webhook.booking import (
     BOOKING_SLOT_ORDER,
@@ -2675,6 +2685,78 @@ def _ensure_rag_meta_defaults(message: Message | None) -> None:
     if "router_skipped_reason" not in decision_meta:
         updates["router_skipped_reason"] = "not_run"
     _update_message_decision_metadata(message, updates)
+
+
+MARKETING_REPLY_CONTEXT_LOOKBACK_DAYS = 30
+
+
+def _maybe_attach_marketing_reply_context(
+    db: Session,
+    *,
+    conversation: Conversation | None,
+    saved_message: Message | None,
+    now: datetime,
+) -> dict[str, Any] | None:
+    if not conversation or not saved_message:
+        return None
+
+    lookback_start = now - timedelta(days=MARKETING_REPLY_CONTEXT_LOOKBACK_DAYS)
+    row = (
+        db.query(MarketingCampaignDelivery, MarketingCampaign)
+        .join(MarketingCampaign, MarketingCampaign.id == MarketingCampaignDelivery.campaign_id)
+        .filter(
+            MarketingCampaignDelivery.client_id == conversation.client_id,
+            MarketingCampaignDelivery.conversation_id == conversation.id,
+            MarketingCampaignDelivery.created_at >= lookback_start,
+        )
+        .order_by(MarketingCampaignDelivery.created_at.desc(), MarketingCampaignDelivery.id.desc())
+        .first()
+    )
+    if not row:
+        return None
+
+    delivery, campaign = row
+    if campaign.client_id != conversation.client_id:
+        return None
+
+    status_before = (delivery.status or "queued").strip().lower() or "queued"
+    if status_before != "replied":
+        delivery.status = "replied"
+        delivery.updated_at = now
+        db.add(delivery)
+
+    marketing_context = {
+        "campaign_id": str(campaign.id),
+        "campaign_name": campaign.name,
+        "delivery_id": str(delivery.id),
+        "status_before": status_before,
+        "attached_at": now.isoformat(),
+    }
+
+    _update_message_decision_metadata(
+        saved_message,
+        {
+            "marketing_reply_context": True,
+            "marketing_campaign_id": str(campaign.id),
+            "marketing_campaign_name": campaign.name,
+            "marketing_delivery_id": str(delivery.id),
+            "marketing_delivery_status_before": status_before,
+        },
+    )
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "marketing_reply_context",
+            "decision": "linked",
+            "campaign_id": str(campaign.id),
+            "delivery_id": str(delivery.id),
+            "status_before": status_before,
+        },
+    )
+    context = _get_conversation_context(conversation)
+    context["marketing_context"] = marketing_context
+    _set_conversation_context(conversation, context)
+    return marketing_context
 
 
 def _resolve_backlog_language(message: Message | None) -> str:
@@ -6138,6 +6220,14 @@ async def _handle_webhook_payload(
             _update_message_decision_metadata(saved_message, dedup_meta_updates)
         if trace_id and saved_message:
             _update_message_decision_metadata(saved_message, {"trace_id": trace_id})
+        marketing_context = _maybe_attach_marketing_reply_context(
+            db,
+            conversation=conversation,
+            saved_message=saved_message,
+            now=datetime.now(timezone.utc),
+        )
+        if marketing_context:
+            timing_context["marketing_campaign_id"] = marketing_context.get("campaign_id")
 
         if enqueue_only:
             return await _handle_enqueue_only_accept(

@@ -2494,6 +2494,96 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/marketing/campaigns/{campaign_id}/diagnostics:
+    get:
+      tags:
+      - console
+      summary: Get Marketing Campaign Diagnostics
+      operationId: get_marketing_campaign_diagnostics_console_v1_admin_marketing_campaigns__campaign_id__diagnostics_get
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Campaign Id
+      - name: sample_limit
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Sample Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleMarketingCampaignDiagnosticsResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/marketing/campaigns/{campaign_id}/retry-failed:
+    post:
+      tags:
+      - console
+      summary: Retry Failed Marketing Campaign Deliveries
+      operationId: retry_failed_marketing_campaign_deliveries_console_v1_admin_marketing_campaigns__campaign_id__retry_failed_post
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Campaign Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleMarketingCampaignRetryRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleMarketingCampaignRetryResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/provider-lifecycle:
     get:
       tags:
@@ -8212,6 +8302,42 @@ components:
       required:
       - campaign
       title: ConsoleMarketingCampaignCreateResponse
+    ConsoleMarketingCampaignDiagnosticsResponse:
+      properties:
+        campaign_id:
+          type: string
+          format: uuid
+          title: Campaign Id
+        queued_count:
+          type: integer
+          title: Queued Count
+        sent_count:
+          type: integer
+          title: Sent Count
+        failed_count:
+          type: integer
+          title: Failed Count
+        replied_count:
+          type: integer
+          title: Replied Count
+        total_count:
+          type: integer
+          title: Total Count
+        sample_failed:
+          items:
+            $ref: '#/components/schemas/ConsoleMarketingDeliverySample'
+          type: array
+          title: Sample Failed
+      type: object
+      required:
+      - campaign_id
+      - queued_count
+      - sent_count
+      - failed_count
+      - replied_count
+      - total_count
+      - sample_failed
+      title: ConsoleMarketingCampaignDiagnosticsResponse
     ConsoleMarketingCampaignExecuteRequest:
       properties:
         confirm_send:
@@ -8310,6 +8436,85 @@ components:
       - sample_conversation_ids
       - sample_recipient_jids
       title: ConsoleMarketingCampaignPreviewResponse
+    ConsoleMarketingCampaignRetryRequest:
+      properties:
+        confirm_retry:
+          type: boolean
+          title: Confirm Retry
+        limit:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Limit
+          default: 100
+      additionalProperties: false
+      type: object
+      required:
+      - confirm_retry
+      title: ConsoleMarketingCampaignRetryRequest
+    ConsoleMarketingCampaignRetryResponse:
+      properties:
+        campaign_id:
+          type: string
+          format: uuid
+          title: Campaign Id
+        retried_count:
+          type: integer
+          title: Retried Count
+        skipped_count:
+          type: integer
+          title: Skipped Count
+      type: object
+      required:
+      - campaign_id
+      - retried_count
+      - skipped_count
+      title: ConsoleMarketingCampaignRetryResponse
+    ConsoleMarketingDeliverySample:
+      properties:
+        delivery_id:
+          type: string
+          format: uuid
+          title: Delivery Id
+        conversation_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Conversation Id
+        recipient_jid:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Recipient Jid
+        status:
+          type: string
+          enum:
+          - queued
+          - sent
+          - failed
+          - replied
+          title: Status
+        outbox_status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Outbox Status
+        last_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Error
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+      type: object
+      required:
+      - delivery_id
+      - status
+      title: ConsoleMarketingDeliverySample
     ConsoleMeResponse:
       properties:
         agent:
