@@ -14353,6 +14353,8 @@ _ONBOARDING_HARD_GATE_DEFAULT_CODES = {
     "delivery:backlog_critical",
     "delivery:failed_24h_critical",
     "delivery:stale_processing_critical",
+    "delivery:provider_billing_blocked_critical",
+    "delivery:provider_auth_critical",
     "traffic:whatsapp_capability_mismatch",
     "traffic:telegram_capability_mismatch",
 }
@@ -14443,6 +14445,61 @@ def _project_hard_gate_row(
     return projected
 
 
+def _delivery_blockers_from_row(row):
+    return [
+        code
+        for code in (row.get("readiness_blocker_codes") or [])
+        if isinstance(code, str) and code.startswith("delivery:")
+    ]
+
+
+def _delivery_critical_blockers_from_row(row):
+    return [code for code in _delivery_blockers_from_row(row) if code.endswith("_critical")]
+
+
+def _delivery_reason_totals(rows):
+    totals = {}
+    for row in rows:
+        profile = row.get("delivery_failure_profile")
+        if not isinstance(profile, dict):
+            continue
+        for key, raw in profile.items():
+            if key in {"window_hours", "total_failed_24h"}:
+                continue
+            try:
+                value = int(raw or 0)
+            except Exception:
+                value = 0
+            totals[key] = int(totals.get(key, 0)) + value
+    return totals
+
+
+def _delivery_remediation_actions_for_row(row):
+    actions = []
+    blockers = set(_delivery_blockers_from_row(row))
+    profile = row.get("delivery_failure_profile") or {}
+    primary_reason = row.get("delivery_primary_reason_code")
+
+    if "delivery:stale_processing_critical" in blockers or int(profile.get("stale_processing") or 0) > 0:
+        actions.append("release_stale_processing_queue")
+    if "delivery:provider_billing_blocked_critical" in blockers or primary_reason == "provider_billing_blocked":
+        actions.append("resolve_provider_billing_block")
+    if "delivery:provider_auth_critical" in blockers or primary_reason == "provider_auth":
+        actions.append("rotate_provider_credentials")
+    if blockers:
+        actions.append("run_outbox_process_and_review_failed")
+        actions.append("classify_delivery_errors_and_apply_remediation")
+
+    unique = []
+    seen = set()
+    for action in actions:
+        if action in seen:
+            continue
+        seen.add(action)
+        unique.append(action)
+    return unique
+
+
 def _resolve_diagnose_container(explicit_name):
     if explicit_name:
         return explicit_name
@@ -14472,12 +14529,13 @@ def _run_onboarding_fleet_container(payload, *, container_name):
     payload_literal = json.dumps(payload_json)
     script = f"""python - <<'PY'
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from app.database import SessionLocal
-from app.models import Branch, Client, ClientCapability, ClientOnboardingContract, ReferencePack
+from app.models import Branch, Client, ClientCapability, ClientOnboardingContract, OutboxMessage, ReferencePack
 from app.services.onboarding_state import build_onboarding_scorecard
+from app.services.provider_error_policy import classify_provider_error
 from app.services.reference_pack_integrity import (
     REFERENCE_PACK_SCHEMA_VERSION,
     build_reference_pack_metadata,
@@ -14494,6 +14552,9 @@ confirm_payment = bool(payload.get("confirm_payment", False))
 ensure_contract = bool(payload.get("ensure_contract", True))
 sync_reference_pack = bool(payload.get("sync_reference_pack", False))
 hard_gate_codes = set(payload.get("hard_gate_codes") or [])
+delivery_window_hours = int(payload.get("delivery_window_hours") or 24)
+if delivery_window_hours <= 0:
+    delivery_window_hours = 24
 
 session = SessionLocal()
 try:
@@ -14631,6 +14692,75 @@ try:
             act.append("reference_pack_integrity_synced")
         return record, act
 
+    def classify_delivery_reason(last_error):
+        normalized = str(last_error or "").strip().lower()
+        if not normalized:
+            return "unknown", "Unknown delivery error"
+        if normalized.startswith("stale_processing"):
+            return "stale_processing", "Stale processing"
+        classified = classify_provider_error(last_error)
+        if classified.kind == "billing_blocked":
+            return "provider_billing_blocked", classified.incident_reason_label
+        if classified.kind == "auth":
+            return "provider_auth", classified.incident_reason_label
+        if classified.kind == "rate_limited":
+            return "provider_rate_limited", classified.incident_reason_label
+        if classified.kind == "unavailable":
+            return "provider_unavailable", classified.incident_reason_label
+        return "unknown", classified.incident_reason_label
+
+    def collect_delivery_failure_profile(branch):
+        delivery_cutoff = now - timedelta(hours=delivery_window_hours)
+        failed_rows = (
+            session.query(OutboxMessage.last_error)
+            .filter(
+                OutboxMessage.client_id == branch.client_id,
+                OutboxMessage.branch_id == branch.id,
+                OutboxMessage.status == "FAILED",
+                OutboxMessage.updated_at >= delivery_cutoff,
+            )
+            .all()
+        )
+        counts = {{
+            "window_hours": delivery_window_hours,
+            "total_failed_24h": len(failed_rows),
+            "stale_processing": 0,
+            "provider_billing_blocked": 0,
+            "provider_auth": 0,
+            "provider_rate_limited": 0,
+            "provider_unavailable": 0,
+            "unknown": 0,
+        }}
+        labels = {{}}
+        for row in failed_rows:
+            if isinstance(row, (tuple, list)):
+                last_error = row[0] if row else None
+            else:
+                last_error = getattr(row, "last_error", None)
+            reason_code, reason_label = classify_delivery_reason(last_error)
+            counts[reason_code] = int(counts.get(reason_code, 0)) + 1
+            if reason_label and reason_code not in labels:
+                labels[reason_code] = reason_label
+
+        primary_reason_code = "unknown"
+        primary_reason_label = labels.get("unknown") or "Unknown delivery error"
+        primary_reason_count = int(counts.get("unknown", 0))
+        for candidate in [
+            "provider_billing_blocked",
+            "provider_auth",
+            "provider_unavailable",
+            "provider_rate_limited",
+            "stale_processing",
+            "unknown",
+        ]:
+            candidate_count = int(counts.get(candidate, 0))
+            if candidate_count > primary_reason_count:
+                primary_reason_code = candidate
+                primary_reason_label = labels.get(candidate) or candidate
+                primary_reason_count = candidate_count
+
+        return counts, primary_reason_code, primary_reason_label, primary_reason_count
+
     for branch in branches:
         client = session.query(Client).filter(Client.id == branch.client_id).first()
         cap = latest_capability(branch)
@@ -14764,6 +14894,12 @@ try:
             for code in hard_gate_candidates
             if isinstance(code, str) and (code.startswith("go_no_go:") or code in hard_gate_codes)
         ]
+        (
+            delivery_failure_profile,
+            delivery_primary_reason_code,
+            delivery_primary_reason_label,
+            delivery_primary_reason_count,
+        ) = collect_delivery_failure_profile(branch)
         for code in missing:
             missing_counts[code] = int(missing_counts.get(code, 0)) + 1
 
@@ -14788,6 +14924,10 @@ try:
                 "readiness_status": readiness_status,
                 "readiness_blocker_codes": readiness_blocker_codes,
                 "hard_gate_blockers": hard_gate_blockers,
+                "delivery_failure_profile": delivery_failure_profile,
+                "delivery_primary_reason_code": delivery_primary_reason_code,
+                "delivery_primary_reason_label": delivery_primary_reason_label,
+                "delivery_primary_reason_count": delivery_primary_reason_count,
                 "cap_domain": cap_domain,
                 "contract_domain": contract_domain,
                 "resolved_domain": effective_domain,
@@ -14818,6 +14958,16 @@ try:
         for row in active_rows
         if row.get("pipeline_blocked") is True
     ]
+    active_delivery_critical = [
+        row
+        for row in active_rows
+        if any(
+            isinstance(code, str)
+            and code.startswith("delivery:")
+            and code.endswith("_critical")
+            for code in (row.get("readiness_blocker_codes") or [])
+        )
+    ]
     summary = {{
         "mode": mode,
         "active_only": active_only,
@@ -14826,6 +14976,7 @@ try:
         "active_not_ready": len(active_not_ready),
         "active_sla_fail": len(active_sla_fail),
         "active_pipeline_blocked": len(active_pipeline_blocked),
+        "active_delivery_critical": len(active_delivery_critical),
         "active_missing_codes": missing_counts,
         "changed_branches": len(actions),
         "unresolved_branches": len(unresolved),
@@ -14845,6 +14996,7 @@ try:
                 "active_not_ready_rows": active_not_ready,
                 "active_sla_fail_rows": active_sla_fail,
                 "active_pipeline_blocked_rows": active_pipeline_blocked,
+                "active_delivery_critical_rows": active_delivery_critical,
                 "actions": actions,
                 "unresolved": unresolved,
             }},
@@ -15118,6 +15270,100 @@ def _run_onboarding_hard_gate_rollout(args):
     if args.fail_on_blocked_active and active_blocked_rows:
         raise SystemExit(
             f"onboarding-hard-gate-rollout: active branches blocked ({len(active_blocked_rows)})"
+        )
+
+
+def _parse_onboarding_delivery_stabilize_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="ops/diagnose.py onboarding-delivery-stabilize",
+        description="Summarize delivery critical blockers and remediation actions for onboarding rollout.",
+    )
+    parser.add_argument(
+        "--window-hours",
+        type=int,
+        default=24,
+        help="Delivery failure aggregation window in hours (default: 24).",
+    )
+    parser.add_argument(
+        "--hard-gate-codes",
+        default=None,
+        help="CSV hard-gate blocker codes; default is readiness hard-gate baseline set.",
+    )
+    parser.add_argument(
+        "--include-inactive",
+        action="store_true",
+        help="Include inactive branches in report (default: active only).",
+    )
+    parser.add_argument(
+        "--fail-on-critical",
+        action="store_true",
+        help="Exit non-zero when active branches have delivery critical blockers.",
+    )
+    parser.add_argument("--container-name", default=None)
+    parser.add_argument("--json", action="store_true")
+    return parser.parse_args(argv)
+
+
+def _run_onboarding_delivery_stabilize(args):
+    container_name = _resolve_diagnose_container(args.container_name)
+    hard_gate_codes = (
+        set(_parse_csv_values(args.hard_gate_codes))
+        if args.hard_gate_codes
+        else set(_ONBOARDING_HARD_GATE_DEFAULT_CODES)
+    )
+    if not hard_gate_codes:
+        hard_gate_codes = set(_ONBOARDING_HARD_GATE_DEFAULT_CODES)
+    payload = {
+        "mode": "check",
+        "active_only": not args.include_inactive,
+        "apply_changes": False,
+        "hard_gate_codes": sorted(hard_gate_codes),
+        "delivery_window_hours": max(1, int(args.window_hours or 24)),
+    }
+    result = _run_onboarding_fleet_container(payload, container_name=container_name)
+    rows = [dict(row) for row in (result.get("rows") or [])]
+    for row in rows:
+        row["delivery_blockers"] = _delivery_blockers_from_row(row)
+        row["delivery_critical_blockers"] = _delivery_critical_blockers_from_row(row)
+        row["delivery_remediation_actions"] = _delivery_remediation_actions_for_row(row)
+
+    active_rows = [row for row in rows if row.get("is_active")]
+    active_critical_rows = [row for row in active_rows if row.get("delivery_critical_blockers")]
+    active_with_failures = [
+        row
+        for row in active_rows
+        if int((row.get("delivery_failure_profile") or {}).get("total_failed_24h") or 0) > 0
+    ]
+    summary = {
+        "window_hours": max(1, int(args.window_hours or 24)),
+        "hard_gate_codes": sorted(hard_gate_codes),
+        "total_branches": len(rows),
+        "active_branches": len(active_rows),
+        "active_delivery_critical": len(active_critical_rows),
+        "active_with_failed_24h": len(active_with_failures),
+        "active_reason_totals": _delivery_reason_totals(active_rows),
+    }
+    payload_out = {
+        "summary": summary,
+        "rows": rows,
+        "active_delivery_critical_rows": active_critical_rows,
+        "active_with_failed_24h_rows": active_with_failures,
+        "fleet_summary": result.get("summary") or {},
+    }
+    if args.json:
+        print(json.dumps(payload_out, ensure_ascii=False))
+    else:
+        print(json.dumps(summary, ensure_ascii=False))
+        for row in active_critical_rows:
+            print(
+                f"- {row.get('client_slug')}/{row.get('branch_slug')} "
+                f"critical={','.join(row.get('delivery_critical_blockers') or [])} "
+                f"reason={row.get('delivery_primary_reason_code')} "
+                f"actions={','.join(row.get('delivery_remediation_actions') or [])}"
+            )
+    if args.fail_on_critical and active_critical_rows:
+        raise SystemExit(
+            f"onboarding-delivery-stabilize: active branches with delivery critical blockers ({len(active_critical_rows)})"
         )
 
 
@@ -17045,6 +17291,9 @@ if len(sys.argv) > 1 and sys.argv[1] == "onboarding-fleet-remediate":
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "onboarding-hard-gate-rollout":
     _run_onboarding_hard_gate_rollout(_parse_onboarding_hard_gate_rollout_args(sys.argv[2:]))
+    raise SystemExit(0)
+if len(sys.argv) > 1 and sys.argv[1] == "onboarding-delivery-stabilize":
+    _run_onboarding_delivery_stabilize(_parse_onboarding_delivery_stabilize_args(sys.argv[2:]))
     raise SystemExit(0)
 if len(sys.argv) > 1 and sys.argv[1] == "onboarding-quality-smoke":
     _run_onboarding_quality_smoke(_parse_onboarding_quality_smoke_args(sys.argv[2:]))

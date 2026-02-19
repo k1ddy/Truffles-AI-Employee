@@ -540,3 +540,51 @@ def test_onboarding_scorecard_pipeline_reflects_sla_warning_status():
     assert sla_stage.status == "warn"
     assert "handover_sla_warning" in sla_stage.blockers
     assert "review_pending_handovers" in scorecard.operational_pipeline.next_actions
+
+
+@pytest.mark.parametrize(
+    ("last_error", "expected"),
+    [
+        ("stale_processing:max_attempts", "stale_processing"),
+        ("ChatFlow billing blocked: plan renewal required [CHATFLOW_BILLING_BLOCKED]", "provider_billing_blocked"),
+        ("HTTP 401 unauthorized", "provider_auth"),
+        ("upstream 502 bad gateway", "provider_unavailable"),
+        ("", "unknown"),
+    ],
+)
+def test_classify_delivery_failure_reason(last_error, expected):
+    assert onboarding_state._classify_delivery_failure_reason(last_error) == expected
+
+
+def _build_delivery_dimension(*, backlog_total: int, failed_errors: list[str]):
+    db = Mock()
+    backlog_query = Mock()
+    backlog_query.filter.return_value.scalar.return_value = backlog_total
+    failed_query = Mock()
+    failed_query.filter.return_value.all.return_value = [
+        SimpleNamespace(last_error=error) for error in failed_errors
+    ]
+    db.query.side_effect = [backlog_query, failed_query]
+    branch = SimpleNamespace(client_id="client-1", id="branch-1")
+    return onboarding_state._build_delivery_health_readiness_dimension(db, branch)
+
+
+def test_delivery_dimension_adds_provider_billing_blocker_and_actions():
+    dimension = _build_delivery_dimension(
+        backlog_total=0,
+        failed_errors=["ChatFlow billing blocked: plan renewal required [CHATFLOW_BILLING_BLOCKED]"],
+    )
+    assert dimension.status == "fail"
+    assert "delivery:provider_billing_blocked_critical" in dimension.blocker_codes
+    assert "resolve_provider_billing_block" in dimension.next_action_codes
+    assert "classify_delivery_errors_and_apply_remediation" in dimension.next_action_codes
+
+
+def test_delivery_dimension_adds_provider_auth_blocker_and_actions():
+    dimension = _build_delivery_dimension(
+        backlog_total=0,
+        failed_errors=["HTTP 401 unauthorized"],
+    )
+    assert dimension.status == "fail"
+    assert "delivery:provider_auth_critical" in dimension.blocker_codes
+    assert "rotate_provider_credentials" in dimension.next_action_codes

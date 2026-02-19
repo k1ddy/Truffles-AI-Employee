@@ -271,3 +271,71 @@ def test_onboarding_pack_quality_helpers_produce_pass_for_complete_payload():
     assert compile_data["status"] == "pass"
     assert quality_data["status"] == "pass"
     assert quality_data["missing_fields_count"] == 0
+
+
+def test_delivery_helpers_collect_critical_blockers_and_actions():
+    row = {
+        "readiness_blocker_codes": [
+            "delivery:stale_processing_critical",
+            "delivery:provider_billing_blocked_critical",
+            "go_no_go:payment_confirmed",
+        ],
+        "delivery_failure_profile": {
+            "total_failed_24h": 9,
+            "stale_processing": 3,
+            "provider_billing_blocked": 2,
+            "provider_auth": 0,
+        },
+        "delivery_primary_reason_code": "provider_billing_blocked",
+    }
+
+    blockers = _module._delivery_blockers_from_row(row)
+    critical = _module._delivery_critical_blockers_from_row(row)
+    actions = _module._delivery_remediation_actions_for_row(row)
+
+    assert blockers == [
+        "delivery:stale_processing_critical",
+        "delivery:provider_billing_blocked_critical",
+    ]
+    assert critical == blockers
+    assert "release_stale_processing_queue" in actions
+    assert "resolve_provider_billing_block" in actions
+    assert "classify_delivery_errors_and_apply_remediation" in actions
+
+
+def test_delivery_reason_totals_aggregate_profiles():
+    rows = [
+        {
+            "delivery_failure_profile": {
+                "window_hours": 24,
+                "total_failed_24h": 5,
+                "stale_processing": 2,
+                "provider_billing_blocked": 1,
+                "provider_auth": 1,
+                "provider_rate_limited": 1,
+                "provider_unavailable": 0,
+                "unknown": 0,
+            }
+        },
+        {
+            "delivery_failure_profile": {
+                "window_hours": 24,
+                "total_failed_24h": 3,
+                "stale_processing": 0,
+                "provider_billing_blocked": 0,
+                "provider_auth": 0,
+                "provider_rate_limited": 1,
+                "provider_unavailable": 1,
+                "unknown": 1,
+            }
+        },
+    ]
+
+    totals = _module._delivery_reason_totals(rows)
+
+    assert totals["stale_processing"] == 2
+    assert totals["provider_billing_blocked"] == 1
+    assert totals["provider_auth"] == 1
+    assert totals["provider_rate_limited"] == 2
+    assert totals["provider_unavailable"] == 1
+    assert totals["unknown"] == 1

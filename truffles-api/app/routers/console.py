@@ -1513,6 +1513,8 @@ _ONBOARDING_READINESS_HARD_GATE_DEFAULT_CODES = {
     "delivery:backlog_critical",
     "delivery:failed_24h_critical",
     "delivery:stale_processing_critical",
+    "delivery:provider_billing_blocked_critical",
+    "delivery:provider_auth_critical",
     "traffic:whatsapp_capability_mismatch",
     "traffic:telegram_capability_mismatch",
 }
