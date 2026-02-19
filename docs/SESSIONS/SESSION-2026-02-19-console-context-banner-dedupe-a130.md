@@ -12,10 +12,12 @@
   - Refactored `ContextHealthStrip` to reduce persistent info noise.
   - Kept warning signals and reduced duplicate desktop actions.
   - Captured before/after evidence screenshots.
+  - Moved active-scope indicator into `ContextBar` header row and compacted sidebar/header vertical spacing.
 - next:
   - Review in browser/mobile viewport and prepare PR.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-19-console-context-banner-dedupe-a130.md
   - docs/evidence/console-context-banner-before-2026-02-19.png
   - docs/evidence/console-context-banner-after-ux-dedupe-2026-02-19.png
+  - docs/evidence/console-context-banner-after-compact-header-2026-02-19.png
 - last_updated: 2026-02-19
