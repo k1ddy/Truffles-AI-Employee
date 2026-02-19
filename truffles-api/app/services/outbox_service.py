@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import text
@@ -129,13 +129,14 @@ def claim_pending_outbox_batches(
     limit: int = 10,
     idle_seconds: int = 8,
     max_wait_seconds: int = 0,
+    include_without_conversation: bool = True,
 ) -> list[dict[str, Any]]:
     max_wait_seconds = max(int(max_wait_seconds or 0), 0)
     rows = (
         db.execute(
             text(
                 """
-                WITH candidates AS (
+                WITH conversation_candidates AS (
                     SELECT conversation_id,
                            MAX(created_at) AS last_created_at,
                            MIN(created_at) AS first_created_at
@@ -150,12 +151,36 @@ def claim_pending_outbox_batches(
                     ORDER BY last_created_at
                     LIMIT :limit
                 ),
-                to_claim AS (
+                conversation_rows AS (
                     SELECT id
                     FROM outbox_messages
                     WHERE status = 'PENDING'
-                      AND conversation_id IN (SELECT conversation_id FROM candidates)
+                      AND conversation_id IN (SELECT conversation_id FROM conversation_candidates)
                     FOR UPDATE SKIP LOCKED
+                ),
+                single_candidates AS (
+                    SELECT id
+                    FROM outbox_messages
+                    WHERE (:include_without_conversation IS TRUE)
+                      AND status = 'PENDING'
+                      AND conversation_id IS NULL
+                      AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
+                      AND (
+                            created_at <= NOW() - (:idle_seconds * INTERVAL '1 second')
+                            OR (:max_wait_seconds > 0
+                                AND created_at <= NOW() - (:max_wait_seconds * INTERVAL '1 second'))
+                      )
+                    ORDER BY created_at
+                    LIMIT GREATEST(
+                        :limit - (SELECT COUNT(*) FROM conversation_candidates),
+                        0
+                    )
+                    FOR UPDATE SKIP LOCKED
+                ),
+                to_claim AS (
+                    SELECT id FROM conversation_rows
+                    UNION ALL
+                    SELECT id FROM single_candidates
                 )
                 UPDATE outbox_messages
                 SET status = 'PROCESSING',
@@ -176,6 +201,7 @@ def claim_pending_outbox_batches(
                 "limit": limit,
                 "idle_seconds": idle_seconds,
                 "max_wait_seconds": max_wait_seconds,
+                "include_without_conversation": include_without_conversation,
             },
         )
         .mappings()
@@ -248,6 +274,69 @@ def release_stale_processing(
         else:
             released += 1
     return {"released": released, "failed": failed}
+
+
+def archive_pending_outbox(
+    db: Session,
+    *,
+    client_id,
+    older_than_seconds: int,
+    limit: int,
+    reason: str,
+    branch_ids: list[uuid.UUID] | None = None,
+    only_without_conversation: bool = True,
+) -> dict[str, Any]:
+    if older_than_seconds <= 0 or limit <= 0:
+        return {"matched": 0, "archived": 0}
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=older_than_seconds)
+    query = db.query(OutboxMessage).filter(
+        OutboxMessage.client_id == client_id,
+        OutboxMessage.status == "PENDING",
+        OutboxMessage.created_at <= cutoff,
+    )
+    if only_without_conversation:
+        query = query.filter(OutboxMessage.conversation_id.is_(None))
+    if branch_ids is not None:
+        if not branch_ids:
+            return {"matched": 0, "archived": 0}
+        query = query.filter(OutboxMessage.branch_id.in_(branch_ids))
+
+    rows = (
+        query.order_by(
+            OutboxMessage.created_at.asc(),
+            OutboxMessage.id.asc(),
+        )
+        .limit(limit)
+        .all()
+    )
+    if not rows:
+        return {"matched": 0, "archived": 0}
+
+    now = datetime.now(timezone.utc)
+    payload: list[dict[str, Any]] = []
+    for row in rows:
+        row.status = "FAILED"
+        row.last_error = reason
+        row.next_attempt_at = None
+        row.updated_at = now
+        payload.append(
+            {
+                "id": row.id,
+                "client_id": row.client_id,
+                "conversation_id": row.conversation_id,
+                "branch_id": row.branch_id,
+                "status": row.status,
+                "last_error": row.last_error,
+                "attempts": row.attempts,
+                "updated_at": row.updated_at,
+                "created_at": row.created_at,
+            }
+        )
+
+    _insert_outbox_status_events(db, payload)
+    db.commit()
+    return {"matched": len(rows), "archived": len(rows)}
 
 
 def mark_outbox_status(

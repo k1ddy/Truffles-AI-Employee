@@ -193,9 +193,15 @@ def classify_threshold(value: int | None, warning_threshold: int, critical_thres
     return "ok"
 
 
-def evaluate_outbox_guard(pending: Any, failed: Any, args: argparse.Namespace) -> dict[str, Any]:
+def evaluate_outbox_guard(
+    pending: Any,
+    failed_24h: Any,
+    failed_total: Any,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
     pending_value = coerce_int(pending)
-    failed_value = coerce_int(failed)
+    failed_24h_value = coerce_int(failed_24h)
+    failed_total_value = coerce_int(failed_total)
 
     pending_status = classify_threshold(
         pending_value,
@@ -203,7 +209,7 @@ def evaluate_outbox_guard(pending: Any, failed: Any, args: argparse.Namespace) -
         args.outbox_pending_critical,
     )
     failed_status = classify_threshold(
-        failed_value,
+        failed_24h_value,
         args.outbox_failed_warning,
         args.outbox_failed_critical,
     )
@@ -224,7 +230,7 @@ def evaluate_outbox_guard(pending: Any, failed: Any, args: argparse.Namespace) -
     failed_unexpected = int(failed_class_totals.get("unexpected_failure", 0) or 0)
 
     incident_class = "none"
-    if coerce_int(failed_value) and int(failed_value) > 0:
+    if failed_24h_value and failed_24h_value > 0:
         if failed_unexpected > 0:
             incident_class = "runtime_incident"
         elif failed_expected_external > 0:
@@ -266,10 +272,14 @@ def evaluate_outbox_guard(pending: Any, failed: Any, args: argparse.Namespace) -
                 "critical_threshold": args.outbox_pending_critical,
             },
             "failed": {
-                "value": failed_value,
+                "value": failed_24h_value,
                 "status": failed_status,
                 "warning_threshold": args.outbox_failed_warning,
                 "critical_threshold": args.outbox_failed_critical,
+            },
+            "failed_total": {
+                "value": failed_total_value,
+                "status": "info",
             },
         },
         "reason_breakdown": reason_breakdown,
@@ -462,9 +472,40 @@ def collect_snapshot(args: argparse.Namespace) -> dict[str, Any]:
     admin_version = http_json(args.admin_version_url, args.timeout)
 
     health_payload = console_health.get("payload", {}) if isinstance(console_health.get("payload"), dict) else {}
-    outbox_pending = deep_find_first(health_payload, {"outbox_pending", "pending", "pending_count"})
-    outbox_failed = deep_find_first(health_payload, {"outbox_failed", "failed", "failed_count"})
-    outbox_guard = evaluate_outbox_guard(outbox_pending, outbox_failed, args)
+    outbox_payload: dict[str, Any] = {}
+    outbox_checks = health_payload.get("checks", {}) if isinstance(health_payload, dict) else {}
+    if isinstance(outbox_checks, dict):
+        maybe_outbox = outbox_checks.get("outbox")
+        if isinstance(maybe_outbox, dict):
+            outbox_payload = maybe_outbox
+    if not outbox_payload and isinstance(health_payload, dict):
+        components = health_payload.get("components", {})
+        if isinstance(components, dict):
+            maybe_outbox = components.get("outbox")
+            if isinstance(maybe_outbox, dict):
+                outbox_payload = maybe_outbox
+
+    outbox_pending = outbox_payload.get("pending")
+    if outbox_pending is None:
+        outbox_pending = deep_find_first(health_payload, {"outbox_pending", "pending", "pending_count"})
+    outbox_failed_24h = outbox_payload.get("failed_24h")
+    if outbox_failed_24h is None:
+        outbox_failed_24h = deep_find_first(health_payload, {"outbox_failed_24h", "failed_24h"})
+    if outbox_failed_24h is None:
+        outbox_failed_24h = outbox_payload.get("failed")
+    outbox_failed_total = outbox_payload.get("failed_total")
+    if outbox_failed_total is None:
+        outbox_failed_total = deep_find_first(health_payload, {"outbox_failed_total", "failed_total"})
+    if outbox_failed_total is None:
+        outbox_failed_total = outbox_payload.get("failed")
+    if outbox_failed_24h is None:
+        outbox_failed_24h = outbox_failed_total
+    outbox_guard = evaluate_outbox_guard(
+        outbox_pending,
+        outbox_failed_24h,
+        outbox_failed_total,
+        args,
+    )
 
     loc_metrics = collect_loc_metrics(DEFAULT_LOC_FILES)
     toast_metrics = collect_toast_metrics(DEFAULT_TOAST_FILES)
@@ -485,7 +526,9 @@ def collect_snapshot(args: argparse.Namespace) -> dict[str, Any]:
             "admin_version": admin_version,
             "derived": {
                 "outbox_pending_hint": outbox_pending,
-                "outbox_failed_hint": outbox_failed,
+                "outbox_failed_hint": outbox_failed_24h,
+                "outbox_failed_24h_hint": outbox_failed_24h,
+                "outbox_failed_total_hint": outbox_failed_total,
             },
             "guards": {
                 "outbox": outbox_guard,

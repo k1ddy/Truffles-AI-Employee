@@ -1,9 +1,11 @@
-from datetime import datetime, timezone
+import os
+from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.logging_config import get_logger
-from app.models import Branch, Conversation, Handover, User
+from app.models import Branch, Conversation, Handover, OutboxMessage, User
 from app.services.knowledge_registry_service import get_current_published
 from app.services.knowledge_validation import (
     MINIMUM_DATA_CONTRACT_VERSION,
@@ -14,6 +16,110 @@ from app.services.state_machine import ConversationState
 from app.services.state_service import force_state
 
 logger = get_logger("health_service")
+_OUTBOX_ARCHIVE_REASON_PREFIX = "archived_pending:"
+_OUTBOX_CALENDAR_SYNC_REASON_PREFIX = "calendar_sync_failed:"
+_OUTBOX_SYSTEM_EVENT_TYPES = ("calendar.sync_inbound", "calendar.sync_outbound")
+
+
+def _int_env(name: str, default: int, minimum: int = 0) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(float(raw))
+    except (TypeError, ValueError):
+        return default
+    return max(value, minimum)
+
+
+def _coerce_int(value, default: int = 0) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _outbox_actionable_failure_filter():
+    event_type = OutboxMessage.payload_json["event_type"].astext
+    return and_(
+        or_(
+            OutboxMessage.last_error.is_(None),
+            ~OutboxMessage.last_error.ilike(f"{_OUTBOX_ARCHIVE_REASON_PREFIX}%"),
+        ),
+        or_(
+            OutboxMessage.last_error.is_(None),
+            ~OutboxMessage.last_error.ilike(f"{_OUTBOX_CALENDAR_SYNC_REASON_PREFIX}%"),
+        ),
+        or_(
+            event_type.is_(None),
+            ~event_type.in_(_OUTBOX_SYSTEM_EVENT_TYPES),
+        ),
+    )
+
+
+def build_outbox_health_snapshot(db: Session, *, now: datetime | None = None) -> dict:
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=24)
+
+    counts_rows = (
+        db.query(
+            OutboxMessage.status,
+            func.count(OutboxMessage.id).label("count"),
+        )
+        .filter(OutboxMessage.status.in_(["PENDING", "FAILED"]))
+        .group_by(OutboxMessage.status)
+        .all()
+    )
+
+    pending = 0
+    failed_total = 0
+    for status_value, count in counts_rows:
+        normalized = str(status_value or "").upper()
+        if normalized == "PENDING":
+            pending = int(count or 0)
+        elif normalized == "FAILED":
+            failed_total = int(count or 0)
+
+    failed_24h = (
+        db.query(func.count(OutboxMessage.id))
+        .filter(
+            OutboxMessage.status == "FAILED",
+            OutboxMessage.created_at >= cutoff,
+            _outbox_actionable_failure_filter(),
+        )
+        .scalar()
+        or 0
+    )
+    failed_24h = int(failed_24h)
+
+    pending_warning = _int_env("OUTBOX_HEALTH_PENDING_WARNING", 500, minimum=0)
+    pending_critical = _int_env("OUTBOX_HEALTH_PENDING_CRITICAL", 1000, minimum=pending_warning)
+    failed_warning = _int_env("OUTBOX_HEALTH_FAILED_24H_WARNING", 30, minimum=0)
+    failed_critical = _int_env("OUTBOX_HEALTH_FAILED_24H_CRITICAL", 100, minimum=failed_warning)
+
+    status = "healthy"
+    if pending >= pending_critical or failed_24h >= failed_critical:
+        status = "critical"
+    elif pending >= pending_warning or failed_24h >= failed_warning:
+        status = "warning"
+
+    return {
+        "status": status,
+        "pending": pending,
+        # Keep legacy key stable for existing consumers.
+        "failed": failed_total,
+        "failed_total": failed_total,
+        "failed_24h": failed_24h,
+        "metric_basis": "failed_24h_non_archived",
+        "thresholds": {
+            "pending_warning": pending_warning,
+            "pending_critical": pending_critical,
+            "failed_24h_warning": failed_warning,
+            "failed_24h_critical": failed_critical,
+        },
+    }
 
 
 def _append_decision_trace(context: dict, payload: dict) -> dict:
@@ -290,13 +396,33 @@ def check_and_alert_health(checks: dict) -> list[str]:
     
     # Check outbox
     outbox_status = checks.get("outbox", {})
-    failed = outbox_status.get("failed", 0)
-    if failed >= 100:
-        msg = f"Outbox critical: {failed} failed messages"
+    if not isinstance(outbox_status, dict):
+        outbox_status = {}
+    pending = _coerce_int(outbox_status.get("pending"), 0)
+    failed_total = _coerce_int(outbox_status.get("failed_total", outbox_status.get("failed")), 0)
+    failed_24h = _coerce_int(outbox_status.get("failed_24h", outbox_status.get("failed")), 0)
+    thresholds = outbox_status.get("thresholds", {})
+    if not isinstance(thresholds, dict):
+        thresholds = {}
+    pending_warning = _coerce_int(thresholds.get("pending_warning"), 500)
+    pending_critical = _coerce_int(thresholds.get("pending_critical"), 1000)
+    failed_warning = _coerce_int(thresholds.get("failed_24h_warning"), 50)
+    failed_critical = _coerce_int(thresholds.get("failed_24h_critical"), 100)
+
+    is_critical = pending >= pending_critical or failed_24h >= failed_critical
+    is_warning = pending >= pending_warning or failed_24h >= failed_warning
+    if is_critical:
+        msg = (
+            "Outbox critical: "
+            f"pending={pending}, failed_24h={failed_24h}, failed_total={failed_total}"
+        )
         logger.error(msg)
         alerts_sent.append(msg)
-    elif failed >= 50:
-        msg = f"Outbox warning: {failed} failed messages"
+    elif is_warning:
+        msg = (
+            "Outbox warning: "
+            f"pending={pending}, failed_24h={failed_24h}, failed_total={failed_total}"
+        )
         logger.warning(msg)
     
     return alerts_sent

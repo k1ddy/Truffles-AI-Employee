@@ -48,7 +48,7 @@ python3 ops/console_platform_admin_kpi_snapshot.py \
 
 Expected output
 - `runtime.console_health` and `runtime.admin_version` payloads.
-- Derived outbox hints (`outbox_pending_hint`, `outbox_failed_hint`).
+- Derived outbox hints (`outbox_pending_hint`, `outbox_failed_24h_hint`, `outbox_failed_total_hint`).
 - Outbox guard severity (`runtime.guards.outbox.status`: `ok|warning|critical|unknown`).
 - Outbox reason classes in guard:
   - `runtime.guards.outbox.incident_class` (`runtime_incident|external_block_only|unknown_failure_mix|none`)
@@ -101,6 +101,25 @@ Optional (when available):
 ```bash
 npm --prefix console-web run build
 ```
+
+## Outbox remediation params (Wave 0.2)
+
+`/console/v1/ops/jobs/run` with `job_type=outbox_process` supports:
+
+- `include_without_conversation` (`true` by default): allows processing `PENDING` rows where `conversation_id` is null.
+- `archive_pending_older_than_hours` (`0` by default): optional archival cut-off for legacy pending tail.
+- `archive_pending_limit` (`limit` by default): max rows archived in one execute call.
+- `archive_pending_without_conversation_only` (`true` by default): keep archival scoped to rows without conversation context unless explicitly changed.
+
+Operational guard
+- Run outbox in one mode only: either `truffles-outbox` worker or legacy cron `/admin/outbox/process`, never both at once.
+- If worker is enabled, disable cron-triggered `/admin/outbox/process` to prevent duplicate processing and API starvation.
+
+Recommended sequence:
+
+1. `dry_run` with archive preview and pending split.
+2. Small `execute` batch with archive enabled.
+3. Re-run KPI snapshot and SQL reason breakdown before next batch.
 
 ## 5) Evidence package for PR/session
 

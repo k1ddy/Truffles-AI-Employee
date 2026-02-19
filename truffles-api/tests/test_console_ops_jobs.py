@@ -136,3 +136,74 @@ async def test_run_ops_job_integration_reconcile_success(monkeypatch):
     assert response.job.result_payload["checked"] == 2
     assert response.job.result_payload["artifact"]["artifact_type"] == "integration_reconcile_report"
     db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_outbox_process_job_execute_supports_archive_and_single_message_flag(monkeypatch):
+    db = Mock()
+    context = _build_context()
+    captured: dict[str, object] = {}
+
+    def _fake_archive(
+        _db,
+        *,
+        client_id,
+        older_than_seconds,
+        limit,
+        reason,
+        branch_ids,
+        only_without_conversation,
+    ):
+        captured["archive"] = {
+            "client_id": client_id,
+            "older_than_seconds": older_than_seconds,
+            "limit": limit,
+            "reason": reason,
+            "branch_ids": branch_ids,
+            "only_without_conversation": only_without_conversation,
+        }
+        return {"matched": 3, "archived": 3}
+
+    def _fake_claim(
+        _db,
+        *,
+        context,
+        limit,
+        idle_seconds,
+        max_wait_seconds,
+        include_without_conversation,
+    ):
+        captured["claim"] = {
+            "context_client_id": context.client.id,
+            "limit": limit,
+            "idle_seconds": idle_seconds,
+            "max_wait_seconds": max_wait_seconds,
+            "include_without_conversation": include_without_conversation,
+        }
+        return []
+
+    monkeypatch.setattr(console_router, "archive_pending_outbox", _fake_archive)
+    monkeypatch.setattr(console_router, "_claim_scoped_outbox_rows", _fake_claim)
+
+    result = await console_router._run_outbox_process_job(
+        db,
+        context=context,
+        mode="execute",
+        params={
+            "limit": 5,
+            "idle_seconds": 12,
+            "max_wait_seconds": 34,
+            "include_without_conversation": False,
+            "archive_pending_older_than_hours": 24,
+            "archive_pending_limit": 7,
+            "archive_pending_without_conversation_only": True,
+        },
+    )
+
+    assert result["processed"] == 0
+    assert result["results"]["processed"] == 0
+    assert result["archive"] == {"matched": 3, "archived": 3}
+    assert captured["claim"]["include_without_conversation"] is False
+    assert captured["archive"]["older_than_seconds"] == 24 * 3600
+    assert captured["archive"]["limit"] == 7
+    assert captured["archive"]["only_without_conversation"] is True

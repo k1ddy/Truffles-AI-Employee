@@ -46,6 +46,9 @@ interface HealthResponse {
         outbox?: {
             pending: number;
             failed: number;
+            failed_24h: number;
+            failed_total: number;
+            status: string;
         };
     };
 }
@@ -115,11 +118,26 @@ export async function GET() {
 
             // Outbox status
             if (apiHealth.checks?.outbox) {
+                const pending = Number(apiHealth.checks.outbox.pending || 0);
+                const failed24h = Number(
+                    apiHealth.checks.outbox.failed_24h
+                    ?? apiHealth.checks.outbox.failed
+                    ?? 0,
+                );
+                const failedTotal = Number(
+                    apiHealth.checks.outbox.failed_total
+                    ?? apiHealth.checks.outbox.failed
+                    ?? failed24h,
+                );
+                const outboxStatus = String(apiHealth.checks.outbox.status || 'unknown');
                 response.components.outbox = {
-                    pending: apiHealth.checks.outbox.pending || 0,
-                    failed: apiHealth.checks.outbox.failed || 0,
+                    pending,
+                    failed: failed24h,
+                    failed_24h: failed24h,
+                    failed_total: failedTotal,
+                    status: outboxStatus,
                 };
-                if (apiHealth.checks.outbox.status === 'warning') {
+                if (outboxStatus === 'critical' || outboxStatus === 'error') {
                     response.status = 'unhealthy';
                 }
             }

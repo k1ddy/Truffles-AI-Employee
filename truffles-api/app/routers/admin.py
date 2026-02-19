@@ -484,6 +484,7 @@ async def process_outbox(
         limit=limit,
         idle_seconds=idle_seconds,
         max_wait_seconds=max_wait_seconds,
+        include_without_conversation=True,
     )
 
     from app.routers.webhook import _process_outbox_rows

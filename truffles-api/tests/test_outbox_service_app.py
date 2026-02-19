@@ -72,7 +72,13 @@ def test_outbox_service_processes(client, monkeypatch):
             assert data["released_stale"] == 1
             assert data["failed_stale"] == 0
             mock_release.assert_called_once()
-            mock_claim.assert_called_once()
+            mock_claim.assert_called_once_with(
+                db,
+                limit=10,
+                idle_seconds=8,
+                max_wait_seconds=10,
+                include_without_conversation=True,
+            )
             mock_inbound.assert_called_once()
             mock_reminders.assert_called_once()
             mock_process.assert_awaited_once()
