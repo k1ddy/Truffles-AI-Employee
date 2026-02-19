@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import text
@@ -93,7 +95,8 @@ async def should_process_debounced_message(
     token = message_id or uuid4().hex
     key = f"truffles:debounce:{client_id}:{remote_jid}"
 
-    redis_client = redis_client or _get_debounce_redis(redis_url, socket_timeout_seconds)
+    if redis_client is None:
+        redis_client = _get_debounce_redis(redis_url, socket_timeout_seconds)
     if not redis_client:
         return True
 
@@ -156,23 +159,81 @@ async def is_duplicate_message_id(
     client_id,
     message_id: str | None,
     redis_client=None,
+    diagnostics: dict[str, Any] | None = None,
 ) -> bool:
+    def _finalize_diagnostics(
+        *,
+        duplicate: bool,
+        dedup_backend: str,
+        dedup_fallback_reason: str | None,
+        redis_latency_ms: float | None,
+        db_latency_ms: float | None,
+        messages_latency_ms: float | None,
+        started_at: float,
+    ) -> None:
+        if not isinstance(diagnostics, dict):
+            return
+        diagnostics["dedup_backend"] = "redis" if dedup_backend == "redis" else "db_fallback"
+        diagnostics["dedup_fallback_reason"] = dedup_fallback_reason
+        diagnostics["dedup_duplicate"] = bool(duplicate)
+        diagnostics["dedup_latency_ms"] = round((time.monotonic() - started_at) * 1000, 2)
+        if isinstance(redis_latency_ms, (int, float)):
+            diagnostics["dedup_redis_latency_ms"] = round(redis_latency_ms, 2)
+        if isinstance(db_latency_ms, (int, float)):
+            diagnostics["dedup_db_latency_ms"] = round(db_latency_ms, 2)
+        if isinstance(messages_latency_ms, (int, float)):
+            diagnostics["dedup_messages_latency_ms"] = round(messages_latency_ms, 2)
+
     if not message_id:
+        _finalize_diagnostics(
+            duplicate=False,
+            dedup_backend="db_fallback",
+            dedup_fallback_reason="message_id_missing",
+            redis_latency_ms=None,
+            db_latency_ms=None,
+            messages_latency_ms=None,
+            started_at=time.monotonic(),
+        )
         return False
+
+    started_at = time.monotonic()
+    redis_latency_ms = None
+    db_latency_ms = None
+    messages_latency_ms = None
+    dedup_backend = "db_fallback"
+    dedup_fallback_reason = "redis_unavailable"
 
     ttl_seconds, redis_url, socket_timeout_seconds = _get_dedup_settings()
     key = f"truffles:dedup:{client_id}:{message_id}"
 
-    redis_client = redis_client or _get_debounce_redis(redis_url, socket_timeout_seconds)
+    if redis_client is None:
+        redis_client = _get_debounce_redis(redis_url, socket_timeout_seconds)
     if redis_client:
+        redis_started = time.monotonic()
         try:
             was_set = await redis_client.set(key, "1", ex=ttl_seconds, nx=True)
+            redis_latency_ms = (time.monotonic() - redis_started) * 1000
+            dedup_backend = "redis"
+            dedup_fallback_reason = None
             if not was_set:
+                _finalize_diagnostics(
+                    duplicate=True,
+                    dedup_backend=dedup_backend,
+                    dedup_fallback_reason=dedup_fallback_reason,
+                    redis_latency_ms=redis_latency_ms,
+                    db_latency_ms=db_latency_ms,
+                    messages_latency_ms=messages_latency_ms,
+                    started_at=started_at,
+                )
                 return True
         except Exception as e:
+            redis_latency_ms = (time.monotonic() - redis_started) * 1000
+            dedup_backend = "db_fallback"
+            dedup_fallback_reason = "redis_error"
             logger.warning(f"Dedup redis unavailable, falling back to DB: {e}")
 
     # Persistent dedup in DB (message_dedup) to survive restarts/retries.
+    db_started = time.monotonic()
     try:
         result = db.execute(
             text(
@@ -184,19 +245,35 @@ async def is_duplicate_message_id(
             ),
             {"client_id": client_id, "message_id": message_id},
         )
+        db_latency_ms = (time.monotonic() - db_started) * 1000
         db.commit()
         if result.rowcount == 0:
             logger.info(
                 "Duplicate message_id (DB)",
                 extra={"context": {"client_id": str(client_id), "message_id": message_id}},
             )
+            _finalize_diagnostics(
+                duplicate=True,
+                dedup_backend=dedup_backend,
+                dedup_fallback_reason=dedup_fallback_reason,
+                redis_latency_ms=redis_latency_ms,
+                db_latency_ms=db_latency_ms,
+                messages_latency_ms=messages_latency_ms,
+                started_at=started_at,
+            )
             return True
     except Exception as e:
+        db_latency_ms = (time.monotonic() - db_started) * 1000
+        if dedup_fallback_reason:
+            dedup_fallback_reason = f"{dedup_fallback_reason}+db_insert_error"
+        else:
+            dedup_fallback_reason = "db_insert_error"
         logger.warning(
             "DB dedup check failed, falling back to messages table",
             extra={"context": {"client_id": str(client_id), "message_id": message_id, "error": str(e)}},
         )
 
+    messages_started = time.monotonic()
     duplicate = (
         db.query(Message)
         .filter(
@@ -205,11 +282,21 @@ async def is_duplicate_message_id(
         )
         .first()
     )
+    messages_latency_ms = (time.monotonic() - messages_started) * 1000
     if duplicate:
         logger.info(
             "Duplicate message_id (messages table)",
             extra={"context": {"client_id": str(client_id), "message_id": message_id}},
         )
+    _finalize_diagnostics(
+        duplicate=duplicate is not None,
+        dedup_backend=dedup_backend,
+        dedup_fallback_reason=dedup_fallback_reason,
+        redis_latency_ms=redis_latency_ms,
+        db_latency_ms=db_latency_ms,
+        messages_latency_ms=messages_latency_ms,
+        started_at=started_at,
+    )
     return duplicate is not None
 
 
@@ -224,8 +311,14 @@ async def _handle_dedup_gate(
     conversation_id,
     resolve_trace_conversation,
     record_early_trace,
+    dedup_diagnostics: dict[str, Any] | None = None,
 ) -> tuple[WebhookResponse | None, str | None]:
-    if await is_duplicate_message_id(db=db, client_id=client.id, message_id=message_id):
+    if await is_duplicate_message_id(
+        db=db,
+        client_id=client.id,
+        message_id=message_id,
+        diagnostics=dedup_diagnostics,
+    ):
         logger.info(f"Duplicate message_id skipped: {message_id}")
         trace_conversation = resolve_trace_conversation(
             trace_client=client,
@@ -238,6 +331,18 @@ async def _handle_dedup_gate(
             stage="dedupe",
             decision="skip",
             reason="duplicate_message_id",
+            meta={
+                "dedup_backend": (
+                    dedup_diagnostics.get("dedup_backend")
+                    if isinstance(dedup_diagnostics, dict)
+                    else None
+                ),
+                "dedup_fallback_reason": (
+                    dedup_diagnostics.get("dedup_fallback_reason")
+                    if isinstance(dedup_diagnostics, dict)
+                    else None
+                ),
+            },
         ):
             db.commit()
         return (

@@ -1911,6 +1911,21 @@ def _build_router_state(
         and not expected_reply_shortcircuit
         and _current_openai_api_key()
     )
+    controller_budget_remaining_ms = _remaining_pipeline_budget_ms(timing_context)
+    if (
+        controller_should_attempt
+        and controller_budget_remaining_ms is not None
+        and controller_budget_remaining_ms <= WEBHOOK_CONTROLLER_MIN_BUDGET_MS
+    ):
+        controller_should_attempt = False
+        controller_state["error"] = "budget_reserved"
+        controller_state["fallback_reason"] = "budget_reserved"
+        controller_state["used_reason"] = "budget_guard"
+        controller_state["budget_remaining_ms"] = round(controller_budget_remaining_ms, 2)
+        controller_state["budget_required_ms"] = round(WEBHOOK_CONTROLLER_MIN_BUDGET_MS, 2)
+        controller_state["output"] = legacy._build_controller_meta_output(
+            error="budget_exceeded"
+        )
     if controller_should_attempt:
         controller_state["attempted"] = True
         controller_state["error"] = None
@@ -2357,6 +2372,8 @@ CONTROLLER_CONFIDENCE_THRESHOLD = float(
 WEBHOOK_PIPELINE_BUDGET_DEFAULT_MS = 18000
 WEBHOOK_BOOKING_CRITICAL_PATH_RESERVE_DEFAULT_MS = 4500.0
 WEBHOOK_MULTI_INTENT_MIN_BUDGET_DEFAULT_MS = 2200.0
+WEBHOOK_CONTROLLER_MIN_BUDGET_DEFAULT_MS = 2600.0
+WEBHOOK_SECONDARY_LLM_MIN_BUDGET_DEFAULT_MS = 1200.0
 
 
 def _get_pipeline_budget_ms() -> int:
@@ -2393,6 +2410,14 @@ WEBHOOK_MULTI_INTENT_MIN_BUDGET_MS = _get_positive_float_env(
     "WEBHOOK_MULTI_INTENT_MIN_BUDGET_MS",
     WEBHOOK_MULTI_INTENT_MIN_BUDGET_DEFAULT_MS,
 )
+WEBHOOK_CONTROLLER_MIN_BUDGET_MS = _get_positive_float_env(
+    "WEBHOOK_CONTROLLER_MIN_BUDGET_MS",
+    WEBHOOK_CONTROLLER_MIN_BUDGET_DEFAULT_MS,
+)
+WEBHOOK_SECONDARY_LLM_MIN_BUDGET_MS = _get_positive_float_env(
+    "WEBHOOK_SECONDARY_LLM_MIN_BUDGET_MS",
+    WEBHOOK_SECONDARY_LLM_MIN_BUDGET_DEFAULT_MS,
+)
 
 
 def _remaining_pipeline_budget_ms(timing_context: dict | None) -> float | None:
@@ -2406,6 +2431,17 @@ def _remaining_pipeline_budget_ms(timing_context: dict | None) -> float | None:
     except (TypeError, ValueError):
         return None
     return max(remaining, 0.0)
+
+
+def _should_skip_secondary_llm_stage(
+    *,
+    timing_context: dict | None,
+    min_remaining_ms: float,
+) -> tuple[bool, float | None]:
+    remaining_ms = _remaining_pipeline_budget_ms(timing_context)
+    if remaining_ms is None:
+        return False, None
+    return remaining_ms <= max(float(min_remaining_ms), 0.0), remaining_ms
 
 
 def _is_env_enabled(value: str | None, default: bool = True) -> bool:
@@ -3661,6 +3697,41 @@ def _looks_like_booking_verification_request(message_text: str | None) -> bool:
     return any(pattern.search(normalized) for pattern in BOOKING_VERIFICATION_PATTERNS)
 
 
+def _resolve_policy_check_confirm_mode(policy_intent: str | None) -> str | None:
+    intent = str(policy_intent or "").strip().casefold()
+    if intent in {"check_booking", "verify_booking"}:
+        return "check"
+    if intent in {"confirm_booking", "booking_confirmation"}:
+        return "confirm"
+    return None
+
+
+def _validate_policy_check_confirm_contract(
+    *,
+    policy_intent: str | None,
+    policy_action: str | None,
+    policy_tool_action: str | None,
+) -> str | None:
+    mode = _resolve_policy_check_confirm_mode(policy_intent)
+    if mode is None:
+        return None
+    action = str(policy_action or "").strip().casefold()
+    tool_action = str(policy_tool_action or "").strip().casefold()
+    if action == "handoff" and tool_action == "handoff":
+        return None
+    if mode == "check":
+        if tool_action != "calendar.get_booking":
+            return "check_confirm_tool_mismatch"
+        if action not in {"fact", "collect"}:
+            return "check_confirm_action_mismatch"
+        return None
+    if tool_action != "calendar.book_slot":
+        return "check_confirm_tool_mismatch"
+    if action not in {"fact", "collect"}:
+        return "check_confirm_action_mismatch"
+    return None
+
+
 def _detect_tool_contract_error(
     *,
     tool_action: str | None,
@@ -4231,6 +4302,7 @@ CONTROLLER_FALLBACK_REASON_MAP = {
     "timeout": "timeout",
     "invalid_json": "invalid_json",
     "budget_exceeded": "budget_exceeded",
+    "budget_reserved": "budget_reserved",
     "no_api_key": "no_api_key",
     "prompt_missing": "prompt_missing",
     "empty_message": "empty_message",
@@ -5861,6 +5933,7 @@ async def _handle_webhook_payload(
             _apply_runtime_truth(conversation.branch_id)
     else:
         dedup_start = time.monotonic()
+        dedup_diagnostics: dict[str, Any] = {}
         with start_span("webhook.dedup", context=timing_context) as span:
             dedupe_response, message_id = await _handle_dedup_gate(
                 db=db,
@@ -5872,6 +5945,7 @@ async def _handle_webhook_payload(
                 conversation_id=conversation_id,
                 resolve_trace_conversation=_resolve_trace_conversation,
                 record_early_trace=_record_early_trace,
+                dedup_diagnostics=dedup_diagnostics,
             )
         if span is not None:
             span.set_attribute("dedup.skipped", dedupe_response is not None)
@@ -5879,7 +5953,12 @@ async def _handle_webhook_payload(
         _log_timing(
             "dedup_ms",
             (time.monotonic() - dedup_start) * 1000,
-            {"dedup_skipped": dedupe_response is not None},
+            {
+                "dedup_skipped": dedupe_response is not None,
+                "dedup_backend": dedup_diagnostics.get("dedup_backend"),
+                "dedup_fallback_reason": dedup_diagnostics.get("dedup_fallback_reason"),
+                "dedup_latency_ms": dedup_diagnostics.get("dedup_latency_ms"),
+            },
         )
         if dedupe_response:
             return dedupe_response
@@ -5928,6 +6007,8 @@ async def _handle_webhook_payload(
             message_metadata["message_type"] = message_type
         if has_media:
             message_metadata["has_media"] = True
+        if dedup_diagnostics:
+            message_metadata["dedup"] = dict(dedup_diagnostics)
         if isinstance(tenant_context, dict) and tenant_context:
             message_metadata["tenant_context"] = dict(tenant_context)
         if media_info:
@@ -5953,6 +6034,20 @@ async def _handle_webhook_payload(
             message_metadata=message_metadata,
         )
         _ensure_rag_meta_defaults(saved_message)
+        dedup_backend = dedup_diagnostics.get("dedup_backend")
+        dedup_fallback_reason = dedup_diagnostics.get("dedup_fallback_reason")
+        dedup_latency_ms = dedup_diagnostics.get("dedup_latency_ms")
+        dedup_meta_updates: dict[str, Any] = {}
+        if isinstance(dedup_backend, str) and dedup_backend.strip():
+            dedup_meta_updates["dedup_backend"] = dedup_backend.strip()
+        if isinstance(dedup_fallback_reason, str) and dedup_fallback_reason.strip():
+            dedup_meta_updates["dedup_fallback_reason"] = dedup_fallback_reason.strip()
+        elif dedup_backend:
+            dedup_meta_updates["dedup_fallback_reason"] = None
+        if isinstance(dedup_latency_ms, (int, float)):
+            dedup_meta_updates["dedup_latency_ms"] = round(float(dedup_latency_ms), 2)
+        if dedup_meta_updates:
+            _update_message_decision_metadata(saved_message, dedup_meta_updates)
         if trace_id and saved_message:
             _update_message_decision_metadata(saved_message, {"trace_id": trace_id})
 
@@ -8234,6 +8329,111 @@ async def _handle_webhook_payload(
                     and not _plan_outcome_matches_action(policy_action, policy_tool_action)
                 ):
                     policy_validation_error = "action_tool_mismatch"
+                if policy_validation_error is None:
+                    check_confirm_contract_error = _validate_policy_check_confirm_contract(
+                        policy_intent=policy_intent,
+                        policy_action=policy_action,
+                        policy_tool_action=policy_tool_action,
+                    )
+                    if check_confirm_contract_error:
+                        policy_rescue_attempted = True
+                        policy_rescue_trigger_error = (
+                            f"policy_validation:{check_confirm_contract_error}"
+                        )
+                        rescue_timing_context = _build_policy_core_rescue_timing_context(
+                            base_timing_context=timing_context,
+                            timeout_seconds=POLICY_CORE_RESCUE_TIMEOUT_SECONDS,
+                        )
+                        rescue_result = route_llm_policy_core(
+                            message_text,
+                            expected_reply_type=expected_reply_type,
+                            current_goal=current_goal,
+                            slot_state=policy_slot_state,
+                            info_refs=info_refs,
+                            consult_refs=consult_refs,
+                            memory_summary=policy_memory_summary,
+                            memory_profile=policy_memory_profile,
+                            client_slug=payload.client_slug,
+                            client_config=client.config if client else None,
+                            timing_context=rescue_timing_context,
+                        )
+                        if isinstance(rescue_result, dict):
+                            rescue_elapsed = rescue_result.get("elapsed_ms")
+                            if isinstance(rescue_elapsed, (int, float)):
+                                policy_rescue_elapsed_ms = float(rescue_elapsed)
+                            rescue_payload = rescue_result.get("payload")
+                            if rescue_result.get("ok") and isinstance(rescue_payload, dict):
+                                rescue_intent = rescue_payload.get("intent")
+                                if isinstance(rescue_intent, str):
+                                    rescue_intent = rescue_intent.strip().casefold()
+                                else:
+                                    rescue_intent = None
+                                rescue_action = rescue_payload.get("action")
+                                if isinstance(rescue_action, str):
+                                    rescue_action = rescue_action.strip().casefold()
+                                else:
+                                    rescue_action = None
+                                rescue_tool_action = rescue_payload.get("tool_action")
+                                if isinstance(rescue_tool_action, str):
+                                    rescue_tool_action = rescue_tool_action.strip().casefold()
+                                else:
+                                    rescue_tool_action = None
+                                rescue_contract_error = _validate_policy_check_confirm_contract(
+                                    policy_intent=rescue_intent,
+                                    policy_action=rescue_action,
+                                    policy_tool_action=rescue_tool_action,
+                                )
+                                if rescue_contract_error is None:
+                                    policy_rescue_applied = True
+                                    policy_rescue_error = None
+                                    policy_result = rescue_result
+                                    policy_payload = rescue_payload
+                                    if rescue_intent:
+                                        policy_intent = rescue_intent
+                                    if rescue_action:
+                                        policy_action = rescue_action
+                                    if rescue_tool_action:
+                                        policy_tool_action = rescue_tool_action
+                                    rescue_confidence = rescue_payload.get("confidence")
+                                    if isinstance(rescue_confidence, (int, float)):
+                                        policy_confidence = float(rescue_confidence)
+                                    rescue_tool_args = rescue_payload.get("tool_args")
+                                    if isinstance(rescue_tool_args, dict):
+                                        policy_tool_args = dict(rescue_tool_args)
+                                    rescue_pack_refs = _normalize_plan_refs(
+                                        rescue_payload.get("pack_refs")
+                                    )
+                                    if rescue_pack_refs:
+                                        policy_pack_refs = rescue_pack_refs
+                                    rescue_goal = rescue_payload.get("goal")
+                                    if isinstance(rescue_goal, str):
+                                        normalized_goal = rescue_goal.strip().casefold()
+                                        policy_goal = normalized_goal or None
+                                    rescue_reason = rescue_payload.get("reason")
+                                    if isinstance(rescue_reason, str):
+                                        normalized_reason = rescue_reason.strip().casefold()
+                                        policy_reason = normalized_reason or None
+                                    rescue_slots = _normalize_plan_slot_state(
+                                        rescue_payload.get("slots")
+                                    )
+                                    if rescue_slots:
+                                        policy_slot_state_normalized = rescue_slots
+                                        policy_slot_state_validated = {}
+                                        for slot_key, value in rescue_slots.items():
+                                            validated_value = _validate_plan_slot_value(
+                                                slot_key,
+                                                value,
+                                                client_slug=payload.client_slug,
+                                            )
+                                            if validated_value:
+                                                policy_slot_state_validated[slot_key] = validated_value
+                                    check_confirm_contract_error = None
+                                else:
+                                    policy_rescue_error = rescue_contract_error
+                            else:
+                                policy_rescue_error = rescue_result.get("error")
+                        if check_confirm_contract_error:
+                            policy_validation_error = check_confirm_contract_error
                 if policy_validation_error is None and policy_tool_action == "info" and not policy_pack_refs:
                     # Rescue common policy-core drift: style-reference asks and booking slot replies
                     # sometimes arrive as "info" without refs.
@@ -8498,6 +8698,12 @@ async def _handle_webhook_payload(
             "ok": policy_result.get("ok") if isinstance(policy_result, dict) else False,
             "error": policy_result.get("error") if isinstance(policy_result, dict) else None,
             "elapsed_ms": policy_result.get("elapsed_ms") if isinstance(policy_result, dict) else 0.0,
+            "compact_input_used": (
+                policy_result.get("compact_input_used") if isinstance(policy_result, dict) else False
+            ),
+            "compact_retry_used": (
+                policy_result.get("compact_retry_used") if isinstance(policy_result, dict) else False
+            ),
             "rescue_attempted": policy_rescue_attempted,
             "rescue_applied": policy_rescue_applied,
             "rescue_trigger_error": policy_rescue_trigger_error,
@@ -8545,6 +8751,8 @@ async def _handle_webhook_payload(
                 "attempted": llm_policy_core_meta["attempted"],
                 "ok": llm_policy_core_meta["ok"],
                 "error": llm_policy_core_meta["error"],
+                "compact_input_used": llm_policy_core_meta["compact_input_used"],
+                "compact_retry_used": llm_policy_core_meta["compact_retry_used"],
                 "rescue_attempted": policy_rescue_attempted,
                 "rescue_applied": policy_rescue_applied,
                 "rescue_trigger_error": policy_rescue_trigger_error,
@@ -9907,6 +10115,40 @@ async def _handle_webhook_payload(
                 if service_query_hint_attempted:
                     return service_query_hint
                 service_query_hint_attempted = True
+                skip_hint_stage, hint_budget_remaining_ms = _should_skip_secondary_llm_stage(
+                    timing_context=timing_context,
+                    min_remaining_ms=WEBHOOK_SECONDARY_LLM_MIN_BUDGET_MS,
+                )
+                if skip_hint_stage:
+                    hint_meta = {
+                        "service_query_hint_attempted": False,
+                        "service_query_hint_ok": False,
+                        "service_query_hint_error": "budget_reserved",
+                    }
+                    if isinstance(hint_budget_remaining_ms, (int, float)):
+                        hint_meta["service_query_hint_budget_remaining_ms"] = round(
+                            hint_budget_remaining_ms, 2
+                        )
+                    if saved_message:
+                        _update_message_decision_metadata(saved_message, hint_meta)
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "service_query_hint",
+                            "decision": "skipped",
+                            "tool_action": policy_tool_action,
+                            "reason": "budget_reserved",
+                            "budget_remaining_ms": (
+                                round(hint_budget_remaining_ms, 2)
+                                if isinstance(hint_budget_remaining_ms, (int, float))
+                                else None
+                            ),
+                            "budget_required_ms": round(
+                                WEBHOOK_SECONDARY_LLM_MIN_BUDGET_MS, 2
+                            ),
+                        },
+                    )
+                    return service_query_hint
                 service_hint = extract_service_query_hint_llm(
                     message_text or "",
                     client_slug=payload.client_slug,
@@ -9949,36 +10191,70 @@ async def _handle_webhook_payload(
                     and policy_tool_args.get("specialist_name").strip()
                 )
                 if specialist_missing:
-                    specialist_hint = extract_specialist_hint_llm(
-                        message_text or "",
-                        client_slug=payload.client_slug,
+                    skip_hint_stage, hint_budget_remaining_ms = _should_skip_secondary_llm_stage(
                         timing_context=timing_context,
+                        min_remaining_ms=WEBHOOK_SECONDARY_LLM_MIN_BUDGET_MS,
                     )
-                    if isinstance(specialist_hint, dict):
-                        candidate = specialist_hint.get("specialist_name")
-                        if isinstance(candidate, str) and candidate.strip():
-                            specialist_name_hint = candidate.strip()
+                    if skip_hint_stage:
                         hint_meta = {
-                            "specialist_hint_attempted": bool(specialist_hint.get("attempted")),
-                            "specialist_hint_ok": bool(specialist_hint.get("ok")),
-                            "specialist_hint_confidence": specialist_hint.get("confidence"),
-                            "specialist_hint_error": specialist_hint.get("error"),
-                            "specialist_hint_language": specialist_hint.get("language"),
+                            "specialist_hint_attempted": False,
+                            "specialist_hint_ok": False,
+                            "specialist_hint_error": "budget_reserved",
                         }
+                        if isinstance(hint_budget_remaining_ms, (int, float)):
+                            hint_meta["specialist_hint_budget_remaining_ms"] = round(
+                                hint_budget_remaining_ms, 2
+                            )
                         if saved_message:
                             _update_message_decision_metadata(saved_message, hint_meta)
                         _record_decision_trace(
                             conversation,
                             {
                                 "stage": "specialist_hint",
-                                "decision": "ok" if specialist_name_hint else "empty",
+                                "decision": "skipped",
                                 "tool_action": policy_tool_action,
-                                "attempted": bool(specialist_hint.get("attempted")),
-                                "confidence": specialist_hint.get("confidence"),
-                                "error": specialist_hint.get("error"),
-                                "language": specialist_hint.get("language"),
+                                "reason": "budget_reserved",
+                                "budget_remaining_ms": (
+                                    round(hint_budget_remaining_ms, 2)
+                                    if isinstance(hint_budget_remaining_ms, (int, float))
+                                    else None
+                                ),
+                                "budget_required_ms": round(
+                                    WEBHOOK_SECONDARY_LLM_MIN_BUDGET_MS, 2
+                                ),
                             },
                         )
+                    else:
+                        specialist_hint = extract_specialist_hint_llm(
+                            message_text or "",
+                            client_slug=payload.client_slug,
+                            timing_context=timing_context,
+                        )
+                        if isinstance(specialist_hint, dict):
+                            candidate = specialist_hint.get("specialist_name")
+                            if isinstance(candidate, str) and candidate.strip():
+                                specialist_name_hint = candidate.strip()
+                            hint_meta = {
+                                "specialist_hint_attempted": bool(specialist_hint.get("attempted")),
+                                "specialist_hint_ok": bool(specialist_hint.get("ok")),
+                                "specialist_hint_confidence": specialist_hint.get("confidence"),
+                                "specialist_hint_error": specialist_hint.get("error"),
+                                "specialist_hint_language": specialist_hint.get("language"),
+                            }
+                            if saved_message:
+                                _update_message_decision_metadata(saved_message, hint_meta)
+                            _record_decision_trace(
+                                conversation,
+                                {
+                                    "stage": "specialist_hint",
+                                    "decision": "ok" if specialist_name_hint else "empty",
+                                    "tool_action": policy_tool_action,
+                                    "attempted": bool(specialist_hint.get("attempted")),
+                                    "confidence": specialist_hint.get("confidence"),
+                                    "error": specialist_hint.get("error"),
+                                    "language": specialist_hint.get("language"),
+                                },
+                            )
             if policy_tool_action == "calendar.book_slot":
                 specialist_name_for_customer_hint = None
                 if isinstance(policy_tool_args.get("specialist_name"), str) and policy_tool_args.get(
@@ -10010,37 +10286,71 @@ async def _handle_webhook_payload(
                         current_customer_name_hint_source
                     ) == normalize_for_matching(specialist_name_for_customer_hint)
                 if customer_hint_needed:
-                    customer_hint = extract_customer_name_hint_llm(
-                        message_text or "",
-                        client_slug=payload.client_slug,
+                    skip_hint_stage, hint_budget_remaining_ms = _should_skip_secondary_llm_stage(
                         timing_context=timing_context,
-                        specialist_name=specialist_name_for_customer_hint,
+                        min_remaining_ms=WEBHOOK_SECONDARY_LLM_MIN_BUDGET_MS,
                     )
-                    if isinstance(customer_hint, dict):
-                        candidate = customer_hint.get("customer_name")
-                        if isinstance(candidate, str) and candidate.strip():
-                            customer_name_hint = candidate.strip()
+                    if skip_hint_stage:
                         hint_meta = {
-                            "customer_name_hint_attempted": bool(customer_hint.get("attempted")),
-                            "customer_name_hint_ok": bool(customer_hint.get("ok")),
-                            "customer_name_hint_confidence": customer_hint.get("confidence"),
-                            "customer_name_hint_error": customer_hint.get("error"),
-                            "customer_name_hint_language": customer_hint.get("language"),
+                            "customer_name_hint_attempted": False,
+                            "customer_name_hint_ok": False,
+                            "customer_name_hint_error": "budget_reserved",
                         }
+                        if isinstance(hint_budget_remaining_ms, (int, float)):
+                            hint_meta["customer_name_hint_budget_remaining_ms"] = round(
+                                hint_budget_remaining_ms, 2
+                            )
                         if saved_message:
                             _update_message_decision_metadata(saved_message, hint_meta)
                         _record_decision_trace(
                             conversation,
                             {
                                 "stage": "customer_name_hint",
-                                "decision": "ok" if customer_name_hint else "empty",
+                                "decision": "skipped",
                                 "tool_action": policy_tool_action,
-                                "attempted": bool(customer_hint.get("attempted")),
-                                "confidence": customer_hint.get("confidence"),
-                                "error": customer_hint.get("error"),
-                                "language": customer_hint.get("language"),
+                                "reason": "budget_reserved",
+                                "budget_remaining_ms": (
+                                    round(hint_budget_remaining_ms, 2)
+                                    if isinstance(hint_budget_remaining_ms, (int, float))
+                                    else None
+                                ),
+                                "budget_required_ms": round(
+                                    WEBHOOK_SECONDARY_LLM_MIN_BUDGET_MS, 2
+                                ),
                             },
                         )
+                    else:
+                        customer_hint = extract_customer_name_hint_llm(
+                            message_text or "",
+                            client_slug=payload.client_slug,
+                            timing_context=timing_context,
+                            specialist_name=specialist_name_for_customer_hint,
+                        )
+                        if isinstance(customer_hint, dict):
+                            candidate = customer_hint.get("customer_name")
+                            if isinstance(candidate, str) and candidate.strip():
+                                customer_name_hint = candidate.strip()
+                            hint_meta = {
+                                "customer_name_hint_attempted": bool(customer_hint.get("attempted")),
+                                "customer_name_hint_ok": bool(customer_hint.get("ok")),
+                                "customer_name_hint_confidence": customer_hint.get("confidence"),
+                                "customer_name_hint_error": customer_hint.get("error"),
+                                "customer_name_hint_language": customer_hint.get("language"),
+                            }
+                            if saved_message:
+                                _update_message_decision_metadata(saved_message, hint_meta)
+                            _record_decision_trace(
+                                conversation,
+                                {
+                                    "stage": "customer_name_hint",
+                                    "decision": "ok" if customer_name_hint else "empty",
+                                    "tool_action": policy_tool_action,
+                                    "attempted": bool(customer_hint.get("attempted")),
+                                    "confidence": customer_hint.get("confidence"),
+                                    "error": customer_hint.get("error"),
+                                    "language": customer_hint.get("language"),
+                                },
+                            )
 
             if policy_tool_action == "calendar.list_slots":
                 merged_slots_for_tool = _merge_booking_plan_slots(

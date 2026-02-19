@@ -3556,6 +3556,48 @@ def _llm_quality_normalize_tool_token(value: object | None) -> str:
     return str(value).strip().lower()
 
 
+def _llm_quality_collect_dedup_stats(meta: dict | None, dedup_stats: dict | None) -> None:
+    if not isinstance(meta, dict) or not isinstance(dedup_stats, dict):
+        return
+    backend_counts = dedup_stats.get("backend")
+    fallback_reasons = dedup_stats.get("fallback_reasons")
+    latency = dedup_stats.get("latency")
+    if not isinstance(backend_counts, dict) or not isinstance(fallback_reasons, dict):
+        return
+    if not isinstance(latency, dict):
+        return
+
+    backend = _llm_quality_normalize_tool_token(meta.get("dedup_backend"))
+    if backend in {"redis", "db_fallback"}:
+        backend_counts[backend] = backend_counts.get(backend, 0) + 1
+    else:
+        backend_counts["unknown"] = backend_counts.get("unknown", 0) + 1
+
+    fallback_reason = meta.get("dedup_fallback_reason")
+    if isinstance(fallback_reason, str):
+        normalized_reason = fallback_reason.strip().lower()
+        if normalized_reason:
+            fallback_reasons[normalized_reason] = fallback_reasons.get(normalized_reason, 0) + 1
+
+    def _add_latency(
+        key_total: str,
+        key_samples: str,
+        raw_value: object | None,
+    ) -> None:
+        if not isinstance(raw_value, (int, float)):
+            return
+        value = float(raw_value)
+        if value < 0:
+            return
+        latency[key_total] = float(latency.get(key_total, 0.0)) + value
+        latency[key_samples] = int(latency.get(key_samples, 0)) + 1
+
+    _add_latency("total_ms", "samples", meta.get("dedup_latency_ms"))
+    _add_latency("redis_total_ms", "redis_samples", meta.get("dedup_redis_latency_ms"))
+    _add_latency("db_total_ms", "db_samples", meta.get("dedup_db_latency_ms"))
+    _add_latency("messages_total_ms", "messages_samples", meta.get("dedup_messages_latency_ms"))
+
+
 def _llm_quality_effective_intent(meta: dict | None) -> str:
     if not isinstance(meta, dict):
         return ""
@@ -5220,6 +5262,21 @@ def _llm_quality_evaluate_turn(
         tool_decision = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
         if intent_value == "calendar.get_booking" and tool_decision in {"ok", "time_mismatch", "not_found"}:
             booking_stall_ignored = True
+        elif intent_value == "calendar.list_slots" and tool_decision == "ok":
+            has_slots_payload = bool(_llm_quality_parse_slot_candidates(outbox_text))
+            has_followup_prompt = _llm_quality_has_expected_followup_prompt(
+                outbox_text,
+                actual_expected_reply_type,
+            )
+            signal_map = tool_signals if isinstance(tool_signals, dict) else {}
+            calendar_signal = signal_map.get("calendar")
+            calendar_outcome = ""
+            if isinstance(calendar_signal, dict):
+                calendar_outcome = _llm_quality_normalize_tool_token(calendar_signal.get("outcome"))
+            # A successful calendar.list_slots turn is already slot progress, even when
+            # the reply is a plain slot list without a follow-up question marker.
+            if has_slots_payload or (calendar_outcome == "success" and bot_response) or has_followup_prompt:
+                booking_stall_ignored = True
     if (
         booking_active
         and booking_progress_expected
@@ -8439,6 +8496,20 @@ def _run_llm_quality(args):
         "progressed": 0,
         "filled_slots_total": 0,
     }
+    dedup_stats = {
+        "backend": {"redis": 0, "db_fallback": 0, "unknown": 0},
+        "fallback_reasons": {},
+        "latency": {
+            "total_ms": 0.0,
+            "samples": 0,
+            "redis_total_ms": 0.0,
+            "redis_samples": 0,
+            "db_total_ms": 0.0,
+            "db_samples": 0,
+            "messages_total_ms": 0.0,
+            "messages_samples": 0,
+        },
+    }
     stage_stats = {
         "controller": {
             "total_expected": 0,
@@ -9129,6 +9200,10 @@ def _run_llm_quality(args):
                         )
                         if _llm_quality_is_policy_core_infra_reason(degrade_reason):
                             stats["policy_core_infra_errors"] += 1
+                _llm_quality_collect_dedup_stats(
+                    meta if isinstance(meta, dict) else None,
+                    dedup_stats,
+                )
                 action_value = (meta or {}).get("action") if isinstance(meta, dict) else None
                 if action_value:
                     coverage_stats["actions"][action_value] = (
@@ -9897,6 +9972,9 @@ def _run_llm_quality(args):
             "policy_core_turns": stats["policy_core_turns"],
             "policy_core_degraded_turns": stats["policy_core_degraded_turns"],
             "policy_core_infra_errors": stats["policy_core_infra_errors"],
+            "dedup_backend_redis": int((dedup_stats.get("backend") or {}).get("redis", 0)),
+            "dedup_backend_db_fallback": int((dedup_stats.get("backend") or {}).get("db_fallback", 0)),
+            "dedup_backend_unknown": int((dedup_stats.get("backend") or {}).get("unknown", 0)),
         },
         "state": {
             "counts": state_counts,
@@ -9907,6 +9985,7 @@ def _run_llm_quality(args):
         "info": info_stats,
         "manager": manager_stats,
         "booking": booking_stats,
+        "dedup": dedup_stats,
         "rates": {},
     }
     if stats["turns"]:
@@ -9958,6 +10037,43 @@ def _run_llm_quality(args):
             stats["policy_core_degraded_turns"] / max(stats["policy_core_turns"], 1),
             4,
         )
+    if stats["turns"]:
+        metrics["rates"]["dedup_redis_rate"] = round(
+            int((dedup_stats.get("backend") or {}).get("redis", 0)) / max(stats["turns"], 1),
+            4,
+        )
+        metrics["rates"]["dedup_db_fallback_rate"] = round(
+            int((dedup_stats.get("backend") or {}).get("db_fallback", 0))
+            / max(stats["turns"], 1),
+            4,
+        )
+    dedup_latency = dedup_stats.get("latency") if isinstance(dedup_stats, dict) else {}
+    if isinstance(dedup_latency, dict):
+        samples = int(dedup_latency.get("samples") or 0)
+        if samples > 0:
+            metrics["rates"]["dedup_latency_avg_ms"] = round(
+                float(dedup_latency.get("total_ms") or 0.0) / max(samples, 1),
+                2,
+            )
+        redis_samples = int(dedup_latency.get("redis_samples") or 0)
+        if redis_samples > 0:
+            dedup_latency["redis_avg_ms"] = round(
+                float(dedup_latency.get("redis_total_ms") or 0.0) / max(redis_samples, 1),
+                2,
+            )
+        db_samples = int(dedup_latency.get("db_samples") or 0)
+        if db_samples > 0:
+            dedup_latency["db_avg_ms"] = round(
+                float(dedup_latency.get("db_total_ms") or 0.0) / max(db_samples, 1),
+                2,
+            )
+        messages_samples = int(dedup_latency.get("messages_samples") or 0)
+        if messages_samples > 0:
+            dedup_latency["messages_avg_ms"] = round(
+                float(dedup_latency.get("messages_total_ms") or 0.0)
+                / max(messages_samples, 1),
+                2,
+            )
     controller_stage = stage_stats.get("controller") or {}
     tool_selection_stage = stage_stats.get("tool_selection") or {}
     tool_args_stage = stage_stats.get("tool_args") or {}

@@ -1,6 +1,7 @@
 import ast
 import json
 import math
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -43,6 +44,9 @@ def _load_evaluate_turn():
         "_llm_quality_effective_intent",
         "_llm_quality_is_booking_confirmation_text",
         "_llm_quality_normalize_tool_token",
+        "_llm_quality_parse_slot_candidates",
+        "_llm_quality_has_expected_followup_prompt",
+        "_llm_quality_normalize_expect_token",
         "_llm_quality_outbox_delivery_state",
         "_llm_quality_resolve_outbox_status",
         "_llm_quality_normalize_outbox_status",
@@ -65,6 +69,7 @@ def _load_evaluate_turn():
             selected_nodes.append(node)
     module = ast.Module(body=selected_nodes, type_ignores=[])
     namespace = {
+        "re": re,
         "_llm_quality_value_matches": lambda *_args, **_kwargs: True,
         "_chaos_reply_type_fallback_ok": lambda *_args, **_kwargs: False,
         "_llm_quality_expected_section_answered": lambda *_args, **_kwargs: (False, set(), set()),
@@ -300,6 +305,73 @@ def test_booking_slot_stall_not_reported_for_calendar_get_booking_reply():
         booking_progress_expected=True,
         booking_progressed=False,
         allow_booking_stall=False,
+    )
+    assert "booking_slot_stall" not in reasons
+
+
+def test_booking_slot_stall_not_reported_for_calendar_list_slots_with_followup_prompt():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "reply", "intent": "calendar.list_slots", "tool_decision": "ok"},
+        trace_entries=[{"stage": "booking"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="name",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=True,
+        booking_progressed=False,
+        allow_booking_stall=False,
+        outbox_text=(
+            "Свободные слоты: Айжан: 10:00, 11:00 | Алина: 12:00. "
+            "Как вас зовут?"
+        ),
+    )
+    assert "booking_slot_stall" not in reasons
+
+
+def test_booking_slot_stall_not_reported_for_calendar_list_slots_with_success_signal():
+    evaluate_turn = _load_evaluate_turn()
+    reasons = evaluate_turn(
+        meta={"action": "reply", "intent": "calendar.list_slots", "tool_decision": "ok"},
+        trace_entries=[{"stage": "booking"}],
+        state="bot_active",
+        conv_meta={},
+        handover_meta={},
+        bot_response=True,
+        expected_response=True,
+        expected_action=None,
+        expected_info_sections=[],
+        expected_reply_type=None,
+        expected_state=None,
+        expected_reply=None,
+        actual_expected_reply_type="time",
+        info_tags=[],
+        info_answered={},
+        booking_active=True,
+        booking_progress_expected=True,
+        booking_progressed=False,
+        allow_booking_stall=False,
+        outbox_text=(
+            "Свободные слоты: Айжан: 10:00, 11:00 | "
+            "Алина: 12:00, 13:00"
+        ),
+        tool_signals={
+            "calendar": {
+                "intent": "calendar.list_slots",
+                "tool_decision": "ok",
+                "outcome": "success",
+            }
+        },
     )
     assert "booking_slot_stall" not in reasons
 

@@ -259,6 +259,44 @@ class TestPolicyCoreTimeoutRetry:
         assert result["error"] is None
         assert mock_llm.return_value.generate.call_count == 2
 
+    def test_timeout_retry_switches_to_compact_payload(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_RETRY_ON_TIMEOUT",
+            "1",
+        )
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_COMPACT_TRIGGER_TIMEOUT_SECONDS",
+            0.2,
+        )
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_COMPACT_MESSAGE_MAX_CHARS",
+            80,
+        )
+
+        payload = self._policy_payload()
+        long_message = "Нужно забронировать услугу " + ("срочно " * 60)
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.side_effect = [
+                httpx.TimeoutException("timeout"),
+                DummyResponse(json.dumps(payload)),
+            ]
+            result = route_llm_policy_core(long_message, expected_reply_type="time")
+
+        assert result["ok"] is True
+        assert result["compact_input_used"] is True
+        assert result["compact_retry_used"] is True
+        assert mock_llm.return_value.generate.call_count == 2
+        first_call_input = json.loads(
+            mock_llm.return_value.generate.call_args_list[0].kwargs["messages"][1]["content"]
+        )
+        second_call_input = json.loads(
+            mock_llm.return_value.generate.call_args_list[1].kwargs["messages"][1]["content"]
+        )
+        assert first_call_input["message"] == long_message
+        assert len(second_call_input["message"]) <= 80
+        assert second_call_input["message"] != long_message
+
     def test_timeout_retry_uses_fallback_model_when_primary_times_out(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         monkeypatch.setattr(
@@ -361,6 +399,29 @@ class TestPolicyCoreTimeoutRetry:
         kwargs = mock_llm.return_value.generate.call_args.kwargs
         assert kwargs["timeout_seconds"] < 1.2
         assert kwargs["timeout_seconds"] >= 0.3
+
+    def test_uses_compact_payload_on_first_attempt_for_tight_timeout(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_COMPACT_TRIGGER_TIMEOUT_SECONDS",
+            10.0,
+        )
+        monkeypatch.setattr(
+            "app.services.intent_service.POLICY_CORE_COMPACT_MESSAGE_MAX_CHARS",
+            90,
+        )
+        payload = self._policy_payload()
+        long_message = "Запишите меня на маникюр " + ("пожалуйста " * 40)
+        with patch("app.services.intent_service.get_llm_provider") as mock_llm:
+            mock_llm.return_value.generate.return_value = DummyResponse(json.dumps(payload))
+            result = route_llm_policy_core(long_message, expected_reply_type="time")
+
+        assert result["ok"] is True
+        assert result["compact_input_used"] is True
+        assert result["compact_retry_used"] is False
+        policy_input = json.loads(mock_llm.return_value.generate.call_args.kwargs["messages"][1]["content"])
+        assert len(policy_input["message"]) <= 90
+        assert policy_input["message"] != long_message
 
     def test_returns_deadline_when_budget_below_min_policy_timeout(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
