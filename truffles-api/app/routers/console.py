@@ -26,6 +26,7 @@ from app.models import (
     Agent,
     AgentIdentity,
     AgentMembership,
+    AlertEvent,
     Branch,
     Client,
     ClientCapability,
@@ -4273,6 +4274,80 @@ def _build_incident_summary(items: list[ConsoleIncidentItem]) -> ConsoleIncident
     )
 
 
+def _coerce_incident_state(value: object) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if normalized in _INCIDENT_STATES:
+        return normalized
+    return None
+
+
+def _load_incident_state_map(
+    db: Session,
+    *,
+    client_id: UUID,
+    incident_ids: list[str],
+    allowed_branch_ids: Optional[list[UUID]],
+) -> dict[str, dict[str, Optional[str]]]:
+    incident_keys = sorted({item.strip() for item in incident_ids if isinstance(item, str) and item.strip()})
+    if not incident_keys:
+        return {}
+
+    query = db.query(AlertEvent).filter(
+        AlertEvent.client_id == client_id,
+        AlertEvent.alert_type == _INCIDENT_STATE_ALERT_TYPE,
+        AlertEvent.alert_metadata.isnot(None),
+        AlertEvent.alert_metadata["incident_id"].astext.in_(incident_keys),
+    )
+    if allowed_branch_ids is not None:
+        if not allowed_branch_ids:
+            return {}
+        query = query.filter(or_(AlertEvent.branch_id.is_(None), AlertEvent.branch_id.in_(allowed_branch_ids)))
+
+    rows = query.order_by(AlertEvent.created_at.desc(), AlertEvent.id.desc()).all()
+    state_map: dict[str, dict[str, Optional[str]]] = {}
+    for row in rows:
+        metadata = row.alert_metadata if isinstance(row.alert_metadata, dict) else {}
+        incident_id = _normalize_optional_text(metadata.get("incident_id"))
+        if not incident_id or incident_id in state_map:
+            continue
+
+        incident_state = _coerce_incident_state(metadata.get("incident_state")) or "open"
+        owner = _normalize_optional_text(metadata.get("owner"))
+        due_at = _normalize_optional_text(metadata.get("due_at"))
+        note = _normalize_optional_text(metadata.get("note"))
+        state_map[incident_id] = {
+            "incident_state": incident_state,
+            "incident_state_updated_at": row.created_at.isoformat() if row.created_at else None,
+            "incident_state_owner": owner,
+            "incident_state_due_at": due_at,
+            "incident_state_note": note,
+        }
+    return state_map
+
+
+def _apply_incident_state_map(
+    items: list[ConsoleIncidentItem],
+    *,
+    state_map: dict[str, dict[str, Optional[str]]],
+) -> None:
+    for item in items:
+        state_payload = state_map.get(item.id)
+        if not state_payload:
+            item.incident_state = "open"
+            item.incident_state_updated_at = None
+            item.incident_state_owner = None
+            item.incident_state_due_at = None
+            item.incident_state_note = None
+            continue
+        item.incident_state = state_payload.get("incident_state") or "open"
+        item.incident_state_updated_at = state_payload.get("incident_state_updated_at")
+        item.incident_state_owner = state_payload.get("incident_state_owner")
+        item.incident_state_due_at = state_payload.get("incident_state_due_at")
+        item.incident_state_note = state_payload.get("incident_state_note")
+
+
 def _parse_date_param(name: str, value: Optional[str]) -> Optional[dt_date]:
     if value is None:
         return None
@@ -4407,7 +4482,15 @@ _OPS_JOB_DEFINITIONS = {
         "description": "Compute daily metrics snapshot for the selected client.",
         "supports_dry_run": True,
     },
+    "incident_state": {
+        "label": "Incident State",
+        "description": "Set incident workflow state (open/in_progress/resolved) with audit metadata.",
+        "supports_dry_run": True,
+    },
 }
+
+_INCIDENT_STATE_ALERT_TYPE = "console_incident_state"
+_INCIDENT_STATES = {"open", "in_progress", "resolved"}
 
 
 def _require_ops_access(context: ConsoleAuthContext, *, action: str = "read") -> None:
@@ -4655,6 +4738,30 @@ def _parse_ops_job_bool_param(
         if normalized in {"0", "false", "no", "off"}:
             return False
     raise ConsoleAPIError(400, "INVALID_PARAM", f"{name} must be a boolean")
+
+
+def _parse_ops_job_text_param(
+    params: dict,
+    *,
+    name: str,
+    required: bool = False,
+    max_length: int = 500,
+) -> Optional[str]:
+    raw = params.get(name)
+    if raw is None:
+        if required:
+            raise ConsoleAPIError(400, "INVALID_PARAM", f"{name} is required")
+        return None
+    if not isinstance(raw, str):
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{name} must be a string")
+    normalized = raw.strip()
+    if not normalized:
+        if required:
+            raise ConsoleAPIError(400, "INVALID_PARAM", f"{name} is required")
+        return None
+    if len(normalized) > max_length:
+        raise ConsoleAPIError(400, "INVALID_PARAM", f"{name} is too long (max {max_length})")
+    return normalized
 
 
 def _parse_ops_job_uuid_list_param(
@@ -5135,6 +5242,70 @@ async def _run_metrics_snapshot_job(
         "days": days,
         "results": results,
     }
+
+
+async def _run_incident_state_job(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    mode: str,
+    params: dict,
+) -> dict:
+    incident_id = _parse_ops_job_text_param(params, name="incident_id", required=True, max_length=160)
+    state_raw = _parse_ops_job_text_param(params, name="incident_state", required=True, max_length=32)
+    incident_state = _coerce_incident_state(state_raw)
+    if not incident_state:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "incident_state must be open, in_progress, or resolved")
+
+    owner = _parse_ops_job_text_param(params, name="owner", required=False, max_length=160)
+    note = _parse_ops_job_text_param(params, name="note", required=False, max_length=2000)
+    reason_code = _parse_ops_job_text_param(params, name="reason_code", required=False, max_length=120)
+    due_at_raw = _parse_ops_job_text_param(params, name="due_at", required=False, max_length=80)
+    due_at = _parse_datetime_param("due_at", due_at_raw) if due_at_raw else None
+
+    branch_id_raw = _parse_ops_job_text_param(params, name="branch_id", required=False, max_length=64)
+    branch_id = _parse_uuid_param("branch_id", branch_id_raw) if branch_id_raw else context.effective_branch_id
+    allowed_branch_ids = _resolve_branch_scope(context)
+    if allowed_branch_ids is not None and branch_id is not None and branch_id not in set(allowed_branch_ids):
+        raise ConsoleAPIError(403, "ACCESS_DENIED", "Branch scope denied")
+
+    payload = {
+        "mode": mode,
+        "scope": {
+            "client_id": str(context.client.id),
+            "branch_id": str(branch_id) if branch_id else None,
+        },
+        "incident_id": incident_id,
+        "incident_state": incident_state,
+        "owner": owner,
+        "due_at": due_at.isoformat() if due_at else None,
+        "note": note,
+        "reason_code": reason_code,
+    }
+    if mode == "dry_run":
+        return payload
+
+    alert_metadata = {
+        "incident_id": incident_id,
+        "incident_state": incident_state,
+        "owner": owner,
+        "due_at": due_at.isoformat() if due_at else None,
+        "note": note,
+        "reason_code": reason_code,
+        "source": "console_ops_job",
+        "actor_agent_id": str(context.agent.id),
+    }
+    db.add(
+        AlertEvent(
+            client_id=context.client.id,
+            branch_id=branch_id,
+            conversation_id=None,
+            message_id=None,
+            alert_type=_INCIDENT_STATE_ALERT_TYPE,
+            alert_metadata={key: value for key, value in alert_metadata.items() if value is not None},
+        )
+    )
+    return payload
 
 
 async def _run_integration_reconcile_job(
@@ -7678,6 +7849,13 @@ async def list_business_incidents(
         branch_ids=allowed_branch_ids,
         platform_scope=False,
     )
+    state_map = _load_incident_state_map(
+        db,
+        client_id=context.client.id,
+        incident_ids=[item.id for item in items],
+        allowed_branch_ids=allowed_branch_ids,
+    )
+    _apply_incident_state_map(items, state_map=state_map)
     return ConsoleIncidentListResponse(
         generated_at=now.isoformat(),
         scope=scope,
@@ -9888,6 +10066,13 @@ async def run_ops_job(
             )
         elif body.job_type == "metrics_snapshot":
             result_payload = await _run_metrics_snapshot_job(
+                db,
+                context=context,
+                mode=body.mode,
+                params=params,
+            )
+        elif body.job_type == "incident_state":
+            result_payload = await _run_incident_state_job(
                 db,
                 context=context,
                 mode=body.mode,
@@ -13229,6 +13414,20 @@ async def list_admin_incidents(
                 platform_scope=True,
             )
         )
+
+    items_by_client: dict[UUID, list[ConsoleIncidentItem]] = {}
+    for item in items:
+        if item.client_id is None:
+            continue
+        items_by_client.setdefault(item.client_id, []).append(item)
+    for client_id, scoped_items in items_by_client.items():
+        state_map = _load_incident_state_map(
+            db,
+            client_id=client_id,
+            incident_ids=[item.id for item in scoped_items],
+            allowed_branch_ids=None,
+        )
+        _apply_incident_state_map(scoped_items, state_map=state_map)
 
     severity_rank = {"critical": 2, "warn": 1, "info": 0}
     items.sort(

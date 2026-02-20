@@ -2864,7 +2864,7 @@ export interface components {
             description: string;
             href?: string | null;
             /** @enum {string|null} */
-            job_type?: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | null;
+            job_type?: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state" | null;
             /** @enum {string|null} */
             mode?: "dry_run" | "execute" | null;
             params?: {
@@ -2891,6 +2891,12 @@ export interface components {
             client_slug?: string | null;
             /** Format: uuid */
             branch_id?: string | null;
+            /** @enum {string} */
+            incident_state: "open" | "in_progress" | "resolved";
+            incident_state_updated_at?: string | null;
+            incident_state_owner?: string | null;
+            incident_state_due_at?: string | null;
+            incident_state_note?: string | null;
             metrics: {
                 [key: string]: unknown;
             };
@@ -3208,7 +3214,7 @@ export interface components {
         };
         OpsJobDefinition: {
             /** @enum {string} */
-            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot";
+            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state";
             label: string;
             description: string;
             supports_dry_run: boolean;
@@ -3218,7 +3224,7 @@ export interface components {
         };
         OpsJobRunRequest: {
             /** @enum {string} */
-            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot";
+            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state";
             /**
              * @default dry_run
              * @enum {string}
@@ -3232,7 +3238,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot";
+            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state";
             /** @enum {string} */
             mode: "dry_run" | "execute";
             /** @enum {string} */

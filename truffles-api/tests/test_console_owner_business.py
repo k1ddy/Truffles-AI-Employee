@@ -7,6 +7,7 @@ import pytest
 
 from app.routers import console as console_router
 from app.schemas.console import (
+    ConsoleIncidentItem,
     ConsoleKnowledgePublishRequest,
     ConsoleMetricFactMeta,
     ConsoleOwnerOperationApplyRequest,
@@ -437,6 +438,62 @@ def test_build_scope_incident_items_includes_delivery_and_handover_risks() -> No
     assert items[0].severity == "critical"
     assert items[1].reason_code == "handover_backlog"
     assert items[1].severity == "critical"
+
+
+def test_apply_incident_state_map_updates_item_fields() -> None:
+    item = ConsoleIncidentItem(
+        id="outbox-demo",
+        scope="client",
+        severity="warn",
+        title="Delivery risk",
+        summary="backlog=10",
+        reason_code="outbox_backlog",
+        reason_label="Delivery backlog",
+        source="outbox_messages",
+        detected_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    console_router._apply_incident_state_map(
+        [item],
+        state_map={
+            "outbox-demo": {
+                "incident_state": "in_progress",
+                "incident_state_updated_at": "2026-02-20T10:00:00+00:00",
+                "incident_state_owner": "ops@truffles",
+                "incident_state_due_at": "2026-02-21T10:00:00+00:00",
+                "incident_state_note": "working on provider binding",
+            }
+        },
+    )
+
+    assert item.incident_state == "in_progress"
+    assert item.incident_state_owner == "ops@truffles"
+    assert item.incident_state_due_at == "2026-02-21T10:00:00+00:00"
+    assert item.incident_state_note == "working on provider binding"
+
+
+def test_apply_incident_state_map_defaults_to_open_without_event() -> None:
+    item = ConsoleIncidentItem(
+        id="handover-demo",
+        scope="client",
+        severity="warn",
+        title="Handover backlog",
+        summary="pending=12",
+        reason_code="handover_backlog",
+        reason_label="Escalation queue overloaded",
+        source="handovers",
+        detected_at=datetime.now(timezone.utc).isoformat(),
+        incident_state="resolved",
+        incident_state_owner="legacy-owner",
+    )
+
+    console_router._apply_incident_state_map([item], state_map={})
+
+    assert item.incident_state == "open"
+    assert item.incident_state_updated_at is None
+    assert item.incident_state_owner is None
+    assert item.incident_state_due_at is None
+    assert item.incident_state_note is None
 
 
 def test_summarize_owner_operation_delta_states() -> None:

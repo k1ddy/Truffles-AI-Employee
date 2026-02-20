@@ -7516,6 +7516,7 @@ components:
             - integration_reconcile
             - heal
             - metrics_snapshot
+            - incident_state
           - type: 'null'
           title: Job Type
         mode:
@@ -7608,6 +7609,34 @@ components:
             format: uuid
           - type: 'null'
           title: Branch Id
+        incident_state:
+          type: string
+          enum:
+          - open
+          - in_progress
+          - resolved
+          title: Incident State
+          default: open
+        incident_state_updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Incident State Updated At
+        incident_state_owner:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Incident State Owner
+        incident_state_due_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Incident State Due At
+        incident_state_note:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Incident State Note
         metrics:
           additionalProperties:
             anyOf:
@@ -10266,6 +10295,7 @@ components:
           - integration_reconcile
           - heal
           - metrics_snapshot
+          - incident_state
           title: Job Type
         label:
           type: string
@@ -10316,6 +10346,7 @@ components:
           - integration_reconcile
           - heal
           - metrics_snapshot
+          - incident_state
           title: Job Type
         mode:
           type: string
@@ -10369,6 +10400,7 @@ components:
           - integration_reconcile
           - heal
           - metrics_snapshot
+          - incident_state
           title: Job Type
         mode:
           type: string
