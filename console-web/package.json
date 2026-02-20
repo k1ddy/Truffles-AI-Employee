@@ -23,6 +23,7 @@
     "react-hot-toast": "^2.6.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.1",
     "@eslint/eslintrc": "^3.3.3",
     "@playwright/test": "^1.57.0",
     "@types/node": "^20.12.12",

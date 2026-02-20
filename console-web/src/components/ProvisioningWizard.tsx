@@ -2961,6 +2961,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                             paymentStatus: event.target.value as "pending" | "confirmed" | "rejected",
                         }))}
                         disabled={!canEdit || !canManagePayment}
+                        aria-label="Autopilot payment status"
                     >
                         <option value="pending">payment: pending</option>
                         <option value="confirmed">payment: confirmed</option>
@@ -2991,6 +2992,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                 providerBindingWebhookStatus: event.target.value as "configured" | "pending" | "rebind_required",
                             }))}
                             disabled={!canEdit}
+                            aria-label="Autopilot provider webhook status"
                         >
                             <option value="configured">webhook: configured</option>
                             <option value="pending">webhook: pending</option>
@@ -3005,6 +3007,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                 providerBindingPaidUntil: event.target.value,
                             }))}
                             disabled={!canEdit}
+                            aria-label="Autopilot provider paid until"
                         />
                         <input
                             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -3025,6 +3028,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                 providerBindingNextRenewalAt: event.target.value,
                             }))}
                             disabled={!canEdit}
+                            aria-label="Autopilot provider next renewal date"
                         />
                         <input
                             type="date"
@@ -3035,6 +3039,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                 providerBindingLastRebindAt: event.target.value,
                             }))}
                             disabled={!canEdit}
+                            aria-label="Autopilot provider last rebind date"
                         />
                         <select
                             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -3044,6 +3049,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                 providerBindingAlertState: event.target.value as "ok" | "warn" | "critical",
                             }))}
                             disabled={!canEdit}
+                            aria-label="Autopilot provider alert state"
                         >
                             <option value="ok">alert: ok</option>
                             <option value="warn">alert: warn</option>
@@ -3847,6 +3853,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                     value={agentForm.role}
                                     onChange={(event) => setAgentForm((prev) => ({ ...prev, role: event.target.value as AgentRole }))}
                                     disabled={!canEdit}
+                                    aria-label="Agent role"
                                 >
                                     {PROVISIONING_ASSIGNABLE_AGENT_ROLES.map((roleValue) => (
                                         <option key={roleValue} value={roleValue}>{roleValue}</option>
@@ -4165,6 +4172,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                 }));
                                             }}
                                             disabled={!canEdit}
+                                            aria-label="Capabilities WhatsApp channel"
                                         >
                                             <option value="inherit">Наследовать</option>
                                             <option value="true">Включено</option>
@@ -4187,6 +4195,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                 }));
                                             }}
                                             disabled={!canEdit}
+                                            aria-label="Capabilities Telegram channel"
                                         >
                                             <option value="inherit">Наследовать</option>
                                             <option value="true">Включено</option>
@@ -4209,6 +4218,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                 }));
                                             }}
                                             disabled={!canEdit}
+                                            aria-label="Capabilities Instagram channel"
                                         >
                                             <option value="inherit">Наследовать</option>
                                             <option value="true">Включено</option>
@@ -4234,6 +4244,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                 }));
                                             }}
                                             disabled={!canEdit}
+                                            aria-label="Capabilities availability provider"
                                         >
                                             <option value="">Наследовать</option>
                                             <option value="none">none</option>
@@ -4259,6 +4270,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                 }));
                                             }}
                                             disabled={!canEdit}
+                                            aria-label="Capabilities CRM provider"
                                         >
                                             <option value="">Наследовать</option>
                                             <option value="none">none</option>
@@ -4283,6 +4295,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                 }));
                                             }}
                                             disabled={!canEdit}
+                                            aria-label="Capabilities calendar provider"
                                         >
                                             <option value="">Наследовать</option>
                                             <option value="none">none</option>
@@ -4309,6 +4322,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                 }));
                                             }}
                                             disabled={!canEdit}
+                                            aria-label="Capabilities booking mode"
                                         >
                                             <option value="">Наследовать</option>
                                             <option value="collect_preferences">collect_preferences</option>
@@ -4331,6 +4345,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                 }));
                                             }}
                                             disabled={!canEdit}
+                                            aria-label="Capabilities knowledge upload"
                                         >
                                             <option value="inherit">Наследовать</option>
                                             <option value="true">Включено</option>
@@ -4353,6 +4368,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                 }));
                                             }}
                                             disabled={!canEdit}
+                                            aria-label="Capabilities analytics"
                                         >
                                             <option value="inherit">Наследовать</option>
                                             <option value="true">Включено</option>
@@ -4375,6 +4391,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                 }));
                                             }}
                                             disabled={!canEdit}
+                                            aria-label="Capabilities auto learn"
                                         >
                                             <option value="inherit">Наследовать</option>
                                             <option value="true">Включено</option>
@@ -4713,6 +4730,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                 value={selectedDomainTemplate}
                                                 onChange={(event) => setSelectedDomainTemplate(event.target.value)}
                                                 disabled={!canEdit}
+                                                aria-label="Onboarding domain template preset"
                                                 data-testid="onboarding-domain-template-select"
                                             >
                                                 {domainTemplatePresets.map((template) => (
@@ -4835,6 +4853,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                         });
                                                     }}
                                                     disabled={!canEdit}
+                                                    aria-label="Onboarding provider binding webhook status"
                                                 >
                                                     <option value="">Не указано</option>
                                                     <option value="configured">configured</option>
@@ -4865,6 +4884,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                         });
                                                     }}
                                                     disabled={!canEdit}
+                                                    aria-label="Onboarding provider binding paid until"
                                                 />
                                             </div>
                                             <div>
@@ -4915,6 +4935,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                         });
                                                     }}
                                                     disabled={!canEdit}
+                                                    aria-label="Onboarding provider binding next renewal date"
                                                 />
                                             </div>
                                             <div>
@@ -4940,6 +4961,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                         });
                                                     }}
                                                     disabled={!canEdit}
+                                                    aria-label="Onboarding provider binding last rebind date"
                                                 />
                                             </div>
                                             <div>
@@ -4966,6 +4988,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                         });
                                                     }}
                                                     disabled={!canEdit}
+                                                    aria-label="Onboarding provider binding alert state"
                                                 >
                                                     <option value="">Не указано</option>
                                                     <option value="ok">ok</option>
@@ -5047,6 +5070,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                         }));
                                                     }}
                                                     disabled={!canEdit}
+                                                    aria-label="Purchased capabilities WhatsApp channel"
                                                 >
                                                     <option value="inherit">Не указано</option>
                                                     <option value="true">Включено</option>
@@ -5069,6 +5093,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                         }));
                                                     }}
                                                     disabled={!canEdit}
+                                                    aria-label="Purchased capabilities Telegram channel"
                                                 >
                                                     <option value="inherit">Не указано</option>
                                                     <option value="true">Включено</option>
@@ -5091,6 +5116,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                         }));
                                                     }}
                                                     disabled={!canEdit}
+                                                    aria-label="Purchased capabilities Instagram channel"
                                                 >
                                                     <option value="inherit">Не указано</option>
                                                     <option value="true">Включено</option>
@@ -5118,6 +5144,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                         }));
                                                     }}
                                                     disabled={!canEdit}
+                                                    aria-label="Purchased capabilities availability provider"
                                                 >
                                                     <option value="">Не указано</option>
                                                     <option value="none">none</option>
@@ -5145,6 +5172,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                         }));
                                                     }}
                                                     disabled={!canEdit}
+                                                    aria-label="Purchased capabilities CRM provider"
                                                 >
                                                     <option value="">Не указано</option>
                                                     <option value="none">none</option>
@@ -5171,6 +5199,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                         }));
                                                     }}
                                                     disabled={!canEdit}
+                                                    aria-label="Purchased capabilities calendar provider"
                                                 >
                                                     <option value="">Не указано</option>
                                                     <option value="none">none</option>
@@ -5199,6 +5228,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                         }));
                                                     }}
                                                     disabled={!canEdit}
+                                                    aria-label="Purchased capabilities booking mode"
                                                 >
                                                     <option value="">Не указано</option>
                                                     <option value="collect_preferences">collect_preferences</option>
@@ -5221,6 +5251,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                         }));
                                                     }}
                                                     disabled={!canEdit}
+                                                    aria-label="Purchased capabilities knowledge upload"
                                                 >
                                                     <option value="inherit">Не указано</option>
                                                     <option value="true">Включено</option>
@@ -5243,6 +5274,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                         }));
                                                     }}
                                                     disabled={!canEdit}
+                                                    aria-label="Purchased capabilities analytics"
                                                 >
                                                     <option value="inherit">Не указано</option>
                                                     <option value="true">Включено</option>
@@ -5265,6 +5297,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                         }));
                                                     }}
                                                     disabled={!canEdit}
+                                                    aria-label="Purchased capabilities auto learn"
                                                 >
                                                     <option value="inherit">Не указано</option>
                                                     <option value="true">Включено</option>
@@ -5324,6 +5357,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                                                 setPaymentStatusDraft(event.target.value as "pending" | "confirmed" | "rejected");
                                             }}
                                             disabled={!canManagePayment}
+                                            aria-label="Onboarding contract payment status"
                                         >
                                             <option value="pending">pending (ожидает)</option>
                                             <option value="confirmed">confirmed (подтверждено)</option>

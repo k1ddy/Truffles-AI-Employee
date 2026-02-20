@@ -857,6 +857,37 @@ export type MarketingCampaignRetryResponse = {
     retried_count: number;
     skipped_count: number;
 };
+export type TenantsWeeklySnapshotRecord = {
+    id: string;
+    created_at: string;
+    client_id: string;
+    week_key: string;
+    snapshot: Record<string, unknown>;
+    actor_name?: string | null;
+};
+export type TenantsWeeklySnapshotListResponse = {
+    items: TenantsWeeklySnapshotRecord[];
+    cursor?: string | null;
+    has_more: boolean;
+};
+export type CreateTenantsWeeklySnapshotRequest = {
+    client_id: string;
+    week_key: string;
+    snapshot: Record<string, unknown>;
+};
+export type CreateTenantsWeeklySnapshotResponse = {
+    item: TenantsWeeklySnapshotRecord;
+};
+export type AuditTenantsSensitiveAccessRequest = {
+    branch_id: string;
+    field: "instance_id";
+    action: "reveal" | "copy";
+    context?: string;
+};
+export type AuditTenantsSensitiveAccessResponse = {
+    ok: boolean;
+    audit_id: string;
+};
 
 // Query params
 export type ListCasesParams = operations["listCases"]["parameters"]["query"];
@@ -866,6 +897,12 @@ export type ListLearningCandidatesParams = operations["listLearningCandidates"][
 export type ListCompaniesParams = operations["listAdminCompanies"]["parameters"]["query"];
 export type ListClientsParams = operations["listAdminClients"]["parameters"]["query"];
 export type ListBranchesParams = operations["listAdminBranches"]["parameters"]["query"];
+export type ListTenantsWeeklySnapshotsParams = {
+    client_id: string;
+    week_key?: string;
+    cursor?: string;
+    limit?: number;
+};
 export type ListFleetAttentionParams = operations["listFleetAttention"]["parameters"]["query"];
 export type ListIntegrationsParams = operations["listAdminIntegrations"]["parameters"]["query"];
 export type ListProviderLifecycleParams = operations["listAdminProviderLifecycle"]["parameters"]["query"];
@@ -1026,6 +1063,12 @@ export const adminApi = {
         apiClient.get<components["schemas"]["ClientListResponse"]>("/admin/clients", { params }),
     listBranches: (params?: ListBranchesParams) =>
         apiClient.get<components["schemas"]["BranchListResponse"]>("/admin/branches", { params }),
+    listTenantsWeeklySnapshots: (params: ListTenantsWeeklySnapshotsParams) =>
+        apiClient.get<TenantsWeeklySnapshotListResponse>("/admin/tenants/weekly-snapshots", { params }),
+    saveTenantsWeeklySnapshot: (data: CreateTenantsWeeklySnapshotRequest) =>
+        apiClient.post<CreateTenantsWeeklySnapshotResponse>("/admin/tenants/weekly-snapshots", data),
+    auditTenantsSensitiveAccess: (data: AuditTenantsSensitiveAccessRequest) =>
+        apiClient.post<AuditTenantsSensitiveAccessResponse>("/admin/tenants/sensitive-access", data),
     listFleetAttention: (params?: ListFleetAttentionParams) =>
         apiClient.get<components["schemas"]["FleetAttentionResponse"]>("/admin/fleet/attention", { params }),
     listIncidents: (params?: { limit?: number }) =>

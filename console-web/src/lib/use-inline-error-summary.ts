@@ -10,12 +10,14 @@ export type InlineErrorSummaryItem = {
     message: string;
     traceId: string;
     capturedAt: string;
+    scope: string;
 };
 
 export type InlineErrorInput = {
     code?: string;
     message: string;
     traceId?: string;
+    scope?: string;
 };
 
 type ParsedErrorShape = {
@@ -28,6 +30,7 @@ type InlineErrorReportOptions = {
     includeProvisioningGuidance?: boolean;
     operation?: string;
     endpoint?: string;
+    scope?: string;
 };
 
 const PROVISIONING_SERVER_ERROR_CODES = new Set([
@@ -65,19 +68,22 @@ export function useInlineErrorSummary(limit = 8) {
 
     const appendError = useCallback((input: InlineErrorInput): InlineErrorSummaryItem => {
         const capturedAt = new Date().toISOString();
+        const scope = input.scope?.trim() || "global";
         const next: InlineErrorSummaryItem = {
             id: `${capturedAt}:${Math.random().toString(36).slice(2, 8)}`,
             code: input.code ?? "UNKNOWN_ERROR",
             message: input.message,
             traceId: input.traceId ?? "",
             capturedAt,
+            scope,
         };
         setErrors((previous) => {
             const deduped = previous.filter(
                 (item) =>
                     item.code !== next.code
                     || item.message !== next.message
-                    || item.traceId !== next.traceId,
+                    || item.traceId !== next.traceId
+                    || item.scope !== next.scope,
             );
             return [next, ...deduped].slice(0, limit);
         });
@@ -90,6 +96,7 @@ export function useInlineErrorSummary(limit = 8) {
             code: parsed?.code ?? "UNKNOWN_ERROR",
             message: parsed?.message ?? "Unexpected error",
             traceId: parsed?.trace_id ?? "",
+            scope: options?.scope,
         });
         if (
             options?.includeProvisioningGuidance
@@ -100,6 +107,7 @@ export function useInlineErrorSummary(limit = 8) {
                 code: "PROVISIONING_NEXT_STEP",
                 message: buildProvisioningGuidanceMessage(parsed, options),
                 traceId: parsed?.trace_id ?? "",
+                scope: options?.scope,
             });
         }
         return parsed;
@@ -113,8 +121,12 @@ export function useInlineErrorSummary(limit = 8) {
         });
     }, [appendError]);
 
-    const clearErrors = useCallback(() => {
-        setErrors([]);
+    const clearErrors = useCallback((scope?: unknown) => {
+        if (typeof scope !== "string" || !scope.trim()) {
+            setErrors([]);
+            return;
+        }
+        setErrors((previous) => previous.filter((item) => item.scope !== scope));
     }, []);
 
     return {

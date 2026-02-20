@@ -503,6 +503,75 @@ test.describe('Platform Admin Tenants', () => {
         await expect(page.getByText(/booking_settings и working_hours нужны/i)).toBeVisible();
     });
 
+    test('should audit instance_id reveal and copy actions on Tenants @smoke', async ({ page }) => {
+        const auditRequests: Array<Record<string, unknown>> = [];
+        await page.route('**/api/proxy/admin/tenants/sensitive-access', async (route) => {
+            if (route.request().method() !== 'POST') {
+                await route.fallback();
+                return;
+            }
+            let payload: Record<string, unknown> = {};
+            try {
+                payload = route.request().postDataJSON() as Record<string, unknown>;
+            } catch {
+                payload = {};
+            }
+            auditRequests.push(payload);
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ ok: true }),
+            });
+        });
+
+        const branches = tenantsSection(page, 'Филиалы');
+        await expect(branches).toBeVisible();
+        const revealButton = page
+            .getByTestId('tenants-instance-id-reveal')
+            .or(page.getByRole('button', { name: /Показать instance_id|Скрыть instance_id/i }))
+            .first();
+        const copyButton = page
+            .getByTestId('tenants-instance-id-copy')
+            .or(page.getByRole('button', { name: /Скопировать instance_id/i }))
+            .first();
+        if (!(await revealButton.isVisible().catch(() => false)) || !(await copyButton.isVisible().catch(() => false))) {
+            await expect(branches.getByText(/Филиалы не найдены|фильтр по клиенту из контекста|instance_id: —/i)).toBeVisible();
+            test.info().annotations.push({
+                type: 'audit-skip',
+                description: 'No branch with reveal/copy controls in current tenant scope.',
+            });
+            return;
+        }
+
+        await page.evaluate(() => {
+            const existing = navigator.clipboard as Clipboard | undefined;
+            if (!existing) {
+                Object.defineProperty(navigator, 'clipboard', {
+                    configurable: true,
+                    value: { writeText: async () => undefined },
+                });
+                return;
+            }
+            Object.defineProperty(existing, 'writeText', {
+                configurable: true,
+                value: async () => undefined,
+            });
+        });
+
+        await revealButton.click();
+        await expect.poll(() => auditRequests.some((item) => item.action === 'reveal')).toBe(true);
+
+        await copyButton.click();
+        await expect.poll(() => auditRequests.some((item) => item.action === 'copy')).toBe(true);
+
+        const revealPayload = auditRequests.find((item) => item.action === 'reveal');
+        const copyPayload = auditRequests.find((item) => item.action === 'copy');
+        expect(revealPayload?.field).toBe('instance_id');
+        expect(copyPayload?.field).toBe('instance_id');
+        expect(typeof revealPayload?.branch_id).toBe('string');
+        expect(typeof copyPayload?.branch_id).toBe('string');
+    });
+
     test('should show actionable provisioning guidance for quick-create server errors @smoke', async ({ page }) => {
         await page.route('**/api/proxy/admin/companies', async (route) => {
             if (route.request().method() !== 'POST') {

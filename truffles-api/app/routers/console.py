@@ -226,6 +226,12 @@ from app.schemas.console import (
     ConsoleSubscriptionPlanDefaults,
     ConsoleSubscriptionSummaryResponse,
     ConsoleSyncStatus,
+    ConsoleTenantsWeeklySnapshotCreateRequest,
+    ConsoleTenantsWeeklySnapshotCreateResponse,
+    ConsoleTenantsWeeklySnapshotListResponse,
+    ConsoleTenantsWeeklySnapshotRecord,
+    ConsoleTenantsSensitiveAccessAuditRequest,
+    ConsoleTenantsSensitiveAccessAuditResponse,
     ConsoleTeamManagerPerformanceItem,
     ConsoleTeamPerformanceSummaryResponse,
     ConsoleTelegramHealthResponse,
@@ -1611,6 +1617,12 @@ _OUTBOX_ARCHIVED_REASON_PREFIX = "archived_pending:"
 _OUTBOX_CALENDAR_SYNC_REASON_PREFIX = "calendar_sync_failed:"
 _OUTBOX_SYSTEM_EVENT_TYPES = {"calendar.sync_inbound", "calendar.sync_outbound"}
 _DEFAULT_RUNTIME_REDIS_URL = "redis://truffles_redis_1:6379/0"
+_TENANTS_WEEKLY_SNAPSHOT_EVENT_TYPE = "tenants_weekly_snapshot_saved"
+_TENANTS_WEEKLY_SNAPSHOT_ENTITY_TYPE = "tenant_snapshot"
+_TENANTS_WEEKLY_SNAPSHOT_WEEK_KEY_PATTERN = re.compile(r"^\d{4}-W\d{2}$")
+_TENANTS_SENSITIVE_ACCESS_EVENT_TYPE = "tenants_sensitive_id_accessed"
+_TENANTS_SENSITIVE_FIELDS = {"instance_id"}
+_TENANTS_SENSITIVE_ACTIONS = {"reveal", "copy"}
 
 
 @dataclass
@@ -1647,6 +1659,49 @@ def _parse_tenant_lifecycle_param(value: Optional[str]) -> str:
     if normalized not in _TENANT_LIFECYCLE_MODES:
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid lifecycle")
     return normalized
+
+
+def _normalize_tenants_weekly_snapshot_week_key(value: str) -> str:
+    normalized = (value or "").strip()
+    if not normalized:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "week_key required")
+    if not _TENANTS_WEEKLY_SNAPSHOT_WEEK_KEY_PATTERN.match(normalized):
+        raise ConsoleAPIError(400, "INVALID_PARAM", "week_key must match YYYY-Wnn")
+    return normalized
+
+
+def _normalize_tenants_weekly_snapshot_payload(value: Optional[dict]) -> dict:
+    if not isinstance(value, dict):
+        raise ConsoleAPIError(400, "INVALID_PARAM", "snapshot must be object")
+    return value
+
+
+def _normalize_tenants_sensitive_access_field(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized not in _TENANTS_SENSITIVE_FIELDS:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported sensitive field")
+    return normalized
+
+
+def _normalize_tenants_sensitive_access_action(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized not in _TENANTS_SENSITIVE_ACTIONS:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported action")
+    return normalized
+
+
+def _serialize_tenants_weekly_snapshot_record(event: AuditEvent) -> ConsoleTenantsWeeklySnapshotRecord:
+    payload = event.payload if isinstance(event.payload, dict) else {}
+    week_key = payload.get("week_key")
+    snapshot = payload.get("snapshot")
+    return ConsoleTenantsWeeklySnapshotRecord(
+        id=event.id,
+        created_at=event.created_at.isoformat(),
+        client_id=event.client_id,
+        week_key=week_key if isinstance(week_key, str) else "",
+        snapshot=snapshot if isinstance(snapshot, dict) else {},
+        actor_name=event.actor_name,
+    )
 
 
 def _normalize_client_lifecycle_reason(reason: str) -> str:
@@ -12210,6 +12265,182 @@ async def list_branches(
         items=[_serialize_branch(branch) for branch in items],
         cursor=next_cursor,
         has_more=has_more,
+    )
+
+
+@router.get(
+    "/admin/tenants/weekly-snapshots",
+    response_model=ConsoleTenantsWeeklySnapshotListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_tenants_weekly_snapshots(
+    request: Request,
+    client_id: str,
+    week_key: Optional[str] = None,
+    cursor: Optional[str] = None,
+    limit: int = 12,
+    db: Session = Depends(get_db),
+) -> ConsoleTenantsWeeklySnapshotListResponse:
+    context = get_console_context(request, db, require_selection=False)
+    _require_platform_admin(context)
+    _reject_unknown_query_params(request, {"client_id", "week_key", "cursor", "limit"})
+    _validate_limit(limit)
+
+    client_uuid = _parse_uuid_param("client_id", client_id)
+    if client_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid client_id")
+
+    normalized_week_key = _normalize_tenants_weekly_snapshot_week_key(week_key) if week_key else None
+    cursor_date = _parse_cursor_param(cursor)
+
+    query = db.query(AuditEvent).filter(
+        AuditEvent.client_id == client_uuid,
+        AuditEvent.event_type == _TENANTS_WEEKLY_SNAPSHOT_EVENT_TYPE,
+        AuditEvent.entity_type == _TENANTS_WEEKLY_SNAPSHOT_ENTITY_TYPE,
+    )
+    if cursor_date is not None:
+        query = query.filter(AuditEvent.created_at < cursor_date)
+
+    # Keep DB-side filtering simple (portable for tests), then filter week key in Python.
+    candidates = (
+        query.order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+        .limit(max(limit * 4, 50))
+        .all()
+    )
+    if normalized_week_key:
+        candidates = [
+            event
+            for event in candidates
+            if isinstance(event.payload, dict) and event.payload.get("week_key") == normalized_week_key
+        ]
+
+    has_more = len(candidates) > limit
+    items = candidates[:limit] if has_more else candidates
+    next_cursor = items[-1].created_at.isoformat() if has_more and items else None
+
+    return ConsoleTenantsWeeklySnapshotListResponse(
+        items=[_serialize_tenants_weekly_snapshot_record(item) for item in items],
+        cursor=next_cursor,
+        has_more=has_more,
+    )
+
+
+@router.post(
+    "/admin/tenants/weekly-snapshots",
+    response_model=ConsoleTenantsWeeklySnapshotCreateResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def save_tenants_weekly_snapshot(
+    request: Request,
+    payload: ConsoleTenantsWeeklySnapshotCreateRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleTenantsWeeklySnapshotCreateResponse:
+    context = get_console_context(request, db, require_selection=False)
+    _require_platform_admin(context)
+
+    client = db.query(Client).filter(Client.id == payload.client_id).first()
+    if client is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+
+    normalized_week_key = _normalize_tenants_weekly_snapshot_week_key(payload.week_key)
+    normalized_snapshot = _normalize_tenants_weekly_snapshot_payload(payload.snapshot)
+    event_payload = {
+        "week_key": normalized_week_key,
+        "snapshot": normalized_snapshot,
+        "snapshot_schema_version": "v1",
+    }
+    now = datetime.now(timezone.utc)
+
+    existing_events = (
+        db.query(AuditEvent)
+        .filter(
+            AuditEvent.client_id == payload.client_id,
+            AuditEvent.event_type == _TENANTS_WEEKLY_SNAPSHOT_EVENT_TYPE,
+            AuditEvent.entity_type == _TENANTS_WEEKLY_SNAPSHOT_ENTITY_TYPE,
+        )
+        .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+        .all()
+    )
+    existing = next(
+        (
+            item
+            for item in existing_events
+            if isinstance(item.payload, dict) and item.payload.get("week_key") == normalized_week_key
+        ),
+        None,
+    )
+    if existing is not None:
+        existing.created_at = now
+        existing.actor_id = context.agent.id
+        existing.actor_name = context.agent.name
+        existing.payload = event_payload
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+        return ConsoleTenantsWeeklySnapshotCreateResponse(
+            item=_serialize_tenants_weekly_snapshot_record(existing),
+        )
+
+    event = record_audit_event(
+        db,
+        actor=context.agent,
+        event_type=_TENANTS_WEEKLY_SNAPSHOT_EVENT_TYPE,
+        entity_type=_TENANTS_WEEKLY_SNAPSHOT_ENTITY_TYPE,
+        entity_id=uuid4(),
+        payload=event_payload,
+        client_id=payload.client_id,
+        branch_id=None,
+    )
+    event.created_at = now
+    db.commit()
+    db.refresh(event)
+    return ConsoleTenantsWeeklySnapshotCreateResponse(
+        item=_serialize_tenants_weekly_snapshot_record(event),
+    )
+
+
+@router.post(
+    "/admin/tenants/sensitive-access",
+    response_model=ConsoleTenantsSensitiveAccessAuditResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def audit_tenants_sensitive_access(
+    request: Request,
+    payload: ConsoleTenantsSensitiveAccessAuditRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleTenantsSensitiveAccessAuditResponse:
+    context = get_console_context(request, db, require_selection=False)
+    _require_platform_admin(context)
+
+    field = _normalize_tenants_sensitive_access_field(payload.field)
+    action = _normalize_tenants_sensitive_access_action(payload.action)
+    context_value = (payload.context or "").strip() or None
+    if context_value and len(context_value) > 64:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "context too long")
+
+    branch = db.query(Branch).filter(Branch.id == payload.branch_id).first()
+    if branch is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+
+    event = record_audit_event(
+        db,
+        actor=context.agent,
+        event_type=_TENANTS_SENSITIVE_ACCESS_EVENT_TYPE,
+        entity_type="branch",
+        entity_id=branch.id,
+        payload={
+            "field": field,
+            "action": action,
+            "context": context_value,
+        },
+        client_id=branch.client_id,
+        branch_id=branch.id,
+    )
+    db.commit()
+    db.refresh(event)
+    return ConsoleTenantsSensitiveAccessAuditResponse(
+        ok=True,
+        audit_id=event.id,
     )
 
 
