@@ -356,6 +356,13 @@ from app.services.pack_compiler_service import (
     extract_compiled_artifacts,
     parse_compiled_at,
 )
+from app.services.reference_branch_selection import (
+    ReferenceBranchSignal,
+    select_reference_branch_ids,
+)
+from app.services.reference_branch_selection import (
+    has_recent_inbound as _reference_branch_has_recent_inbound,
+)
 from app.services.reference_pack_integrity import (
     REFERENCE_PACK_SCHEMA_VERSION,
     build_reference_pack_metadata,
@@ -1596,6 +1603,7 @@ _FLEET_ATTENTION_OUTBOX_WINDOW_HOURS = 24
 _FLEET_ATTENTION_HANDOVER_PENDING_STATUSES = {"pending", "active"}
 _FLEET_ATTENTION_HIGH_THRESHOLD = 70
 _FLEET_ATTENTION_MEDIUM_THRESHOLD = 35
+_FLEET_REFERENCE_BRANCH_RECENT_INBOUND_DAYS = 30
 _OUTBOX_ARCHIVED_REASON_PREFIX = "archived_pending:"
 _OUTBOX_CALENDAR_SYNC_REASON_PREFIX = "calendar_sync_failed:"
 _OUTBOX_SYSTEM_EVENT_TYPES = {"calendar.sync_inbound", "calendar.sync_outbound"}
@@ -1614,6 +1622,8 @@ class _FleetClientDetails:
     active_branches: int
     degraded_branches: int
     go_live_ready_branches: int
+    reference_branch_ids: tuple[UUID, ...] = ()
+    reference_branch_reason: str = "no_active_branches"
 
 
 @dataclass
@@ -2733,6 +2743,57 @@ def _resolve_fleet_next_action(
     return "monitor_sla_and_quality"
 
 
+def _build_reference_branch_decisions(
+    *,
+    branches: list[Branch],
+    inbound_observations: dict[UUID, tuple[datetime, Optional[str]]],
+    now: datetime,
+) -> dict[UUID, tuple[tuple[UUID, ...], str]]:
+    signals: list[ReferenceBranchSignal] = []
+    for branch in branches:
+        observed = inbound_observations.get(branch.id)
+        last_inbound_at = observed[0] if observed else None
+        signals.append(
+            ReferenceBranchSignal(
+                branch_id=branch.id,
+                client_id=branch.client_id,
+                is_active=bool(branch.is_active),
+                slug=branch.slug,
+                created_at=branch.created_at,
+                has_instance_id=bool(_normalize_optional_text(branch.instance_id)),
+                has_phone=bool(_normalize_optional_text(branch.phone)),
+                has_recent_inbound=_reference_branch_has_recent_inbound(
+                    last_inbound_at,
+                    now=now,
+                    window_days=_FLEET_REFERENCE_BRANCH_RECENT_INBOUND_DAYS,
+                ),
+                go_live_allowed=_is_branch_go_live_allowed(branch, now=now),
+                onboarding_go_no_go=(branch.onboarding_state or "").strip().lower() == "go_no_go",
+                integration_ok=(branch.integration_state or "").strip().lower() == "ok",
+            )
+        )
+    decisions = select_reference_branch_ids(signals)
+    return {
+        client_id: (decision.branch_ids, decision.reason)
+        for client_id, decision in decisions.items()
+    }
+
+
+def _select_reference_active_branches(
+    branches: list[Branch],
+    *,
+    reference_branch_ids: tuple[UUID, ...],
+) -> list[Branch]:
+    active_branches = [branch for branch in branches if branch.is_active]
+    if not active_branches:
+        return []
+    selected_ids = set(reference_branch_ids)
+    if not selected_ids:
+        return active_branches
+    selected = [branch for branch in active_branches if branch.id in selected_ids]
+    return selected or active_branches
+
+
 def _build_fleet_client_details_map(
     db: Session,
     *,
@@ -2754,9 +2815,31 @@ def _build_fleet_client_details_map(
         for client_id in client_ids
     }
     branches = db.query(Branch).filter(Branch.client_id.in_(client_ids)).all()
+    branches_by_client: dict[UUID, list[Branch]] = {client_id: [] for client_id in client_ids}
     for branch in branches:
+        branches_by_client.setdefault(branch.client_id, []).append(branch)
+    now = datetime.now(timezone.utc)
+    inbound_observations = _load_latest_branch_inbound_observations_for_clients(
+        db,
+        client_ids=client_ids,
+    )
+    reference_decisions = _build_reference_branch_decisions(
+        branches=branches,
+        inbound_observations=inbound_observations,
+        now=now,
+    )
+    for client_id in client_ids:
+        client_branches = branches_by_client.get(client_id, [])
+        reference_branch_ids, _reason = reference_decisions.get(
+            client_id,
+            (tuple(), "no_active_branches"),
+        )
+        scoped_branches = _select_reference_active_branches(
+            client_branches,
+            reference_branch_ids=reference_branch_ids,
+        )
         stats = branch_stats.setdefault(
-            branch.client_id,
+            client_id,
             {
                 "total_branches": 0,
                 "active_branches": 0,
@@ -2764,13 +2847,18 @@ def _build_fleet_client_details_map(
                 "go_live_ready_branches": 0,
             },
         )
-        stats["total_branches"] += 1
-        if branch.is_active:
-            stats["active_branches"] += 1
-            if (branch.onboarding_state or "").strip().lower() == "go_no_go":
-                stats["go_live_ready_branches"] += 1
-        if (branch.integration_state or "").strip().lower() == "degraded":
-            stats["degraded_branches"] += 1
+        stats["total_branches"] = len(scoped_branches)
+        stats["active_branches"] = len(scoped_branches)
+        stats["go_live_ready_branches"] = sum(
+            1
+            for branch in scoped_branches
+            if (branch.onboarding_state or "").strip().lower() == "go_no_go"
+        )
+        stats["degraded_branches"] = sum(
+            1
+            for branch in scoped_branches
+            if (branch.integration_state or "").strip().lower() == "degraded"
+        )
 
     owner_by_client: dict[UUID, Optional[str]] = {client_id: None for client_id in client_ids}
     owners = (
@@ -2821,6 +2909,10 @@ def _build_fleet_client_details_map(
                 "go_live_ready_branches": 0,
             },
         )
+        reference_branch_ids, reference_branch_reason = reference_decisions.get(
+            client.id,
+            (tuple(), "no_active_branches"),
+        )
         payment_status = payment_by_client.get(client.id, "unknown")
         commercial_state = _resolve_fleet_commercial_state(payment_status)
         service_state = _resolve_fleet_service_state(
@@ -2852,6 +2944,8 @@ def _build_fleet_client_details_map(
             active_branches=stats["active_branches"],
             degraded_branches=stats["degraded_branches"],
             go_live_ready_branches=stats["go_live_ready_branches"],
+            reference_branch_ids=tuple(reference_branch_ids),
+            reference_branch_reason=reference_branch_reason,
         )
     return details
 
@@ -11671,6 +11765,12 @@ async def list_clients(
                 go_live_ready_branches=fleet_details_map[client.id].go_live_ready_branches
                 if client.id in fleet_details_map
                 else None,
+                reference_branch_ids=list(fleet_details_map[client.id].reference_branch_ids)
+                if client.id in fleet_details_map
+                else None,
+                reference_branch_reason=fleet_details_map[client.id].reference_branch_reason
+                if client.id in fleet_details_map
+                else None,
             )
             for client in clients
         ],
@@ -12957,12 +13057,15 @@ async def list_fleet_attention(
         if not details:
             continue
 
+        reference_branch_ids = set(details.reference_branch_ids or ())
         stale_branches = 0
         integration_error_branches = 0
         integration_warn_branches = 0
 
         for branch in branches_by_client.get(client.id, []):
             if not branch.is_active:
+                continue
+            if reference_branch_ids and branch.id not in reference_branch_ids:
                 continue
             observed = inbound_observations.get(branch.id)
             last_inbound_at: Optional[datetime] = None
@@ -13033,6 +13136,8 @@ async def list_fleet_attention(
                 active_branches=details.active_branches,
                 degraded_branches=details.degraded_branches,
                 go_live_ready_branches=details.go_live_ready_branches,
+                reference_branch_ids=list(details.reference_branch_ids),
+                reference_branch_reason=details.reference_branch_reason,
                 stale_branches=stale_branches,
                 integration_error_branches=integration_error_branches,
                 integration_warn_branches=integration_warn_branches,

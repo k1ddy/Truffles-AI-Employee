@@ -1,0 +1,75 @@
+# TP-2026-02-19-onboarding-reference-branch-normalization-step3-a131
+
+- Название/цель: Реализовать этап 5 (Reference Branch Normalization) для onboarding any-niche: выделить production-like reference branches per client, ограничить fleet diagnostics/reference scope по этим веткам, и отразить scope в Console API/ops evidence без client-specific hardcode.
+- Canon refs: `docs/TASK_PACKAGES/TP-2026-02-19-onboarding-any-niche-step123-a131.md`, `docs/TASK_PACKAGES/TP-2026-02-19-onboarding-delivery-contour-step2-a131.md`, `AGENTS.md`, `STATE.md`, `SPECS/SYSTEM_REFERENCE.md`, `TECH.md`.
+- Invariant:
+  - Не ослаблять fail-closed go-live semantics и hard-gate checks.
+  - Не вводить demo/client-specific hardcode.
+  - Нормализация должна быть data-driven (live signals), с безопасным fallback.
+- Scope:
+  - Добавить kernel выбора reference branches:
+    - active + (go_live_allowed OR recent inbound OR instance_id+phone),
+    - fallback на best active candidate при отсутствии production-like.
+  - Применить reference scope в Console fleet read-model:
+    - `list_clients` и `list_fleet_attention` используют reference subset для branch-level operational counters.
+    - API возвращает `reference_branch_ids` и `reference_branch_reason`.
+  - Применить reference scope в ops diagnose:
+    - `onboarding-fleet-check`, `onboarding-hard-gate-rollout`, `onboarding-delivery-stabilize` по умолчанию работают в normalized mode.
+    - добавить override `--all-active-branches`.
+  - Добавить unit tests на kernel/console/ops.
+- Out of scope:
+  - Любые mutate/runtime webhook изменения.
+  - Изменение продуктового контракта FACT/COLLECT/HANDOFF.
+  - Глобальная чистка/перестройка branch data вручную в БД.
+- Touch-list:
+  - `truffles-api/app/services/reference_branch_selection.py` (new)
+  - `truffles-api/app/routers/console.py`
+  - `truffles-api/app/schemas/console.py`
+  - `ops/diagnose.py`
+  - `truffles-api/tests/test_reference_branch_selection.py` (new)
+  - `truffles-api/tests/test_console_fleet_attention.py`
+  - `truffles-api/tests/test_console_tenants_list.py`
+  - `truffles-api/tests/test_diagnose_onboarding_fleet.py`
+  - `docs/REPORTS/2026-02-19-onboarding-reference-branch-normalization-step3-a131.md` (new)
+  - `docs/SESSIONS/SESSION-2026-02-19-onboarding-any-niche-step123-a131.md`
+  - `docs/SESSION_INDEX.md`
+- Plan:
+  1) Добавить selection-kernel и интеграцию в Console backend.
+  2) Включить normalized scope в ops diagnose командах и добавить explicit override.
+  3) Закрыть unit tests и прогнать targeted acceptance checks.
+  4) Зафиксировать runtime evidence normalized vs all-active и оформить report.
+- DoD:
+  - В codebase есть единый selection-kernel без client-specific ветвлений.
+  - Console fleet API возвращает `reference_branch_ids`/`reference_branch_reason`.
+  - Fleet/hard-gate/delivery diagnose команды поддерживают `reference_mode` и `--all-active-branches`.
+  - Unit tests по kernel/console/ops зеленые.
+  - Есть raw evidence по normalized/all-active в `/tmp/onboarding_reference_branch_step3_a131/`.
+- Checks:
+  - `python3 -m py_compile truffles-api/app/services/reference_branch_selection.py truffles-api/app/routers/console.py truffles-api/app/schemas/console.py ops/diagnose.py truffles-api/tests/test_reference_branch_selection.py truffles-api/tests/test_console_fleet_attention.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_diagnose_onboarding_fleet.py`
+  - `ruff check truffles-api/app/services/reference_branch_selection.py truffles-api/app/routers/console.py truffles-api/app/schemas/console.py ops/diagnose.py truffles-api/tests/test_reference_branch_selection.py truffles-api/tests/test_console_fleet_attention.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_diagnose_onboarding_fleet.py`
+  - `pytest -q truffles-api/tests/test_reference_branch_selection.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py truffles-api/tests/test_diagnose_onboarding_fleet.py`
+  - `pytest -q truffles-api/tests/test_console_access_admin_pr2.py -k "hard_gate or onboarding_scorecard or go_live or require_branch_scorecard"`
+  - `pytest -q truffles-api/tests/test_console_onboarding_state.py`
+  - `python3 truffles-api/scripts/generate_openapi.py --check`
+  - `python3 ops/diagnose.py onboarding-fleet-check --json > /tmp/onboarding_reference_branch_step3_a131/onboarding_fleet_check_normalized.json`
+  - `python3 ops/diagnose.py onboarding-fleet-check --all-active-branches --json > /tmp/onboarding_reference_branch_step3_a131/onboarding_fleet_check_all_active.json`
+  - `python3 ops/diagnose.py onboarding-hard-gate-rollout --mode actual --json > /tmp/onboarding_reference_branch_step3_a131/onboarding_hard_gate_rollout_actual.json`
+  - `python3 ops/diagnose.py onboarding-delivery-stabilize --json > /tmp/onboarding_reference_branch_step3_a131/onboarding_delivery_stabilize_normalized.json`
+  - `python3 ops/diagnose.py onboarding-delivery-stabilize --all-active-branches --json > /tmp/onboarding_reference_branch_step3_a131/onboarding_delivery_stabilize_all_active.json`
+- Evidence:
+  - `docs/REPORTS/2026-02-19-onboarding-reference-branch-normalization-step3-a131.md`
+  - `/tmp/onboarding_reference_branch_step3_a131/*`
+- Rollback:
+  - `git revert COMMIT_SHA`.
+- No-go:
+  - Не отключать hard-gate, не подменять readiness через ручной SQL.
+  - Не добавлять special-case по `demo_salon`/конкретному client_id.
+  - Не расширять scope на runtime decision/webhook pipeline.
+- Branch/worktree/base/merge/cleanup:
+  - Branch: `feat/2026-02-19-onboarding-any-niche-step123-a131`
+  - Worktree: `/home/zhan/worktrees/2026-02-19-onboarding-any-niche-step123-a131`
+  - Base: `origin/main`
+  - Merge policy: merge commit via PR (no rebase)
+  - Cleanup: `scripts/session_end.sh --status done` в финальном коммите; cleanup после merge.
+- Риски/блокеры:
+  - В runtime snapshot с 1 активной веткой normalized/all-active метрики могут совпадать; в этом случае критичен факт корректного `reference_mode` и наличия reference annotations.

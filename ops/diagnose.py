@@ -14530,10 +14530,21 @@ def _run_onboarding_fleet_container(payload, *, container_name):
     script = f"""python - <<'PY'
 import json
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
+
+from sqlalchemy import func
 
 from app.database import SessionLocal
-from app.models import Branch, Client, ClientCapability, ClientOnboardingContract, OutboxMessage, ReferencePack
+from app.models import (
+    Branch,
+    Client,
+    ClientCapability,
+    ClientOnboardingContract,
+    Conversation,
+    Message,
+    OutboxMessage,
+    ReferencePack,
+)
 from app.services.onboarding_state import build_onboarding_scorecard
 from app.services.provider_error_policy import classify_provider_error
 from app.services.reference_pack_integrity import (
@@ -14553,6 +14564,7 @@ ensure_contract = bool(payload.get("ensure_contract", True))
 sync_reference_pack = bool(payload.get("sync_reference_pack", False))
 hard_gate_codes = set(payload.get("hard_gate_codes") or [])
 delivery_window_hours = int(payload.get("delivery_window_hours") or 24)
+normalize_reference_branch = bool(payload.get("normalize_reference_branch", True))
 if delivery_window_hours <= 0:
     delivery_window_hours = 24
 
@@ -14568,6 +14580,101 @@ try:
     actions = []
     unresolved = []
     now = datetime.now(timezone.utc)
+
+    def load_recent_inbound_map():
+        rows = (
+            session.query(
+                Conversation.branch_id.label("branch_id"),
+                func.max(Message.created_at).label("last_inbound_at"),
+            )
+            .join(Message, Message.conversation_id == Conversation.id)
+            .filter(
+                Conversation.branch_id.isnot(None),
+                Message.role == "user",
+            )
+            .group_by(Conversation.branch_id)
+            .all()
+        )
+        payload = {{}}
+        for row in rows:
+            branch_id = row.branch_id
+            observed_at = row.last_inbound_at
+            if branch_id and observed_at:
+                payload[branch_id] = observed_at
+        return payload
+
+    recent_inbound_by_branch = load_recent_inbound_map()
+
+    def has_recent_inbound_at(last_inbound_at, *, window_days=30):
+        if last_inbound_at is None:
+            return False
+        try:
+            safe_days = max(1, int(window_days or 30))
+        except Exception:
+            safe_days = 30
+        return last_inbound_at >= now - timedelta(days=safe_days)
+
+    def _row_rank(row):
+        score = 0
+        if row.get("go_live_allowed"):
+            score += 100
+        if row.get("has_recent_inbound"):
+            score += 70
+        has_instance_id = bool(row.get("has_instance_id"))
+        has_phone = bool(row.get("has_phone"))
+        if has_instance_id and has_phone:
+            score += 60
+        elif has_instance_id:
+            score += 25
+        elif has_phone:
+            score += 15
+        if row.get("onboarding_go_no_go"):
+            score += 20
+        if row.get("integration_ok"):
+            score += 5
+        return (
+            -score,
+            str(row.get("branch_slug") or ""),
+            str(row.get("branch_id") or ""),
+        )
+
+    def _row_is_production_like(row):
+        if not row.get("is_active"):
+            return False
+        if row.get("go_live_allowed"):
+            return True
+        if row.get("has_recent_inbound"):
+            return True
+        return bool(row.get("has_instance_id")) and bool(row.get("has_phone"))
+
+    def select_reference_rows(rows):
+        grouped = {{}}
+        for row in rows:
+            client_id = str(row.get("client_id") or "")
+            if not client_id:
+                continue
+            grouped.setdefault(client_id, []).append(row)
+        decisions = {{}}
+        for client_id, client_rows in grouped.items():
+            active_rows = [row for row in client_rows if row.get("is_active")]
+            if not active_rows:
+                decisions[client_id] = {{"branch_ids": [], "reason": "no_active_branches"}}
+                continue
+            production_rows = [row for row in active_rows if _row_is_production_like(row)]
+            if production_rows:
+                ordered = sorted(production_rows, key=_row_rank)
+                decisions[client_id] = {{
+                    "branch_ids": [str(row.get("branch_id")) for row in ordered if row.get("branch_id")],
+                    "reason": "active_live_signals",
+                }}
+                continue
+            best_row = sorted(active_rows, key=_row_rank)[0]
+            best_id = str(best_row.get("branch_id")) if best_row.get("branch_id") else None
+            decisions[client_id] = {{
+                "branch_ids": [best_id] if best_id else [],
+                "reason": "active_fallback_best_candidate",
+            }}
+        return decisions
 
     def latest_capability(branch):
         return (
@@ -14900,6 +15007,21 @@ try:
             delivery_primary_reason_label,
             delivery_primary_reason_count,
         ) = collect_delivery_failure_profile(branch)
+        last_inbound_at = recent_inbound_by_branch.get(branch.id)
+        has_instance_id = bool(str(branch.instance_id or "").strip())
+        has_phone = bool(str(branch.phone or "").strip())
+        go_live_state = str(branch.go_live_state or "").strip().lower() or "pending"
+        waiver_until = branch.go_live_waiver_until
+        go_live_allowed = bool(
+            go_live_state == "approved"
+            or (waiver_until is not None and waiver_until > now)
+        )
+        onboarding_go_no_go = (branch.onboarding_state or "").strip().lower() == "go_no_go"
+        integration_ok = (branch.integration_state or "").strip().lower() == "ok"
+        branch_has_recent_inbound = has_recent_inbound_at(
+            last_inbound_at,
+            window_days=30,
+        )
         for code in missing:
             missing_counts[code] = int(missing_counts.get(code, 0)) + 1
 
@@ -14910,6 +15032,15 @@ try:
                 "client_id": str(branch.client_id),
                 "client_slug": client.name if client else None,
                 "is_active": bool(branch.is_active),
+                "has_instance_id": has_instance_id,
+                "has_phone": has_phone,
+                "has_recent_inbound": branch_has_recent_inbound,
+                "last_inbound_at": last_inbound_at.isoformat() if last_inbound_at else None,
+                "go_live_state": go_live_state,
+                "go_live_waiver_until": waiver_until.isoformat() if waiver_until else None,
+                "go_live_allowed": go_live_allowed,
+                "onboarding_go_no_go": onboarding_go_no_go,
+                "integration_ok": integration_ok,
                 "scorecard_ready": bool(scorecard.ready),
                 "scorecard_missing": missing,
                 "sla_status": getattr(sla_loop, "status", None),
@@ -14946,21 +15077,39 @@ try:
                 }}
             )
 
+    reference_by_client = select_reference_rows(report_rows)
+
+    for row in report_rows:
+        client_key = str(row.get("client_id") or "")
+        branch_key = str(row.get("branch_id") or "")
+        decision = reference_by_client.get(client_key) or {{"branch_ids": [], "reason": "no_active_branches"}}
+        row["reference_branch"] = branch_key in set(decision.get("branch_ids") or [])
+        row["reference_branch_reason"] = decision.get("reason") or "no_active_branches"
+
     active_rows = [row for row in report_rows if row.get("is_active")]
-    active_not_ready = [row for row in active_rows if not row.get("scorecard_ready")]
+    active_reference_rows = [row for row in active_rows if row.get("reference_branch")]
+    active_scope_rows = active_rows
+    reference_mode = "all_active"
+    if normalize_reference_branch and active_reference_rows:
+        active_scope_rows = active_reference_rows
+        reference_mode = "normalized"
+    elif normalize_reference_branch:
+        reference_mode = "fallback_all_active"
+
+    active_not_ready = [row for row in active_scope_rows if not row.get("scorecard_ready")]
     active_sla_fail = [
         row
-        for row in active_rows
+        for row in active_scope_rows
         if row.get("sla_status") == "fail"
     ]
     active_pipeline_blocked = [
         row
-        for row in active_rows
+        for row in active_scope_rows
         if row.get("pipeline_blocked") is True
     ]
     active_delivery_critical = [
         row
-        for row in active_rows
+        for row in active_scope_rows
         if any(
             isinstance(code, str)
             and code.startswith("delivery:")
@@ -14968,16 +15117,26 @@ try:
             for code in (row.get("readiness_blocker_codes") or [])
         )
     ]
+    scoped_missing_counts = {{}}
+    for row in active_scope_rows:
+        for code in (row.get("scorecard_missing") or []):
+            scoped_missing_counts[code] = int(scoped_missing_counts.get(code, 0)) + 1
+
     summary = {{
         "mode": mode,
         "active_only": active_only,
+        "reference_mode": reference_mode,
         "total_branches": len(report_rows),
-        "active_branches": len(active_rows),
+        "active_branches": len(active_scope_rows),
+        "active_branches_raw": len(active_rows),
+        "active_reference_branches": len(active_reference_rows),
         "active_not_ready": len(active_not_ready),
+        "active_not_ready_raw": len([row for row in active_rows if not row.get("scorecard_ready")]),
         "active_sla_fail": len(active_sla_fail),
         "active_pipeline_blocked": len(active_pipeline_blocked),
         "active_delivery_critical": len(active_delivery_critical),
-        "active_missing_codes": missing_counts,
+        "active_missing_codes": scoped_missing_counts,
+        "active_missing_codes_raw": missing_counts,
         "changed_branches": len(actions),
         "unresolved_branches": len(unresolved),
         "apply_changes": apply_changes,
@@ -14997,6 +15156,9 @@ try:
                 "active_sla_fail_rows": active_sla_fail,
                 "active_pipeline_blocked_rows": active_pipeline_blocked,
                 "active_delivery_critical_rows": active_delivery_critical,
+                "active_rows_raw": active_rows,
+                "active_reference_rows": active_reference_rows,
+                "reference_by_client": reference_by_client,
                 "actions": actions,
                 "unresolved": unresolved,
             }},
@@ -15030,6 +15192,11 @@ def _parse_onboarding_fleet_check_args(argv):
         action="store_true",
         help="Exit non-zero when at least one active branch is not scorecard-ready.",
     )
+    parser.add_argument(
+        "--all-active-branches",
+        action="store_true",
+        help="Disable reference-branch normalization and evaluate all active branches.",
+    )
     parser.add_argument("--container-name", default=None)
     parser.add_argument("--json", action="store_true")
     return parser.parse_args(argv)
@@ -15041,6 +15208,7 @@ def _run_onboarding_fleet_check(args):
         "mode": "check",
         "active_only": not args.include_inactive,
         "apply_changes": False,
+        "normalize_reference_branch": not bool(args.all_active_branches),
     }
     result = _run_onboarding_fleet_container(payload, container_name=container_name)
     if args.json:
@@ -15128,6 +15296,7 @@ def _run_onboarding_fleet_remediate(args):
         "confirm_payment": bool(args.confirm_payment),
         "ensure_contract": not bool(args.no_ensure_contract),
         "sync_reference_pack": bool(args.sync_reference_pack_integrity),
+        "normalize_reference_branch": False,
     }
     result = _run_onboarding_fleet_container(payload, container_name=container_name)
     if args.json:
@@ -15185,6 +15354,11 @@ def _parse_onboarding_hard_gate_rollout_args(argv):
         help="Include inactive branches in report (default: active only).",
     )
     parser.add_argument(
+        "--all-active-branches",
+        action="store_true",
+        help="Disable reference-branch normalization and evaluate all active branches.",
+    )
+    parser.add_argument(
         "--fail-on-blocked-active",
         action="store_true",
         help="Exit non-zero when active branches are blocked for selected rollout mode.",
@@ -15208,6 +15382,7 @@ def _run_onboarding_hard_gate_rollout(args):
         "active_only": not args.include_inactive,
         "apply_changes": False,
         "hard_gate_codes": sorted(hard_gate_codes),
+        "normalize_reference_branch": not bool(args.all_active_branches),
     }
     result = _run_onboarding_fleet_container(payload, container_name=container_name)
 
@@ -15231,16 +15406,25 @@ def _run_onboarding_hard_gate_rollout(args):
         for row in (result.get("rows") or [])
     ]
 
-    active_rows = [row for row in projected_rows if row.get("is_active")]
+    active_rows_raw = [row for row in projected_rows if row.get("is_active")]
+    active_reference_rows = [row for row in active_rows_raw if row.get("reference_branch")]
+    active_rows = active_rows_raw
+    if not args.all_active_branches and active_reference_rows:
+        active_rows = active_reference_rows
     active_blocked_rows = [row for row in active_rows if row.get("projected_status") != "pass"]
     summary = {
         "mode": args.mode,
         "hard_gate_codes": sorted(hard_gate_codes),
+        "reference_mode": "all_active"
+        if args.all_active_branches
+        else ("normalized" if active_reference_rows else "fallback_all_active"),
         "actual_global_enabled": bool(actual_global_enabled),
         "actual_canary_branch_ids": sorted(actual_canary_ids),
         "input_canary_branch_ids": sorted(canary_branch_ids),
         "total_branches": len(projected_rows),
         "active_branches": len(active_rows),
+        "active_branches_raw": len(active_rows_raw),
+        "active_reference_branches": len(active_reference_rows),
         "active_blocked": len(active_blocked_rows),
         "active_blocked_scorecard": sum(
             1 for row in active_blocked_rows if row.get("projected_status") == "blocked_scorecard"
@@ -15295,6 +15479,11 @@ def _parse_onboarding_delivery_stabilize_args(argv):
         help="Include inactive branches in report (default: active only).",
     )
     parser.add_argument(
+        "--all-active-branches",
+        action="store_true",
+        help="Disable reference-branch normalization and evaluate all active branches.",
+    )
+    parser.add_argument(
         "--fail-on-critical",
         action="store_true",
         help="Exit non-zero when active branches have delivery critical blockers.",
@@ -15319,6 +15508,7 @@ def _run_onboarding_delivery_stabilize(args):
         "apply_changes": False,
         "hard_gate_codes": sorted(hard_gate_codes),
         "delivery_window_hours": max(1, int(args.window_hours or 24)),
+        "normalize_reference_branch": not bool(args.all_active_branches),
     }
     result = _run_onboarding_fleet_container(payload, container_name=container_name)
     rows = [dict(row) for row in (result.get("rows") or [])]
@@ -15327,7 +15517,11 @@ def _run_onboarding_delivery_stabilize(args):
         row["delivery_critical_blockers"] = _delivery_critical_blockers_from_row(row)
         row["delivery_remediation_actions"] = _delivery_remediation_actions_for_row(row)
 
-    active_rows = [row for row in rows if row.get("is_active")]
+    active_rows_raw = [row for row in rows if row.get("is_active")]
+    active_reference_rows = [row for row in active_rows_raw if row.get("reference_branch")]
+    active_rows = active_rows_raw
+    if not args.all_active_branches and active_reference_rows:
+        active_rows = active_reference_rows
     active_critical_rows = [row for row in active_rows if row.get("delivery_critical_blockers")]
     active_with_failures = [
         row
@@ -15337,8 +15531,13 @@ def _run_onboarding_delivery_stabilize(args):
     summary = {
         "window_hours": max(1, int(args.window_hours or 24)),
         "hard_gate_codes": sorted(hard_gate_codes),
+        "reference_mode": "all_active"
+        if args.all_active_branches
+        else ("normalized" if active_reference_rows else "fallback_all_active"),
         "total_branches": len(rows),
         "active_branches": len(active_rows),
+        "active_branches_raw": len(active_rows_raw),
+        "active_reference_branches": len(active_reference_rows),
         "active_delivery_critical": len(active_critical_rows),
         "active_with_failed_24h": len(active_with_failures),
         "active_reason_totals": _delivery_reason_totals(active_rows),

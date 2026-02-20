@@ -91,6 +91,8 @@ class ConsoleClient(BaseModel):
     active_branches: Optional[int] = None
     degraded_branches: Optional[int] = None
     go_live_ready_branches: Optional[int] = None
+    reference_branch_ids: Optional[list[UUID]] = None
+    reference_branch_reason: Optional[str] = None
 
 
 class ConsoleBranch(BaseModel):
@@ -159,6 +161,8 @@ class ConsoleFleetAttentionItem(BaseModel):
     active_branches: int = 0
     degraded_branches: int = 0
     go_live_ready_branches: int = 0
+    reference_branch_ids: list[UUID] = []
+    reference_branch_reason: Optional[str] = None
     stale_branches: int = 0
     integration_error_branches: int = 0
     integration_warn_branches: int = 0
