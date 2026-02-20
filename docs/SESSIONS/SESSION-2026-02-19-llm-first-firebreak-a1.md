@@ -26,8 +26,11 @@
   - Stabilized scenario contract reliability in generator by enforcing `check_booking -> confirm` ordering when booking coverage is requested (prevents random `check_confirm_sequence_missing` invalid runs).
   - Added and passed focused infra tests for run-command redaction, dynamic scenario timeout budgeting, and scenario ordering guarantees (`15 passed` across diagnose/script test modules).
   - Reproduced timeout failure path with clean/no-secret reason and validated successful `count=10` LLM dry-run artifact generation after infra fix (`debug-infra-default-a1`).
+  - Implemented Track B step-2 runtime enforcement in `truffles-api/app/routers/webhook/decision.py`: fail-closed on `plan->final` override with missing/invalid reason-code (`override_reason_missing`), emit guard trace (`llm_policy_plan_delta`, `policy_core_guard`), and return guarded clarify response with explicit decision meta.
+  - Added regression test `test_llm_policy_core_override_without_reason_code_blocks_with_clarify` in `truffles-api/tests/test_message_endpoint.py` to prove missing reason-code cannot silently pass and must degrade to policy clarify.
+  - Opened PR `#770` for runtime guard enforcement after pushing commit `6bc58ddb`.
 - next:
-  - Continue TP Track B runtime refactor for remaining post-tool semantic rewrites outside the current policy-core guard scope.
+  - Continue TP Track B runtime refactor for remaining post-tool semantic rewrites outside the current policy-core guard scope and remove lexical degrade paths where reason-coded clarify/handoff is required.
   - Execute fresh canonical lock-run (`judge-mode all`, fail-on-thresholds) on current `main` head and then replay vs this lock baseline.
   - Wire structured scenario-generation progress into llm-quality summary/warnings for faster infra triage without reading raw stderr.
 - evidence:
@@ -66,4 +69,16 @@
   - TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --batch-size 5 --retry-count 2 --retry-backoff 0.6 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode off --dry-run --scenario-progress-stderr --run-id debug-infra-default-a1
   - /tmp/booking_quality/debug-infra-default-a1/summary.json
   - /tmp/booking_quality/debug-infra-default-a1/brief.md
-- last_updated: 2026-02-20T08:15:00+05:00
+  - python3 -m py_compile truffles-api/app/routers/webhook/decision.py
+  - ruff check truffles-api/app/routers/webhook/decision.py truffles-api/tests/test_message_endpoint.py
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "llm_policy_core"
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 1 --min-turns 10 --max-turns 10 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --scenario-progress-stderr --judge-mode all --fail-on-thresholds --timeout-profile fast-replay --max-failures 20 --run-id booking-lock-20260220-main-a1-mini
+  - /tmp/booking_quality/booking-lock-20260220-main-a1-mini/summary.json
+  - /tmp/booking_quality/booking-lock-20260220-main-a1-mini/brief.md
+  - /tmp/booking_quality/booking-lock-20260220-main-a1-mini/scenarios.json
+  - lock mini KPI: `infra_valid=true`, `semantic_valid=true`, `strict_pass_rate=1.0`, `hard_fail_rate=0.0`, `degraded_fallback_rate=0.0`.
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://localhost:8000 --client-slug demo_salon --scenarios-file /tmp/booking_quality/booking-lock-20260220-main-a1-mini/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-20260220-main-a1-mini/summary.json --count 1 --timeout-profile fast-replay --tool-hooks auto --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression --max-failures 20 --run-id booking-replay-20260220-main-a1-mini
+  - /tmp/booking_quality/booking-replay-20260220-main-a1-mini/summary.json
+  - /tmp/booking_quality/booking-replay-20260220-main-a1-mini/brief.md
+  - replay mini status: `infra_valid=true`, `semantic_valid=false`, regression breach (`strict_pass_rate -0.1`, `degraded_fallback_rate +0.1`).
+- last_updated: 2026-02-20T09:16:53+05:00
