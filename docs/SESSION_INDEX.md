@@ -4,7 +4,8 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
-| 2026-02-19-llm-first-firebreak-a1 | active | fix/llm-first-firebreak-2026-02-19 | /home/zhan/worktrees/fix-llm-first-firebreak-2026-02-19 | docs/TASK_PACKAGES/TP-2026-02-19-llm-first-firebreak-program.md | 2026-02-20T05:45:00+05:00 |
+| 2026-02-20-wave3-marketing-trace-retention-a140 | active | feat/2026-02-20-wave3-marketing-trace-retention-a140 | /home/zhan/worktrees/2026-02-20-wave3-marketing-trace-retention-a140 | docs/TASK_PACKAGES/TP-2026-02-20-wave3-marketing-trace-retention-a140.md | 2026-02-20 |
+| 2026-02-20-onboarding-followup123-a131 | active | feat/2026-02-20-onboarding-followup123-a131 | /home/zhan/worktrees/2026-02-20-onboarding-followup123-a131 | docs/TASK_PACKAGES/TP-2026-02-20-onboarding-followup123-a131.md | 2026-02-20 |
 | 2026-02-19-wave3-marketing-full-a140 | done | feat/2026-02-19-wave3-marketing-full-a140 | /home/zhan/worktrees/2026-02-19-wave-canon-context-marketing-mvp-a140 | docs/TASK_PACKAGES/TP-2026-02-19-wave3-marketing-full-a140.md | 2026-02-19 |
 | 2026-02-19-wave-canon-context-marketing-mvp-a140 | done | feat/2026-02-19-wave-canon-context-marketing-mvp-a140 | /home/zhan/worktrees/2026-02-19-wave-canon-context-marketing-mvp-a140 | docs/TASK_PACKAGES/TP-2026-02-19-wave-canon-context-marketing-mvp-a140.md | 2026-02-19 |
 | 2026-02-19-platform-health-remediation-a120 | done | feat/2026-02-19-platform-health-remediation-a120 | /home/zhan/worktrees/2026-02-19-platform-health-remediation-a120 | docs/TASK_PACKAGES/TP-2026-02-19-platform-health-remediation-a120.md | 2026-02-19 |
@@ -14,7 +15,7 @@
 | 2026-02-19-onboarding-any-niche-step123-a131 | done | feat/2026-02-19-onboarding-any-niche-step123-a131 | /home/zhan/worktrees/2026-02-19-onboarding-any-niche-step123-a131 | docs/TASK_PACKAGES/TP-2026-02-19-onboarding-reference-branch-normalization-step3-a131.md | 2026-02-19 |
 | 2026-02-19-onboarding-any-niche-acceptance-a131 | done | feat/2026-02-19-onboarding-any-niche-acceptance-a131 | /home/zhan/worktrees/2026-02-19-onboarding-any-niche-acceptance-a131 | docs/TASK_PACKAGES/TP-2026-02-19-onboarding-any-niche-acceptance-a131.md | 2026-02-19 |
 | 2026-02-19-marketing-postmerge-livecheck-a140 | done | main | /home/zhan/truffles-main | docs/TASK_PACKAGES/TP-2026-02-19-marketing-postmerge-livecheck-a140.md | 2026-02-19 |
-| 2026-02-19-llm-first-firebreak-a1 | active | fix/llm-first-firebreak-2026-02-19 | /home/zhan/worktrees/fix-llm-first-firebreak-2026-02-19 | docs/TASK_PACKAGES/TP-2026-02-19-booking-routing-transition-a120.md | 2026-02-19 |
+| 2026-02-19-llm-first-firebreak-a1 | active | fix/llm-first-firebreak-2026-02-19 | /home/zhan/worktrees/fix-llm-first-firebreak-2026-02-19 | docs/TASK_PACKAGES/TP-2026-02-19-llm-first-firebreak-program.md | 2026-02-20T05:45:00+05:00 |
 | 2026-02-19-console-context-banner-dedupe-a130 | active | feat/2026-02-19-console-context-banner-dedupe-a130 | /home/zhan/worktrees/2026-02-19-console-context-banner-dedupe-a130 | docs/TASK_PACKAGES/TP-2026-02-19-console-context-banner-dedupe-a130.md | 2026-02-19 |
 | 2026-02-19-booking-routing-transition-a120 | done | feat/2026-02-19-booking-routing-transition-a120 | /home/zhan/worktrees/2026-02-19-booking-routing-transition-a120 | docs/TASK_PACKAGES/TP-2026-02-19-booking-routing-transition-a120.md | 2026-02-19 |
 | 2026-02-19-booking-name-progression-a120 | active | feat/2026-02-19-booking-name-progression-a120 | /home/zhan/worktrees/2026-02-19-booking-name-progression-a120 | docs/TASK_PACKAGES/TP-2026-02-19-booking-name-progression-a120.md | 2026-02-19 |
@@ -314,4 +315,3 @@
 | 2026-01-27-consultant-canon-a2 | active | feat/2026-01-27-consultant-canon-a2 | /home/zhan/worktrees/2026-01-27-consultant-canon-a2 | docs/TASK_PACKAGES/TP-2026-01-27-consultant-canon-alignment.md | 2026-01-29 |
 | 2026-01-27-console-ux-selection | done | feat/console-ux-selection | /home/zhan/worktrees/console-ux-selection | docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md | 2026-01-28 |
 | 2026-01-27-admin-login-verify-a2 | done | feat/2026-01-27-admin-login-verify-a2 | /home/zhan/worktrees/2026-01-27-admin-login-verify-a2 | docs/TASK_PACKAGES/TP-2026-01-27-admin-login-verify.md | 2026-01-27 |
-| 2026-02-20-onboarding-followup123-a131 | active | feat/2026-02-20-onboarding-followup123-a131 | /home/zhan/worktrees/2026-02-20-onboarding-followup123-a131 | docs/TASK_PACKAGES/TP-2026-02-20-onboarding-followup123-a131.md | 2026-02-20 |
