@@ -2,11 +2,11 @@
 
 - status: done
 - owner: Top Architect / Brain / Hands
-- task_package: docs/TASK_PACKAGES/TP-2026-02-19-onboarding-delivery-contour-step2-a131.md
+- task_package: docs/TASK_PACKAGES/TP-2026-02-19-onboarding-reference-branch-normalization-step3-a131.md
 - branch: feat/2026-02-19-onboarding-any-niche-step123-a131
 - worktree: /home/zhan/worktrees/2026-02-19-onboarding-any-niche-step123-a131
 - base_ref: origin/main
-- scope: Реализовать шаг 2 (Delivery Contour Stabilization): reason-aware delivery blockers + ops delivery stabilization diagnose flow.
+- scope: Реализовать шаг 3 (Reference Branch Normalization): выделение production-like reference branches и нормализация fleet readiness/attention контуров в Console/ops diagnose.
 - done:
   - Добавлены reason-aware delivery blockers в readiness dimension: `delivery:provider_billing_blocked_critical`, `delivery:provider_auth_critical`.
   - Добавлены targeted next actions: `release_stale_processing_queue`, `resolve_provider_billing_block`, `rotate_provider_credentials`.
@@ -21,9 +21,15 @@
   - Выполнен ops remediation `onboarding-fleet-remediate --sync-reference-pack-integrity --apply` и подтвержден PASS по fleet-check/smoke/pack-quality.
   - Исправлена красная CI-проверка `unit-tests` в PR #758 через обновление openapi контракт-тестов под канонический `/console/v1` и `ConsoleReminder*` schema aliases.
   - Реализован rollout diagnostics шага 1: `ops/diagnose.py onboarding-hard-gate-rollout` + helper/tests + runtime evidence для `actual/shadow/canary/enforced`.
+  - Реализован шаг 3 (Reference Branch Normalization): добавлен selection-kernel `reference_branch_selection` и интеграция в Console fleet read-model (`list_clients`, `list_fleet_attention`) с `reference_branch_ids/reference_branch_reason`.
+  - В ops diagnose включен normalized reference scope по умолчанию для `onboarding-fleet-check`, `onboarding-hard-gate-rollout`, `onboarding-delivery-stabilize`; добавлен override `--all-active-branches`.
+  - Добавлены unit tests для reference selection/console scope/diagnose scope; подтверждено `61 passed` по targeted test suite.
 - next:
-  - Step 3: Reference Branch Normalization.
+  - Закрыть session artifacts под step 3 и подготовить PR.
 - evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-19-onboarding-reference-branch-normalization-step3-a131.md
+  - docs/REPORTS/2026-02-19-onboarding-reference-branch-normalization-step3-a131.md
+  - /tmp/onboarding_reference_branch_step3_a131/
   - docs/TASK_PACKAGES/TP-2026-02-19-onboarding-delivery-contour-step2-a131.md
   - docs/REPORTS/2026-02-19-onboarding-delivery-contour-step2-a131.md
   - /tmp/onboarding_delivery_step2_a131/
