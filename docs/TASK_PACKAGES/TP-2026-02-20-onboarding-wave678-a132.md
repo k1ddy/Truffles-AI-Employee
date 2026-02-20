@@ -1,0 +1,84 @@
+# TP-2026-02-20-onboarding-wave678-a132
+
+- Название/цель: Закрыть next-wave пункты 6/7/8 из `TP-2026-02-19-onboarding-any-niche-end2end-tz.md`: (6) Single-Operator flow consolidation, (7) evidence-closed remediation для инцидентов, (8) throughput metrics для скорости онбординга.
+- Canon refs: `AGENTS.md`, `STATE.md`, `STRUCTURE.md`, `TECH.md`, `SPECS/SYSTEM_REFERENCE.md`, `docs/TASK_PACKAGES/TP-2026-02-19-onboarding-any-niche-end2end-tz.md`.
+- Invariant:
+  - Не ослаблять fail-closed go-live/hard-gate semantics.
+  - Не добавлять client-specific hardcode.
+  - Сохранить существующие API/UX потоки рабочими; новые шаги должны быть additive.
+- Scope:
+  - Step 6 (Single-Operator flow):
+    - обозначить `Company Workspace` как канонический execution hub;
+    - добавить из wizard (Tenants/Settings) явный переход в Workspace с carry-over контекста (company/client/branch);
+    - убрать двусмысленность «где выполнять remediation», не убирая текущие экраны.
+  - Step 7 (Evidence-Closed remediation):
+    - добавить в OPS управляемое закрытие инцидента: checklist + post-check delta по ключевым метрикам;
+    - запретить перевод инцидента в `resolved` без evidence payload (backend contract check);
+    - фиксировать evidence в `incident_state_note/metadata`.
+  - Step 8 (Onboarding throughput metrics):
+    - добавить в fleet summary метрики:
+      - `time_to_go_live_median_hours`,
+      - `blocker_age_p95_hours`,
+      - `first_pass_go_live_rate_pct`,
+      - `incident_reopen_rate_24h_pct`;
+    - вывести эти метрики в `Tenants` и `Company Workspace` без перегруза UI.
+- Out of scope:
+  - Переписывание webhook/runtime decision pipeline.
+  - Изменение провайдерских интеграций (ChatFlow billing/outage) вне console onboarding flow.
+  - Ручные DB bypass ради pass-статуса.
+- Touch-list:
+  - `docs/TASK_PACKAGES/TP-2026-02-19-onboarding-any-niche-end2end-tz.md`
+  - `docs/TASK_PACKAGES/TP-2026-02-20-onboarding-wave678-a132.md`
+  - `console-web/src/components/ProvisioningWizard.tsx`
+  - `console-web/src/components/OpsPage.tsx`
+  - `console-web/src/app/tenants/page.tsx`
+  - `console-web/src/app/company-workspace/page.tsx`
+  - `console-web/src/lib/api-client.ts`
+  - `console-web/src/types/api.generated.ts`
+  - `truffles-api/app/routers/console.py`
+  - `truffles-api/app/schemas/console.py`
+  - `truffles-api/tests/test_console_ops_jobs.py`
+  - `truffles-api/tests/test_console_access_admin_pr2.py`
+  - `truffles-api/tests/test_console_tenants_list.py`
+  - `truffles-api/tests/test_console_fleet_attention.py`
+  - `contracts/console_api/openapi.v1.yaml`
+  - `docs/REPORTS/2026-02-20-onboarding-wave678-a132.md`
+  - `docs/SESSIONS/SESSION-2026-02-20-onboarding-wave678-a132.md`
+  - `docs/SESSION_INDEX.md`
+- Plan:
+  1) Реализовать Step 6 UX consolidation (wizard -> workspace execution hub + context carry-over).
+  2) Реализовать Step 7 evidence-closed remediation (UI checklist + backend resolved-evidence validation).
+  3) Реализовать Step 8 throughput metrics (backend summary + Tenants/Workspace rendering).
+  4) Синхронизировать OpenAPI/contracts/types.
+  5) Прогнать backend/frontend/ops checks и собрать report + raw evidence.
+- DoD:
+  - Wizard в Tenants/Settings явно направляет в Workspace execution hub с сохранением контекста.
+  - `incident_state=resolved` без evidence блокируется backend с детерминированной ошибкой.
+  - OPS UI показывает post-check delta и checklist перед закрытием инцидента.
+  - Fleet summary содержит throughput metrics и они отображаются в Tenants/Workspace.
+  - OpenAPI/types/tests зелёные, без регрессий.
+- Checks:
+  - `python3 -m py_compile truffles-api/app/routers/console.py truffles-api/app/schemas/console.py truffles-api/tests/test_console_ops_jobs.py truffles-api/tests/test_console_access_admin_pr2.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py`
+  - `ruff check truffles-api/app/routers/console.py truffles-api/app/schemas/console.py truffles-api/tests/test_console_ops_jobs.py truffles-api/tests/test_console_access_admin_pr2.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py`
+  - `pytest -q truffles-api/tests/test_console_ops_jobs.py truffles-api/tests/test_console_access_admin_pr2.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py`
+  - `python3 truffles-api/scripts/generate_openapi.py --check`
+  - `npm --prefix console-web run lint -- --file src/components/ProvisioningWizard.tsx --file src/components/OpsPage.tsx --file src/app/tenants/page.tsx --file src/app/company-workspace/page.tsx --file src/types/api.generated.ts`
+  - `npm --prefix console-web run build`
+- Evidence:
+  - `/tmp/onboarding_wave678_a132/*` (тест-логи + json snapshots)
+  - `docs/REPORTS/2026-02-20-onboarding-wave678-a132.md`
+  - UI evidence через скриншоты/видео по новым блокам.
+- Rollback:
+  - `git revert COMMIT_SHA` по шагам (6/7/8) отдельно.
+- No-go:
+  - Не отключать hard-gate/evidence gate ради UX-демо.
+  - Не добавлять special-case под `demo_salon`.
+  - Не делать manual DB updates для демонстрации closure.
+- Branch/worktree/base/merge/cleanup:
+  - Branch: `feat/2026-02-20-onboarding-wave678-a132`
+  - Worktree: `/home/zhan/worktrees/2026-02-20-onboarding-wave678-a132`
+  - Base: `origin/main`
+  - Merge policy: merge commit via PR (no rebase)
+  - Cleanup: `scripts/session_end.sh --status done` в финальном коммите, cleanup после merge.
+- Риски/блокеры:
+  - Реальный provider billing block может оставаться `critical` после remediation попыток; в таком случае ожидаемое поведение — evidence + эскалация, а не «ложный зеленый».

@@ -126,6 +126,16 @@ class ConsoleCompanyListResponse(BaseModel):
     has_more: bool
 
 
+class ConsoleOnboardingThroughputMetrics(BaseModel):
+    window_hours: int = 24
+    approved_branches_total: int = 0
+    first_pass_approved_branches: int = 0
+    time_to_go_live_median_hours: Optional[float] = None
+    blocker_age_p95_hours: Optional[float] = None
+    first_pass_go_live_rate_pct: Optional[float] = None
+    incident_reopen_rate_24h_pct: Optional[float] = None
+
+
 class ConsoleFleetSummary(BaseModel):
     total_companies: int
     total_clients: int
@@ -140,6 +150,7 @@ class ConsoleFleetSummary(BaseModel):
     lifecycle_counts: dict[str, int]
     payment_counts: dict[str, int]
     service_counts: dict[str, int]
+    onboarding_throughput: Optional[ConsoleOnboardingThroughputMetrics] = None
 
 
 ConsoleFleetAttentionLevel = Literal["high", "medium", "low"]

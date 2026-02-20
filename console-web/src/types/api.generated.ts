@@ -2067,6 +2067,19 @@ export interface components {
             service_counts: {
                 [key: string]: number;
             };
+            onboarding_throughput?: components["schemas"]["ConsoleOnboardingThroughputMetrics"] | null;
+        };
+        ConsoleOnboardingThroughputMetrics: {
+            /** @default 24 */
+            window_hours: number;
+            /** @default 0 */
+            approved_branches_total: number;
+            /** @default 0 */
+            first_pass_approved_branches: number;
+            time_to_go_live_median_hours?: number | null;
+            blocker_age_p95_hours?: number | null;
+            first_pass_go_live_rate_pct?: number | null;
+            incident_reopen_rate_24h_pct?: number | null;
         };
         FleetAttentionItem: {
             /** Format: uuid */

@@ -821,7 +821,15 @@ export default function SettingsPage() {
             {(showAdvanced || (!canReadSettings && canReadProvisioning)) && (
                 <>
                     {canReadProvisioning && (
-                        <ProvisioningWizard session={session} accessSection={provisioningAccessSection} />
+                        <>
+                            <div className="mb-3 rounded-lg border border-blue-300/60 bg-blue-50 p-3 text-xs text-blue-900" data-testid="settings-onboarding-workspace-hint">
+                                Канонический execution-flow: для remediation/go-live используйте `Company Workspace`.
+                                <Link href="/company-workspace" className="btn-ghost ml-2">
+                                    Открыть Workspace
+                                </Link>
+                            </div>
+                            <ProvisioningWizard session={session} accessSection={provisioningAccessSection} />
+                        </>
                     )}
 
                     {canReadSettings && (
