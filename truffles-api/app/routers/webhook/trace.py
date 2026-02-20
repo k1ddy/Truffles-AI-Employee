@@ -124,6 +124,10 @@ def _is_critical_trace(payload: dict[str, Any]) -> bool:
     stage = payload.get("stage")
     if stage in DECISION_TRACE_CRITICAL_STAGES:
         return True
+    if stage == "routing" and (
+        payload.get("decision") == "human_lock_silent" or payload.get("reason") == "human_lock"
+    ):
+        return True
     if stage == "question_contract" and payload.get("decision") in {"matched", "missed"}:
         return True
     if payload.get("contract_error") or payload.get("trace_contract_error"):

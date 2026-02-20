@@ -1,0 +1,2 @@
+# False positive in test fixture idempotency header value (PR #777 history).
+d58b1992ed46d653f460171e4780df7a76720dfa:truffles-api/tests/test_console_outreach.py:generic-api-key:102
