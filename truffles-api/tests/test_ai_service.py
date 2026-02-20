@@ -1,3 +1,4 @@
+import json
 import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -509,6 +510,53 @@ class TestDetectMultiIntentBudgetReserve:
         assert result is not None
         assert timing_context.get("llm_degradation_reason") == "controller_reserved"
         mock_llm.assert_not_called()
+
+
+class TestDetectMultiIntentTimeoutResilience:
+    def test_retries_with_extended_timeout_before_fallback(self, monkeypatch):
+        payload = {
+            "multi_intent": True,
+            "primary_intent": "booking",
+            "secondary_intents": ["pricing"],
+            "intents": ["booking", "pricing"],
+            "service_query": "маникюр",
+            "consult_intent": False,
+            "consult_topic": "",
+            "consult_question": "",
+        }
+        response = SimpleNamespace(content=json.dumps(payload))
+        llm = Mock()
+        llm.generate.side_effect = [httpx.TimeoutException("slow"), response]
+
+        monkeypatch.setattr(ai_service, "OPENAI_API_KEY", "test")
+        monkeypatch.setenv("OPENAI_API_KEY", "test")
+        monkeypatch.setattr(ai_service, "MULTI_INTENT_RETRY_ON_TIMEOUT", "1")
+        monkeypatch.setattr(ai_service, "MULTI_INTENT_RETRY_TIMEOUT_SECONDS", 2.4)
+
+        with patch("app.services.ai_service.get_llm_provider", return_value=llm):
+            result = detect_multi_intent("Сколько стоит маникюр и когда можно записаться?")
+
+        assert isinstance(result, dict)
+        assert result.get("primary_intent") == "booking"
+        assert llm.generate.call_count == 2
+        assert llm.generate.call_args_list[0].kwargs.get("timeout_seconds") == ai_service.MULTI_INTENT_TIMEOUT_SECONDS
+        assert llm.generate.call_args_list[1].kwargs.get("timeout_seconds") == 2.4
+
+    def test_timeout_safe_fallback_avoids_implicit_hours_location(self, monkeypatch):
+        llm = Mock()
+        llm.generate.side_effect = httpx.TimeoutException("slow")
+
+        monkeypatch.setattr(ai_service, "OPENAI_API_KEY", "test")
+        monkeypatch.setenv("OPENAI_API_KEY", "test")
+        monkeypatch.setattr(ai_service, "MULTI_INTENT_RETRY_ON_TIMEOUT", "0")
+
+        with patch("app.services.ai_service.get_llm_provider", return_value=llm):
+            result = detect_multi_intent("Какие мастера работают на педикюр?")
+
+        assert isinstance(result, dict)
+        assert "hours" not in (result.get("intents") or [])
+        assert "location" not in (result.get("intents") or [])
+        assert result.get("primary_intent") in {"other", "booking", "pricing", "duration"}
 
 
 class TestOpenAIKeyResolution:
