@@ -20,7 +20,7 @@ class AuditEvent(Base):
 
     id = Column("event_id", PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-    client_id = Column(PGUUID(as_uuid=True), nullable=True)
+    client_id = Column(PGUUID(as_uuid=True), nullable=False)
     branch_id = Column(PGUUID(as_uuid=True), nullable=True)
     actor_id = Column("actor_agent_id", PGUUID(as_uuid=True), nullable=True)
     actor_name = Column(String(255), nullable=True)
