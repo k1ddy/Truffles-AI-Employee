@@ -15,9 +15,12 @@
   - Implemented multi-intent timeout resilience in `ai_service.py` (retry with extended timeout + timeout-safe fallback for location/hours explicit-only).
   - Added tests for multi-intent retry/fallback behavior in `truffles-api/tests/test_ai_service.py`.
   - Opened PR `#763` with updated TP + timeout resilience fix.
+  - Implemented runtime `plan -> final` audit contract for LLM policy core in `truffles-api/app/routers/webhook/decision.py` with persisted `llm_policy_plan_audit` and trace stage `llm_policy_plan_delta`.
+  - Added deterministic override whitelist reason-codes and wired reason-coded audit events for policy rewrites (`collect/list_slots -> book_slot`, `info -> collect`, `service_query -> location`, style-reference normalization).
+  - Extended regression coverage in `truffles-api/tests/test_message_endpoint.py` (new explicit location rewrite audit test + assertions for normalization reason-codes) and hardened trace retention for the new audit stage in `truffles-api/app/routers/webhook/trace.py`.
 - next:
-  - Close CI checks for PR `#763` and merge.
-  - Run lock/replay LLM quality suite on merged head and publish KPI delta table.
+  - Continue TP Track B runtime refactor by moving remaining semantic post-tool rewrites to explicit clarify/handoff reason-codes.
+  - Run lock/replay LLM quality suite on merged head and publish KPI delta table with `plan->final` override counters.
 - evidence:
   - pytest -q truffles-api/tests/test_demo_salon_eval.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_booking_chaos_dialogs.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_message_endpoint.py
   - 289 passed, 2 warnings
@@ -25,4 +28,11 @@
   - pytest -q truffles-api/tests/test_ai_service.py
   - pytest -q truffles-api/tests/test_booking_info_interrupt_contract.py
   - pytest -q truffles-api/tests/test_message_endpoint.py -k "expected_reply_time_question_like_info_does_not_match_deterministic or is_booking_request_rejects_need_plus_service_without_datetime_or_booking_lexicon"
-- last_updated: 2026-02-19T19:00:00+05:00
+  - python3 -m py_compile truffles-api/app/routers/webhook/decision.py
+  - ruff check truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/trace.py truffles-api/tests/test_message_endpoint.py
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "collect_with_full_slots_normalizes_to_book_slot or list_slots_name_stage_normalizes_to_book_slot or service_query_rewrites_to_location_with_reason_code"
+  - pytest -q truffles-api/tests/test_message_endpoint.py::test_llm_policy_core_catalog_service_reply_normalized_to_master_info_by_signal truffles-api/tests/test_message_endpoint.py::test_llm_policy_core_catalog_location_reply_normalized_to_master_info truffles-api/tests/test_message_endpoint.py::test_llm_policy_core_semantic_arbitration_off_keeps_master_without_location_rewrite truffles-api/tests/test_message_endpoint.py::test_llm_policy_core_service_query_rewrites_to_location_with_reason_code
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "llm_policy_core"
+  - Result: `59 passed, 163 deselected` for `llm_policy_core` slice; targeted override suite `3 passed`; cross-check suite `4 passed`.
+  - pytest -q truffles-api/tests/test_reasoning_core.py::test_reasoning_core_stage_snapshot_matches_trace truffles-api/tests/test_outbox_payload_contract.py::test_stage_order_snapshot_hash truffles-api/tests/test_webhook_trace.py
+- last_updated: 2026-02-20T05:45:00+05:00

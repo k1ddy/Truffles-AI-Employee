@@ -30,6 +30,7 @@ DECISION_TRACE_CRITICAL_STAGES = {
     "info_class",
     "knowledge_safe_mode",
     "llm_policy_core",
+    "llm_policy_plan_delta",
     "multi_truth",
     "minimum_data_safe_mode",
     "out_of_domain",
