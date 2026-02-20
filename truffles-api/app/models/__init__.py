@@ -15,6 +15,7 @@ from app.models.console_confirmation import ConsoleConfirmation
 from app.models.console_idempotency import ConsoleIdempotencyKey
 from app.models.console_macro import ConsoleMacro
 from app.models.console_ops_job import ConsoleOpsJob
+from app.models.conversation_human_lock import ConversationHumanLock
 from app.models.conversation import Conversation
 from app.models.handover import Handover
 from app.models.inbox_event import InboxEvent
@@ -55,6 +56,7 @@ __all__ = [
     "ConsoleIdempotencyKey",
     "ConsoleMacro",
     "ConsoleOpsJob",
+    "ConversationHumanLock",
     "Prompt",
     "ReferencePack",
     "OutboxMessage",

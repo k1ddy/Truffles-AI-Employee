@@ -437,6 +437,7 @@ def classify_outbox_incident_reason(
     Literal[
         "outbox_backlog",
         "provider_billing_blocked",
+        "provider_invalid_recipient",
         "provider_unavailable",
         "provider_auth",
         "provider_rate_limited",

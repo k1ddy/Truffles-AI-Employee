@@ -552,6 +552,119 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/outreach/messages:
+    post:
+      tags:
+      - console
+      summary: Send Outreach Message
+      description: Send manual outreach message by phone/JID with optional per-client
+        bot pause.
+      operationId: send_outreach_message_console_v1_outreach_messages_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleOutreachMessageRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleOutreachMessageResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/conversations/{conversation_id}/human-lock:
+    get:
+      tags:
+      - console
+      summary: Get Conversation Human Lock Status
+      operationId: get_conversation_human_lock_status_console_v1_conversations__conversation_id__human_lock_get
+      parameters:
+      - name: conversation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Conversation Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleHumanLockStatusResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - console
+      summary: Release Conversation Human Lock
+      operationId: release_conversation_human_lock_console_v1_conversations__conversation_id__human_lock_delete
+      parameters:
+      - name: conversation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Conversation Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleHumanLockStatusResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/conversations/{conversation_id}/human-lock/pause:
+    post:
+      tags:
+      - console
+      summary: Pause Conversation Human Lock
+      operationId: pause_conversation_human_lock_console_v1_conversations__conversation_id__human_lock_pause_post
+      parameters:
+      - name: conversation_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Conversation Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleHumanLockPauseRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleHumanLockStatusResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/conversations/{conversation_id}/messages/media:
     post:
       tags:
@@ -7496,6 +7609,66 @@ components:
       - redis
       - outbox_backlog
       title: ConsoleHealthResponse
+    ConsoleHumanLockPauseRequest:
+      properties:
+        minutes:
+          type: integer
+          title: Minutes
+          default: 30
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      additionalProperties: false
+      type: object
+      title: ConsoleHumanLockPauseRequest
+    ConsoleHumanLockStatus:
+      properties:
+        active:
+          type: boolean
+          title: Active
+        remote_jid:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Remote Jid
+        lock_until:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Lock Until
+        remaining_seconds:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Remaining Seconds
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      type: object
+      required:
+      - active
+      title: ConsoleHumanLockStatus
+    ConsoleHumanLockStatusResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+        status:
+          $ref: '#/components/schemas/ConsoleHumanLockStatus'
+      type: object
+      required:
+      - success
+      - status
+      title: ConsoleHumanLockStatusResponse
     ConsoleIncidentAction:
       properties:
         id:
@@ -7580,6 +7753,7 @@ components:
           enum:
           - outbox_backlog
           - provider_billing_blocked
+          - provider_invalid_recipient
           - provider_unavailable
           - provider_auth
           - provider_rate_limited
@@ -10623,6 +10797,84 @@ components:
       - retried
       - skipped
       title: ConsoleOutboxRetryResponse
+    ConsoleOutreachMessageRequest:
+      properties:
+        destination:
+          type: string
+          title: Destination
+        content:
+          type: string
+          title: Content
+        conversation_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Conversation Id
+        branch_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Branch Id
+        pause_bot_minutes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Pause Bot Minutes
+          default: 30
+        pause_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pause Reason
+      additionalProperties: false
+      type: object
+      required:
+      - destination
+      - content
+      title: ConsoleOutreachMessageRequest
+    ConsoleOutreachMessageResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+        delivery_status:
+          type: string
+          enum:
+          - queued
+          - delivered
+          - failed
+          title: Delivery Status
+        remote_jid:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Remote Jid
+        outbox_enqueued:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Outbox Enqueued
+        lock_until:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Lock Until
+        message:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleMessage'
+          - type: 'null'
+        error_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Code
+      type: object
+      required:
+      - success
+      - delivery_status
+      title: ConsoleOutreachMessageResponse
     ConsoleOwnerOperationApplyRequest:
       properties:
         mode:

@@ -317,3 +317,4 @@
 | 2026-01-27-admin-login-verify-a2 | done | feat/2026-01-27-admin-login-verify-a2 | /home/zhan/worktrees/2026-01-27-admin-login-verify-a2 | docs/TASK_PACKAGES/TP-2026-01-27-admin-login-verify.md | 2026-01-27 |
 | 2026-02-20-onboarding-wave678-a132 | done | feat/2026-02-20-onboarding-wave678-a132 | /home/zhan/worktrees/2026-02-20-onboarding-wave678-a132 | docs/TASK_PACKAGES/TP-2026-02-20-onboarding-wave678-a132.md | 2026-02-20 |
 | 2026-02-20-wave5-owner-admin-acceptance-lane-a500 | done | feat/2026-02-20-wave5-owner-admin-acceptance-lane-a500 | /home/zhan/worktrees/2026-02-20-wave5-owner-admin-acceptance-lane-a500 | docs/TASK_PACKAGES/TP-2026-02-18-wave5-owner-admin-acceptance-lane-a88.md | 2026-02-20 |
+| 2026-02-20-outreach-human-lock-a200 | active | feat/2026-02-20-outreach-human-lock-a200 | /home/zhan/worktrees/2026-02-20-outreach-human-lock-a200 | docs/TASK_PACKAGES/TP-2026-02-20-outreach-human-lock-a200.md | 2026-02-20 |
