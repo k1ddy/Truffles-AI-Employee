@@ -463,7 +463,122 @@ def test_tool_registry_get_booking_not_found_acknowledges_photo_offer():
     assert result.handled is True
     assert result.ok is False
     assert result.error_code == "booking_not_found"
-    assert "Спасибо за фото/референс" in (result.response_text or "")
+    assert "Да, конечно, можно прислать фото/референс" in (result.response_text or "")
+
+
+def test_tool_registry_get_booking_not_found_verification_skips_service_followup():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service, "_get_booking", return_value=(None, "booking_not_found")
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.get_booking",
+            tool_args={"appointment_id": ""},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query=None,
+            message_text="Подтвердите, пожалуйста, запись на 15:00.",
+            expected_reply_type="service_choice",
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "booking_not_found"
+    assert "Проверил: пока не вижу подтверждённой записи на 15:00." in (result.response_text or "")
+    assert "На какую услугу хотите записаться?" not in (result.response_text or "")
+
+
+def test_tool_registry_book_slot_conflict_verification_mentions_confirmation_failure():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+    specialist = SimpleNamespace(id=uuid4(), name="Алия")
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "get_provider_health",
+        return_value=SimpleNamespace(ready=True, reason=None),
+    ), patch.object(
+        tool_registry_service,
+        "_resolve_specialist_for_booking",
+        return_value=(specialist, "service_default", None),
+    ), patch.object(
+        tool_registry_service,
+        "_book_slot",
+        side_effect=tool_registry_service.AppointmentConflictError("conflict"),
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.book_slot",
+            tool_args={"start_at": "2026-02-20T18:30:00+05:00"},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+            message_text="Подтвердите, пожалуйста, запись на 18:30.",
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "slot_unavailable"
+    assert "Подтвердить запись на это время не удалось" in (result.response_text or "")
+
+
+def test_tool_registry_book_slot_conflict_returns_requested_time_alternatives():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+    specialist = SimpleNamespace(id=uuid4(), name="Алия")
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "get_provider_health",
+        return_value=SimpleNamespace(ready=True, reason=None),
+    ), patch.object(
+        tool_registry_service,
+        "_resolve_specialist_for_booking",
+        return_value=(specialist, "service_default", None),
+    ), patch.object(
+        tool_registry_service,
+        "_book_slot",
+        side_effect=tool_registry_service.AppointmentConflictError("conflict"),
+    ), patch.object(
+        tool_registry_service,
+        "_list_slots",
+        return_value=("На 16:00 свободного окна нет. Доступны: 17:00, 18:00.", None),
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.book_slot",
+            tool_args={"start_at": "2026-02-20T16:00:00+05:00"},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+            message_text="Я не могу в 15:00, можно на 16:00?",
+        )
+
+    assert result.handled is True
+    assert result.ok is False
+    assert result.error_code == "slot_unavailable"
+    assert "На 16:00 свободного окна нет." in (result.response_text or "")
 
 
 def test_tool_registry_reschedule_not_found_echoes_requested_time():
@@ -738,6 +853,54 @@ def test_tool_registry_list_slots_reports_requested_time_available_explicitly():
     assert result.ok is True
     assert "Да, на 17:45 есть свободное окно." in (result.response_text or "")
     assert "Свободные слоты:" in (result.response_text or "")
+
+
+def test_tool_registry_list_slots_evening_request_returns_evening_windows():
+    db = Mock()
+    specialist = SimpleNamespace(id=uuid4(), name="Айгерим")
+    specialist_query = Mock()
+    specialist_query.filter.return_value.order_by.return_value.all.return_value = [specialist]
+    service_query = Mock()
+    service_query.filter.return_value.first.return_value = None
+
+    def _query(model):
+        if model is Service:
+            return service_query
+        return specialist_query
+
+    db.query.side_effect = _query
+
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+    slot_1030 = SimpleNamespace(start=datetime(2026, 2, 20, 10, 30, tzinfo=timezone.utc), available=True)
+    slot_1745 = SimpleNamespace(start=datetime(2026, 2, 20, 17, 45, tzinfo=timezone.utc), available=True)
+    slot_1830 = SimpleNamespace(start=datetime(2026, 2, 20, 18, 30, tzinfo=timezone.utc), available=True)
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "_resolve_specialist_filter",
+        return_value=(None, None, None),
+    ), patch.object(tool_registry_service, "SchedulingService") as scheduling_cls:
+        scheduling_cls.return_value.get_available_slots.return_value = [slot_1030, slot_1745, slot_1830]
+
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.list_slots",
+            tool_args={"date": "2026-02-20"},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Стрижка",
+            message_text="А можно записаться на вечер?",
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert "На вечер доступны: 17:45, 18:30." in (result.response_text or "")
 
 
 def test_tool_registry_book_slot_allows_sync_missing_provider_health():
@@ -1147,6 +1310,38 @@ def test_tool_registry_catalog_service_query_duration_prefers_message_service_ov
     assert result.decision_meta.get("tool_decision") == "duration"
     assert "укладка" in (result.response_text or "").lower()
     assert "маникюр" not in (result.response_text or "").lower()
+
+
+def test_tool_registry_catalog_service_query_services_overview_without_service_slot():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+    db.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
+        ("Маникюр",),
+        ("Педикюр",),
+        ("Стрижка",),
+    ]
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="catalog.service_query",
+            tool_args={},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug=None,
+            service_query=None,
+            message_text="Добрый день, какие услуги вы предлагаете?",
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.decision_meta.get("tool_decision") == "services_overview"
+    assert "Маникюр" in (result.response_text or "")
 
 
 def test_demo_salon_price_item_match_ignores_booking_datetime_phrase():
