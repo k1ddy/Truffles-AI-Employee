@@ -101,6 +101,19 @@ class TestGetConversationHistory:
         assert len(result) == 1
         assert result[0]["role"] == "user"
 
+    def test_maps_manager_messages_as_assistant(self):
+        mock_db = Mock()
+        msg1 = Mock(role="user", content="Can I come after 18:00?")
+        msg2 = Mock(role="manager", content="Yes, after 18:00 is available")
+        mock_db.query().filter().order_by().limit().all.return_value = [msg2, msg1]
+
+        result = get_conversation_history(mock_db, uuid4())
+
+        assert len(result) == 2
+        assert result[0]["role"] == "user"
+        assert result[1]["role"] == "assistant"
+        assert result[1]["content"] == "Yes, after 18:00 is available"
+
     def test_hierarchical_memory_inserts_summary_for_older_messages(self, monkeypatch):
         monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_ENABLED", "1")
         monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MESSAGES", 3)
@@ -138,6 +151,36 @@ class TestGetConversationHistory:
         assert "ignore this" not in result[0]["content"]
         assert result[1] == {"role": "user", "content": "recent question"}
         assert result[2] == {"role": "assistant", "content": "recent answer"}
+
+    def test_hierarchical_memory_summary_marks_manager_as_assistant(self, monkeypatch):
+        monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_ENABLED", "1")
+        monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MESSAGES", 3)
+        monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MAX_LINES", 3)
+        monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_SUMMARY_MAX_CHARS", 500)
+
+        mock_db = Mock()
+        t1 = datetime(2026, 2, 16, 10, 0, tzinfo=timezone.utc)
+        t2 = datetime(2026, 2, 16, 10, 1, tzinfo=timezone.utc)
+        t3 = datetime(2026, 2, 16, 10, 2, tzinfo=timezone.utc)
+
+        recent_desc = [
+            SimpleNamespace(role="user", content="after 18 works?", created_at=t3),
+        ]
+        older_desc = [
+            SimpleNamespace(role="manager", content="yes, we can do after 18", created_at=t2),
+            SimpleNamespace(role="user", content="need evening slot", created_at=t1),
+        ]
+
+        mock_db.query.side_effect = [
+            self._query_with_messages(recent_desc),
+            self._query_with_messages(older_desc),
+        ]
+
+        result = get_conversation_history(mock_db, uuid4(), limit=1)
+
+        assert result[0]["role"] == "assistant"
+        assert "A: yes, we can do after 18" in result[0]["content"]
+        assert "U: need evening slot" in result[0]["content"]
 
     def test_hierarchical_memory_does_not_add_summary_when_disabled(self, monkeypatch):
         monkeypatch.setattr(ai_service, "HIERARCHICAL_MEMORY_ENABLED", "0")

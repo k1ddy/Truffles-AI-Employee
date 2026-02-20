@@ -1084,6 +1084,257 @@ class TestReengageConfirmation:
         )
 
 
+def test_human_lock_silent_keeps_context_and_allows_resume_after_release():
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    booking_seed = {
+        "active": True,
+        "service": "маникюр",
+        "last_question": "datetime",
+    }
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={
+            "expected_reply_type": webhook_router.EXPECTED_REPLY_TIME,
+            "booking": dict(booking_seed),
+        },
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+    branch_query = Mock()
+    branch_query.filter.return_value.first.return_value = None
+    branch_phone_query = Mock()
+    branch_phone_query.filter.return_value.all.return_value = []
+
+    def _query(model):
+        if model is Client:
+            return client_query
+        if model is ClientSettings:
+            return settings_query
+        if model is Conversation:
+            return conversation_query
+        if model is User:
+            return user_query
+        if model is Branch:
+            return branch_query
+        if model is Branch.phone:
+            return branch_phone_query
+        return Mock()
+
+    db = Mock()
+    db.query.side_effect = _query
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    saved_messages: list[SimpleNamespace] = []
+
+    def _save_message(
+        _db,
+        conv_id,
+        c_id,
+        *,
+        role,
+        content,
+        message_metadata=None,
+    ):
+        msg = SimpleNamespace(
+            id=uuid4(),
+            conversation_id=conv_id,
+            client_id=c_id,
+            role=role,
+            content=content,
+            message_metadata=dict(message_metadata or {}),
+            created_at=datetime.now(timezone.utc),
+        )
+        saved_messages.append(msg)
+        return msg
+
+    async def _dedup_gate_stub(*_args, **kwargs):
+        return None, kwargs.get("message_id")
+
+    def _llm_primary_stub(*_args, **kwargs):
+        observed_user_messages = [
+            msg.content
+            for msg in saved_messages
+            if getattr(msg, "role", None) == "user"
+        ]
+        assert "я хочу маникюр завтра" in observed_user_messages
+        assert kwargs["conversation"].context.get("booking", {}).get("service") == "маникюр"
+        return SimpleNamespace(
+            response=WebhookResponse(
+                success=True,
+                message="Bot resumed after human lock",
+                conversation_id=conversation_id,
+                bot_response="Контекст сохранен, продолжаем.",
+            ),
+            llm_primary_result=None,
+            llm_primary_failed=False,
+            llm_primary_reason=None,
+        )
+
+    payload_locked = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="я хочу маникюр завтра",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-human-lock-1",
+                timestamp=1234569001,
+            ),
+        ),
+    )
+    payload_resumed = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="можно после 18:00?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-human-lock-2",
+                timestamp=1234569002,
+            ),
+        ),
+    )
+
+    active_lock = SimpleNamespace(
+        lock_until=datetime.now(timezone.utc) + timedelta(minutes=30),
+        active=True,
+    )
+
+    with patch(
+        "app.routers.webhook.guards.get_active_human_lock",
+        side_effect=[active_lock, None],
+    ), patch(
+        "app.routers.webhook.decision.record_inbound_count",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.decision._handle_dedup_gate",
+        side_effect=_dedup_gate_stub,
+    ), patch(
+        "app.routers.webhook.decision.get_or_create_user",
+        return_value=user,
+    ), patch(
+        "app.routers.webhook.decision.find_active_conversation_by_channel_ref",
+        return_value=conversation,
+    ), patch(
+        "app.routers.webhook.decision.save_message",
+        side_effect=_save_message,
+    ), patch(
+        "app.routers.webhook.decision._handle_llm_primary",
+        side_effect=_llm_primary_stub,
+    ), patch(
+        "app.routers.webhook.decision._handle_info_flow",
+        return_value=SimpleNamespace(response=None, force_truth_gate=False),
+    ), patch(
+        "app.routers.webhook.decision._handle_booking_flow",
+        return_value=SimpleNamespace(response=None, booking_t0=None, booking_logged=True),
+    ), patch(
+        "app.routers.webhook.decision._handle_booking_interrupt",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message",
+        AsyncMock(return_value=True),
+    ), patch(
+        "app.routers.webhook._legacy.semantic_service_match",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores",
+        return_value=(DomainIntent.UNKNOWN, 0.0, 0.0, {"out_hits": 0, "strict_in_hits": 0}),
+    ), patch(
+        "app.routers.webhook._legacy.classify_domain_with_scores",
+        return_value=(DomainIntent.UNKNOWN, 0.0, 0.0, {"out_hits": 0, "strict_in_hits": 0}),
+    ), patch(
+        "app.routers.webhook._legacy._extract_service_hint",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.decision.route_llm_policy_core",
+        return_value={
+            "ok": False,
+            "payload": None,
+            "error": "skip",
+            "raw": None,
+            "attempted": False,
+            "elapsed_ms": 0.0,
+        },
+    ):
+        locked_response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload_locked,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=False,
+                conversation_id=conversation_id,
+            )
+        )
+        resumed_response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload_resumed,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=False,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert locked_response.success is True
+    assert locked_response.bot_response is None
+    assert locked_response.message == "Human lock active, message forwarded"
+    booking_context = conversation.context.get("booking") or {}
+    assert booking_context.get("active") is True
+    assert booking_context.get("service") == booking_seed["service"]
+    assert booking_context.get("datetime") == "завтра"
+    decision_trace = conversation.context.get("decision_trace") or []
+    assert any(
+        entry.get("stage") == "routing"
+        and entry.get("decision") == "human_lock_silent"
+        and entry.get("reason") == "human_lock"
+        for entry in decision_trace
+    )
+
+    user_texts = [
+        msg.content
+        for msg in saved_messages
+        if getattr(msg, "role", None) == "user"
+    ]
+    assert "я хочу маникюр завтра" in user_texts
+    assert "можно после 18:00?" in user_texts
+    assert resumed_response.success is True
+    assert resumed_response.bot_response == "Контекст сохранен, продолжаем."
+
+
 class TestRoutingPolicy:
     def test_routing_policy_bot_active(self):
         policy = webhook_router._get_routing_policy(ConversationState.BOT_ACTIVE.value)
