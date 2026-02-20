@@ -368,6 +368,10 @@ def test_classify_outbox_incident_reason_markers() -> None:
         last_error="429 too many requests",
         integration_degraded=False,
     )
+    reason_invalid_recipient, _ = console_router._classify_outbox_incident_reason(
+        last_error="recipient not found for this WhatsApp number",
+        integration_degraded=False,
+    )
     reason_drift, _ = console_router._classify_outbox_incident_reason(
         last_error=None,
         integration_degraded=True,
@@ -377,6 +381,7 @@ def test_classify_outbox_incident_reason_markers() -> None:
     assert reason_unavailable == "provider_unavailable"
     assert reason_auth == "provider_auth"
     assert reason_rate == "provider_rate_limited"
+    assert reason_invalid_recipient == "provider_invalid_recipient"
     assert reason_drift == "integration_degraded"
 
 

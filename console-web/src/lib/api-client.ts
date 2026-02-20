@@ -73,6 +73,7 @@ export type ErrorCode = keyof typeof ErrorCodes;
 export type ConsoleRole = "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer";
 export type ConsoleSection =
     | "inbox"
+    | "outreach"
     | "knowledge"
     | "team"
     | "calendar"
@@ -92,6 +93,10 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
     inbox: {
         read: ["platform_admin", "owner", "admin", "manager", "viewer"],
         write: ["platform_admin", "owner", "admin", "manager"],
+    },
+    outreach: {
+        read: ["platform_admin", "owner", "admin", "manager", "support", "viewer", "specialist"],
+        write: ["platform_admin", "owner", "admin", "manager", "support", "viewer", "specialist"],
     },
     knowledge: {
         read: ["platform_admin", "owner", "admin", "manager", "viewer"],
@@ -470,6 +475,40 @@ export type CaseListResponse = components["schemas"]["CaseListResponse"];
 export type CaseActionResponse = components["schemas"]["CaseActionResponse"];
 export type Message = components["schemas"]["Message"];
 export type MessageListResponse = components["schemas"]["MessageListResponse"];
+export type OutreachDeliveryStatus = "queued" | "delivered" | "failed";
+export type OutreachMessageRequest = {
+    destination: string;
+    content: string;
+    conversation_id?: string | null;
+    branch_id?: string | null;
+    pause_bot_minutes?: number | null;
+    pause_reason?: string | null;
+};
+export type OutreachMessageResponse = {
+    success: boolean;
+    delivery_status: OutreachDeliveryStatus;
+    remote_jid?: string | null;
+    outbox_enqueued?: boolean | null;
+    lock_until?: string | null;
+    message?: Message | null;
+    error_code?: string | null;
+};
+export type HumanLockPauseRequest = {
+    minutes?: number;
+    reason?: string | null;
+};
+export type HumanLockStatus = {
+    active: boolean;
+    remote_jid?: string | null;
+    lock_until?: string | null;
+    remaining_seconds?: number | null;
+    source?: string | null;
+    reason?: string | null;
+};
+export type HumanLockStatusResponse = {
+    success: boolean;
+    status: HumanLockStatus;
+};
 export type InboxMacro = components["schemas"]["InboxMacro"];
 export type InboxMacroListResponse = components["schemas"]["InboxMacroListResponse"];
 export type InboxMacroCreateRequest = components["schemas"]["InboxMacroCreateRequest"];
@@ -508,6 +547,7 @@ export type IncidentItem = {
     reason_code:
         | "outbox_backlog"
         | "provider_billing_blocked"
+        | "provider_invalid_recipient"
         | "provider_unavailable"
         | "provider_auth"
         | "provider_rate_limited"
@@ -993,6 +1033,21 @@ export const messagesApi = {
             { content },
             idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : undefined
         ),
+};
+
+export const outreachApi = {
+    sendMessage: (data: OutreachMessageRequest, idempotencyKey?: string) =>
+        apiClient.post<OutreachMessageResponse>(
+            "/outreach/messages",
+            data,
+            idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : undefined,
+        ),
+    getHumanLockStatus: (conversationId: string) =>
+        apiClient.get<HumanLockStatusResponse>(`/conversations/${conversationId}/human-lock`),
+    pauseHumanLock: (conversationId: string, data: HumanLockPauseRequest) =>
+        apiClient.post<HumanLockStatusResponse>(`/conversations/${conversationId}/human-lock/pause`, data),
+    releaseHumanLock: (conversationId: string) =>
+        apiClient.delete<HumanLockStatusResponse>(`/conversations/${conversationId}/human-lock`),
 };
 
 /** Ops endpoints */

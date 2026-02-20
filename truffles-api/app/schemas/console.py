@@ -831,6 +831,47 @@ class ConsoleManagerMessageResponse(BaseModel):
     message: ConsoleMessage
 
 
+ConsoleOutreachDeliveryStatus = Literal["queued", "delivered", "failed"]
+
+
+class ConsoleOutreachMessageRequest(ConsoleRequestModel):
+    destination: StrictStr
+    content: StrictStr
+    conversation_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
+    pause_bot_minutes: Optional[int] = 30
+    pause_reason: Optional[StrictStr] = None
+
+
+class ConsoleOutreachMessageResponse(BaseModel):
+    success: bool
+    delivery_status: ConsoleOutreachDeliveryStatus
+    remote_jid: Optional[str] = None
+    outbox_enqueued: Optional[bool] = None
+    lock_until: Optional[str] = None
+    message: Optional[ConsoleMessage] = None
+    error_code: Optional[str] = None
+
+
+class ConsoleHumanLockPauseRequest(ConsoleRequestModel):
+    minutes: int = 30
+    reason: Optional[StrictStr] = None
+
+
+class ConsoleHumanLockStatus(BaseModel):
+    active: bool
+    remote_jid: Optional[str] = None
+    lock_until: Optional[str] = None
+    remaining_seconds: Optional[int] = None
+    source: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class ConsoleHumanLockStatusResponse(BaseModel):
+    success: bool
+    status: ConsoleHumanLockStatus
+
+
 class ConsoleHealthResponse(BaseModel):
     status: str
     version: str
@@ -871,6 +912,7 @@ ConsoleIncidentState = Literal["open", "in_progress", "resolved"]
 ConsoleIncidentReasonCode = Literal[
     "outbox_backlog",
     "provider_billing_blocked",
+    "provider_invalid_recipient",
     "provider_unavailable",
     "provider_auth",
     "provider_rate_limited",

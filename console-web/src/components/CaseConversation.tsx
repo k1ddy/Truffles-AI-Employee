@@ -1,10 +1,10 @@
 "use client";
 
-import { type ReactNode } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState, type ReactNode } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import { casesApi, type CaseActionResponse } from "@/lib/api-client";
+import { casesApi, outreachApi, type CaseActionResponse } from "@/lib/api-client";
 import type { Case, Message } from "@/types";
 import ChatInterface from "./ChatInterface";
 import { getSlaCountdown, getStatusLabel, getSlaLabel } from "@/utils/labels";
@@ -19,6 +19,7 @@ interface CaseConversationProps {
     onLoadMoreMessages?: () => void;
     canSend: boolean;
     canWrite: boolean;
+    canOutreach?: boolean;
     draft?: string;
     onDraftChange?: (value: string) => void;
     onResolved?: () => void;
@@ -81,6 +82,7 @@ export default function CaseConversation({
     onLoadMoreMessages,
     canSend,
     canWrite,
+    canOutreach = false,
     draft,
     onDraftChange,
     onResolved,
@@ -165,6 +167,95 @@ export default function CaseConversation({
         },
     });
 
+    const defaultDestination = caseDetail.customer_phone || caseDetail.customer_remote_jid || "";
+    const [outreachDestination, setOutreachDestination] = useState(defaultDestination);
+    const [outreachContent, setOutreachContent] = useState("");
+    const [pauseMinutes, setPauseMinutes] = useState(30);
+
+    useEffect(() => {
+        setOutreachDestination(caseDetail.customer_phone || caseDetail.customer_remote_jid || "");
+        setOutreachContent("");
+        setPauseMinutes(30);
+    }, [caseId, caseDetail.customer_phone, caseDetail.customer_remote_jid]);
+
+    const humanLockQuery = useQuery({
+        queryKey: ["human-lock", caseDetail.conversation_id],
+        queryFn: async () => {
+            const response = await outreachApi.getHumanLockStatus(caseDetail.conversation_id);
+            return response.data;
+        },
+        enabled: canOutreach && Boolean(caseDetail.conversation_id),
+        refetchInterval: 15000,
+    });
+
+    const sendOutreachMutation = useMutation({
+        mutationFn: async () => {
+            const response = await outreachApi.sendMessage({
+                destination: outreachDestination.trim(),
+                content: outreachContent.trim(),
+                conversation_id: caseDetail.conversation_id,
+                branch_id: caseDetail.branch_id || null,
+                pause_bot_minutes: 30,
+            });
+            return response.data;
+        },
+        onSuccess: (response) => {
+            if (!response.success) {
+                const suffix = response.error_code ? ` (${response.error_code})` : "";
+                toast.error(`Не удалось отправить outreach${suffix}`);
+                return;
+            }
+            if (response.delivery_status === "queued") {
+                toast.success("Outreach поставлен в очередь");
+            } else {
+                toast.success("Outreach отправлен");
+            }
+            setOutreachContent("");
+            queryClient.invalidateQueries({ queryKey: ["messages", caseId] });
+            queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+            queryClient.invalidateQueries({ queryKey: ["human-lock", caseDetail.conversation_id] });
+        },
+        onError: (error: unknown) => {
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            if (code === "INTEGRATION_UNAVAILABLE") {
+                toast.error("Интеграция WhatsApp не настроена для филиала");
+                return;
+            }
+            toast.error("Не удалось отправить outreach");
+        },
+    });
+
+    const pauseMutation = useMutation({
+        mutationFn: async () => {
+            const response = await outreachApi.pauseHumanLock(caseDetail.conversation_id, {
+                minutes: pauseMinutes,
+                reason: "manual_pause",
+            });
+            return response.data;
+        },
+        onSuccess: () => {
+            toast.success("Бот поставлен на паузу");
+            queryClient.invalidateQueries({ queryKey: ["human-lock", caseDetail.conversation_id] });
+        },
+        onError: () => {
+            toast.error("Не удалось включить паузу бота");
+        },
+    });
+
+    const releasePauseMutation = useMutation({
+        mutationFn: async () => {
+            const response = await outreachApi.releaseHumanLock(caseDetail.conversation_id);
+            return response.data;
+        },
+        onSuccess: () => {
+            toast.success("Пауза бота снята");
+            queryClient.invalidateQueries({ queryKey: ["human-lock", caseDetail.conversation_id] });
+        },
+        onError: () => {
+            toast.error("Не удалось снять паузу бота");
+        },
+    });
+
     const isActive = caseDetail.status === "active";
     const isPending = caseDetail.status === "pending";
     const contextText = caseDetail.context_summary || caseDetail.user_message || "Сводка недоступна";
@@ -190,6 +281,15 @@ export default function CaseConversation({
     const contextClass = `rounded-lg border border-border/60 bg-card p-3 text-sm ${
         isInboxLayout ? "mx-5" : ""
     }`;
+    const humanLockStatus = humanLockQuery.data?.status;
+    const lockRemainingSeconds = humanLockStatus?.remaining_seconds ?? null;
+    const lockRemainingLabel =
+        lockRemainingSeconds && lockRemainingSeconds > 0
+            ? `${Math.ceil(lockRemainingSeconds / 60)} мин`
+            : null;
+    const outreachBusy =
+        sendOutreachMutation.isPending || pauseMutation.isPending || releasePauseMutation.isPending;
+    const canSubmitOutreach = Boolean(outreachDestination.trim() && outreachContent.trim());
 
     return (
         <div className={`flex flex-col h-full ${isInboxLayout ? "gap-4" : "gap-5"}`} data-testid="case-conversation">
@@ -311,6 +411,103 @@ export default function CaseConversation({
                     isInboxLayout ? "mx-5" : ""
                 }`}>
                     {issueHints.join(" ")}
+                </div>
+            )}
+            {canOutreach && (
+                <div
+                    className={`rounded-lg border border-border/60 bg-card px-3 py-3 text-sm ${
+                        isInboxLayout ? "mx-5" : ""
+                    }`}
+                    data-testid="outreach-panel"
+                >
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            Outreach / Пауза бота
+                        </p>
+                        <span
+                            className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                                humanLockStatus?.active
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : "bg-muted text-muted-foreground"
+                            }`}
+                            data-testid="human-lock-badge"
+                        >
+                            {humanLockStatus?.active
+                                ? `Бот на паузе${lockRemainingLabel ? ` (${lockRemainingLabel})` : ""}`
+                                : "Бот активен"}
+                        </span>
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-[2fr_1fr]">
+                        <label className="space-y-1">
+                            <span className="text-xs text-muted-foreground">WhatsApp номер или JID</span>
+                            <input
+                                type="text"
+                                value={outreachDestination}
+                                onChange={(event) => setOutreachDestination(event.target.value)}
+                                className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                                placeholder="+7 777 123 45 67"
+                                data-testid="outreach-destination"
+                            />
+                        </label>
+                        <label className="space-y-1">
+                            <span className="text-xs text-muted-foreground">Пауза (мин)</span>
+                            <input
+                                type="number"
+                                min={1}
+                                max={1440}
+                                value={pauseMinutes}
+                                onChange={(event) => setPauseMinutes(Number(event.target.value) || 30)}
+                                className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                                data-testid="human-lock-minutes"
+                            />
+                        </label>
+                    </div>
+                    <label className="mt-2 block space-y-1">
+                        <span className="text-xs text-muted-foreground">Сообщение клиенту</span>
+                        <textarea
+                            value={outreachContent}
+                            onChange={(event) => setOutreachContent(event.target.value)}
+                            rows={3}
+                            className="w-full resize-y rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                            placeholder="Например: Мы на связи, продолжаем вручную"
+                            data-testid="outreach-message"
+                        />
+                    </label>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (!canSubmitOutreach) {
+                                    toast.error("Заполните номер и сообщение для outreach");
+                                    return;
+                                }
+                                sendOutreachMutation.mutate();
+                            }}
+                            disabled={outreachBusy || !canSubmitOutreach}
+                            className="rounded bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                            data-testid="outreach-send"
+                        >
+                            {sendOutreachMutation.isPending ? "Отправка..." : "Отправить outreach"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => pauseMutation.mutate()}
+                            disabled={outreachBusy}
+                            className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-foreground disabled:opacity-50"
+                            data-testid="human-lock-pause"
+                        >
+                            {pauseMutation.isPending ? "Ставим паузу..." : "Пауза бота"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => releasePauseMutation.mutate()}
+                            disabled={outreachBusy || !humanLockStatus?.active}
+                            className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-muted-foreground disabled:opacity-50"
+                            data-testid="human-lock-release"
+                        >
+                            {releasePauseMutation.isPending ? "Снимаем..." : "Снять паузу"}
+                        </button>
+                    </div>
                 </div>
             )}
 

@@ -66,3 +66,23 @@ def test_retain_decision_trace_keeps_marketing_reply_context_over_limit():
     assert len(retained) == webhook_trace.DECISION_TRACE_MAX
     stages = {item.get("stage") for item in retained}
     assert "marketing_reply_context" in stages
+
+
+def test_retain_decision_trace_keeps_human_lock_routing_trace_over_limit():
+    trace_list = [
+        {"stage": "routing", "decision": "human_lock_silent", "reason": "human_lock"},
+    ]
+    trace_list.extend(
+        {"stage": "booking_interrupt", "decision": "info_reply"}
+        for _ in range(webhook_trace.DECISION_TRACE_MAX + 5)
+    )
+
+    retained = webhook_trace._retain_decision_trace(trace_list)
+
+    assert len(retained) == webhook_trace.DECISION_TRACE_MAX
+    assert any(
+        item.get("stage") == "routing"
+        and item.get("decision") == "human_lock_silent"
+        and item.get("reason") == "human_lock"
+        for item in retained
+    )

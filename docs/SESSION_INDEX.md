@@ -4,7 +4,12 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-02-20-wave5-owner-admin-acceptance-lane-a500 | done | feat/2026-02-20-wave5-owner-admin-acceptance-lane-a500 | /home/zhan/worktrees/2026-02-20-wave5-owner-admin-acceptance-lane-a500 | docs/TASK_PACKAGES/TP-2026-02-18-wave5-owner-admin-acceptance-lane-a88.md | 2026-02-20 |
 | 2026-02-20-wave3-marketing-trace-retention-a140 | done | feat/2026-02-20-wave3-marketing-trace-retention-a140 | /home/zhan/worktrees/2026-02-20-wave3-marketing-trace-retention-a140 | docs/TASK_PACKAGES/TP-2026-02-20-wave3-marketing-trace-retention-a140.md | 2026-02-20T01:56:00Z |
+| 2026-02-20-tenants-create-company-audit-contract-a133 | done | feat/2026-02-20-tenants-create-company-audit-contract-a133 | /home/zhan/worktrees/2026-02-20-tenants-create-company-audit-contract-a133 | docs/TASK_PACKAGES/TP-2026-02-20-tenants-create-company-audit-contract-a133.md | 2026-02-20 |
+| 2026-02-20-provisioning-server-error-guidance-a134 | done | feat/2026-02-20-provisioning-server-error-guidance-a134 | /home/zhan/worktrees/2026-02-20-provisioning-server-error-guidance-a134 | docs/TASK_PACKAGES/TP-2026-02-20-provisioning-server-error-guidance-a134.md | 2026-02-20 |
+| 2026-02-20-outreach-human-lock-a200 | active | feat/2026-02-20-outreach-human-lock-a200 | /home/zhan/worktrees/2026-02-20-outreach-human-lock-a200 | docs/TASK_PACKAGES/TP-2026-02-20-outreach-human-lock-a200.md | 2026-02-20 |
+| 2026-02-20-onboarding-wave678-a132 | done | feat/2026-02-20-onboarding-wave678-a132 | /home/zhan/worktrees/2026-02-20-onboarding-wave678-a132 | docs/TASK_PACKAGES/TP-2026-02-20-onboarding-wave678-a132.md | 2026-02-20 |
 | 2026-02-20-onboarding-followup123-a131 | active | feat/2026-02-20-onboarding-followup123-a131 | /home/zhan/worktrees/2026-02-20-onboarding-followup123-a131 | docs/TASK_PACKAGES/TP-2026-02-20-onboarding-followup123-a131.md | 2026-02-20 |
 | 2026-02-19-wave3-marketing-full-a140 | done | feat/2026-02-19-wave3-marketing-full-a140 | /home/zhan/worktrees/2026-02-19-wave-canon-context-marketing-mvp-a140 | docs/TASK_PACKAGES/TP-2026-02-19-wave3-marketing-full-a140.md | 2026-02-19 |
 | 2026-02-19-wave-canon-context-marketing-mvp-a140 | done | feat/2026-02-19-wave-canon-context-marketing-mvp-a140 | /home/zhan/worktrees/2026-02-19-wave-canon-context-marketing-mvp-a140 | docs/TASK_PACKAGES/TP-2026-02-19-wave-canon-context-marketing-mvp-a140.md | 2026-02-19 |
