@@ -502,4 +502,40 @@ test.describe('Platform Admin Tenants', () => {
 
         await expect(page.getByText(/booking_settings и working_hours нужны/i)).toBeVisible();
     });
+
+    test('should show actionable provisioning guidance for quick-create server errors @smoke', async ({ page }) => {
+        await page.route('**/api/proxy/admin/companies', async (route) => {
+            if (route.request().method() !== 'POST') {
+                await route.fallback();
+                return;
+            }
+            await route.fulfill({
+                status: 500,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    error: {
+                        code: 'SERVER_ERROR',
+                        message: 'Synthetic create company failure',
+                        trace_id: 'trace-e2e-quick-create-500',
+                    },
+                }),
+            });
+        });
+
+        const quickCreateSection = page.getByTestId('tenants-quick-create');
+        await expect(quickCreateSection).toBeVisible();
+
+        await quickCreateSection.getByPlaceholder('Beauty Group').fill(`e2e-company-${Date.now()}`);
+        await quickCreateSection.getByRole('button', { name: 'Создать компанию' }).click();
+
+        const errorSummary = page.getByTestId('tenants-error-summary');
+        await expect(errorSummary).toBeVisible();
+        await expect(errorSummary).toContainText('SERVER_ERROR');
+        await expect(errorSummary).toContainText('Synthetic create company failure');
+        await expect(errorSummary).toContainText('PROVISIONING_NEXT_STEP');
+        await expect(errorSummary).toContainText('создание компании');
+        await expect(errorSummary).toContainText('POST /api/proxy/admin/companies');
+        await expect(errorSummary).toContainText('trace-e2e-quick-create-500');
+        await expect(errorSummary).toContainText('передайте в OPS');
+    });
 });

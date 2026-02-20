@@ -812,6 +812,12 @@ export default function TenantsPage() {
         reportInlineError({ code, message });
         toast.error(message);
     };
+    const reportProvisioningError = (error: unknown, operation: string, endpoint: string) =>
+        reportError(error, {
+            includeProvisioningGuidance: true,
+            operation,
+            endpoint,
+        });
     const [clientQuery, setClientQuery] = useState("");
     const [branchQuery, setBranchQuery] = useState("");
     const [companyQuery, setCompanyQuery] = useState("");
@@ -1294,7 +1300,7 @@ export default function TenantsPage() {
             refreshTenants();
             toast.success("Компания создана");
         } catch (error) {
-            reportError(error);
+            reportProvisioningError(error, "создание компании", "POST /api/proxy/admin/companies");
         } finally {
             setQuickCreateRunning(null);
         }
@@ -1336,7 +1342,7 @@ export default function TenantsPage() {
             refreshTenants();
             toast.success("Клиент создан");
         } catch (error) {
-            reportError(error);
+            reportProvisioningError(error, "создание клиента", "POST /api/proxy/admin/clients");
         } finally {
             setQuickCreateRunning(null);
         }
@@ -1393,7 +1399,7 @@ export default function TenantsPage() {
             refreshTenants();
             toast.success("Филиал создан и выбран в контексте");
         } catch (error) {
-            reportError(error);
+            reportProvisioningError(error, "создание филиала", "POST /api/proxy/admin/branches");
         } finally {
             setQuickCreateRunning(null);
         }
@@ -1665,7 +1671,7 @@ export default function TenantsPage() {
             refreshTenants();
             refreshContext();
         } catch (error) {
-            reportError(error);
+            reportProvisioningError(error, "обновление компании", "PATCH /api/proxy/admin/companies/:id");
         } finally {
             setSavingCompany(false);
         }
@@ -1709,7 +1715,7 @@ export default function TenantsPage() {
             refreshTenants();
             refreshContext();
         } catch (error) {
-            reportError(error);
+            reportProvisioningError(error, "обновление клиента", "PATCH /api/proxy/admin/clients/:id");
         } finally {
             setSavingClient(false);
         }
@@ -1814,7 +1820,13 @@ export default function TenantsPage() {
             refreshTenants();
             refreshContext();
         } catch (error) {
-            const parsed = reportError(error) as
+            const parsed = reportProvisioningError(
+                error,
+                mode === "archive" ? "архивация клиента" : "восстановление клиента",
+                mode === "archive"
+                    ? "POST /api/proxy/admin/clients/:id/archive"
+                    : "POST /api/proxy/admin/clients/:id/restore",
+            ) as
                 | { message?: string; trace_id?: string }
                 | undefined;
             setClientLifecycleAuditById((prev) => pushLifecycleAuditEntry(prev, {
@@ -1894,7 +1906,11 @@ export default function TenantsPage() {
             }
             await branchChangesQuery.refetch();
         } catch (error) {
-            reportError(error);
+            reportProvisioningError(
+                error,
+                "черновик и валидация изменения филиала",
+                "POST /api/proxy/admin/branch-changes + /validate",
+            );
         } finally {
             setSavingBranch(false);
         }
@@ -1930,7 +1946,7 @@ export default function TenantsPage() {
             refreshTenants();
             refreshContext();
         } catch (error) {
-            reportError(error);
+            reportProvisioningError(error, "публикация изменения филиала", "POST /api/proxy/admin/branch-changes/:id/publish");
         } finally {
             setPublishingBranchChange(false);
         }
@@ -1983,7 +1999,7 @@ export default function TenantsPage() {
             refreshTenants();
             refreshContext();
         } catch (error) {
-            reportError(error);
+            reportProvisioningError(error, "откат изменения филиала", "POST /api/proxy/admin/branch-changes/:id/rollback");
         } finally {
             setRollingBackBranchChange(false);
         }
