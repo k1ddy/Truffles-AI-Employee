@@ -218,6 +218,43 @@ class ConsoleBranchListResponse(BaseModel):
     has_more: bool
 
 
+class ConsoleTenantsWeeklySnapshotRecord(BaseModel):
+    id: UUID
+    created_at: str
+    client_id: UUID
+    week_key: str
+    snapshot: dict
+    actor_name: Optional[str] = None
+
+
+class ConsoleTenantsWeeklySnapshotListResponse(BaseModel):
+    items: list[ConsoleTenantsWeeklySnapshotRecord]
+    cursor: Optional[str] = None
+    has_more: bool
+
+
+class ConsoleTenantsWeeklySnapshotCreateRequest(ConsoleRequestModel):
+    client_id: UUID
+    week_key: StrictStr
+    snapshot: dict
+
+
+class ConsoleTenantsWeeklySnapshotCreateResponse(BaseModel):
+    item: ConsoleTenantsWeeklySnapshotRecord
+
+
+class ConsoleTenantsSensitiveAccessAuditRequest(ConsoleRequestModel):
+    branch_id: UUID
+    field: StrictStr
+    action: Literal["reveal", "copy"]
+    context: Optional[StrictStr] = None
+
+
+class ConsoleTenantsSensitiveAccessAuditResponse(BaseModel):
+    ok: bool = True
+    audit_id: UUID
+
+
 ConsoleMarketingCampaignStatus = Literal["draft", "ready", "executed", "paused"]
 ConsoleMarketingAudienceMode = Literal["branch_active_conversations"]
 ConsoleMarketingDeliveryStatus = Literal["queued", "sent", "failed", "replied"]

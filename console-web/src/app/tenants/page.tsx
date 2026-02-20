@@ -9,7 +9,17 @@ import type { components } from "@/types/api.generated";
 import AccessDenied from "@/components/AccessDenied";
 import ProvisioningWizard from "@/components/ProvisioningWizard";
 import TenantsActionQueuePanel, { type TenantsActionQueueItem } from "@/components/TenantsActionQueuePanel";
-import { adminApi, auditApi, authApi, canAccessConsole, confirmationsApi, opsApi } from "@/lib/api-client";
+import TenantsScopedErrorSummary from "@/components/TenantsScopedErrorSummary";
+import TenantsSensitiveIdCell, { type TenantsSensitiveAction } from "@/components/TenantsSensitiveIdCell";
+import {
+    adminApi,
+    auditApi,
+    authApi,
+    canAccessConsole,
+    confirmationsApi,
+    opsApi,
+    type TenantsWeeklySnapshotRecord,
+} from "@/lib/api-client";
 import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
 import {
     setConsoleBranchContext,
@@ -373,6 +383,13 @@ function formatDateTimeLabel(value: string | undefined): string {
     return parsed.toLocaleString("ru-RU");
 }
 
+function resolveErrorScopeFromWorkspace(workspaceMode: TenantsWorkspaceMode): string {
+    if (workspaceMode === "all") {
+        return "global";
+    }
+    return workspaceMode;
+}
+
 function formatReferenceScopeReason(value?: string | null): string {
     if (!value) {
         return "не задан";
@@ -485,6 +502,27 @@ function safeParseWeeklySnapshots(rawValue: string | null): TenantsOperationalSn
     } catch {
         return [];
     }
+}
+
+function mapWeeklySnapshotRecordToViewModel(
+    record: TenantsWeeklySnapshotRecord,
+): TenantsOperationalSnapshot | null {
+    if (!record?.id || !record?.created_at || !record?.week_key) {
+        return null;
+    }
+    if (!record.snapshot || typeof record.snapshot !== "object") {
+        return null;
+    }
+    const report = record.snapshot as Partial<TenantsOperationalSnapshot["report"]>;
+    if (!report.generatedAt || !report.kpi || typeof report.kpi !== "object") {
+        return null;
+    }
+    return {
+        id: record.id,
+        weekKey: record.week_key,
+        createdAt: record.created_at,
+        report: report as TenantsOperationalSnapshot["report"],
+    };
 }
 
 function mergeLifecycleAuditEntries(
@@ -808,8 +846,13 @@ export default function TenantsPage() {
     const router = useRouter();
     const queryClient = useQueryClient();
     const { errors: inlineErrors, reportError, reportInlineError, clearErrors } = useInlineErrorSummary();
-    const reportValidationError = (message: string, code = "VALIDATION_ERROR") => {
-        reportInlineError({ code, message });
+    const reportValidationError = (
+        message: string,
+        code = "VALIDATION_ERROR",
+        scope?: string,
+    ) => {
+        const resolvedScope = scope ?? resolveErrorScopeFromWorkspace(workspaceMode);
+        reportInlineError({ code, message, scope: resolvedScope });
         toast.error(message);
     };
     const reportProvisioningError = (error: unknown, operation: string, endpoint: string) =>
@@ -817,6 +860,7 @@ export default function TenantsPage() {
             includeProvisioningGuidance: true,
             operation,
             endpoint,
+            scope: "onboarding",
         });
     const [clientQuery, setClientQuery] = useState("");
     const [branchQuery, setBranchQuery] = useState("");
@@ -883,13 +927,13 @@ export default function TenantsPage() {
         () => meData?.branches ?? [],
         [meData?.branches],
     );
-    const selectedCompanyName = useMemo(() => {
+    const selectedCompanyNameFromContext = useMemo(() => {
         if (!selectedCompanyId) {
             return null;
         }
         return knownCompanies.find((company) => company.id === selectedCompanyId)?.name ?? null;
     }, [knownCompanies, selectedCompanyId]);
-    const selectedBranchName = useMemo(() => {
+    const selectedBranchNameFromContext = useMemo(() => {
         if (!selectedBranchId) {
             return null;
         }
@@ -1067,6 +1111,29 @@ export default function TenantsPage() {
         enabled: tenantsEnabled && !!selectedClientId,
         staleTime: 30000,
     });
+    const weeklySnapshotsServerQuery = useQuery({
+        queryKey: ["tenants-weekly-snapshots", selectedClientId],
+        queryFn: async () => {
+            if (!selectedClientId) {
+                return [] as TenantsOperationalSnapshot[];
+            }
+            const response = await adminApi.listTenantsWeeklySnapshots({
+                client_id: selectedClientId,
+                limit: MAX_WEEKLY_SNAPSHOTS,
+            });
+            return (response.data.items ?? [])
+                .map((item) => mapWeeklySnapshotRecordToViewModel(item))
+                .filter((item): item is TenantsOperationalSnapshot => item !== null);
+        },
+        enabled: tenantsEnabled && !!selectedClientId,
+        staleTime: 30000,
+    });
+    useEffect(() => {
+        if (!selectedClientId || !weeklySnapshotsServerQuery.data) {
+            return;
+        }
+        setWeeklySnapshots(weeklySnapshotsServerQuery.data);
+    }, [selectedClientId, weeklySnapshotsServerQuery.data]);
 
     const companies = useMemo(
         () => companiesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
@@ -1088,6 +1155,46 @@ export default function TenantsPage() {
         () => branchesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
         [branchesQuery.data],
     );
+    const selectedCompanyName = useMemo(() => {
+        if (!selectedCompanyId) {
+            return null;
+        }
+        return (
+            companies.find((company) => company.id === selectedCompanyId)?.name
+            ?? selectedCompanyNameFromContext
+            ?? null
+        );
+    }, [companies, selectedCompanyId, selectedCompanyNameFromContext]);
+    const selectedClientName = useMemo(() => {
+        if (!selectedClientId) {
+            return null;
+        }
+        if (meData?.client?.id === selectedClientId && meData.client?.name) {
+            return meData.client.name;
+        }
+        return clients.find((client) => client.id === selectedClientId)?.name ?? null;
+    }, [clients, meData?.client?.id, meData?.client?.name, selectedClientId]);
+    const selectedBranchName = useMemo(() => {
+        if (!selectedBranchId) {
+            return null;
+        }
+        return (
+            branches.find((branch) => branch.id === selectedBranchId)?.name
+            ?? selectedBranchNameFromContext
+            ?? null
+        );
+    }, [branches, selectedBranchId, selectedBranchNameFromContext]);
+    const activeErrorScope = useMemo(
+        () => resolveErrorScopeFromWorkspace(workspaceMode),
+        [workspaceMode],
+    );
+    const visibleInlineErrors = useMemo(() => {
+        if (workspaceMode === "all") {
+            return inlineErrors;
+        }
+        return inlineErrors.filter((error) => error.scope === "global" || error.scope === activeErrorScope);
+    }, [activeErrorScope, inlineErrors, workspaceMode]);
+    const activeErrorScopeLabel = workspaceMode === "all" ? "all" : activeErrorScope;
     const latestPublishedBranchChange = useMemo(() => {
         const items = branchChangesQuery.data?.items ?? [];
         return (
@@ -1260,6 +1367,24 @@ export default function TenantsPage() {
         queryClient.invalidateQueries({ queryKey: ["tenants-fleet-attention"] });
         queryClient.invalidateQueries({ queryKey: ["tenants-branch-changes-recent-kpi"] });
         queryClient.invalidateQueries({ queryKey: ["tenants-client-lifecycle-audit-api"] });
+    };
+    const auditSensitiveAccess = async (input: {
+        branchId: string;
+        field: "instance_id";
+        action: TenantsSensitiveAction;
+        contextScope?: string;
+    }) => {
+        try {
+            await adminApi.auditTenantsSensitiveAccess({
+                branch_id: input.branchId,
+                field: input.field,
+                action: input.action,
+                context: input.contextScope,
+            });
+        } catch (error) {
+            reportError(error, { scope: "changes" });
+            throw error;
+        }
     };
 
     const setCompanyContext = (companyId?: string | null) => {
@@ -1516,22 +1641,44 @@ export default function TenantsPage() {
         toast.success("Отчёт CSV выгружен");
     };
 
-    const saveWeeklySnapshot = () => {
+    const saveWeeklySnapshot = async () => {
+        if (!selectedClientId) {
+            reportValidationError("Сначала выберите клиента в контексте", "VALIDATION_ERROR", "portfolio");
+            return;
+        }
         const now = new Date().toISOString();
         const weekKey = toWeekKey(now);
-        setWeeklySnapshots((previous) => {
-            const next: TenantsOperationalSnapshot = {
-                id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-                    ? crypto.randomUUID()
-                    : `${Date.now()}`,
-                weekKey,
-                createdAt: now,
-                report: operationalReport,
-            };
-            const withoutWeek = previous.filter((item) => item.weekKey !== weekKey);
-            return [next, ...withoutWeek].slice(0, MAX_WEEKLY_SNAPSHOTS);
-        });
-        toast.success(`Weekly snapshot сохранён (${weekKey})`);
+        const localSnapshot: TenantsOperationalSnapshot = {
+            id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                ? crypto.randomUUID()
+                : `${Date.now()}`,
+            weekKey,
+            createdAt: now,
+            report: operationalReport,
+        };
+        const applySnapshot = (snapshot: TenantsOperationalSnapshot) => {
+            setWeeklySnapshots((previous) => {
+                const withoutWeek = previous.filter((item) => item.weekKey !== snapshot.weekKey);
+                return [snapshot, ...withoutWeek].slice(0, MAX_WEEKLY_SNAPSHOTS);
+            });
+        };
+        try {
+            const response = await adminApi.saveTenantsWeeklySnapshot({
+                client_id: selectedClientId,
+                week_key: weekKey,
+                snapshot: operationalReport as Record<string, unknown>,
+            });
+            const mappedSnapshot = mapWeeklySnapshotRecordToViewModel(response.data.item);
+            applySnapshot(mappedSnapshot ?? localSnapshot);
+            queryClient.invalidateQueries({
+                queryKey: ["tenants-weekly-snapshots", selectedClientId],
+            });
+            toast.success(`Weekly snapshot сохранён (${weekKey})`);
+        } catch (error) {
+            reportError(error, { scope: "portfolio" });
+            applySnapshot(localSnapshot);
+            toast.success(`Weekly snapshot сохранён локально (${weekKey})`);
+        }
     };
 
     const copyAlertHookPayload = async () => {
@@ -1559,7 +1706,7 @@ export default function TenantsPage() {
             setLastMetricsSnapshotJob(response.data.job);
             toast.success(mode === "dry_run" ? "Snapshot dry-run выполнен" : "Snapshot execute выполнен");
         } catch (error) {
-            reportError(error);
+            reportError(error, { scope: resolveErrorScopeFromWorkspace(workspaceMode) });
         } finally {
             setRunningMetricsSnapshotMode(null);
         }
@@ -2134,7 +2281,7 @@ export default function TenantsPage() {
             <div className="flex flex-col gap-2 mb-6">
                 <h1 className="text-2xl font-bold" data-testid="tenants-title">Тенанты</h1>
                 <div className="text-xs text-muted-foreground">
-                    Контекст: {selectedCompanyName ?? "—"} / {meData?.client?.name ?? "—"} / {selectedBranchName ?? "—"}
+                    Контекст: {selectedCompanyName ?? "—"} / {selectedClientName ?? "—"} / {selectedBranchName ?? "—"}
                     {isPlatformPreset ? (
                         <span>
                             {" · IDs: "}
@@ -2142,29 +2289,13 @@ export default function TenantsPage() {
                         </span>
                     ) : null}
                 </div>
-                {inlineErrors.length > 0 ? (
-                    <section className="rounded-lg border border-red-300/60 bg-red-50 p-3" data-testid="tenants-error-summary">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-sm font-semibold text-red-900">Ошибки последних операций</div>
-                            <button className="btn-ghost" onClick={clearErrors}>Очистить</button>
-                        </div>
-                        <div className="mt-1 text-xs text-red-900/80">
-                            Исправьте отмеченные поля и повторите действие. Для API ошибок используйте `trace` из записи ниже.
-                        </div>
-                        <div className="mt-2 space-y-2">
-                            {inlineErrors.map((error) => (
-                                <div key={error.id} className="rounded-md border border-red-200/80 bg-background/90 p-2 text-xs">
-                                    <div className="font-mono text-red-900">{error.code}</div>
-                                    <div className="mt-1 text-foreground">{error.message}</div>
-                                    <div className="mt-1 text-muted-foreground">
-                                        {new Date(error.capturedAt).toLocaleString("ru-RU")}
-                                        {error.traceId ? ` · trace: ${error.traceId}` : ""}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </section>
-                ) : null}
+                <TenantsScopedErrorSummary
+                    errors={visibleInlineErrors}
+                    scopeLabel={activeErrorScopeLabel}
+                    showScopeClear={workspaceMode !== "all"}
+                    onClearScope={() => clearErrors(activeErrorScope)}
+                    onClearAll={() => clearErrors()}
+                />
                 <div className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-workspace-modes">
                     <div className="text-xs text-muted-foreground mb-2">Рабочая зона Tenants:</div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -2224,18 +2355,18 @@ export default function TenantsPage() {
                     </div>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="tenants-workspace-guide">
-                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground mb-2">
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-foreground/80">
                         Операционный guide
                     </div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-xs text-foreground/80">
                         Портфель: риск-панель и состав клиентов. Онбординг: запуск нового филиала. Изменения:
                         controlled change + draft/validate/publish. Decommission: архив/восстановление с подтверждением.
                     </div>
-                    <div className="mt-2 text-xs text-muted-foreground">
+                    <div className="mt-2 text-xs text-foreground/80">
                         Перед Go-Live проверьте: `instance_id`, `phone`, `timezone`, `telegram_chat_id`, `knowledge_tag`,
                         `payment_status`, активный reference pack.
                     </div>
-                    <div className="mt-2 text-xs text-muted-foreground">
+                    <div className="mt-2 text-xs text-foreground/80">
                         Порядок работы: `Action Queue`, затем контекст клиента, затем профильная зона, затем подтверждение результата через trace/audit.
                     </div>
                 </div>
@@ -2412,6 +2543,9 @@ export default function TenantsPage() {
                                         fleetAttentionQuery.refetch();
                                         recentBranchChangesKpiQuery.refetch();
                                         selectedClientAuditQuery.refetch();
+                                        if (selectedClientId) {
+                                            weeklySnapshotsServerQuery.refetch();
+                                        }
                                     }}
                                     disabled={fleetAttentionQuery.isFetching || recentBranchChangesKpiQuery.isFetching}
                                 >
@@ -2435,6 +2569,8 @@ export default function TenantsPage() {
                                     className="btn-ghost"
                                     onClick={saveWeeklySnapshot}
                                     data-testid="tenants-kpi-save-weekly-snapshot"
+                                    disabled={!selectedClientId}
+                                    title={selectedClientId ? undefined : "Выберите клиента в контексте"}
                                 >
                                     Weekly snapshot
                                 </button>
@@ -2507,19 +2643,19 @@ export default function TenantsPage() {
                                 </div>
                                 <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                                     <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                                        <div className="text-[11px] text-muted-foreground">Median time to go-live</div>
+                                        <div className="text-[11px] text-foreground/80">Median time to go-live</div>
                                         <div className="text-base font-semibold">{formatOptionalHours(onboardingThroughput.time_to_go_live_median_hours)}</div>
                                     </div>
                                     <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                                        <div className="text-[11px] text-muted-foreground">Blocker age p95</div>
+                                        <div className="text-[11px] text-foreground/80">Blocker age p95</div>
                                         <div className="text-base font-semibold">{formatOptionalHours(onboardingThroughput.blocker_age_p95_hours)}</div>
                                     </div>
                                     <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                                        <div className="text-[11px] text-muted-foreground">First-pass go-live rate</div>
+                                        <div className="text-[11px] text-foreground/80">First-pass go-live rate</div>
                                         <div className="text-base font-semibold">{formatOptionalPercent(onboardingThroughput.first_pass_go_live_rate_pct)}</div>
                                     </div>
                                     <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                                        <div className="text-[11px] text-muted-foreground">Incident reopen &lt;24h</div>
+                                        <div className="text-[11px] text-foreground/80">Incident reopen &lt;24h</div>
                                         <div className="text-base font-semibold">{formatOptionalPercent(onboardingThroughput.incident_reopen_rate_24h_pct)}</div>
                                     </div>
                                 </div>
@@ -2610,7 +2746,15 @@ export default function TenantsPage() {
                                 <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                                     Weekly snapshots
                                 </div>
-                                {weeklySnapshots.length === 0 ? (
+                                {!selectedClientId ? (
+                                    <div className="text-xs text-muted-foreground">
+                                        Выберите клиента в контексте, чтобы загрузить weekly snapshots.
+                                    </div>
+                                ) : weeklySnapshotsServerQuery.isFetching ? (
+                                    <div className="text-xs text-muted-foreground">
+                                        Загрузка weekly snapshots...
+                                    </div>
+                                ) : weeklySnapshots.length === 0 ? (
                                     <div className="text-xs text-muted-foreground">
                                         Снимков пока нет. Сохраните первый weekly snapshot.
                                     </div>
@@ -2949,6 +3093,7 @@ export default function TenantsPage() {
                                 className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
                                 value={fleetLifecycleFilter}
                                 onChange={(event) => setFleetLifecycleFilter(event.target.value as FleetLifecycleFilter)}
+                                aria-label="Фильтр этапа клиента"
                             >
                                 <option value="all">Этап: все</option>
                                 <option value="lead">лид</option>
@@ -2963,6 +3108,7 @@ export default function TenantsPage() {
                                 className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
                                 value={fleetPaymentFilter}
                                 onChange={(event) => setFleetPaymentFilter(event.target.value as FleetPaymentFilter)}
+                                aria-label="Фильтр статуса оплаты"
                             >
                                 <option value="all">Оплата: все</option>
                                 <option value="pending">ожидает</option>
@@ -2974,6 +3120,7 @@ export default function TenantsPage() {
                                 className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
                                 value={fleetServiceFilter}
                                 onChange={(event) => setFleetServiceFilter(event.target.value as FleetServiceFilter)}
+                                aria-label="Фильтр сервисного статуса"
                             >
                                 <option value="all">Сервис: все</option>
                                 <option value="ok">стабильно</option>
@@ -3196,6 +3343,7 @@ export default function TenantsPage() {
                                                                 )
                                                             }
                                                             disabled={!canWriteTenants || savingClient || companyLocked}
+                                                            aria-label="Компания клиента"
                                                         >
                                                             <option value="">Без компании</option>
                                                             {knownCompanies.map((company) => (
@@ -3293,9 +3441,12 @@ export default function TenantsPage() {
                                             {isPlatformPreset ? (
                                                 <div className="text-xs text-muted-foreground">{branch.id}</div>
                                             ) : null}
-                                            <div className="text-xs text-muted-foreground">
-                                                {branch.instance_id ? `instance_id: ${branch.instance_id}` : "instance_id: —"}
-                                            </div>
+                                            <TenantsSensitiveIdCell
+                                                branchId={branch.id}
+                                                instanceId={branch.instance_id}
+                                                contextScope={workspaceMode}
+                                                onAudit={auditSensitiveAccess}
+                                            />
                                             <div className="text-xs text-muted-foreground">
                                                 {branch.onboarding_state ? `этап онбординга: ${branch.onboarding_state}` : "этап онбординга: —"}
                                             </div>

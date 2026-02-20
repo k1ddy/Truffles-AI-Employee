@@ -406,6 +406,12 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         run: npm run test:e2e:smoke
 
+      - name: Playwright tenants a11y thresholds
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          A11Y_FAIL_ON_THRESHOLDS: "1"
+        run: npx playwright test e2e/tenants-a11y.spec.ts --project=chromium --no-deps --reporter=list
+
   console-e2e-live:
     needs: [changes]
     if: needs.changes.outputs.console_web == 'true'

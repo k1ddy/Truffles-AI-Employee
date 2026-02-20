@@ -1604,7 +1604,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                             </div>
                             {data && (
                                 <div className="w-full lg:w-auto lg:flex-1">
-                                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground md:hidden">
+                                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-1.5 text-xs text-foreground/80 md:hidden">
                                         Контекст:{" "}
                                         <span className="font-semibold text-foreground">
                                             {data.client?.company_name ?? "Компания"}
@@ -1617,7 +1617,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                         <span className="font-semibold text-foreground">
                                             {findBranchName(data.branches, data.selected_branch_id, !data.branch_selection_required)}
                                         </span>
-                                        <Link href="/company-workspace" className="ml-2 underline">
+                                        <Link href="/company-workspace" className="ml-2 font-medium text-primary underline underline-offset-2">
                                             изменить
                                         </Link>
                                         {role === "platform_admin" && (

@@ -530,3 +530,185 @@ def test_build_onboarding_throughput_metrics_empty_scope_returns_defaults() -> N
     assert metrics.first_pass_go_live_rate_pct is None
     assert metrics.incident_reopen_rate_24h_pct is None
     db.query.assert_not_called()
+
+
+def test_normalize_tenants_weekly_snapshot_week_key_accepts_valid_format() -> None:
+    assert console_router._normalize_tenants_weekly_snapshot_week_key("2026-W08") == "2026-W08"
+
+
+@pytest.mark.parametrize("value", ["", "2026-08", "2026-W8", "bad-value"])
+def test_normalize_tenants_weekly_snapshot_week_key_rejects_invalid(value: str) -> None:
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._normalize_tenants_weekly_snapshot_week_key(value)
+
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
+def test_normalize_tenants_weekly_snapshot_payload_rejects_non_object() -> None:
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._normalize_tenants_weekly_snapshot_payload(None)
+
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
+def test_serialize_tenants_weekly_snapshot_record_maps_payload() -> None:
+    now = datetime.now(timezone.utc)
+    event = SimpleNamespace(
+        id=uuid4(),
+        created_at=now,
+        client_id=uuid4(),
+        actor_name="Platform Admin",
+        payload={
+            "week_key": "2026-W08",
+            "snapshot": {"generatedAt": now.isoformat(), "kpi": {"blockedSignals": 1}},
+        },
+    )
+
+    record = console_router._serialize_tenants_weekly_snapshot_record(event)
+
+    assert record.week_key == "2026-W08"
+    assert record.snapshot["kpi"]["blockedSignals"] == 1
+    assert record.actor_name == "Platform Admin"
+
+
+class _ClientQuery:
+    def __init__(self, client):
+        self._client = client
+
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def first(self):
+        return self._client
+
+
+class _AuditSaveQuery:
+    def __init__(self, items):
+        self._items = items
+
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def order_by(self, *_args, **_kwargs):
+        return self
+
+    def all(self):
+        return self._items
+
+
+@pytest.mark.asyncio
+async def test_save_tenants_weekly_snapshot_updates_existing_week(monkeypatch) -> None:
+    client_id = uuid4()
+    event_id = uuid4()
+    now = datetime.now(timezone.utc)
+    existing_event = SimpleNamespace(
+        id=event_id,
+        created_at=now - timedelta(days=1),
+        client_id=client_id,
+        actor_id=None,
+        actor_name=None,
+        payload={"week_key": "2026-W08", "snapshot": {"generatedAt": now.isoformat(), "kpi": {"blockedSignals": 3}}},
+    )
+    request = SimpleNamespace(query_params={})
+    context = SimpleNamespace(
+        role="platform_admin",
+        agent=SimpleNamespace(id=uuid4(), name="Platform Admin"),
+    )
+    db = Mock()
+    db.query.side_effect = lambda model: (
+        _ClientQuery(SimpleNamespace(id=client_id))
+        if model is console_router.Client
+        else _AuditSaveQuery([existing_event])
+    )
+    db.refresh = Mock()
+
+    record_audit_mock = Mock()
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(console_router, "record_audit_event", record_audit_mock)
+
+    response = await console_router.save_tenants_weekly_snapshot(
+        request=request,
+        payload=console_router.ConsoleTenantsWeeklySnapshotCreateRequest(
+            client_id=client_id,
+            week_key="2026-W08",
+            snapshot={"generatedAt": now.isoformat(), "kpi": {"blockedSignals": 1}},
+        ),
+        db=db,
+    )
+
+    assert response.item.id == event_id
+    assert response.item.week_key == "2026-W08"
+    assert response.item.snapshot["kpi"]["blockedSignals"] == 1
+    assert existing_event.actor_name == "Platform Admin"
+    assert record_audit_mock.call_count == 0
+    db.commit.assert_called_once()
+
+
+def test_normalize_tenants_sensitive_access_field_accepts_instance_id() -> None:
+    assert console_router._normalize_tenants_sensitive_access_field("instance_id") == "instance_id"
+
+
+@pytest.mark.parametrize("value", ["", "phone", "telegram_chat_id"])
+def test_normalize_tenants_sensitive_access_field_rejects_unsupported(value: str) -> None:
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._normalize_tenants_sensitive_access_field(value)
+
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.parametrize("value", ["reveal", "copy"])
+def test_normalize_tenants_sensitive_access_action_accepts_allowed(value: str) -> None:
+    assert console_router._normalize_tenants_sensitive_access_action(value) == value
+
+
+@pytest.mark.parametrize("value", ["", "download", "open"])
+def test_normalize_tenants_sensitive_access_action_rejects_invalid(value: str) -> None:
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._normalize_tenants_sensitive_access_action(value)
+
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.asyncio
+async def test_audit_tenants_sensitive_access_records_event(monkeypatch) -> None:
+    branch_id = uuid4()
+    client_id = uuid4()
+    request = SimpleNamespace(query_params={})
+    context = SimpleNamespace(
+        role="platform_admin",
+        agent=SimpleNamespace(id=uuid4(), name="Platform Admin"),
+    )
+    branch = SimpleNamespace(id=branch_id, client_id=client_id)
+    db = Mock()
+    db.query.side_effect = lambda model: (
+        _ClientQuery(branch)
+        if model is console_router.Branch
+        else AssertionError(f"Unexpected model: {model}")
+    )
+    db.refresh = Mock()
+
+    event = SimpleNamespace(id=uuid4())
+    record_audit_mock = Mock(return_value=event)
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+    monkeypatch.setattr(console_router, "record_audit_event", record_audit_mock)
+
+    response = await console_router.audit_tenants_sensitive_access(
+        request=request,
+        payload=console_router.ConsoleTenantsSensitiveAccessAuditRequest(
+            branch_id=branch_id,
+            field="instance_id",
+            action="copy",
+            context="changes",
+        ),
+        db=db,
+    )
+
+    assert response.ok is True
+    assert response.audit_id == event.id
+    assert record_audit_mock.call_count == 1
+    assert record_audit_mock.call_args.kwargs["event_type"] == "tenants_sensitive_id_accessed"
+    assert record_audit_mock.call_args.kwargs["client_id"] == client_id
+    assert record_audit_mock.call_args.kwargs["branch_id"] == branch_id
+    assert record_audit_mock.call_args.kwargs["payload"]["field"] == "instance_id"
+    assert record_audit_mock.call_args.kwargs["payload"]["action"] == "copy"
+    db.commit.assert_called_once()
