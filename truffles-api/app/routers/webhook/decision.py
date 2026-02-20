@@ -7672,6 +7672,7 @@ async def _handle_webhook_payload(
         client_id=client.id,
         client_slug=payload.client_slug,
         conversation=conversation,
+        remote_jid=remote_jid,
         message_text=message_text,
         batch_messages=batch_messages,
         expected_reply_shortcircuit=expected_reply_shortcircuit_effective,

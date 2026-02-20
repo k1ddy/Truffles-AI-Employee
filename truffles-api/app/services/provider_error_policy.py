@@ -14,6 +14,7 @@ from typing import Literal, Optional
 
 ProviderErrorKind = Literal[
     "billing_blocked",
+    "invalid_recipient",
     "auth",
     "rate_limited",
     "unavailable",
@@ -21,6 +22,7 @@ ProviderErrorKind = Literal[
 ]
 ProviderIncidentReasonCode = Literal[
     "provider_billing_blocked",
+    "provider_invalid_recipient",
     "provider_auth",
     "provider_rate_limited",
     "provider_unavailable",
@@ -65,6 +67,22 @@ _PROVIDER_ERROR_RULES: tuple[ProviderErrorRule, ...] = (
             "not paid",
             "payment required",
             "invoice overdue",
+        ),
+    ),
+    ProviderErrorRule(
+        kind="invalid_recipient",
+        incident_reason_code="provider_invalid_recipient",
+        incident_reason_label="Некорректный номер WhatsApp получателя",
+        retryable=False,
+        error_codes=("CHATFLOW_INVALID_RECIPIENT",),
+        markers=(
+            "invalid recipient",
+            "invalid jid",
+            "jid not found",
+            "recipient not found",
+            "number does not exist",
+            "not a whatsapp user",
+            "phone number shared via url is invalid",
         ),
     ),
     ProviderErrorRule(
@@ -186,4 +204,3 @@ def is_permanent_provider_error(
 ) -> bool:
     classification = classify_provider_error(error_text, explicit_error_code=explicit_error_code)
     return classification.kind != "unknown" and not classification.retryable
-

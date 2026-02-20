@@ -36,6 +36,7 @@ from app.models import (
     ConsoleBranchChange,
     ConsoleOpsJob,
     Conversation,
+    ConversationHumanLock,
     Handover,
     KnowledgeVersion,
     LearnedResponse,
@@ -111,6 +112,9 @@ from app.schemas.console import (
     ConsoleFleetAttentionSummary,
     ConsoleFleetSummary,
     ConsoleHealthResponse,
+    ConsoleHumanLockPauseRequest,
+    ConsoleHumanLockStatus,
+    ConsoleHumanLockStatusResponse,
     ConsoleIncidentAction,
     ConsoleIncidentItem,
     ConsoleIncidentListResponse,
@@ -194,6 +198,8 @@ from app.schemas.console import (
     ConsoleOutboxListResponse,
     ConsoleOutboxRetryRequest,
     ConsoleOutboxRetryResponse,
+    ConsoleOutreachMessageRequest,
+    ConsoleOutreachMessageResponse,
     ConsoleOwnerMode,
     ConsoleOwnerOperationApplyRequest,
     ConsoleOwnerOperationApplyResponse,
@@ -250,6 +256,7 @@ from app.services.agent_link_service import build_telegram_deep_link, create_age
 from app.services.alert_service import alert_warning
 from app.services.audit_service import AuditEvent, record_audit_event
 from app.services.capabilities_service import merge_capabilities, payload_to_dict
+from app.services.chatflow_service import get_instance_id, send_bot_response
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_confirmations import create_confirmation, mark_confirmation_used, require_confirmation
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
@@ -301,6 +308,13 @@ from app.services.console_owner_admin import (
     safe_int as _safe_int,
 )
 from app.services.escalation_service import resolve_telegram_routing
+from app.services.human_lock_service import (
+    get_active_human_lock,
+    normalize_phone_to_jid,
+    release_human_lock,
+    resolve_conversation_remote_jid,
+    upsert_human_lock,
+)
 from app.services.integration_guardrails_service import run_integration_watchdog_scoped
 from app.services.knowledge_registry_service import (
     apply_pack_index_to_client_config,
@@ -351,7 +365,11 @@ from app.services.onboarding_state import (
     build_onboarding_status,
     ensure_onboarding_step,
 )
-from app.services.outbox_service import archive_pending_outbox
+from app.services.outbox_service import (
+    archive_pending_outbox,
+    build_inbound_message_id,
+    enqueue_outbox_message,
+)
 from app.services.pack_compiler_service import (
     PackCompilerError,
     build_compiled_pack_meta,
@@ -1148,6 +1166,133 @@ def _normalize_phone_digits(value: Optional[str]) -> str:
     if not value:
         return ""
     return re.sub(r"\D+", "", value)
+
+
+def _is_env_enabled(value: Optional[str], *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _coerce_utc_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _build_human_lock_status_payload(
+    lock: ConversationHumanLock | None,
+    *,
+    remote_jid: str | None,
+    now: datetime,
+) -> ConsoleHumanLockStatus:
+    if not lock:
+        return ConsoleHumanLockStatus(active=False, remote_jid=remote_jid)
+
+    lock_until = _coerce_utc_datetime(lock.lock_until)
+    if not lock.active or not lock_until or lock_until <= now:
+        return ConsoleHumanLockStatus(active=False, remote_jid=remote_jid)
+
+    remaining_seconds = max(0, int((lock_until - now).total_seconds()))
+    return ConsoleHumanLockStatus(
+        active=True,
+        remote_jid=remote_jid,
+        lock_until=lock_until.isoformat(),
+        remaining_seconds=remaining_seconds,
+        source=lock.source,
+        reason=lock.reason,
+    )
+
+
+def _build_console_outbox_text_payload(
+    *,
+    client_id: UUID,
+    branch_id: UUID | None,
+    conversation_id: UUID | None,
+    client_slug: str,
+    remote_jid: str,
+    instance_id: str,
+    text_value: str,
+    idempotency_key: str,
+    source: str,
+    now: datetime,
+) -> dict:
+    # tenant_context.source follows tenancy contract enum; keep console origin separately.
+    return {
+        "schema_version": "outbox.v1",
+        "event_type": "whatsapp.send_text",
+        "idempotency_key": idempotency_key,
+        "client_id": str(client_id),
+        "branch_id": str(branch_id) if branch_id else None,
+        "tenant_context": {
+            "client_id": str(client_id),
+            "branch_id": str(branch_id) if branch_id else None,
+            "client_slug": client_slug,
+            "instance_id": instance_id,
+            "source": "system",
+            "origin_source": source,
+        },
+        "conversation_id": str(conversation_id) if conversation_id else None,
+        "channel": "whatsapp",
+        "created_at": now.isoformat(),
+        "payload": {
+            "remote_jid": remote_jid,
+            "instance_id": instance_id,
+            "idempotency_key": idempotency_key,
+            "text": text_value,
+        },
+    }
+
+
+def _normalize_pause_minutes(
+    value: Optional[int],
+    *,
+    default: int = 30,
+    allow_zero: bool = False,
+    max_minutes: int = 24 * 60,
+) -> int:
+    if value is None:
+        return default
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "pause minutes must be an integer") from exc
+    min_minutes = 0 if allow_zero else 1
+    if minutes < min_minutes or minutes > max_minutes:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"pause minutes must be between {min_minutes} and {max_minutes}",
+        )
+    return minutes
+
+
+def _normalize_outreach_destination(value: Optional[str]) -> str:
+    normalized = normalize_phone_to_jid(_normalize_optional_text(value))
+    if not normalized:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "destination must be a WhatsApp phone or JID")
+    return normalized
+
+
+def _resolve_console_conversation_or_404(
+    db: Session,
+    *,
+    client_id: UUID,
+    conversation_id: UUID,
+) -> Conversation:
+    conversation = (
+        db.query(Conversation)
+        .filter(
+            Conversation.id == conversation_id,
+            Conversation.client_id == client_id,
+        )
+        .first()
+    )
+    if not conversation:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
+    return conversation
 
 
 def _normalize_search_query(
@@ -6824,36 +6969,35 @@ async def send_manager_message(
 ) -> ConsoleManagerMessageResponse:
     """Send a message from the manager to the customer via WhatsApp."""
     from app.logging_config import get_logger
-    from app.models import Conversation, User
     from app.schemas.console import ConsoleManagerMessageRequest, ConsoleManagerMessageResponse
-    from app.services.chatflow_service import send_bot_response
-    from app.services.manager_message_service import get_user_remote_jid
-    
+
     logger = get_logger("console_send_message")
-    
+
     context = get_console_context(request, db)
     require_console_permission(context, "inbox", "write")
-    idempotency = None
     idempotency_key = _get_idempotency_key(request)
-    
+    normalized_content = _normalize_required_text(body.content, "content")
+
     # Verify access to conversation via handover
     case = db.query(Handover).filter(
         Handover.conversation_id == conversation_id,
-        Handover.client_id == context.client.id
+        Handover.client_id == context.client.id,
     ).first()
-    
+
     if not case:
         raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found or access denied")
 
-    conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
-    if not conversation:
-        raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
+    conversation = _resolve_console_conversation_or_404(
+        db,
+        client_id=context.client.id,
+        conversation_id=conversation_id,
+    )
     _require_branch_access(context, conversation.branch_id, message="Access to this conversation denied")
-    
+
     # Only allow if case is active and assigned to this agent, or agent is owner/admin
     if case.status != "active" and context.role not in ("platform_admin", "owner", "admin"):
         raise ConsoleAPIError(403, "CASE_NOT_ACTIVE", "Case must be active to send messages")
-    
+
     if context.role not in ("platform_admin", "owner", "admin"):
         assigned_id = str(case.assigned_to or "").strip()
         if assigned_id:
@@ -6875,7 +7019,7 @@ async def send_manager_message(
         scope="console.conversation.message",
         payload={
             "conversation_id": str(conversation_id),
-            "content": body.content,
+            "content": normalized_content,
         },
     )
     if idempotency and idempotency.replay:
@@ -6883,7 +7027,7 @@ async def send_manager_message(
             status_code=idempotency.response_status,
             content=idempotency.response_body,
         )
-    
+
     # Create the message
     commit_done = False
     try:
@@ -6891,12 +7035,12 @@ async def send_manager_message(
             conversation_id=conversation_id,
             client_id=context.client.id,
             role="manager",
-            content=body.content,
+            content=normalized_content,
             created_at=datetime.now(timezone.utc),
             message_metadata={"source": "console"},
         )
         db.add(new_message)
-        case.manager_response = body.content
+        case.manager_response = normalized_content
         if case.first_response_at is None:
             case.first_response_at = datetime.now(timezone.utc)
         if not case.assigned_to_name and context.agent.name:
@@ -6909,7 +7053,7 @@ async def send_manager_message(
             event_type="message_sent",
             entity_type="conversation",
             entity_id=conversation_id,
-            payload={"content_length": len(body.content), "source": "web_console"},
+            payload={"content_length": len(normalized_content), "source": "web_console"},
             branch_id=conversation.branch_id,
         )
 
@@ -6920,43 +7064,102 @@ async def send_manager_message(
         if idempotency and idempotency.record and not commit_done:
             release_idempotency(db, record=idempotency.record)
         raise
-    
-    # Send to WhatsApp
-    delivery_status = "pending"
+
+    delivery_status = "failed"
     delivery_error = None
-    
+    outbox_enqueued: Optional[bool] = None
+    now_utc = datetime.now(timezone.utc)
+
     try:
-        # Get user's WhatsApp JID
-        remote_jid = get_user_remote_jid(db, conversation.user_id)
-        
+        remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
         if not remote_jid:
-            logger.warning(f"No remote_jid for user {conversation.user_id}")
-            delivery_status = "failed"
             delivery_error = "user_jid_not_found"
         else:
-            # Send via ChatFlow (same as Telegram manager messages)
-            sent = send_bot_response(
-                db=db,
-                client_id=context.client.id,
-                remote_jid=remote_jid,
-                message=body.content,
+            instance_id = get_instance_id(
+                db,
+                context.client.id,
                 branch_id=conversation.branch_id,
-                idempotency_key=idempotency_key,
+                remote_jid=remote_jid,
             )
-            
-            if sent:
-                delivery_status = "delivered"
-                logger.info(f"Message {new_message.id} sent to {remote_jid} via web console")
+            if not instance_id:
+                delivery_error = "instance_id_not_found"
+            elif _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False):
+                outbox_idempotency_key = idempotency_key or build_inbound_message_id(
+                    None,
+                    remote_jid,
+                    int(now_utc.timestamp()),
+                    normalized_content,
+                )
+                client_slug = _normalize_optional_text(getattr(context.client, "name", None)) or "truffles"
+                outbox_payload = _build_console_outbox_text_payload(
+                    client_id=context.client.id,
+                    branch_id=conversation.branch_id,
+                    conversation_id=conversation.id,
+                    client_slug=client_slug,
+                    remote_jid=remote_jid,
+                    instance_id=instance_id,
+                    text_value=normalized_content,
+                    idempotency_key=outbox_idempotency_key,
+                    source="console_message",
+                    now=now_utc,
+                )
+                outbox_enqueued = enqueue_outbox_message(
+                    db,
+                    client_id=context.client.id,
+                    conversation_id=conversation.id,
+                    inbound_message_id=outbox_idempotency_key,
+                    payload_json=outbox_payload,
+                    branch_id=conversation.branch_id,
+                )
+                metadata = dict(new_message.message_metadata or {})
+                metadata.update(
+                    {
+                        "source": "console",
+                        "outbox_enqueued": outbox_enqueued,
+                        "outbox_event_type": "whatsapp.send_text",
+                        "outbox_idempotency_key": outbox_idempotency_key,
+                    }
+                )
+                new_message.message_metadata = metadata
+                delivery_status = "queued"
             else:
-                delivery_status = "failed"
-                delivery_error = "chatflow_send_failed"
-                logger.error(f"Failed to send message {new_message.id} to {remote_jid}")
-    except Exception as e:
-        logger.error(f"WhatsApp delivery error: {e}")
+                sent = send_bot_response(
+                    db=db,
+                    client_id=context.client.id,
+                    remote_jid=remote_jid,
+                    message=normalized_content,
+                    branch_id=conversation.branch_id,
+                    idempotency_key=idempotency_key,
+                )
+                if sent:
+                    delivery_status = "delivered"
+                else:
+                    delivery_error = "chatflow_send_failed"
+
+            if delivery_status in {"queued", "delivered"}:
+                upsert_human_lock(
+                    db,
+                    client_id=context.client.id,
+                    remote_jid=remote_jid,
+                    lock_until=now_utc + timedelta(minutes=30),
+                    conversation_id=conversation.id,
+                    branch_id=conversation.branch_id,
+                    locked_by_id=context.agent.id,
+                    locked_by_name=context.agent.name,
+                    source="console_message",
+                    reason="manual_reply",
+                )
+    except Exception as exc:
+        logger.error("WhatsApp delivery error: %s", exc)
         delivery_status = "failed"
-        delivery_error = str(e)
-    
-    if delivery_status == "delivered":
+        delivery_error = str(exc)
+
+    if delivery_status == "failed" and not delivery_error:
+        delivery_error = "chatflow_send_failed"
+
+    db.commit()
+
+    if delivery_status in {"delivered", "queued"}:
         try:
             if conversation.telegram_topic_id:
                 routing_meta = resolve_telegram_routing(
@@ -6971,7 +7174,7 @@ async def send_manager_message(
                     manager_label = context.agent.name or "Менеджер"
                     result = telegram.send_message(
                         chat_id=str(chat_id),
-                        text=f"🖥️ <b>{manager_label}</b>: {body.content}",
+                        text=f"🖥️ <b>{manager_label}</b>: {normalized_content}",
                         message_thread_id=conversation.telegram_topic_id,
                     )
                     if not result.get("ok"):
@@ -6991,7 +7194,7 @@ async def send_manager_message(
             )
 
     response = ConsoleManagerMessageResponse(
-        success=delivery_status == "delivered",
+        success=delivery_status in {"delivered", "queued"},
         message=ConsoleMessage(
             id=new_message.id,
             role=new_message.role,
@@ -7008,6 +7211,363 @@ async def send_manager_message(
             response_body=response.model_dump(mode="json"),
         )
     return response
+
+
+@router.post(
+    "/outreach/messages",
+    response_model=ConsoleOutreachMessageResponse,
+)
+async def send_outreach_message(
+    body: ConsoleOutreachMessageRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleOutreachMessageResponse:
+    """Send manual outreach message by phone/JID with optional per-client bot pause."""
+    context = get_console_context(request, db)
+    require_console_permission(context, "outreach", "write")
+
+    remote_jid = _normalize_outreach_destination(body.destination)
+    content = _normalize_required_text(body.content, "content")
+    pause_minutes = _normalize_pause_minutes(body.pause_bot_minutes, default=30, allow_zero=True)
+    pause_reason = _normalize_optional_text(body.pause_reason)
+    idempotency_key = _get_idempotency_key(request)
+
+    conversation: Conversation | None = None
+    branch_id = body.branch_id
+    if body.conversation_id:
+        conversation = _resolve_console_conversation_or_404(
+            db,
+            client_id=context.client.id,
+            conversation_id=body.conversation_id,
+        )
+        branch_id = conversation.branch_id
+    if branch_id is not None:
+        _require_branch_access(context, branch_id, message="Access to this branch denied")
+    elif conversation is None:
+        branch_id = _resolve_branch_from_context(context).id
+
+    instance_id = get_instance_id(
+        db,
+        context.client.id,
+        branch_id=branch_id,
+        remote_jid=remote_jid,
+    )
+    if not instance_id:
+        raise ConsoleAPIError(
+            409,
+            "INTEGRATION_UNAVAILABLE",
+            "WhatsApp integration is not configured for this branch",
+        )
+
+    idempotency = start_idempotency(
+        db,
+        client_id=context.client.id,
+        agent_id=context.agent.id,
+        idempotency_key=idempotency_key,
+        scope="console.outreach.message",
+        payload={
+            "destination": remote_jid,
+            "content": content,
+            "conversation_id": str(conversation.id) if conversation else None,
+            "branch_id": str(branch_id) if branch_id else None,
+            "pause_bot_minutes": pause_minutes,
+        },
+    )
+    if idempotency and idempotency.replay:
+        return JSONResponse(
+            status_code=idempotency.response_status,
+            content=idempotency.response_body,
+        )
+
+    message: Message | None = None
+    commit_done = False
+    try:
+        if conversation:
+            message = Message(
+                conversation_id=conversation.id,
+                client_id=context.client.id,
+                role="manager",
+                content=content,
+                created_at=datetime.now(timezone.utc),
+                message_metadata={
+                    "source": "console_outreach",
+                    "destination": remote_jid,
+                },
+            )
+            db.add(message)
+
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="outreach_sent",
+            entity_type="conversation" if conversation else "client",
+            entity_id=conversation.id if conversation else context.client.id,
+            payload={
+                "destination": remote_jid,
+                "content_length": len(content),
+                "conversation_id": str(conversation.id) if conversation else None,
+            },
+            branch_id=branch_id,
+        )
+        db.commit()
+        commit_done = True
+        if message:
+            db.refresh(message)
+    except Exception:
+        if idempotency and idempotency.record and not commit_done:
+            release_idempotency(db, record=idempotency.record)
+        raise
+
+    delivery_status: Literal["queued", "delivered", "failed"] = "failed"
+    delivery_error: Optional[str] = None
+    outbox_enqueued: Optional[bool] = None
+    lock_until: Optional[datetime] = None
+    now_utc = datetime.now(timezone.utc)
+
+    try:
+        if _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False):
+            outbox_idempotency_key = idempotency_key or build_inbound_message_id(
+                None,
+                remote_jid,
+                int(now_utc.timestamp()),
+                content,
+            )
+            client_slug = _normalize_optional_text(getattr(context.client, "name", None)) or "truffles"
+            outbox_payload = _build_console_outbox_text_payload(
+                client_id=context.client.id,
+                branch_id=branch_id,
+                conversation_id=conversation.id if conversation else None,
+                client_slug=client_slug,
+                remote_jid=remote_jid,
+                instance_id=instance_id,
+                text_value=content,
+                idempotency_key=outbox_idempotency_key,
+                source="console_outreach",
+                now=now_utc,
+            )
+            outbox_enqueued = enqueue_outbox_message(
+                db,
+                client_id=context.client.id,
+                conversation_id=conversation.id if conversation else None,
+                inbound_message_id=outbox_idempotency_key,
+                payload_json=outbox_payload,
+                branch_id=branch_id,
+            )
+            delivery_status = "queued"
+            if message:
+                metadata = dict(message.message_metadata or {})
+                metadata.update(
+                    {
+                        "outbox_enqueued": outbox_enqueued,
+                        "outbox_event_type": "whatsapp.send_text",
+                        "outbox_idempotency_key": outbox_idempotency_key,
+                    }
+                )
+                message.message_metadata = metadata
+        else:
+            sent = send_bot_response(
+                db=db,
+                client_id=context.client.id,
+                remote_jid=remote_jid,
+                message=content,
+                branch_id=branch_id,
+                idempotency_key=idempotency_key,
+            )
+            if sent:
+                delivery_status = "delivered"
+            else:
+                delivery_error = "chatflow_send_failed"
+
+        if delivery_status in {"queued", "delivered"} and pause_minutes > 0:
+            lock = upsert_human_lock(
+                db,
+                client_id=context.client.id,
+                remote_jid=remote_jid,
+                lock_until=now_utc + timedelta(minutes=pause_minutes),
+                conversation_id=conversation.id if conversation else None,
+                branch_id=branch_id,
+                locked_by_id=context.agent.id,
+                locked_by_name=context.agent.name,
+                source="console_outreach",
+                reason=pause_reason or "manual_pause",
+            )
+            lock_until = _coerce_utc_datetime(lock.lock_until)
+    except Exception as exc:
+        delivery_status = "failed"
+        delivery_error = str(exc)
+
+    if delivery_status == "failed" and not delivery_error:
+        delivery_error = "chatflow_send_failed"
+
+    db.commit()
+
+    response = ConsoleOutreachMessageResponse(
+        success=delivery_status in {"queued", "delivered"},
+        delivery_status=delivery_status,
+        remote_jid=remote_jid,
+        outbox_enqueued=outbox_enqueued,
+        lock_until=lock_until.isoformat() if lock_until else None,
+        message=ConsoleMessage(
+            id=message.id,
+            role=message.role,
+            content=message.content,
+            created_at=message.created_at.isoformat(),
+            metadata=message.message_metadata,
+        )
+        if message
+        else None,
+        error_code=delivery_error,
+    )
+    if idempotency and idempotency.record:
+        finalize_idempotency(
+            db,
+            record=idempotency.record,
+            response_status=200,
+            response_body=response.model_dump(mode="json"),
+        )
+    return response
+
+
+@router.get(
+    "/conversations/{conversation_id}/human-lock",
+    response_model=ConsoleHumanLockStatusResponse,
+)
+async def get_conversation_human_lock_status(
+    conversation_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleHumanLockStatusResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "outreach", "read")
+
+    conversation = _resolve_console_conversation_or_404(
+        db,
+        client_id=context.client.id,
+        conversation_id=conversation_id,
+    )
+    _require_branch_access(context, conversation.branch_id, message="Access to this conversation denied")
+
+    remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
+    now_utc = datetime.now(timezone.utc)
+    lock = get_active_human_lock(
+        db,
+        client_id=context.client.id,
+        remote_jid=remote_jid,
+        now=now_utc,
+    )
+    db.commit()
+    return ConsoleHumanLockStatusResponse(
+        success=True,
+        status=_build_human_lock_status_payload(lock, remote_jid=remote_jid, now=now_utc),
+    )
+
+
+@router.post(
+    "/conversations/{conversation_id}/human-lock/pause",
+    response_model=ConsoleHumanLockStatusResponse,
+)
+async def pause_conversation_human_lock(
+    conversation_id: UUID,
+    body: ConsoleHumanLockPauseRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleHumanLockStatusResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "outreach", "write")
+
+    minutes = _normalize_pause_minutes(body.minutes, default=30, allow_zero=False)
+    reason = _normalize_optional_text(body.reason) or "manual_pause"
+    conversation = _resolve_console_conversation_or_404(
+        db,
+        client_id=context.client.id,
+        conversation_id=conversation_id,
+    )
+    _require_branch_access(context, conversation.branch_id, message="Access to this conversation denied")
+    remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
+    if not remote_jid:
+        raise ConsoleAPIError(
+            409,
+            "INTEGRATION_UNAVAILABLE",
+            "Customer WhatsApp contact is not available",
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    lock = upsert_human_lock(
+        db,
+        client_id=context.client.id,
+        remote_jid=remote_jid,
+        lock_until=now_utc + timedelta(minutes=minutes),
+        conversation_id=conversation.id,
+        branch_id=conversation.branch_id,
+        locked_by_id=context.agent.id,
+        locked_by_name=context.agent.name,
+        source="console_pause",
+        reason=reason,
+    )
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="human_lock_pause",
+        entity_type="conversation",
+        entity_id=conversation.id,
+        payload={
+            "minutes": minutes,
+            "remote_jid": remote_jid,
+            "reason": reason,
+        },
+        branch_id=conversation.branch_id,
+    )
+    db.commit()
+    return ConsoleHumanLockStatusResponse(
+        success=True,
+        status=_build_human_lock_status_payload(lock, remote_jid=remote_jid, now=now_utc),
+    )
+
+
+@router.delete(
+    "/conversations/{conversation_id}/human-lock",
+    response_model=ConsoleHumanLockStatusResponse,
+)
+async def release_conversation_human_lock(
+    conversation_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleHumanLockStatusResponse:
+    context = get_console_context(request, db)
+    require_console_permission(context, "outreach", "write")
+
+    conversation = _resolve_console_conversation_or_404(
+        db,
+        client_id=context.client.id,
+        conversation_id=conversation_id,
+    )
+    _require_branch_access(context, conversation.branch_id, message="Access to this conversation denied")
+    remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
+    now_utc = datetime.now(timezone.utc)
+
+    lock = release_human_lock(
+        db,
+        client_id=context.client.id,
+        remote_jid=remote_jid,
+        now=now_utc,
+    )
+    record_audit_event(
+        db,
+        actor=context.agent,
+        event_type="human_lock_release",
+        entity_type="conversation",
+        entity_id=conversation.id,
+        payload={
+            "released": bool(lock),
+            "remote_jid": remote_jid,
+        },
+        branch_id=conversation.branch_id,
+    )
+    db.commit()
+    return ConsoleHumanLockStatusResponse(
+        success=True,
+        status=ConsoleHumanLockStatus(active=False, remote_jid=remote_jid),
+    )
 
 
 @router.post(

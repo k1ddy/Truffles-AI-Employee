@@ -44,6 +44,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const role = meData?.agent?.role ?? "manager";
     const canReadInbox = canAccessConsole(role, "inbox", "read");
     const canWriteInbox = canAccessConsole(role, "inbox", "write");
+    const canWriteOutreach = canAccessConsole(role, "outreach", "write");
     const branches = (meData?.branches ?? []) as { id?: string; name?: string }[];
     const selectedBranchId = meData?.selected_branch_id ?? "";
     const isPrivileged = role === "owner" || role === "admin" || role === "platform_admin";
@@ -273,6 +274,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                                         onLoadMoreMessages={loadMoreMessages}
                                         canSend={canSend}
                                         canWrite={canWriteInbox}
+                                        canOutreach={canWriteOutreach}
                                         draft={draft}
                                         onDraftChange={setDraft}
                                         composerBefore={composerBefore}

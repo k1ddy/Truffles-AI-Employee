@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.models import Conversation, Message, User
 from app.schemas.webhook import WebhookResponse
 from app.services.ai_service import normalize_for_matching
+from app.services.human_lock_service import get_active_human_lock, normalize_remote_jid
 
 
 def _get_intent_queue(context: dict) -> list[str]:
@@ -350,6 +351,7 @@ def _handle_reengage_and_mute_gate(
     client_id,
     client_slug: str,
     conversation: Conversation,
+    remote_jid: str | None,
     message_text: str,
     batch_messages: list[str] | None,
     expected_reply_shortcircuit: bool,
@@ -375,6 +377,44 @@ def _handle_reengage_and_mute_gate(
     booking_state = legacy._get_booking_context(context)
     booking_active = bool(booking_state.get("active"))
     reengage_override = False
+    normalized_remote_jid = normalize_remote_jid(remote_jid)
+
+    if (
+        conversation.state == legacy.ConversationState.BOT_ACTIVE.value
+        and normalized_remote_jid
+    ):
+        human_lock = get_active_human_lock(
+            db,
+            client_id=client_id,
+            remote_jid=normalized_remote_jid,
+            now=now,
+        )
+        if human_lock:
+            lock_until = human_lock.lock_until
+            if lock_until and lock_until.tzinfo is None:
+                lock_until = lock_until.replace(tzinfo=timezone.utc)
+            legacy._record_decision_trace(
+                conversation,
+                {
+                    "stage": "routing",
+                    "decision": "human_lock_silent",
+                    "reason": "human_lock",
+                    "state": conversation.state,
+                    "remote_jid": normalized_remote_jid,
+                    "lock_until": lock_until.isoformat() if lock_until else None,
+                },
+            )
+            db.commit()
+            return (
+                WebhookResponse(
+                    success=True,
+                    message="Human lock active, message forwarded",
+                    conversation_id=conversation.id,
+                    bot_response=None,
+                ),
+                batch_messages,
+                reengage_override,
+            )
 
     if conversation.state == legacy.ConversationState.BOT_ACTIVE.value:
         reengage_confirmation = legacy._get_reengage_confirmation(context)
