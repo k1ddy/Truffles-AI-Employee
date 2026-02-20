@@ -257,6 +257,19 @@ function providerSlaLabel(value?: string | null): string {
     return "Нет SLA";
 }
 
+const REFERENCE_SCOPE_REASON_LABELS: Record<string, string> = {
+    active_live_signals: "live-сигналы активных филиалов",
+    active_fallback_best_candidate: "fallback на лучший активный филиал",
+    no_active_branches: "нет активных филиалов",
+};
+
+function formatReferenceScopeReason(value?: string | null): string {
+    if (!value) {
+        return "не задан";
+    }
+    return REFERENCE_SCOPE_REASON_LABELS[value] ?? value;
+}
+
 function providerPriorityBadgeClass(priority?: string | null): string {
     if (priority === "p0") {
         return "bg-red-100 text-red-800";
@@ -1509,6 +1522,11 @@ export default function IntegrationsPage() {
                     </div>
                 </section>
             )}
+            {fleetAttentionSummary ? (
+                <div className="mt-2 text-xs text-muted-foreground">
+                    scope: reference branches (fleet metrics без тестового branch noise)
+                </div>
+            ) : null}
 
             {fleetAttentionData?.items?.length ? (
                 <section className="mt-4 rounded-xl border border-border/60 bg-card p-4" data-testid="integrations-fleet-attention-list">
@@ -1527,6 +1545,9 @@ export default function IntegrationsPage() {
                                 </div>
                                 <div className="mt-1 text-muted-foreground">
                                     филиалы {item.active_branches}/{item.total_branches} · stale {item.stale_branches} · degraded {item.degraded_branches}
+                                </div>
+                                <div className="mt-1 text-muted-foreground">
+                                    reference scope: {item.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(item.reference_branch_reason)}
                                 </div>
                             </div>
                         ))}

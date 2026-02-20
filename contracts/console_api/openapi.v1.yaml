@@ -6839,6 +6839,19 @@ components:
           - type: integer
           - type: 'null'
           title: Go Live Ready Branches
+        reference_branch_ids:
+          anyOf:
+          - items:
+              type: string
+              format: uuid
+            type: array
+          - type: 'null'
+          title: Reference Branch Ids
+        reference_branch_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reference Branch Reason
       type: object
       required:
       - id
@@ -7258,6 +7271,18 @@ components:
           type: integer
           title: Go Live Ready Branches
           default: 0
+        reference_branch_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Reference Branch Ids
+          default: []
+        reference_branch_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reference Branch Reason
         stale_branches:
           type: integer
           title: Stale Branches
