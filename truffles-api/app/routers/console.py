@@ -182,6 +182,7 @@ from app.schemas.console import (
     ConsoleOnboardingSlaControlLoop,
     ConsoleOnboardingStatusResponse,
     ConsoleOnboardingStepStatus,
+    ConsoleOnboardingThroughputMetrics,
     ConsoleOpsJobCatalogResponse,
     ConsoleOpsJobDefinition,
     ConsoleOpsJobListResponse,
@@ -1605,6 +1606,7 @@ _FLEET_ATTENTION_HANDOVER_PENDING_STATUSES = {"pending", "active"}
 _FLEET_ATTENTION_HIGH_THRESHOLD = 70
 _FLEET_ATTENTION_MEDIUM_THRESHOLD = 35
 _FLEET_REFERENCE_BRANCH_RECENT_INBOUND_DAYS = 30
+_ONBOARDING_THROUGHPUT_WINDOW_HOURS = 30 * 24
 _OUTBOX_ARCHIVED_REASON_PREFIX = "archived_pending:"
 _OUTBOX_CALENDAR_SYNC_REASON_PREFIX = "calendar_sync_failed:"
 _OUTBOX_SYSTEM_EVENT_TYPES = {"calendar.sync_inbound", "calendar.sync_outbound"}
@@ -2967,6 +2969,149 @@ def _fleet_client_matches_filters(
     return True
 
 
+def _interpolated_percentile(values: list[float], percentile: float) -> Optional[float]:
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    rank = ((len(ordered) - 1) * percentile) / 100.0
+    lower_index = int(rank)
+    upper_index = min(lower_index + 1, len(ordered) - 1)
+    if lower_index == upper_index:
+        return ordered[lower_index]
+    fraction = rank - lower_index
+    lower_value = ordered[lower_index]
+    upper_value = ordered[upper_index]
+    return lower_value + (upper_value - lower_value) * fraction
+
+
+def _build_onboarding_throughput_metrics(
+    db: Session,
+    *,
+    client_ids: set[UUID],
+    window_hours: int = _ONBOARDING_THROUGHPUT_WINDOW_HOURS,
+) -> ConsoleOnboardingThroughputMetrics:
+    metrics = ConsoleOnboardingThroughputMetrics(window_hours=window_hours)
+    if not client_ids:
+        return metrics
+
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(hours=max(window_hours, 1))
+    branches = db.query(Branch).filter(Branch.client_id.in_(list(client_ids))).all()
+
+    approved_branch_ids: set[UUID] = set()
+    go_live_durations_hours: list[float] = []
+    blocker_ages_hours: list[float] = []
+
+    for branch in branches:
+        go_live_state = _normalize_branch_go_live_state(getattr(branch, "go_live_state", None))
+        reviewed_at = _coerce_utc(getattr(branch, "go_live_reviewed_at", None))
+        created_at = _coerce_utc(getattr(branch, "created_at", None))
+
+        if go_live_state == "approved" and reviewed_at and reviewed_at >= window_start:
+            approved_branch_ids.add(branch.id)
+            if created_at:
+                go_live_durations_hours.append(max((reviewed_at - created_at).total_seconds() / 3600.0, 0.0))
+
+        if not getattr(branch, "is_active", False):
+            continue
+        if _is_branch_go_live_allowed(branch, now=now):
+            continue
+        blocker_anchor = _coerce_utc(getattr(branch, "onboarding_updated_at", None)) or created_at
+        if blocker_anchor:
+            blocker_ages_hours.append(max((now - blocker_anchor).total_seconds() / 3600.0, 0.0))
+
+    first_pass_approved = len(approved_branch_ids)
+    if approved_branch_ids:
+        go_live_events = (
+            db.query(
+                AuditEvent.branch_id.label("branch_id"),
+                AuditEvent.event_type.label("event_type"),
+                AuditEvent.created_at.label("created_at"),
+            )
+            .filter(
+                AuditEvent.branch_id.in_(list(approved_branch_ids)),
+                AuditEvent.event_type.in_(("branch_go_live_approved", "branch_go_live_rejected")),
+            )
+            .order_by(AuditEvent.created_at.asc(), AuditEvent.id.asc())
+            .all()
+        )
+        rejected_before_first_approval: set[UUID] = set()
+        first_approval_seen: set[UUID] = set()
+        for event in go_live_events:
+            branch_id = getattr(event, "branch_id", None)
+            event_type = getattr(event, "event_type", None)
+            if not branch_id or not isinstance(event_type, str):
+                continue
+            if event_type == "branch_go_live_rejected":
+                if branch_id not in first_approval_seen:
+                    rejected_before_first_approval.add(branch_id)
+                continue
+            if event_type == "branch_go_live_approved" and branch_id not in first_approval_seen:
+                first_approval_seen.add(branch_id)
+        first_pass_approved = sum(1 for branch_id in approved_branch_ids if branch_id not in rejected_before_first_approval)
+
+    resolved_total = 0
+    reopened_within_24h = 0
+    resolved_state_by_incident: dict[tuple[UUID, str], Optional[datetime]] = {}
+    incident_rows = (
+        db.query(
+            AlertEvent.client_id.label("client_id"),
+            AlertEvent.alert_metadata.label("alert_metadata"),
+            AlertEvent.created_at.label("created_at"),
+            AlertEvent.id.label("id"),
+        )
+        .filter(
+            AlertEvent.client_id.in_(list(client_ids)),
+            AlertEvent.alert_type == _INCIDENT_STATE_ALERT_TYPE,
+            AlertEvent.alert_metadata.isnot(None),
+            AlertEvent.created_at >= (window_start - timedelta(hours=24)),
+        )
+        .order_by(AlertEvent.created_at.asc(), AlertEvent.id.asc())
+        .all()
+    )
+    for row in incident_rows:
+        metadata = getattr(row, "alert_metadata", None)
+        if not isinstance(metadata, dict):
+            continue
+        incident_id = _normalize_optional_text(metadata.get("incident_id"))
+        incident_state = _coerce_incident_state(metadata.get("incident_state"))
+        event_client_id = getattr(row, "client_id", None)
+        event_at = _coerce_utc(getattr(row, "created_at", None))
+        if not incident_id or not incident_state or not event_client_id or event_at is None:
+            continue
+        incident_key = (event_client_id, incident_id)
+        if incident_state == "resolved":
+            resolved_state_by_incident[incident_key] = event_at
+            if event_at >= window_start:
+                resolved_total += 1
+            continue
+        if incident_state not in {"open", "in_progress"}:
+            continue
+        resolved_at = resolved_state_by_incident.get(incident_key)
+        if resolved_at is None or resolved_at < window_start:
+            continue
+        if event_at <= resolved_at + timedelta(hours=24):
+            reopened_within_24h += 1
+            resolved_state_by_incident[incident_key] = None
+
+    metrics.approved_branches_total = len(approved_branch_ids)
+    metrics.first_pass_approved_branches = first_pass_approved
+    median_hours = _interpolated_percentile(go_live_durations_hours, 50.0)
+    blocker_age_p95 = _interpolated_percentile(blocker_ages_hours, 95.0)
+    metrics.time_to_go_live_median_hours = round(median_hours, 1) if median_hours is not None else None
+    metrics.blocker_age_p95_hours = round(blocker_age_p95, 1) if blocker_age_p95 is not None else None
+    if metrics.approved_branches_total > 0:
+        metrics.first_pass_go_live_rate_pct = round(
+            (metrics.first_pass_approved_branches / metrics.approved_branches_total) * 100.0,
+            1,
+        )
+    if resolved_total > 0:
+        metrics.incident_reopen_rate_24h_pct = round((reopened_within_24h / resolved_total) * 100.0, 1)
+    return metrics
+
+
 def _compose_fleet_summary(
     *,
     total_clients: int,
@@ -2974,6 +3119,7 @@ def _compose_fleet_summary(
     lifecycle_counts: dict[str, int],
     payment_counts: dict[str, int],
     service_counts: dict[str, int],
+    onboarding_throughput: Optional[ConsoleOnboardingThroughputMetrics] = None,
 ) -> ConsoleFleetSummary:
     return ConsoleFleetSummary(
         total_companies=len(company_ids),
@@ -2989,6 +3135,7 @@ def _compose_fleet_summary(
         lifecycle_counts=lifecycle_counts,
         payment_counts=payment_counts,
         service_counts=service_counts,
+        onboarding_throughput=onboarding_throughput,
     )
 
 
@@ -3006,6 +3153,7 @@ def _build_fleet_summary_for_scope(
     service_counts = {state: 0 for state in _FLEET_SERVICE_ORDER}
     total_clients = 0
     company_ids: set[UUID] = set()
+    matched_client_ids: set[UUID] = set()
     scan_cursor: Optional[datetime] = None
 
     while True:
@@ -3042,6 +3190,7 @@ def _build_fleet_summary_for_scope(
             ):
                 continue
             total_clients += 1
+            matched_client_ids.add(client.id)
             if client.company_id:
                 company_ids.add(client.company_id)
             lifecycle_counts[details.lifecycle_state] += 1
@@ -3058,6 +3207,10 @@ def _build_fleet_summary_for_scope(
         lifecycle_counts=lifecycle_counts,
         payment_counts=payment_counts,
         service_counts=service_counts,
+        onboarding_throughput=_build_onboarding_throughput_metrics(
+            db,
+            client_ids=matched_client_ids,
+        ),
     )
 
 
@@ -5259,6 +5412,17 @@ async def _run_incident_state_job(
 
     owner = _parse_ops_job_text_param(params, name="owner", required=False, max_length=160)
     note = _parse_ops_job_text_param(params, name="note", required=False, max_length=2000)
+    evidence_confirmed = _parse_ops_job_bool_param(
+        params,
+        name="evidence_confirmed",
+        default=False,
+    )
+    evidence_summary = _parse_ops_job_text_param(
+        params,
+        name="evidence_summary",
+        required=False,
+        max_length=2000,
+    )
     reason_code = _parse_ops_job_text_param(params, name="reason_code", required=False, max_length=120)
     due_at_raw = _parse_ops_job_text_param(params, name="due_at", required=False, max_length=80)
     due_at = _parse_datetime_param("due_at", due_at_raw) if due_at_raw else None
@@ -5268,6 +5432,14 @@ async def _run_incident_state_job(
     allowed_branch_ids = _resolve_branch_scope(context)
     if allowed_branch_ids is not None and branch_id is not None and branch_id not in set(allowed_branch_ids):
         raise ConsoleAPIError(403, "ACCESS_DENIED", "Branch scope denied")
+
+    if mode == "execute" and incident_state == "resolved":
+        if not evidence_confirmed or not evidence_summary:
+            raise ConsoleAPIError(
+                409,
+                "INCIDENT_EVIDENCE_REQUIRED",
+                "Use evidence_confirmed=true and evidence_summary before setting incident_state=resolved",
+            )
 
     payload = {
         "mode": mode,
@@ -5280,6 +5452,8 @@ async def _run_incident_state_job(
         "owner": owner,
         "due_at": due_at.isoformat() if due_at else None,
         "note": note,
+        "evidence_confirmed": evidence_confirmed,
+        "evidence_summary": evidence_summary,
         "reason_code": reason_code,
     }
     if mode == "dry_run":
@@ -5291,6 +5465,8 @@ async def _run_incident_state_job(
         "owner": owner,
         "due_at": due_at.isoformat() if due_at else None,
         "note": note,
+        "evidence_confirmed": evidence_confirmed,
+        "evidence_summary": evidence_summary,
         "reason_code": reason_code,
         "source": "console_ops_job",
         "actor_agent_id": str(context.agent.id),

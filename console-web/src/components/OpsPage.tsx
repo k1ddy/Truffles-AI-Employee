@@ -178,6 +178,61 @@ interface OpsJobRunResponse {
     job: OpsJobRecord;
 }
 
+type IncidentPostCheckSnapshot = {
+    outbox_backlog: number;
+    outbox_failed_24h: number;
+    integration_degraded_branches: number;
+    pending_handovers: number;
+    captured_at: string;
+};
+
+type IncidentResolutionDraft = {
+    check_action_completed: boolean;
+    check_postcheck_recorded: boolean;
+    check_owner_ack: boolean;
+    note: string;
+};
+
+function _incidentMetricNumber(item: IncidentItem, key: string): number {
+    const raw = item.metrics?.[key];
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+        return raw;
+    }
+    if (typeof raw === "string") {
+        const parsed = Number(raw);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+    return 0;
+}
+
+function buildIncidentPostCheckSnapshot(item: IncidentItem): IncidentPostCheckSnapshot {
+    return {
+        outbox_backlog: _incidentMetricNumber(item, "outbox_backlog"),
+        outbox_failed_24h: _incidentMetricNumber(item, "outbox_failed_24h"),
+        integration_degraded_branches: _incidentMetricNumber(item, "integration_degraded_branches"),
+        pending_handovers: _incidentMetricNumber(item, "pending_handovers"),
+        captured_at: new Date().toISOString(),
+    };
+}
+
+function formatSignedDelta(value: number): string {
+    if (value > 0) {
+        return `+${value}`;
+    }
+    return `${value}`;
+}
+
+function resolutionChecklistReady(draft: IncidentResolutionDraft): boolean {
+    return Boolean(
+        draft.check_action_completed
+        && draft.check_postcheck_recorded
+        && draft.check_owner_ack
+        && draft.note.trim().length >= 12,
+    );
+}
+
 async function fetchHealth(): Promise<HealthData> {
     const response = await api.get("/health");
     return response.data;
@@ -362,6 +417,8 @@ export default function OpsPage() {
     const [metricsSnapshotDays, setMetricsSnapshotDays] = useState<number>(1);
     const [metricsSnapshotDate, setMetricsSnapshotDate] = useState<string>("");
     const [incidentActionRunningId, setIncidentActionRunningId] = useState<string | null>(null);
+    const [incidentBaselines, setIncidentBaselines] = useState<Record<string, IncidentPostCheckSnapshot>>({});
+    const [incidentResolutionDrafts, setIncidentResolutionDrafts] = useState<Record<string, IncidentResolutionDraft>>({});
     const focusedIncidentId = (searchParams?.get("incident_id") ?? "").trim();
     const focusedReasonCode = (searchParams?.get("reason") ?? "").trim();
 
@@ -513,6 +570,39 @@ export default function OpsPage() {
             return new Date(right.detected_at).getTime() - new Date(left.detected_at).getTime();
         });
     }, [focusedIncidentId, focusedReasonCode, incidentsData?.items]);
+
+    useEffect(() => {
+        if (!incidentItems.length) {
+            return;
+        }
+        setIncidentBaselines((prev) => {
+            let changed = false;
+            const next = { ...prev };
+            for (const item of incidentItems) {
+                if (!next[item.id]) {
+                    next[item.id] = buildIncidentPostCheckSnapshot(item);
+                    changed = true;
+                }
+            }
+            return changed ? next : prev;
+        });
+        setIncidentResolutionDrafts((prev) => {
+            let changed = false;
+            const next = { ...prev };
+            for (const item of incidentItems) {
+                if (!next[item.id]) {
+                    next[item.id] = {
+                        check_action_completed: false,
+                        check_postcheck_recorded: false,
+                        check_owner_ack: false,
+                        note: "",
+                    };
+                    changed = true;
+                }
+            }
+            return changed ? next : prev;
+        });
+    }, [incidentItems]);
 
     const telegramVerify = useMutation({
         mutationFn: async () => {
@@ -730,6 +820,28 @@ export default function OpsPage() {
         incident: IncidentItem,
         targetState: IncidentItem["incident_state"],
     ) => {
+        const baseline = incidentBaselines[incident.id] ?? buildIncidentPostCheckSnapshot(incident);
+        const current = buildIncidentPostCheckSnapshot(incident);
+        const draft = incidentResolutionDrafts[incident.id] ?? {
+            check_action_completed: false,
+            check_postcheck_recorded: false,
+            check_owner_ack: false,
+            note: "",
+        };
+        const checklistDone = resolutionChecklistReady(draft);
+        const evidenceSummary = [
+            `baseline(backlog=${baseline.outbox_backlog},failed_24h=${baseline.outbox_failed_24h},degraded=${baseline.integration_degraded_branches},handover=${baseline.pending_handovers})`,
+            `current(backlog=${current.outbox_backlog},failed_24h=${current.outbox_failed_24h},degraded=${current.integration_degraded_branches},handover=${current.pending_handovers})`,
+            `delta(backlog=${formatSignedDelta(current.outbox_backlog - baseline.outbox_backlog)},failed_24h=${formatSignedDelta(current.outbox_failed_24h - baseline.outbox_failed_24h)},degraded=${formatSignedDelta(current.integration_degraded_branches - baseline.integration_degraded_branches)},handover=${formatSignedDelta(current.pending_handovers - baseline.pending_handovers)})`,
+            `checks(action=${draft.check_action_completed ? "yes" : "no"},postcheck=${draft.check_postcheck_recorded ? "yes" : "no"},owner=${draft.check_owner_ack ? "yes" : "no"})`,
+            `note=${draft.note.trim() || "-"}`,
+        ].join(" | ");
+
+        if (targetState === "resolved" && !checklistDone) {
+            toast.error("Для закрытия инцидента заполните evidence checklist и note (мин. 12 символов).");
+            return;
+        }
+
         const actionId = `state:${incident.id}:${targetState}`;
         setIncidentActionRunningId(actionId);
         try {
@@ -741,12 +853,27 @@ export default function OpsPage() {
                     incident_state: targetState,
                     reason_code: incident.reason_code,
                     branch_id: incident.branch_id ?? undefined,
+                    owner: meData?.agent?.name || undefined,
+                    note: targetState === "resolved" ? draft.note.trim() : undefined,
+                    evidence_confirmed: targetState === "resolved" ? checklistDone : undefined,
+                    evidence_summary: targetState === "resolved" ? evidenceSummary : undefined,
                 },
             };
             const response = await opsApi.runJob(payload);
             const job = response.data.job;
             if (job.status === "success") {
                 toast.success(`Инцидент переведен в "${incidentStateLabel(targetState)}"`);
+                if (targetState === "resolved") {
+                    setIncidentResolutionDrafts((prev) => ({
+                        ...prev,
+                        [incident.id]: {
+                            check_action_completed: false,
+                            check_postcheck_recorded: false,
+                            check_owner_ack: false,
+                            note: "",
+                        },
+                    }));
+                }
             } else {
                 toast.error(job.error_message || "Не удалось обновить состояние инцидента");
             }
@@ -852,6 +979,19 @@ export default function OpsPage() {
                                     (focusedIncidentId && item.id === focusedIncidentId)
                                     || (focusedReasonCode && item.reason_code === focusedReasonCode),
                                 );
+                                const baseline = incidentBaselines[item.id] ?? buildIncidentPostCheckSnapshot(item);
+                                const current = buildIncidentPostCheckSnapshot(item);
+                                const deltaBacklog = current.outbox_backlog - baseline.outbox_backlog;
+                                const deltaFailed24h = current.outbox_failed_24h - baseline.outbox_failed_24h;
+                                const deltaDegraded = current.integration_degraded_branches - baseline.integration_degraded_branches;
+                                const deltaPendingHandovers = current.pending_handovers - baseline.pending_handovers;
+                                const draft = incidentResolutionDrafts[item.id] ?? {
+                                    check_action_completed: false,
+                                    check_postcheck_recorded: false,
+                                    check_owner_ack: false,
+                                    note: "",
+                                };
+                                const checklistDone = resolutionChecklistReady(draft);
                                 return (
                                     <article
                                         key={item.id}
@@ -888,6 +1028,99 @@ export default function OpsPage() {
                                                 {item.incident_state_note ? ` · note: ${item.incident_state_note}` : ""}
                                             </p>
                                         )}
+                                        <div className="mt-2 rounded-md border border-border/60 bg-background px-3 py-2 text-[11px]" data-testid={`ops-incident-postcheck-${item.id}`}>
+                                            <p className="font-semibold text-foreground">Post-check evidence</p>
+                                            <div className="mt-1 text-muted-foreground">
+                                                baseline: backlog={baseline.outbox_backlog}, failed_24h={baseline.outbox_failed_24h}, degraded={baseline.integration_degraded_branches}, handover={baseline.pending_handovers}
+                                            </div>
+                                            <div className="text-muted-foreground">
+                                                current: backlog={current.outbox_backlog}, failed_24h={current.outbox_failed_24h}, degraded={current.integration_degraded_branches}, handover={current.pending_handovers}
+                                            </div>
+                                            <div className="text-muted-foreground">
+                                                delta: backlog={formatSignedDelta(deltaBacklog)}, failed_24h={formatSignedDelta(deltaFailed24h)}, degraded={formatSignedDelta(deltaDegraded)}, handover={formatSignedDelta(deltaPendingHandovers)}
+                                            </div>
+                                            <div className="mt-1 text-muted-foreground">
+                                                baseline captured: {new Date(baseline.captured_at).toLocaleString("ru-RU")}
+                                            </div>
+                                            <div className="mt-2 flex flex-wrap gap-2">
+                                                <button
+                                                    type="button"
+                                                    className="btn-ghost text-xs"
+                                                    onClick={() => {
+                                                        setIncidentBaselines((prev) => ({
+                                                            ...prev,
+                                                            [item.id]: buildIncidentPostCheckSnapshot(item),
+                                                        }));
+                                                        toast.success("Baseline обновлен");
+                                                    }}
+                                                >
+                                                    Обновить baseline
+                                                </button>
+                                            </div>
+                                            <div className="mt-2 grid gap-1 text-muted-foreground">
+                                                <label className="inline-flex items-center gap-2">
+                                                    <input
+                                                        type="checkbox"
+                                                        className="h-4 w-4"
+                                                        checked={draft.check_action_completed}
+                                                        onChange={(event) => {
+                                                            const checked = event.target.checked;
+                                                            setIncidentResolutionDrafts((prev) => ({
+                                                                ...prev,
+                                                                [item.id]: { ...draft, check_action_completed: checked },
+                                                            }));
+                                                        }}
+                                                    />
+                                                    remediation action выполнено
+                                                </label>
+                                                <label className="inline-flex items-center gap-2">
+                                                    <input
+                                                        type="checkbox"
+                                                        className="h-4 w-4"
+                                                        checked={draft.check_postcheck_recorded}
+                                                        onChange={(event) => {
+                                                            const checked = event.target.checked;
+                                                            setIncidentResolutionDrafts((prev) => ({
+                                                                ...prev,
+                                                                [item.id]: { ...draft, check_postcheck_recorded: checked },
+                                                            }));
+                                                        }}
+                                                    />
+                                                    post-check зафиксирован (delta проверен)
+                                                </label>
+                                                <label className="inline-flex items-center gap-2">
+                                                    <input
+                                                        type="checkbox"
+                                                        className="h-4 w-4"
+                                                        checked={draft.check_owner_ack}
+                                                        onChange={(event) => {
+                                                            const checked = event.target.checked;
+                                                            setIncidentResolutionDrafts((prev) => ({
+                                                                ...prev,
+                                                                [item.id]: { ...draft, check_owner_ack: checked },
+                                                            }));
+                                                        }}
+                                                    />
+                                                    подтверждено ответственным оператором
+                                                </label>
+                                            </div>
+                                            <textarea
+                                                className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-xs"
+                                                rows={2}
+                                                placeholder="Коротко: что сделали и что изменилось по метрикам (минимум 12 символов)"
+                                                value={draft.note}
+                                                onChange={(event) => {
+                                                    const value = event.target.value;
+                                                    setIncidentResolutionDrafts((prev) => ({
+                                                        ...prev,
+                                                        [item.id]: { ...draft, note: value },
+                                                    }));
+                                                }}
+                                            />
+                                            <div className="mt-1 text-muted-foreground">
+                                                checklist: {checklistDone ? "готов к закрытию" : "неполный"}
+                                            </div>
+                                        </div>
                                         <div className="mt-2 flex flex-wrap gap-2">
                                             {item.incident_state !== "in_progress" && (
                                                 <button
@@ -906,11 +1139,12 @@ export default function OpsPage() {
                                                 <button
                                                     type="button"
                                                     className="btn-ghost text-xs"
-                                                    disabled={!canWriteOps || incidentActionRunningId === `state:${item.id}:resolved`}
+                                                    disabled={!canWriteOps || incidentActionRunningId === `state:${item.id}:resolved` || !checklistDone}
                                                     onClick={() => {
                                                         void runIncidentStateTransition(item, "resolved");
                                                     }}
                                                     data-testid={`ops-incident-state-${item.id}-resolved`}
+                                                    title={checklistDone ? undefined : "Заполните post-check checklist и note"}
                                                 >
                                                     {incidentActionRunningId === `state:${item.id}:resolved` ? "Выполняю..." : "Закрыть"}
                                                 </button>

@@ -229,6 +229,20 @@ function statusCardClass(ok: boolean): string {
         : "border-red-300/70 bg-red-50 text-red-900";
 }
 
+function formatThroughputHours(value?: number | null): string {
+    if (typeof value !== "number" || Number.isNaN(value)) {
+        return "—";
+    }
+    return `${Number(value.toFixed(1))}ч`;
+}
+
+function formatThroughputPercent(value?: number | null): string {
+    if (typeof value !== "number" || Number.isNaN(value)) {
+        return "—";
+    }
+    return `${Number(value.toFixed(1))}%`;
+}
+
 function workspaceIncidentSteps(item: IncidentItem): string[] {
     if (item.reason_code === "integration_degraded") {
         return [
@@ -377,6 +391,20 @@ export default function CompanyWorkspacePage() {
                 include_fleet: "true",
             });
             return response.data;
+        },
+        enabled: !!session && canReadTenants,
+    });
+    const { data: onboardingThroughput } = useQuery({
+        queryKey: ["company-workspace-onboarding-throughput", scopeCompanyId, scopeClientId],
+        queryFn: async () => {
+            const response = await adminApi.listClients({
+                limit: 1,
+                lifecycle: "active",
+                company_id: scopeCompanyId || undefined,
+                q: scopeClientId || undefined,
+                include_summary: "true",
+            });
+            return response.data.summary?.onboarding_throughput ?? null;
         },
         enabled: !!session && canReadTenants,
     });
@@ -1026,6 +1054,35 @@ export default function CompanyWorkspacePage() {
                     <div className="mt-1 text-sm">{scorecardReady ? "Допуск возможен" : "Есть блокеры"}</div>
                 </div>
             </section>
+
+            {onboardingThroughput ? (
+                <section className="mt-4 rounded-lg border border-border/60 bg-card p-4" data-testid="company-workspace-throughput">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h2 className="text-sm font-semibold">Скорость онбординга</h2>
+                        <div className="text-xs text-muted-foreground">
+                            окно: {onboardingThroughput.window_hours}ч · approvals: {onboardingThroughput.approved_branches_total} · first-pass: {onboardingThroughput.first_pass_approved_branches}
+                        </div>
+                    </div>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+                            <div className="text-[11px] text-muted-foreground">Median time to go-live</div>
+                            <div className="text-base font-semibold">{formatThroughputHours(onboardingThroughput.time_to_go_live_median_hours)}</div>
+                        </div>
+                        <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+                            <div className="text-[11px] text-muted-foreground">Blocker age p95</div>
+                            <div className="text-base font-semibold">{formatThroughputHours(onboardingThroughput.blocker_age_p95_hours)}</div>
+                        </div>
+                        <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+                            <div className="text-[11px] text-muted-foreground">First-pass go-live rate</div>
+                            <div className="text-base font-semibold">{formatThroughputPercent(onboardingThroughput.first_pass_go_live_rate_pct)}</div>
+                        </div>
+                        <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+                            <div className="text-[11px] text-muted-foreground">Incident reopen &lt;24h</div>
+                            <div className="text-base font-semibold">{formatThroughputPercent(onboardingThroughput.incident_reopen_rate_24h_pct)}</div>
+                        </div>
+                    </div>
+                </section>
+            ) : null}
 
             <section className="mt-4 rounded-lg border border-border/60 bg-card p-4" data-testid="company-workspace-recommended-action">
                 <div className="flex flex-wrap items-start justify-between gap-3">

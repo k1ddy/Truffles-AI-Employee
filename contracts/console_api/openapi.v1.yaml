@@ -7451,6 +7451,10 @@ components:
             type: integer
           type: object
           title: Service Counts
+        onboarding_throughput:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleOnboardingThroughputMetrics'
+          - type: 'null'
       type: object
       required:
       - total_companies
@@ -10275,6 +10279,42 @@ components:
       - status
       - required
       title: ConsoleOnboardingStepStatus
+    ConsoleOnboardingThroughputMetrics:
+      properties:
+        window_hours:
+          type: integer
+          title: Window Hours
+          default: 24
+        approved_branches_total:
+          type: integer
+          title: Approved Branches Total
+          default: 0
+        first_pass_approved_branches:
+          type: integer
+          title: First Pass Approved Branches
+          default: 0
+        time_to_go_live_median_hours:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Time To Go Live Median Hours
+        blocker_age_p95_hours:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Blocker Age P95 Hours
+        first_pass_go_live_rate_pct:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: First Pass Go Live Rate Pct
+        incident_reopen_rate_24h_pct:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Incident Reopen Rate 24H Pct
+      type: object
+      title: ConsoleOnboardingThroughputMetrics
     ConsoleOpsJobCatalogResponse:
       properties:
         items:

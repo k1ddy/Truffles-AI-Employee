@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import toast from "react-hot-toast";
 import type { components } from "@/types/api.generated";
@@ -16,6 +17,7 @@ import {
     type ConsoleSection,
     type OnboardingBlueprintListResponse,
 } from "@/lib/api-client";
+import { writeConsoleContextScopeToStorage } from "@/lib/console-context-storage";
 import { useInlineErrorSummary } from "@/lib/use-inline-error-summary";
 
 type SessionData = ReturnType<typeof useSession>["data"];
@@ -808,6 +810,7 @@ type ProvisioningWizardProps = {
 };
 
 function ProvisioningWizard({ session, accessSection = "settings" }: ProvisioningWizardProps) {
+    const router = useRouter();
     const queryClient = useQueryClient();
     const {
         errors: inlineErrors,
@@ -2685,6 +2688,22 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
     const currentStepLocked = currentStepState?.status === "locked";
     const advanceBlocked = currentStepLocked || (currentStepState?.required && currentStepMissing.length > 0);
     const currentStepFieldGuide = MANUAL_STEP_FIELD_GUIDE[currentStep.id];
+    const workspaceScope = useMemo(() => ({
+        companyId: companyId.trim(),
+        clientId: clientId.trim(),
+        branchId: branchData?.id?.trim() ?? "",
+    }), [branchData?.id, clientId, companyId]);
+    const workspaceScopeReady = Boolean(
+        workspaceScope.companyId && workspaceScope.clientId && workspaceScope.branchId,
+    );
+
+    const openExecutionHub = () => {
+        writeConsoleContextScopeToStorage(workspaceScope);
+        if (!workspaceScopeReady) {
+            toast("Открою Workspace: завершите выбор company/client/branch в контексте.");
+        }
+        router.push("/company-workspace");
+    };
 
     return (
         <div className="card-surface p-6 mb-8" data-testid="provisioning-wizard">
@@ -2769,6 +2788,30 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 <p className="mt-3 text-xs text-muted-foreground">
                     Автопроцесс: минимальные входы и авто-связка сущностей. Ручной режим: детальная настройка шага за шагом.
                 </p>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-blue-300/60 bg-blue-50 p-4" data-testid="onboarding-execution-hub">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-900">
+                            Execution Hub
+                        </div>
+                        <div className="mt-1 text-sm text-blue-900">
+                            Рабочий поток выполнения: используйте Company Workspace для remediation/go-live.
+                        </div>
+                        <div className="mt-1 text-xs text-blue-900/80">
+                            scope: company={workspaceScope.companyId || "—"} · client={workspaceScope.clientId || "—"} · branch={workspaceScope.branchId || "—"}
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={openExecutionHub}
+                        data-testid="onboarding-open-workspace"
+                    >
+                        Продолжить в Workspace
+                    </button>
+                </div>
             </div>
 
             {onboardingMode === "autopilot" && (

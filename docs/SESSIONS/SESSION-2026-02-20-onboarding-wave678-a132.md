@@ -1,0 +1,21 @@
+# SESSION 2026-02-20-onboarding-wave678-a132 — Session 2026-02-20-onboarding-wave678-a132
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-20-onboarding-wave678-a132.md
+- branch: feat/2026-02-20-onboarding-wave678-a132
+- worktree: /home/zhan/worktrees/2026-02-20-onboarding-wave678-a132
+- base_ref: origin/main
+- scope: Step 6 + Step 7 + Step 8 из onboarding next-wave (UX consolidation, evidence-closed incidents, throughput metrics)
+- done:
+  - Session created.
+  - Реализован Step 6 (Execution Hub + context carry-over в Workspace).
+  - Реализован Step 7 (resolve incident требует evidence + UI checklist/post-check).
+  - Реализован Step 8 (throughput metrics в backend summary + Tenants/Workspace UI).
+  - Синхронизированы OpenAPI/types и пройдены проверки.
+- next:
+  - Commit + push + PR.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-20-onboarding-wave678-a132.md
+  - docs/REPORTS/2026-02-20-onboarding-wave678-a132.md
+- last_updated: 2026-02-20

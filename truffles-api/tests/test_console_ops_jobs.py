@@ -209,6 +209,61 @@ async def test_run_incident_state_job_execute_adds_alert_event():
 
 
 @pytest.mark.asyncio
+async def test_run_incident_state_job_resolved_requires_evidence_payload():
+    db = Mock()
+    context = _build_context()
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router._run_incident_state_job(
+            db,
+            context=context,
+            mode="execute",
+            params={
+                "incident_id": "outbox-demo",
+                "incident_state": "resolved",
+                "reason_code": "provider_billing_blocked",
+            },
+        )
+
+    assert exc_info.value.code == "INCIDENT_EVIDENCE_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_run_incident_state_job_resolved_with_evidence_adds_metadata():
+    db = Mock()
+    captured: dict[str, object] = {}
+
+    def _capture_add(obj):
+        captured["obj"] = obj
+
+    db.add.side_effect = _capture_add
+    context = _build_context()
+
+    result = await console_router._run_incident_state_job(
+        db,
+        context=context,
+        mode="execute",
+        params={
+            "incident_id": "outbox-demo",
+            "incident_state": "resolved",
+            "reason_code": "provider_billing_blocked",
+            "note": "Ops executed remediation and validated post-check.",
+            "evidence_confirmed": True,
+            "evidence_summary": "checklist=all_passed | delta_failed_24h=-4",
+        },
+    )
+
+    assert result["incident_state"] == "resolved"
+    assert result["evidence_confirmed"] is True
+    assert result["evidence_summary"] == "checklist=all_passed | delta_failed_24h=-4"
+    event = captured.get("obj")
+    assert isinstance(event, AlertEvent)
+    assert event.alert_metadata["incident_state"] == "resolved"
+    assert event.alert_metadata["evidence_confirmed"] is True
+    assert event.alert_metadata["evidence_summary"] == "checklist=all_passed | delta_failed_24h=-4"
+
+
+@pytest.mark.asyncio
 async def test_run_outbox_process_job_execute_supports_archive_and_single_message_flag(monkeypatch):
     db = Mock()
     context = _build_context()

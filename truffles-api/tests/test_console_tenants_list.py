@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
 from uuid import UUID, uuid4
@@ -234,6 +234,19 @@ async def test_list_clients_include_fleet_enriches_items_and_summary(monkeypatch
             )
         },
     )
+    monkeypatch.setattr(
+        console_router,
+        "_build_onboarding_throughput_metrics",
+        lambda *_args, **_kwargs: console_router.ConsoleOnboardingThroughputMetrics(
+            window_hours=720,
+            approved_branches_total=1,
+            first_pass_approved_branches=1,
+            time_to_go_live_median_hours=12.0,
+            blocker_age_p95_hours=4.0,
+            first_pass_go_live_rate_pct=100.0,
+            incident_reopen_rate_24h_pct=0.0,
+        ),
+    )
 
     response = await console_router.list_clients(
         request=request,
@@ -384,3 +397,136 @@ async def test_list_branches_archived_lifecycle_filters_inactive(monkeypatch) ->
     assert captured["include_inactive_tenants"] is True
     first_filter = query.filter.call_args_list[0].args[0]
     assert str(first_filter) == "branches.is_active IS false"
+
+
+class _RowsQuery:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def order_by(self, *_args, **_kwargs):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+def test_build_onboarding_throughput_metrics_computes_expected_values() -> None:
+    now = datetime.now(timezone.utc)
+    client_id = uuid4()
+    branch_a_id = uuid4()
+    branch_b_id = uuid4()
+
+    branch_rows = [
+        SimpleNamespace(
+            id=branch_a_id,
+            client_id=client_id,
+            go_live_state="approved",
+            go_live_reviewed_at=now - timedelta(hours=24),
+            created_at=now - timedelta(hours=48),
+            is_active=True,
+            onboarding_updated_at=now - timedelta(hours=48),
+            go_live_waiver_until=None,
+        ),
+        SimpleNamespace(
+            id=branch_b_id,
+            client_id=client_id,
+            go_live_state="approved",
+            go_live_reviewed_at=now - timedelta(hours=12),
+            created_at=now - timedelta(hours=72),
+            is_active=True,
+            onboarding_updated_at=now - timedelta(hours=72),
+            go_live_waiver_until=None,
+        ),
+        SimpleNamespace(
+            id=uuid4(),
+            client_id=client_id,
+            go_live_state="pending",
+            go_live_reviewed_at=None,
+            created_at=now - timedelta(hours=50),
+            is_active=True,
+            onboarding_updated_at=now - timedelta(hours=50),
+            go_live_waiver_until=None,
+        ),
+        SimpleNamespace(
+            id=uuid4(),
+            client_id=client_id,
+            go_live_state="pending",
+            go_live_reviewed_at=None,
+            created_at=now - timedelta(hours=10),
+            is_active=True,
+            onboarding_updated_at=now - timedelta(hours=10),
+            go_live_waiver_until=None,
+        ),
+    ]
+    audit_rows = [
+        SimpleNamespace(branch_id=branch_b_id, event_type="branch_go_live_rejected", created_at=now - timedelta(hours=36)),
+        SimpleNamespace(branch_id=branch_a_id, event_type="branch_go_live_approved", created_at=now - timedelta(hours=24)),
+        SimpleNamespace(branch_id=branch_b_id, event_type="branch_go_live_approved", created_at=now - timedelta(hours=12)),
+    ]
+    incident_rows = [
+        SimpleNamespace(
+            client_id=client_id,
+            alert_metadata={"incident_id": "inc-a", "incident_state": "resolved"},
+            created_at=now - timedelta(hours=8),
+            id=uuid4(),
+        ),
+        SimpleNamespace(
+            client_id=client_id,
+            alert_metadata={"incident_id": "inc-a", "incident_state": "open"},
+            created_at=now - timedelta(hours=4),
+            id=uuid4(),
+        ),
+        SimpleNamespace(
+            client_id=client_id,
+            alert_metadata={"incident_id": "inc-b", "incident_state": "resolved"},
+            created_at=now - timedelta(hours=6),
+            id=uuid4(),
+        ),
+    ]
+
+    db = Mock()
+    queries = [
+        _RowsQuery(branch_rows),
+        _RowsQuery(audit_rows),
+        _RowsQuery(incident_rows),
+    ]
+
+    def _query_side_effect(*_entities):
+        assert queries, "unexpected extra db.query call"
+        return queries.pop(0)
+
+    db.query.side_effect = _query_side_effect
+
+    metrics = console_router._build_onboarding_throughput_metrics(
+        db,
+        client_ids={client_id},
+        window_hours=72,
+    )
+
+    assert metrics.approved_branches_total == 2
+    assert metrics.first_pass_approved_branches == 1
+    assert metrics.first_pass_go_live_rate_pct == 50.0
+    assert metrics.incident_reopen_rate_24h_pct == 50.0
+    assert metrics.time_to_go_live_median_hours == 42.0
+    assert metrics.blocker_age_p95_hours == 48.0
+
+
+def test_build_onboarding_throughput_metrics_empty_scope_returns_defaults() -> None:
+    db = Mock()
+
+    metrics = console_router._build_onboarding_throughput_metrics(
+        db,
+        client_ids=set(),
+    )
+
+    assert metrics.window_hours == console_router._ONBOARDING_THROUGHPUT_WINDOW_HOURS
+    assert metrics.approved_branches_total == 0
+    assert metrics.first_pass_approved_branches == 0
+    assert metrics.time_to_go_live_median_hours is None
+    assert metrics.blocker_age_p95_hours is None
+    assert metrics.first_pass_go_live_rate_pct is None
+    assert metrics.incident_reopen_rate_24h_pct is None
+    db.query.assert_not_called()

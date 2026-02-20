@@ -387,6 +387,20 @@ function asPercent(numerator: number, denominator: number): number {
     return Math.round((numerator / denominator) * 100);
 }
 
+function formatOptionalHours(value: number | null | undefined): string {
+    if (typeof value !== "number" || Number.isNaN(value)) {
+        return "—";
+    }
+    return `${Number(value.toFixed(1))}ч`;
+}
+
+function formatOptionalPercent(value: number | null | undefined): string {
+    if (typeof value !== "number" || Number.isNaN(value)) {
+        return "—";
+    }
+    return `${Number(value.toFixed(1))}%`;
+}
+
 function toWeekKey(dateValue: string): string {
     const parsed = new Date(dateValue);
     if (Number.isNaN(parsed.getTime())) {
@@ -1059,6 +1073,10 @@ export default function TenantsPage() {
     const clientsSummary = useMemo(
         () => clientsQuery.data?.pages[0]?.summary ?? null,
         [clientsQuery.data],
+    );
+    const onboardingThroughput = useMemo(
+        () => clientsSummary?.onboarding_throughput ?? null,
+        [clientsSummary],
     );
     const branches = useMemo(
         () => branchesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
@@ -2461,6 +2479,37 @@ export default function TenantsPage() {
                             </div>
                         </div>
 
+                        {onboardingThroughput ? (
+                            <div className="mt-4 rounded-lg border border-border/60 bg-background p-3" data-testid="tenants-onboarding-throughput">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                                        Onboarding Throughput
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                        окно: {onboardingThroughput.window_hours}ч · approvals: {onboardingThroughput.approved_branches_total} · first-pass: {onboardingThroughput.first_pass_approved_branches}
+                                    </div>
+                                </div>
+                                <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+                                        <div className="text-[11px] text-muted-foreground">Median time to go-live</div>
+                                        <div className="text-base font-semibold">{formatOptionalHours(onboardingThroughput.time_to_go_live_median_hours)}</div>
+                                    </div>
+                                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+                                        <div className="text-[11px] text-muted-foreground">Blocker age p95</div>
+                                        <div className="text-base font-semibold">{formatOptionalHours(onboardingThroughput.blocker_age_p95_hours)}</div>
+                                    </div>
+                                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+                                        <div className="text-[11px] text-muted-foreground">First-pass go-live rate</div>
+                                        <div className="text-base font-semibold">{formatOptionalPercent(onboardingThroughput.first_pass_go_live_rate_pct)}</div>
+                                    </div>
+                                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+                                        <div className="text-[11px] text-muted-foreground">Incident reopen &lt;24h</div>
+                                        <div className="text-base font-semibold">{formatOptionalPercent(onboardingThroughput.incident_reopen_rate_24h_pct)}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : null}
+
                         <div className="mt-4 rounded-lg border border-border/60 bg-background p-3" data-testid="tenants-kpi-drilldown">
                             <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                                 Threshold drill-down
@@ -3727,6 +3776,16 @@ export default function TenantsPage() {
 
             {showOnboarding ? (
                 <div className="mt-10" data-testid="tenants-onboarding-section">
+                    <div className="mb-3 rounded-lg border border-blue-300/60 bg-blue-50 p-3 text-xs text-blue-900">
+                        Канонический execution-flow: выполняйте remediation и go-live в `Company Workspace`.
+                        <button
+                            className="btn-ghost ml-2"
+                            onClick={() => router.push("/company-workspace")}
+                            data-testid="tenants-open-workspace-from-onboarding"
+                        >
+                            Открыть Workspace
+                        </button>
+                    </div>
                     <ProvisioningWizard session={session} accessSection="tenants" />
                 </div>
             ) : null}
