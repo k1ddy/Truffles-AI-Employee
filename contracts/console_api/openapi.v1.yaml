@@ -2435,6 +2435,140 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/tenants/weekly-snapshots:
+    get:
+      tags:
+      - console
+      summary: List Tenants Weekly Snapshots
+      operationId: list_tenants_weekly_snapshots_console_v1_admin_tenants_weekly_snapshots_get
+      parameters:
+      - name: client_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Client Id
+      - name: week_key
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Week Key
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 12
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleTenantsWeeklySnapshotListResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - console
+      summary: Save Tenants Weekly Snapshot
+      operationId: save_tenants_weekly_snapshot_console_v1_admin_tenants_weekly_snapshots_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleTenantsWeeklySnapshotCreateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleTenantsWeeklySnapshotCreateResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/tenants/sensitive-access:
+    post:
+      tags:
+      - console
+      summary: Audit Tenants Sensitive Access
+      operationId: audit_tenants_sensitive_access_console_v1_admin_tenants_sensitive_access_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleTenantsSensitiveAccessAuditRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleTenantsSensitiveAccessAuditResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/marketing/campaigns:
     get:
       tags:
@@ -12497,6 +12631,126 @@ components:
       - delivery_status
       - verification_code
       title: ConsoleTelegramVerifyResponse
+    ConsoleTenantsSensitiveAccessAuditRequest:
+      properties:
+        branch_id:
+          type: string
+          format: uuid
+          title: Branch Id
+        field:
+          type: string
+          title: Field
+        action:
+          type: string
+          enum:
+          - reveal
+          - copy
+          title: Action
+        context:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Context
+      additionalProperties: false
+      type: object
+      required:
+      - branch_id
+      - field
+      - action
+      title: ConsoleTenantsSensitiveAccessAuditRequest
+    ConsoleTenantsSensitiveAccessAuditResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          default: true
+        audit_id:
+          type: string
+          format: uuid
+          title: Audit Id
+      type: object
+      required:
+      - audit_id
+      title: ConsoleTenantsSensitiveAccessAuditResponse
+    ConsoleTenantsWeeklySnapshotCreateRequest:
+      properties:
+        client_id:
+          type: string
+          format: uuid
+          title: Client Id
+        week_key:
+          type: string
+          title: Week Key
+        snapshot:
+          type: object
+          title: Snapshot
+      additionalProperties: false
+      type: object
+      required:
+      - client_id
+      - week_key
+      - snapshot
+      title: ConsoleTenantsWeeklySnapshotCreateRequest
+    ConsoleTenantsWeeklySnapshotCreateResponse:
+      properties:
+        item:
+          $ref: '#/components/schemas/ConsoleTenantsWeeklySnapshotRecord'
+      type: object
+      required:
+      - item
+      title: ConsoleTenantsWeeklySnapshotCreateResponse
+    ConsoleTenantsWeeklySnapshotListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleTenantsWeeklySnapshotRecord'
+          type: array
+          title: Items
+        cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+        has_more:
+          type: boolean
+          title: Has More
+      type: object
+      required:
+      - items
+      - has_more
+      title: ConsoleTenantsWeeklySnapshotListResponse
+    ConsoleTenantsWeeklySnapshotRecord:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        created_at:
+          type: string
+          title: Created At
+        client_id:
+          type: string
+          format: uuid
+          title: Client Id
+        week_key:
+          type: string
+          title: Week Key
+        snapshot:
+          type: object
+          title: Snapshot
+        actor_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Actor Name
+      type: object
+      required:
+      - id
+      - created_at
+      - client_id
+      - week_key
+      - snapshot
+      title: ConsoleTenantsWeeklySnapshotRecord
     ConsoleWebhookSecretResponse:
       properties:
         client_id:
