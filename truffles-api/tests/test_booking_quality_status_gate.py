@@ -103,6 +103,24 @@ def test_baseline_canonical_requires_judge_on():
     assert reason == "judge_mode_off"
 
 
+def test_baseline_canonical_rejects_invalid_quality_status():
+    ns = _load_quality_helpers()
+    baseline_is_canonical = ns["_llm_quality_baseline_is_canonical"]
+
+    canonical, reason = baseline_is_canonical(
+        {
+            "config": {"judge_mode": "all"},
+            "quality_status": {
+                "infra_valid": True,
+                "semantic_valid": True,
+                "blocking_reason_count": 2,
+            },
+        }
+    )
+    assert canonical is False
+    assert reason == "blocking_reasons_present"
+
+
 def test_infra_status_marks_invalid_on_preflight_or_runtime_errors():
     ns = _load_quality_helpers()
     build_infra_status = ns["_llm_quality_build_infra_status"]

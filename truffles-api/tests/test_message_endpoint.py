@@ -17970,6 +17970,18 @@ def test_detect_tool_contract_error_allows_created_text_for_confirmed_status():
     assert error is None
 
 
+def test_detect_tool_contract_error_allows_services_overview_for_catalog_query():
+    error = _detect_tool_contract_error(
+        tool_action="catalog.service_query",
+        tool_ok=True,
+        response_text="Мы предлагаем: Маникюр, Педикюр.",
+        decision_meta={
+            "tool_decision": "services_overview",
+        },
+    )
+    assert error is None
+
+
 def test_unknown_state_fallback_sends_reply():
     saved_message = Mock()
     saved_message.message_metadata = {}

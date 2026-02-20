@@ -356,6 +356,7 @@ from app.services.pack_runtime_service import (
     _detect_promotion_intent,
     _format_service_not_found_reply,
     _has_duration_signal,
+    _has_parking_signal,
     _has_price_signal,
     _match_service,
     _matches_service_request_lexicon,
@@ -3924,6 +3925,7 @@ TOOL_VERIFIER_SUCCESS_DECISIONS: dict[str, set[str]] = {
         "ok",
         "promotions",
         "duration",
+        "services_overview",
         "truth_fallback",
         "presence_fallback",
         "price_item_fallback",
@@ -10363,7 +10365,10 @@ async def _handle_webhook_payload(
                 )
             service_not_found_reply = None
             if unknown_service_request_signal:
-                service_not_found_reply = _format_service_not_found_reply(load_yaml_truth(payload.client_slug))
+                service_not_found_reply = _format_service_not_found_reply(
+                    load_yaml_truth(payload.client_slug),
+                    client_slug=payload.client_slug,
+                )
             if service_not_found_reply:
                 context = _set_expected_reply_context(
                     conversation=conversation,
@@ -10982,66 +10987,48 @@ async def _handle_webhook_payload(
             if not info_sections_hint:
                 info_sections_hint = list(TOOL_INFO_SECTION_MAP.get(policy_tool_action, []))
             if policy_tool_action == "catalog.location":
-                try:
-                    from app.services import demo_salon_knowledge as knowledge
-
-                    slug = knowledge._normalize_client_slug(payload.client_slug)
-                    policy_intent_hint = (
-                        policy_payload.get("intent")
-                        if isinstance(policy_payload, dict)
+                policy_intent_hint = (
+                    policy_payload.get("intent")
+                    if isinstance(policy_payload, dict)
+                    else None
+                )
+                if (
+                    isinstance(policy_intent_hint, str)
+                    and "parking" in policy_intent_hint.strip().casefold()
+                    and "parking" not in info_sections_hint
+                ):
+                    info_sections_hint.append("parking")
+                hint_candidates: list[str] = []
+                if isinstance(message_text, str) and message_text.strip():
+                    hint_candidates.append(message_text)
+                if isinstance(policy_payload, dict):
+                    policy_reason = policy_payload.get("reason")
+                    if isinstance(policy_reason, str) and policy_reason.strip():
+                        hint_candidates.append(policy_reason)
+                    policy_slots = policy_payload.get("slots")
+                    slot_service_hint = (
+                        policy_slots.get("service")
+                        if isinstance(policy_slots, dict)
                         else None
                     )
-                    if (
-                        isinstance(policy_intent_hint, str)
-                        and "parking" in policy_intent_hint.strip().casefold()
-                        and "parking" not in info_sections_hint
-                    ):
-                        info_sections_hint.append("parking")
-                    hint_candidates: list[str] = []
-                    if isinstance(message_text, str) and message_text.strip():
-                        hint_candidates.append(message_text)
-                    if isinstance(policy_payload, dict):
-                        policy_reason = policy_payload.get("reason")
-                        if isinstance(policy_reason, str) and policy_reason.strip():
-                            hint_candidates.append(policy_reason)
-                        policy_slots = policy_payload.get("slots")
-                        slot_service_hint = (
-                            policy_slots.get("service")
-                            if isinstance(policy_slots, dict)
-                            else None
-                        )
-                        if isinstance(slot_service_hint, str) and slot_service_hint.strip():
-                            hint_candidates.append(slot_service_hint)
-                    for candidate in hint_candidates:
-                        normalized = knowledge._normalize_text(candidate)
-                        parking_detected = bool(
-                            normalized
-                            and knowledge._has_parking_signal(
-                                normalized, client_slug=slug
-                            )
-                        )
-                        if not parking_detected:
-                            lowered = candidate.casefold()
-                            parking_detected = any(
-                                marker in lowered
-                                for marker in ("парков", "паркинг", "стоян", "тұрақ")
-                            )
-                        if parking_detected:
-                            if "parking" not in info_sections_hint:
-                                info_sections_hint.append("parking")
-                            break
-                except Exception:
-                    for candidate in (message_text, (policy_payload or {}).get("reason")):
-                        if not isinstance(candidate, str) or not candidate.strip():
-                            continue
+                    if isinstance(slot_service_hint, str) and slot_service_hint.strip():
+                        hint_candidates.append(slot_service_hint)
+                for candidate in hint_candidates:
+                    normalized = _normalize_service_text(candidate)
+                    parking_detected = bool(
+                        normalized
+                        and _has_parking_signal(normalized, client_slug=payload.client_slug)
+                    )
+                    if not parking_detected:
                         lowered = candidate.casefold()
-                        if any(
+                        parking_detected = any(
                             marker in lowered
                             for marker in ("парков", "паркинг", "стоян", "тұрақ")
-                        ):
-                            if "parking" not in info_sections_hint:
-                                info_sections_hint.append("parking")
-                            break
+                        )
+                    if parking_detected:
+                        if "parking" not in info_sections_hint:
+                            info_sections_hint.append("parking")
+                        break
             specialist_name_hint = None
             customer_name_hint = None
             service_query_hint = None
@@ -11538,6 +11525,11 @@ async def _handle_webhook_payload(
                     normalized_message = (
                         normalize_for_matching(message_text) if isinstance(message_text, str) else ""
                     )
+                    reschedule_request = bool(
+                        normalized_message
+                        and _looks_like_booking_reschedule_request(message_text)
+                        and not _looks_like_booking_verification_request(message_text)
+                    )
                     availability_request = bool(
                         time_match
                         and normalized_message
@@ -11548,7 +11540,17 @@ async def _handle_webhook_payload(
                             for marker in ("можно", "есть", "свобод", "доступ")
                         )
                     )
-                    if availability_request:
+                    if reschedule_request:
+                        requested_time = time_match.group(0).replace(".", ":") if time_match else None
+                        verifier_prompt = (
+                            f"На какую дату вам удобно, если время {requested_time}?"
+                            if requested_time
+                            else MSG_BOOKING_ASK_DATETIME
+                        )
+                        verifier_action = "booking_prompt"
+                        verifier_intent = "booking"
+                        verifier_slot = "datetime"
+                    elif availability_request:
                         requested_time = time_match.group(0).replace(".", ":")
                         verifier_prompt = f"На какую дату вам удобно, если время {requested_time}?"
                         verifier_action = "booking_prompt"
@@ -11868,58 +11870,38 @@ async def _handle_webhook_payload(
                         now=now,
                     )
                 booking_followup_expected = None
-                if expected_reply_type in {
+                if booking_wants_flow or policy_tool_action.startswith("calendar."):
+                    booking_for_followup = dict(booking_state) if isinstance(booking_state, dict) else {}
+                    if booking_for_followup.get("active") is not True:
+                        booking_for_followup["active"] = True
+                    for key, value in merged_slots.items():
+                        if not booking_for_followup.get(key):
+                            booking_for_followup[key] = value
+                    booking_for_followup, _ = _next_booking_prompt(
+                        booking_for_followup,
+                        client_slug=payload.client_slug,
+                    )
+                    derived_reply = _expected_reply_for_booking_question(
+                        booking_for_followup.get("last_question")
+                    )
+                    if derived_reply in {
+                        EXPECTED_REPLY_SERVICE,
+                        EXPECTED_REPLY_TIME,
+                        EXPECTED_REPLY_NAME,
+                    }:
+                        booking_followup_expected = derived_reply
+                if booking_followup_expected is None and expected_reply_type in {
                     EXPECTED_REPLY_SERVICE,
                     EXPECTED_REPLY_TIME,
                     EXPECTED_REPLY_NAME,
                 }:
                     booking_followup_expected = expected_reply_type
-                elif memory_expected_reply_type in {
+                elif booking_followup_expected is None and memory_expected_reply_type in {
                     EXPECTED_REPLY_SERVICE,
                     EXPECTED_REPLY_TIME,
                     EXPECTED_REPLY_NAME,
                 }:
                     booking_followup_expected = memory_expected_reply_type
-                elif booking_wants_flow:
-                    booking_for_followup = dict(booking_state) if isinstance(booking_state, dict) else {}
-                    if booking_for_followup.get("active") is not True:
-                        booking_for_followup["active"] = True
-                    for key, value in merged_slots.items():
-                        if not booking_for_followup.get(key):
-                            booking_for_followup[key] = value
-                    booking_for_followup, _ = _next_booking_prompt(
-                        booking_for_followup,
-                        client_slug=payload.client_slug,
-                    )
-                    derived_reply = _expected_reply_for_booking_question(
-                        booking_for_followup.get("last_question")
-                    )
-                    if derived_reply in {
-                        EXPECTED_REPLY_SERVICE,
-                        EXPECTED_REPLY_TIME,
-                        EXPECTED_REPLY_NAME,
-                    }:
-                        booking_followup_expected = derived_reply
-                elif policy_tool_action.startswith("calendar."):
-                    booking_for_followup = dict(booking_state) if isinstance(booking_state, dict) else {}
-                    if booking_for_followup.get("active") is not True:
-                        booking_for_followup["active"] = True
-                    for key, value in merged_slots.items():
-                        if not booking_for_followup.get(key):
-                            booking_for_followup[key] = value
-                    booking_for_followup, _ = _next_booking_prompt(
-                        booking_for_followup,
-                        client_slug=payload.client_slug,
-                    )
-                    derived_reply = _expected_reply_for_booking_question(
-                        booking_for_followup.get("last_question")
-                    )
-                    if derived_reply in {
-                        EXPECTED_REPLY_SERVICE,
-                        EXPECTED_REPLY_TIME,
-                        EXPECTED_REPLY_NAME,
-                    }:
-                        booking_followup_expected = derived_reply
                 if (
                     policy_tool_action.startswith("calendar.")
                     and merged_slots.get("service")
@@ -11974,20 +11956,26 @@ async def _handle_webhook_payload(
                             send_response=_send_response,
                             finalize_response=_finalize_bot_response,
                         )
-                booking_followup_allowed = bool(
-                    info_sections
-                    or (
-                        policy_tool_action.startswith("calendar.")
-                        and tool_decision
-                        in {
-                            "provider_unavailable",
-                            "missing_slot",
-                            "not_found",
-                            "conflict",
-                            "time_mismatch",
-                        }
-                    )
-                )
+                booking_followup_allowed = bool(info_sections)
+                if (
+                    not booking_followup_allowed
+                    and policy_tool_action == "calendar.list_slots"
+                    and tool_decision in {"ok", "specialist_missing"}
+                ):
+                    booking_followup_allowed = True
+                if (
+                    not booking_followup_allowed
+                    and policy_tool_action.startswith("calendar.")
+                    and tool_decision
+                    in {
+                        "provider_unavailable",
+                        "missing_slot",
+                        "not_found",
+                        "conflict",
+                        "time_mismatch",
+                    }
+                ):
+                    booking_followup_allowed = True
                 if (
                     policy_tool_action == "catalog.service_query"
                     and tool_decision
@@ -12023,7 +12011,6 @@ async def _handle_webhook_payload(
                     and booking_followup_allowed
                     and not tool_expected_reply_type
                     and not suppress_booking_lookup_followup
-                    and not suppress_redundant_followup_prompt
                 ):
                     (
                         booking_followup_expected,
@@ -12044,6 +12031,8 @@ async def _handle_webhook_payload(
                             reason="booking_interrupt",
                             now=now,
                         )
+                    if suppress_redundant_followup_prompt:
+                        booking_interrupt_prompt = None
                 active_handover_exists = get_active_handover(db, conversation.id) is not None
                 has_booking_reference = _booking_has_reference(booking_state)
                 policy_appointment_id = policy_tool_args.get("appointment_id")

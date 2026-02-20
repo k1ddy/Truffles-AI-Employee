@@ -6,6 +6,19 @@ from app.services import pack_runtime_service as runtime
 from app.services.pack_runtime_types import PackDecision
 
 
+def _project_root() -> Path:
+    here = Path(__file__).resolve()
+    for candidate in here.parents:
+        if (candidate / "app/services/pack_runtime_default.py").exists():
+            return candidate
+    return here.parents[1]
+
+
+def _services_file(relative_path: str) -> Path:
+    root = _project_root()
+    return root / relative_path
+
+
 def test_pack_runtime_service_reexports_default_adapter() -> None:
     assert runtime.get_pack_decision is default_runtime.get_pack_decision
     assert runtime.get_pack_service_decision is default_runtime.get_pack_service_decision
@@ -21,18 +34,18 @@ def test_pack_runtime_decision_back_compat_alias() -> None:
 
 
 def test_pack_runtime_default_does_not_import_demo_module_directly() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    content = (repo_root / "truffles-api/app/services/pack_runtime_default.py").read_text(
-        encoding="utf-8"
-    )
+    content = _services_file("app/services/pack_runtime_default.py").read_text(encoding="utf-8")
     assert "demo_salon_knowledge" not in content
 
 
 def test_pack_runtime_generic_adapter_avoids_demo_module_imports() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    content = (repo_root / "truffles-api/app/services/pack_runtime_generic_adapter.py").read_text(
-        encoding="utf-8"
-    )
+    content = _services_file("app/services/pack_runtime_generic_adapter.py").read_text(encoding="utf-8")
+    assert "demo_salon_knowledge" not in content
+    assert "pack_runtime_demo_adapter" not in content
+
+
+def test_pack_runtime_fallback_adapter_avoids_demo_module_imports() -> None:
+    content = _services_file("app/services/pack_runtime_fallback_adapter.py").read_text(encoding="utf-8")
     assert "demo_salon_knowledge" not in content
     assert "pack_runtime_demo_adapter" not in content
 

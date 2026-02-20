@@ -1377,22 +1377,6 @@ def detect_multi_intent(
     timing_context: dict | None = None,
     reserve_ms: float = 0.0,
 ) -> dict | None:
-    explicit_location_markers = (
-        "адрес",
-        "где",
-        "находит",
-        "как добрат",
-        "парков",
-    )
-    explicit_hours_markers = (
-        "часы",
-        "график",
-        "режим работы",
-        "работаете",
-        "до скольки",
-        "во сколько",
-    )
-
     def _clean_service_query(value: str | None) -> str:
         if not isinstance(value, str):
             return ""
@@ -1433,6 +1417,17 @@ def detect_multi_intent(
         return any(keyword in normalized for keyword in consult_intent_cues)
 
     def _fallback_payload(*, timeout_safe: bool = False) -> dict:
+        if timeout_safe:
+            return {
+                "multi_intent": False,
+                "primary_intent": "other",
+                "secondary_intents": [],
+                "intents": ["other"],
+                "service_query": "",
+                "consult_intent": False,
+                "consult_topic": "",
+                "consult_question": "",
+            }
         normalized = normalize_for_matching(text)
         intents: list[str] = []
 
@@ -1446,10 +1441,7 @@ def detect_multi_intent(
             intents.append("booking")
 
         hours_keywords = get_system_lexicon_list("hours_keywords")
-        has_explicit_hours_signal = any(marker in normalized for marker in explicit_hours_markers)
-        if timeout_safe and has_explicit_hours_signal:
-            intents.append("hours")
-        elif not timeout_safe and any(keyword in normalized for keyword in hours_keywords):
+        if any(keyword in normalized for keyword in hours_keywords):
             intents.append("hours")
 
         price_keywords = get_system_lexicon_list("price_keywords")
@@ -1461,10 +1453,7 @@ def detect_multi_intent(
             intents.append("duration")
 
         location_keywords = get_system_lexicon_list("location_keywords")
-        has_explicit_location_signal = any(marker in normalized for marker in explicit_location_markers)
-        if timeout_safe and has_explicit_location_signal:
-            intents.append("location")
-        elif not timeout_safe and any(keyword in normalized for keyword in location_keywords):
+        if any(keyword in normalized for keyword in location_keywords):
             intents.append("location")
 
         if not intents:

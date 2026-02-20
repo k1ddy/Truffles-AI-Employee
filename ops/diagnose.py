@@ -831,6 +831,13 @@ LLM_QUALITY_REGRESSION_KEYS = (
     "booking_slot_progress_rate",
     "handoff_correct_rate",
 )
+LLM_QUALITY_BLOCKING_REASONS = (
+    "calendar_tool_contract_miss",
+    "expected_action_mismatch",
+    "expected_reply_type_mismatch",
+    "tool_decision_mismatch",
+    "judge_fail",
+)
 LLM_QUALITY_REASON_LABELS = {
     "decision_meta_missing": "decision_meta missing for inbound turn",
     "decision_trace_missing": "decision_trace missing for inbound turn",
@@ -4263,6 +4270,18 @@ def _llm_quality_top_failure_reasons(failure_counts, limit=3):
     return top
 
 
+def _llm_quality_collect_blocking_reasons(failure_counts):
+    counts = {}
+    total = 0
+    for reason in LLM_QUALITY_BLOCKING_REASONS:
+        value = int((failure_counts or {}).get(reason, 0) or 0)
+        if value <= 0:
+            continue
+        counts[reason] = value
+        total += value
+    return {"count": total, "reasons": counts}
+
+
 def _llm_quality_next_step_for_reason(reason):
     mapping = {
         "booking_slot_stall": "trace booking stages and verify slot extraction for this turn",
@@ -4775,11 +4794,22 @@ def _llm_quality_is_judge_mode_enabled(mode):
 def _llm_quality_baseline_is_canonical(payload):
     config = (payload or {}).get("config") if isinstance(payload, dict) else None
     mode = config.get("judge_mode") if isinstance(config, dict) else None
-    if _llm_quality_is_judge_mode_enabled(mode):
-        return True, None
-    if isinstance(mode, str) and mode.strip():
-        return False, f"judge_mode_{mode.strip().casefold()}"
-    return False, "judge_mode_missing"
+    if not _llm_quality_is_judge_mode_enabled(mode):
+        if isinstance(mode, str) and mode.strip():
+            return False, f"judge_mode_{mode.strip().casefold()}"
+        return False, "judge_mode_missing"
+    quality_status = (payload or {}).get("quality_status") if isinstance(payload, dict) else None
+    if isinstance(quality_status, dict):
+        infra_valid = quality_status.get("infra_valid")
+        semantic_valid = quality_status.get("semantic_valid")
+        blocking_reason_count = quality_status.get("blocking_reason_count")
+        if infra_valid is False:
+            return False, "infra_invalid"
+        if semantic_valid is False:
+            return False, "semantic_invalid"
+        if isinstance(blocking_reason_count, (int, float)) and int(blocking_reason_count) > 0:
+            return False, "blocking_reasons_present"
+    return True, None
 
 
 def _llm_quality_parse_coverage_tokens(value):
@@ -10345,6 +10375,8 @@ def _run_llm_quality(args):
     if args.dry_run:
         threshold_results = {}
         threshold_breaches = []
+    blocking_reasons = _llm_quality_collect_blocking_reasons(failure_counts)
+    blocking_reason_count = blocking_reasons.get("count", 0)
     tool_evidence_policy = args.tool_evidence_policy
     if args.dry_run:
         tool_evidence_policy = "off"
@@ -10383,6 +10415,8 @@ def _run_llm_quality(args):
     if args.dry_run:
         semantic_reasons.append("comparison_blocked:dry_run")
     else:
+        if blocking_reason_count:
+            semantic_reasons.append("blocking_reason")
         if threshold_breaches:
             semantic_reasons.append("threshold_breach")
         if comparison_enforced:
@@ -10450,6 +10484,7 @@ def _run_llm_quality(args):
         "baseline_canonical_reason": baseline_canonical_reason,
         "delta": delta,
         "failure_counts": failure_counts,
+        "blocking_reasons": blocking_reasons,
         "top_failures": top_failures,
         "failures": failures,
         "coverage": coverage_stats,
@@ -10465,6 +10500,8 @@ def _run_llm_quality(args):
             "infra_reasons": infra_status["reasons"],
             "semantic_valid": semantic_status["valid"],
             "semantic_reasons": semantic_status["reasons"],
+            "blocking_reason_count": blocking_reason_count,
+            "blocking_reasons": blocking_reasons.get("reasons", {}),
             "tool_evidence_valid": tool_evidence_status.get("valid"),
             "tool_evidence_reasons": tool_evidence_status.get("reasons"),
             "scenario_contract_valid": scenario_contract.get("valid"),
@@ -10524,6 +10561,21 @@ def _run_llm_quality(args):
         "infra_valid": infra_status["valid"],
         "semantic_valid": semantic_status["valid"],
     }
+    baseline_update_block_reasons = []
+    if args.update_baseline:
+        if not infra_status["valid"]:
+            baseline_update_block_reasons.append("infra_invalid")
+        if not semantic_status["valid"]:
+            baseline_update_block_reasons.append("semantic_invalid")
+        if not judge_enabled:
+            baseline_update_block_reasons.append("judge_disabled")
+        if blocking_reason_count:
+            baseline_update_block_reasons.append("blocking_reasons_present")
+        if baseline_update_block_reasons:
+            raise SystemExit(
+                "llm-quality: baseline update blocked "
+                f"({', '.join(baseline_update_block_reasons)})"
+            )
     if args.update_baseline or args.append_history:
         os.makedirs(os.path.dirname(baseline_path), exist_ok=True)
         baseline_payload = dict(baseline_payload or {})
@@ -10553,6 +10605,11 @@ def _run_llm_quality(args):
             ensure_ascii=False,
         )
     )
+    if args.fail_on_thresholds and blocking_reason_count:
+        blocked = ", ".join(
+            f"{reason}:{count}" for reason, count in blocking_reasons.get("reasons", {}).items()
+        )
+        raise SystemExit(f"llm-quality: blocking reasons ({blocked})")
     if args.fail_on_thresholds and threshold_breaches:
         raise SystemExit(
             f"llm-quality: threshold breaches ({', '.join(threshold_breaches)})"
