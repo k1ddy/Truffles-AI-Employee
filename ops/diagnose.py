@@ -14816,10 +14816,29 @@ try:
             return "provider_unavailable", classified.incident_reason_label
         return "unknown", classified.incident_reason_label
 
+    def extract_delivery_event_type(payload_json):
+        if not isinstance(payload_json, dict):
+            return None
+        value = payload_json.get("event_type")
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip().lower()
+        return normalized or None
+
+    def is_delivery_event(event_type):
+        if not event_type:
+            return False
+        if event_type in {{"provider_gateway.outbound"}}:
+            return True
+        return any(
+            event_type.startswith(prefix)
+            for prefix in ("whatsapp.send_", "telegram.send_", "instagram.send_", "web.send_")
+        )
+
     def collect_delivery_failure_profile(branch):
         delivery_cutoff = now - timedelta(hours=delivery_window_hours)
         failed_rows = (
-            session.query(OutboxMessage.last_error)
+            session.query(OutboxMessage.last_error, OutboxMessage.payload_json)
             .filter(
                 OutboxMessage.client_id == branch.client_id,
                 OutboxMessage.branch_id == branch.id,
@@ -14830,7 +14849,8 @@ try:
         )
         counts = {{
             "window_hours": delivery_window_hours,
-            "total_failed_24h": len(failed_rows),
+            "total_failed_24h": 0,
+            "non_delivery_failed_24h": 0,
             "stale_processing": 0,
             "provider_billing_blocked": 0,
             "provider_auth": 0,
@@ -14842,8 +14862,15 @@ try:
         for row in failed_rows:
             if isinstance(row, (tuple, list)):
                 last_error = row[0] if row else None
+                payload_json = row[1] if len(row) > 1 else None
             else:
                 last_error = getattr(row, "last_error", None)
+                payload_json = getattr(row, "payload_json", None)
+            event_type = extract_delivery_event_type(payload_json)
+            if not is_delivery_event(event_type):
+                counts["non_delivery_failed_24h"] = int(counts.get("non_delivery_failed_24h", 0)) + 1
+                continue
+            counts["total_failed_24h"] = int(counts.get("total_failed_24h", 0)) + 1
             reason_code, reason_label = classify_delivery_reason(last_error)
             counts[reason_code] = int(counts.get(reason_code, 0)) + 1
             if reason_label and reason_code not in labels:

@@ -323,6 +323,12 @@ const FLEET_SERVICE_LABELS: Record<string, string> = {
     attention: "Требует внимания",
 };
 
+const REFERENCE_SCOPE_REASON_LABELS: Record<string, string> = {
+    active_live_signals: "live-сигналы активных филиалов",
+    active_fallback_best_candidate: "fallback на лучший активный филиал",
+    no_active_branches: "нет активных филиалов",
+};
+
 const BRANCH_CHANGE_STATUS_LABELS: Record<string, string> = {
     draft: "Черновик",
     validated: "Проверено",
@@ -365,6 +371,13 @@ function formatDateTimeLabel(value: string | undefined): string {
         return "—";
     }
     return parsed.toLocaleString("ru-RU");
+}
+
+function formatReferenceScopeReason(value?: string | null): string {
+    if (!value) {
+        return "не задан";
+    }
+    return REFERENCE_SCOPE_REASON_LABELS[value] ?? value;
 }
 
 function asPercent(numerator: number, denominator: number): number {
@@ -2572,6 +2585,9 @@ export default function TenantsPage() {
                                 <p className="text-sm text-muted-foreground">
                                     Операционные риски по активным клиентам (топ по score)
                                 </p>
+                                <p className="text-xs text-muted-foreground">
+                                    scope: reference branches (шум тестовых веток исключен)
+                                </p>
                             </div>
                             <button
                                 className="btn-ghost"
@@ -2622,6 +2638,9 @@ export default function TenantsPage() {
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
                                             филиалы активные {item.active_branches}/{item.total_branches} · неактуальные {item.stale_branches} · интеграционных ошибок {item.integration_error_branches} · outbox_failed_24h {item.outbox_failed_24h} · ожидают передачи {item.pending_handovers}
+                                        </div>
+                                        <div className="mt-1 text-xs text-muted-foreground">
+                                            reference scope: {item.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(item.reference_branch_reason)}
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
                                             причины: {item.reasons?.join(", ") || "—"}
@@ -2954,6 +2973,9 @@ export default function TenantsPage() {
                                             </div>
                                             <div className="text-xs text-muted-foreground">
                                                 филиалы: активные {client.active_branches ?? 0}/{client.total_branches ?? 0} · деградация {client.degraded_branches ?? 0} · готовы к запуску {client.go_live_ready_branches ?? 0}
+                                            </div>
+                                            <div className="text-xs text-muted-foreground">
+                                                reference scope: {client.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(client.reference_branch_reason)}
                                             </div>
                                             {lifecycleAuditHistory.length > 0 || clientIdKey === selectedClientId ? (
                                                 <div className="mt-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs" data-testid="tenants-client-lifecycle-audit">

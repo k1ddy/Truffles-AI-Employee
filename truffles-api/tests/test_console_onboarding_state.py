@@ -556,35 +556,67 @@ def test_classify_delivery_failure_reason(last_error, expected):
     assert onboarding_state._classify_delivery_failure_reason(last_error) == expected
 
 
-def _build_delivery_dimension(*, backlog_total: int, failed_errors: list[str]):
+def _build_delivery_dimension(*, backlog_total: int, failed_rows: list[tuple[str, str | None]]):
     db = Mock()
     backlog_query = Mock()
     backlog_query.filter.return_value.scalar.return_value = backlog_total
     failed_query = Mock()
     failed_query.filter.return_value.all.return_value = [
-        SimpleNamespace(last_error=error) for error in failed_errors
+        SimpleNamespace(
+            last_error=error,
+            payload_json={"event_type": event_type} if event_type is not None else {},
+        )
+        for error, event_type in failed_rows
     ]
     db.query.side_effect = [backlog_query, failed_query]
     branch = SimpleNamespace(client_id="client-1", id="branch-1")
     return onboarding_state._build_delivery_health_readiness_dimension(db, branch)
 
 
-def test_delivery_dimension_adds_provider_billing_blocker_and_actions():
+def test_delivery_dimension_adds_provider_billing_warn_and_actions():
     dimension = _build_delivery_dimension(
         backlog_total=0,
-        failed_errors=["ChatFlow billing blocked: plan renewal required [CHATFLOW_BILLING_BLOCKED]"],
+        failed_rows=[
+            ("ChatFlow billing blocked: plan renewal required [CHATFLOW_BILLING_BLOCKED]", "whatsapp.send_text")
+        ],
+    )
+    assert dimension.status == "warn"
+    assert "delivery:provider_billing_blocked_warn" in dimension.blocker_codes
+    assert "resolve_provider_billing_block" in dimension.next_action_codes
+    assert "classify_delivery_errors_and_apply_remediation" in dimension.next_action_codes
+
+
+def test_delivery_dimension_adds_provider_billing_critical_after_threshold():
+    dimension = _build_delivery_dimension(
+        backlog_total=0,
+        failed_rows=[
+            ("ChatFlow billing blocked: plan renewal required [CHATFLOW_BILLING_BLOCKED]", "whatsapp.send_text"),
+            ("ChatFlow billing blocked: plan renewal required [CHATFLOW_BILLING_BLOCKED]", "whatsapp.send_text"),
+            ("ChatFlow billing blocked: plan renewal required [CHATFLOW_BILLING_BLOCKED]", "whatsapp.send_text"),
+        ],
     )
     assert dimension.status == "fail"
     assert "delivery:provider_billing_blocked_critical" in dimension.blocker_codes
     assert "resolve_provider_billing_block" in dimension.next_action_codes
-    assert "classify_delivery_errors_and_apply_remediation" in dimension.next_action_codes
 
 
 def test_delivery_dimension_adds_provider_auth_blocker_and_actions():
     dimension = _build_delivery_dimension(
         backlog_total=0,
-        failed_errors=["HTTP 401 unauthorized"],
+        failed_rows=[("HTTP 401 unauthorized", "whatsapp.send_text")],
     )
     assert dimension.status == "fail"
     assert "delivery:provider_auth_critical" in dimension.blocker_codes
     assert "rotate_provider_credentials" in dimension.next_action_codes
+
+
+def test_delivery_dimension_ignores_non_delivery_failed_rows():
+    dimension = _build_delivery_dimension(
+        backlog_total=0,
+        failed_rows=[
+            ("legacy outbox error", None),
+            ("calendar sync failed", "calendar.sync_outbound"),
+        ],
+    )
+    assert dimension.status == "pass"
+    assert dimension.blocker_codes == []

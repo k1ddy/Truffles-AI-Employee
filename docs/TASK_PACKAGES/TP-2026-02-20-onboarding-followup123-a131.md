@@ -1,0 +1,79 @@
+# TP-2026-02-20-onboarding-followup123-a131
+
+- Название/цель: Закрыть follow-up по onboarding any-niche в одном проходе: (1) delivery closure без ослабления fail-closed контракта, (2) сделать reference-scope видимым в Console UX/UI и синхронизировать API contracts, (3) устранить doc drift по отсутствующему end2end-TZ.
+- Canon refs: `AGENTS.md`, `STATE.md`, `STRUCTURE.md`, `TECH.md`, `SPECS/SYSTEM_REFERENCE.md`, `docs/TASK_PACKAGES/TP-2026-02-19-onboarding-any-niche-step123-a131.md`, `docs/TASK_PACKAGES/TP-2026-02-19-onboarding-delivery-contour-step2-a131.md`, `docs/TASK_PACKAGES/TP-2026-02-19-onboarding-reference-branch-normalization-step3-a131.md`.
+- Invariant:
+  - Не ослаблять fail-closed semantics hard-gate/readiness.
+  - Не добавлять client-specific hardcode.
+  - Delivery-readiness считать только по релевантным клиентским outbound событиям (без системного/шумового outbox).
+- Scope:
+  - Step 1 (delivery closure):
+    - уточнить delivery readiness/diagnose классификацию так, чтобы критичность определялась по клиентскому delivery-контуру, а не по нерелевантным outbox rows;
+    - сохранить/усилить explainability blocker-ов и next-actions;
+    - добиться детерминированного `onboarding-delivery-stabilize` поведения с корректным critical сигналом.
+  - Step 2 (Console UX/UI + contracts):
+    - добавить явный reference-scope индикатор на Console страницах fleet attention/tenants;
+    - синхронизировать backend schema -> `contracts/console_api/openapi.v1.yaml` -> `console-web/src/types/api.generated.ts`.
+  - Step 3 (docs cleanup):
+    - закрыть ссылки на отсутствующий `TP-2026-02-19-onboarding-any-niche-end2end-tz.md` через создание/привязку canonical umbrella doc;
+    - обновить связанные отчеты/ссылки, чтобы не было broken refs.
+- Out of scope:
+  - Изменения webhook decision pipeline/LLM policy core.
+  - Ручные DB правки для «зеленого» результата.
+  - Большие архитектурные перестройки без DEC.
+- Touch-list:
+  - `truffles-api/app/services/onboarding_state.py`
+  - `ops/diagnose.py`
+  - `truffles-api/tests/test_console_onboarding_state.py`
+  - `truffles-api/tests/test_diagnose_onboarding_fleet.py`
+  - `truffles-api/app/schemas/console.py` (при необходимости)
+  - `contracts/console_api/openapi.v1.yaml`
+  - `contracts/console_api/openapi.generated.yaml`
+  - `console-web/src/app/tenants/page.tsx`
+  - `console-web/src/app/integrations/page.tsx`
+  - `console-web/src/lib/api-client.ts` (при необходимости)
+  - `console-web/src/types/api.generated.ts`
+  - `docs/TASK_PACKAGES/TP-2026-02-19-onboarding-any-niche-end2end-tz.md` (new/restore canonical)
+  - `docs/REPORTS/2026-02-20-onboarding-followup123-a131.md` (new)
+  - `docs/SESSIONS/SESSION-2026-02-20-onboarding-followup123-a131.md`
+  - `docs/SESSION_INDEX.md`
+- Plan:
+  1) Реализовать delivery-readiness фильтрацию/классификацию и покрыть unit tests.
+  2) Обновить Console UI для явного reference-scope, синхронизировать OpenAPI + generated frontend types.
+  3) Закрыть doc drift и восстановить canonical end2end-TZ doc.
+  4) Прогнать backend/frontend checks + ops diagnose evidence.
+  5) Сформировать report, обновить session/state artifacts, commit/push/PR.
+- DoD:
+  - `onboarding-delivery-stabilize` показывает корректный delivery-critical сигнал без outbox noise.
+  - Console UI явно отображает reference scope и источник (`reference_branch_reason`) там, где показываются fleet counters.
+  - `openapi.v1.yaml` и `api.generated.ts` включают reference scope поля.
+  - В docs нет broken refs на отсутствующий end2end-TZ файл.
+  - Все заявленные checks проходят.
+- Checks:
+  - `python3 -m py_compile truffles-api/app/services/onboarding_state.py ops/diagnose.py truffles-api/app/routers/console.py truffles-api/app/schemas/console.py truffles-api/tests/test_console_onboarding_state.py truffles-api/tests/test_diagnose_onboarding_fleet.py`
+  - `ruff check truffles-api/app/services/onboarding_state.py ops/diagnose.py truffles-api/app/routers/console.py truffles-api/app/schemas/console.py truffles-api/tests/test_console_onboarding_state.py truffles-api/tests/test_diagnose_onboarding_fleet.py`
+  - `pytest -q truffles-api/tests/test_console_onboarding_state.py truffles-api/tests/test_diagnose_onboarding_fleet.py truffles-api/tests/test_console_fleet_attention.py truffles-api/tests/test_console_tenants_list.py`
+  - `python3 truffles-api/scripts/generate_openapi.py --check`
+  - `npm --prefix console-web run generate:api`
+  - `npm --prefix console-web run lint -- --file src/app/tenants/page.tsx --file src/app/integrations/page.tsx --file src/types/api.generated.ts`
+  - `npm --prefix console-web run build`
+  - `python3 ops/diagnose.py onboarding-fleet-check --json`
+  - `python3 ops/diagnose.py onboarding-delivery-stabilize --json`
+- Evidence:
+  - `/tmp/onboarding_followup123_a131/` (ops json snapshots + check outputs)
+  - `docs/REPORTS/2026-02-20-onboarding-followup123-a131.md`
+  - при core behavior изменениях: запись в `STATE.md` до merge.
+- Rollback:
+  - `git revert COMMIT_SHA`.
+- No-go:
+  - Не ослаблять hard-gate до pass через ручные bypass.
+  - Не подгонять тесты/метрики без контрактных изменений.
+  - Не добавлять client-id specific logic.
+- Branch/worktree/base/merge/cleanup:
+  - Branch: `feat/2026-02-20-onboarding-followup123-a131`
+  - Worktree: `/home/zhan/worktrees/2026-02-20-onboarding-followup123-a131`
+  - Base: `origin/main`
+  - Merge policy: merge commit via PR (no rebase)
+  - Cleanup: `scripts/session_end.sh --status done` в финальном коммите; cleanup после merge.
+- Риски/блокеры:
+  - Runtime delivery incident может остаться критичным из-за реального внешнего провайдера; в таком случае фиксируем как operational blocker с прозрачным evidence, не скрываем в коде.

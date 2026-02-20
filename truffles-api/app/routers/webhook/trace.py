@@ -56,6 +56,7 @@ DECISION_TRACE_PRIORITY_STAGES = {
 DECISION_TRACE_PINNED_STAGES = {
     "booking_commit",
     "consult_return",
+    "marketing_reply_context",
 }
 
 DECISION_STAGE_ORDER_SNAPSHOT = [
