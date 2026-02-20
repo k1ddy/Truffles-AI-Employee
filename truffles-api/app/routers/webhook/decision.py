@@ -3727,6 +3727,15 @@ LLM_POLICY_CORE_LOW_CONFIDENCE_TOOL_ALLOWLIST = {
     "consult",
     "collect",
 }
+POLICY_OVERRIDE_REASON_CODES = {
+    "safety_policy_block",
+    "contract_validation_failure",
+    "required_slot_missing",
+    "tool_unavailable",
+    "timeout_degrade",
+    "idempotency_replay_guard",
+}
+POLICY_OVERRIDE_REASON_DEFAULT = "contract_validation_failure"
 LLM_POLICY_CORE_ENABLED = _is_env_enabled(
     os.environ.get("LLM_POLICY_CORE_ENABLED"), default=True
 )
@@ -4020,6 +4029,71 @@ def _plan_outcome_matches_action(outcome: str | None, tool_action: str | None) -
             "calendar."
         ) or tool_action.startswith("catalog.")
     return False
+
+
+def _normalize_policy_override_reason_code(reason_code: str | None) -> str:
+    if not isinstance(reason_code, str):
+        return POLICY_OVERRIDE_REASON_DEFAULT
+    normalized = reason_code.strip().casefold()
+    if normalized in POLICY_OVERRIDE_REASON_CODES:
+        return normalized
+    return POLICY_OVERRIDE_REASON_DEFAULT
+
+
+def _build_policy_plan_audit(
+    *,
+    plan_action: str | None,
+    plan_tool_action: str | None,
+    final_action: str | None,
+    final_tool_action: str | None,
+    override_events: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    action_changed = bool(
+        isinstance(plan_action, str)
+        and plan_action
+        and (not isinstance(final_action, str) or plan_action != final_action)
+    )
+    tool_action_changed = bool(
+        isinstance(plan_tool_action, str)
+        and plan_tool_action
+        and (not isinstance(final_tool_action, str) or plan_tool_action != final_tool_action)
+    )
+    override_applied = bool(action_changed or tool_action_changed)
+
+    cleaned_events: list[dict[str, Any]] = []
+    override_reason_codes: list[str] = []
+    for event in override_events or []:
+        if not isinstance(event, dict):
+            continue
+        reason_code = _normalize_policy_override_reason_code(
+            event.get("reason_code") if isinstance(event.get("reason_code"), str) else None
+        )
+        cleaned_event: dict[str, Any] = {"reason_code": reason_code}
+        for key in ("reason", "from_action", "from_tool_action", "to_action", "to_tool_action"):
+            value = event.get(key)
+            if isinstance(value, str) and value.strip():
+                cleaned_event[key] = value.strip()
+        cleaned_events.append(cleaned_event)
+        if reason_code not in override_reason_codes:
+            override_reason_codes.append(reason_code)
+
+    if override_applied and not override_reason_codes:
+        override_reason_codes = [POLICY_OVERRIDE_REASON_DEFAULT]
+
+    return {
+        "plan_action": plan_action,
+        "plan_tool_action": plan_tool_action,
+        "final_action": final_action,
+        "final_tool_action": final_tool_action,
+        "action_changed": action_changed,
+        "tool_action_changed": tool_action_changed,
+        "override_applied": override_applied,
+        "override_reason_code": (
+            override_reason_codes[-1] if override_reason_codes else None
+        ),
+        "override_reason_codes": override_reason_codes,
+        "override_events": cleaned_events,
+    }
 
 
 def _derive_policy_info_refs(
@@ -8366,6 +8440,87 @@ async def _handle_webhook_payload(
     policy_rescue_trigger_error = None
     policy_rescue_error = None
     policy_rescue_elapsed_ms = 0.0
+    policy_plan_action = None
+    policy_plan_tool_action = None
+    policy_override_events: list[dict[str, Any]] = []
+
+    def _sync_policy_plan_audit(*, emit_trace: bool = False) -> None:
+        if not policy_plan_action and not policy_plan_tool_action:
+            return
+        plan_audit = _build_policy_plan_audit(
+            plan_action=policy_plan_action,
+            plan_tool_action=policy_plan_tool_action,
+            final_action=policy_action,
+            final_tool_action=policy_tool_action,
+            override_events=policy_override_events,
+        )
+        if isinstance(llm_policy_core_meta, dict):
+            llm_policy_core_meta["plan_action"] = plan_audit.get("plan_action")
+            llm_policy_core_meta["plan_tool_action"] = plan_audit.get("plan_tool_action")
+            llm_policy_core_meta["final_action"] = plan_audit.get("final_action")
+            llm_policy_core_meta["final_tool_action"] = plan_audit.get("final_tool_action")
+            llm_policy_core_meta["plan_final_audit"] = plan_audit
+            llm_policy_core_meta["override_reason_code"] = plan_audit.get("override_reason_code")
+            llm_policy_core_meta["override_reason_codes"] = plan_audit.get("override_reason_codes")
+        if saved_message:
+            updates: dict[str, Any] = {"llm_policy_plan_audit": plan_audit}
+            if isinstance(llm_policy_core_meta, dict):
+                updates["llm_policy_core"] = llm_policy_core_meta
+            override_reason_codes = plan_audit.get("override_reason_codes") or []
+            if override_reason_codes:
+                updates["llm_policy_override_reason_codes"] = override_reason_codes
+                updates["llm_policy_override_reason_code"] = plan_audit.get("override_reason_code")
+            _update_message_decision_metadata(saved_message, updates)
+        if emit_trace:
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "llm_policy_plan_delta",
+                    "decision": "override" if plan_audit.get("override_applied") else "match",
+                    "plan_action": plan_audit.get("plan_action"),
+                    "plan_tool_action": plan_audit.get("plan_tool_action"),
+                    "final_action": plan_audit.get("final_action"),
+                    "final_tool_action": plan_audit.get("final_tool_action"),
+                    "override_reason_codes": plan_audit.get("override_reason_codes") or [],
+                },
+            )
+
+    def _register_policy_override(
+        *,
+        reason_code: str,
+        reason: str,
+        from_action: str | None,
+        from_tool_action: str | None,
+    ) -> None:
+        normalized_reason_code = _normalize_policy_override_reason_code(reason_code)
+        policy_override_events.append(
+            {
+                "reason_code": normalized_reason_code,
+                "reason": reason,
+                "from_action": from_action,
+                "from_tool_action": from_tool_action,
+                "to_action": policy_action,
+                "to_tool_action": policy_tool_action,
+            }
+        )
+        _record_decision_trace(
+            conversation,
+            {
+                "stage": "llm_policy_plan_delta",
+                "decision": "override_event",
+                "reason_code": normalized_reason_code,
+                "reason": reason,
+                "plan_action": policy_plan_action,
+                "plan_tool_action": policy_plan_tool_action,
+                "from_action": from_action,
+                "from_tool_action": from_tool_action,
+                "to_action": policy_action,
+                "to_tool_action": policy_tool_action,
+            },
+        )
+        if isinstance(llm_policy_core_meta, dict):
+            _sync_policy_plan_audit()
+
     policy_core_runtime_active = bool(
         LLM_POLICY_CORE_ENABLED
         and routing["allow_bot_reply"]
@@ -8503,9 +8658,11 @@ async def _handle_webhook_payload(
             raw_action = policy_payload.get("action")
             if isinstance(raw_action, str):
                 policy_action = raw_action.strip().casefold()
+                policy_plan_action = policy_action
             raw_tool_action = policy_payload.get("tool_action")
             if isinstance(raw_tool_action, str):
                 policy_tool_action = raw_tool_action.strip().casefold()
+                policy_plan_tool_action = policy_tool_action
             raw_confidence = policy_payload.get("confidence")
             if isinstance(raw_confidence, (int, float)):
                 policy_confidence = float(raw_confidence)
@@ -8582,8 +8739,16 @@ async def _handle_webhook_payload(
                         policy_tool_action,
                     )
                     if normalized_action in LLM_POLICY_CORE_ALLOWED_ACTIONS:
+                        previous_action = policy_action
                         policy_action = normalized_action
                         policy_action_normalized = was_normalized
+                        if was_normalized and previous_action != policy_action:
+                            _register_policy_override(
+                                reason_code="contract_validation_failure",
+                                reason="action_normalized_from_tool_action",
+                                from_action=previous_action,
+                                from_tool_action=policy_tool_action,
+                            )
                     else:
                         policy_validation_error = "action_invalid"
                 if (
@@ -8747,8 +8912,16 @@ async def _handle_webhook_payload(
                             or policy_goal == "booking"
                         )
                         if style_reference_signal and not has_media:
+                            previous_action = policy_action
+                            previous_tool_action = policy_tool_action
                             policy_action = "fact"
                             policy_tool_action = "catalog.portfolio"
+                            _register_policy_override(
+                                reason_code="required_slot_missing",
+                                reason="style_reference_without_media",
+                                from_action=previous_action,
+                                from_tool_action=previous_tool_action,
+                            )
                         elif message_text and _has_lateness_signal(
                             message_text,
                             client_slug=payload.client_slug,
@@ -8762,8 +8935,16 @@ async def _handle_webhook_payload(
                                 or policy_intent in {"introduce", "provide_name"}
                             )
                         ):
+                            previous_action = policy_action
+                            previous_tool_action = policy_tool_action
                             policy_action = "collect"
                             policy_tool_action = "collect"
+                            _register_policy_override(
+                                reason_code="required_slot_missing",
+                                reason="collect_slot_recovery",
+                                from_action=previous_action,
+                                from_tool_action=previous_tool_action,
+                            )
                 if policy_validation_error is None and policy_tool_action == "info" and not policy_pack_refs:
                     info_refs_from_tool_args = _normalize_plan_refs(policy_tool_args.get("info_refs"))
                     if not info_refs_from_tool_args:
@@ -8879,9 +9060,17 @@ async def _handle_webhook_payload(
                         and _plan_has_complete_booking_slots(merged_policy_slots)
                     ):
                         # Convert complete collect plans to booking tool call instead of stalling.
+                        previous_action = policy_action
+                        previous_tool_action = policy_tool_action
                         policy_action = "fact"
                         policy_tool_action = "calendar.book_slot"
                         policy_slot_state_validated = merged_policy_slots
+                        _register_policy_override(
+                            reason_code="contract_validation_failure",
+                            reason="collect_complete_slots_promoted_to_booking",
+                            from_action=previous_action,
+                            from_tool_action=previous_tool_action,
+                        )
                         if (
                             "start_at" not in policy_tool_args
                             and isinstance(merged_policy_slots.get("datetime"), str)
@@ -8943,8 +9132,16 @@ async def _handle_webhook_payload(
                         and merged_policy_slots.get("datetime").strip()
                     ):
                         # Allow collect-plan replay for slot listing when service+datetime are known.
+                        previous_action = policy_action
                         policy_action = "fact"
                         policy_slot_state_validated = merged_policy_slots
+                        if previous_action != policy_action:
+                            _register_policy_override(
+                                reason_code="contract_validation_failure",
+                                reason="collect_plan_replay_for_list_slots",
+                                from_action=previous_action,
+                                from_tool_action=policy_tool_action,
+                            )
                     else:
                         policy_validation_error = "collect_slot_missing"
 
@@ -8974,9 +9171,17 @@ async def _handle_webhook_payload(
                     and name_turn_signal
                 )
                 if ready_for_name_commit:
+                    previous_action = policy_action
+                    previous_tool_action = policy_tool_action
                     policy_action = "fact"
                     policy_tool_action = "calendar.book_slot"
                     policy_slot_state_validated = merged_policy_slots
+                    _register_policy_override(
+                        reason_code="contract_validation_failure",
+                        reason="name_stage_commit_promoted_to_booking",
+                        from_action=previous_action,
+                        from_tool_action=previous_tool_action,
+                    )
                     _record_decision_trace(
                         conversation,
                         {
@@ -9016,6 +9221,8 @@ async def _handle_webhook_payload(
             "rescue_trigger_error": policy_rescue_trigger_error,
             "rescue_error": policy_rescue_error,
             "rescue_elapsed_ms": policy_rescue_elapsed_ms,
+            "plan_action": policy_plan_action,
+            "plan_tool_action": policy_plan_tool_action,
             "payload": policy_payload,
             "raw": policy_result.get("raw") if isinstance(policy_result, dict) else None,
             "intent": policy_intent,
@@ -9045,16 +9252,15 @@ async def _handle_webhook_payload(
                 else []
             ),
         }
-        if saved_message:
-            _update_message_decision_metadata(
-                saved_message, {"llm_policy_core": llm_policy_core_meta}
-            )
+        _sync_policy_plan_audit()
         _record_decision_trace(
             conversation,
             {
                 "stage": "llm_policy_core",
                 "intent": policy_intent,
                 "decision": policy_action,
+                "plan_action": policy_plan_action,
+                "plan_tool_action": policy_plan_tool_action,
                 "attempted": llm_policy_core_meta["attempted"],
                 "ok": llm_policy_core_meta["ok"],
                 "error": llm_policy_core_meta["error"],
@@ -9093,6 +9299,7 @@ async def _handle_webhook_payload(
                 "risk_signals": policy_risk_signals,
             },
         )
+        _sync_policy_plan_audit(emit_trace=True)
     elif LLM_POLICY_CORE_ENABLED and routing["allow_bot_reply"] and message_text:
         policy_core_degrade_reason = "guard_not_eligible"
 
@@ -10424,9 +10631,16 @@ async def _handle_webhook_payload(
                 ):
                     should_route_to_location = True
                 if should_route_to_location:
+                    previous_tool_action = policy_tool_action
                     policy_tool_action = "catalog.location"
                     policy_tool_args = {}
                     policy_service_query = None
+                    _register_policy_override(
+                        reason_code="contract_validation_failure",
+                        reason="explicit_location_or_hours_signal",
+                        from_action=policy_action,
+                        from_tool_action=previous_tool_action,
+                    )
             if not info_sections_hint:
                 info_sections_hint = list(TOOL_INFO_SECTION_MAP.get(policy_tool_action, []))
             if policy_tool_action == "catalog.location":

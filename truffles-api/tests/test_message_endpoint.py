@@ -9003,6 +9003,12 @@ def test_llm_policy_core_collect_with_full_slots_normalizes_to_book_slot(monkeyp
     assert meta.get("tool_decision") == "ok"
     assert meta.get("appointment_id") == "apt-1"
     assert meta.get("llm_policy_core", {}).get("validated") is True
+    plan_audit = meta.get("llm_policy_plan_audit", {})
+    assert plan_audit.get("plan_action") == "collect"
+    assert plan_audit.get("plan_tool_action") == "collect"
+    assert plan_audit.get("final_tool_action") == "calendar.book_slot"
+    assert plan_audit.get("override_applied") is True
+    assert "contract_validation_failure" in (plan_audit.get("override_reason_codes") or [])
 
 
 def test_llm_policy_core_list_slots_name_stage_normalizes_to_book_slot(monkeypatch):
@@ -9188,6 +9194,11 @@ def test_llm_policy_core_list_slots_name_stage_normalizes_to_book_slot(monkeypat
     assert meta.get("tool_decision") == "ok"
     assert meta.get("appointment_id") == "apt-name-stage"
     assert meta.get("llm_policy_core", {}).get("validated") is True
+    plan_audit = meta.get("llm_policy_plan_audit", {})
+    assert plan_audit.get("plan_tool_action") == "calendar.list_slots"
+    assert plan_audit.get("final_tool_action") == "calendar.book_slot"
+    assert plan_audit.get("override_applied") is True
+    assert "contract_validation_failure" in (plan_audit.get("override_reason_codes") or [])
 
 
 def test_llm_policy_core_low_confidence_book_slot_with_complete_slots_is_allowed(monkeypatch):
@@ -14827,6 +14838,173 @@ def test_llm_policy_core_info_tool_restores_booking_followup_from_slots(monkeypa
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("tool_action") == "catalog.location"
     assert "parking" in (meta.get("info_sections") or [])
+
+
+def test_llm_policy_core_service_query_rewrites_to_location_with_reason_code(monkeypatch):
+    monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="Где вы находитесь и есть парковка?",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-llm-policy-core-service-to-location",
+                timestamp=1234567908,
+            ),
+        ),
+    )
+
+    policy_payload = {
+        "intent": "info",
+        "action": "fact",
+        "tool_action": "catalog.service_query",
+        "tool_args": {"service_query": "Маникюр"},
+        "pack_refs": ["location", "parking"],
+        "language": "ru",
+        "confidence": 0.85,
+        "reason": "explicit_location_question",
+        "goal": "info",
+        "slots": {},
+        "next_question": None,
+        "open_questions": [],
+        "needs_manager": False,
+        "risk_signals": [],
+    }
+    policy_result = {
+        "ok": True,
+        "payload": policy_payload,
+        "error": None,
+        "raw": json.dumps(policy_payload, ensure_ascii=False),
+        "attempted": True,
+        "elapsed_ms": 11.0,
+    }
+    domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
+    captured_tool_action = {}
+
+    def _fake_execute_tool_action(*_args, **kwargs):
+        captured_tool_action["tool_action"] = kwargs.get("tool_action")
+        return SimpleNamespace(
+            handled=True,
+            ok=True,
+            response_text="Адрес: Алматы, ул. Абая 150. Парковка есть.",
+            error_code=None,
+            decision_meta={
+                "tool_action": "catalog.location",
+                "tool_decision": "ok",
+                "info_sections": ["location", "parking"],
+            },
+            trace={
+                "stage": "tool_registry",
+                "decision": "ok",
+                "tool_action": "catalog.location",
+                "info_sections": ["location", "parking"],
+            },
+            expected_reply_type=None,
+        )
+
+    def _fake_detect_info_class_intents(_message_text, *, intent_decomp_set, client_slug=None):
+        _ = intent_decomp_set, client_slug
+        return {"location", "parking"}, {
+            "info_signals": {
+                "location": True,
+                "parking": True,
+                "hours": False,
+                "master": False,
+            }
+        }
+
+    with patch(
+        "app.routers.webhook.decision.route_llm_policy_core", return_value=policy_result
+    ), patch("app.routers.webhook.decision._collect_plan_consult_refs", return_value=([], None)), patch(
+        "app.routers.webhook.decision.classify_domain_with_scores", return_value=domain_result
+    ), patch(
+        "app.services.tool_registry_service.execute_tool_action",
+        side_effect=_fake_execute_tool_action,
+    ), patch(
+        "app.routers.webhook.decision._detect_info_class_intents",
+        side_effect=_fake_detect_info_class_intents,
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ), patch(
+        "app.routers.webhook._legacy.semantic_service_match", return_value=None
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert captured_tool_action.get("tool_action") == "catalog.location"
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    plan_audit = meta.get("llm_policy_plan_audit", {})
+    assert plan_audit.get("plan_tool_action") == "catalog.service_query"
+    assert plan_audit.get("final_tool_action") == "catalog.location"
+    assert plan_audit.get("override_applied") is True
+    assert "contract_validation_failure" in (plan_audit.get("override_reason_codes") or [])
+    assert meta.get("llm_policy_override_reason_code") == "contract_validation_failure"
 
 
 def test_llm_policy_core_catalog_location_passes_parking_info_hint(monkeypatch):
