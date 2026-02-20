@@ -615,6 +615,7 @@ def _list_slots(
     specialist_id: UUID | None,
     date_value: str | None,
     duration_min: int | None,
+    requested_time: str | None = None,
     now: datetime | None = None,
 ) -> tuple[str | None, str | None]:
     if not date_value:
@@ -665,6 +666,28 @@ def _list_slots(
         slots_by_specialist[specialist.name] = [
             slot.start.strftime("%H:%M") for slot in slots if slot.available
         ]
+
+    requested_token = requested_time.strip() if isinstance(requested_time, str) else ""
+    if requested_token:
+        available_times = sorted(
+            {
+                token
+                for specialist_slots in slots_by_specialist.values()
+                for token in specialist_slots
+                if isinstance(token, str) and token
+            }
+        )
+        if requested_token in available_times:
+            return (
+                f"Да, на {requested_token} есть свободное окно. "
+                f"{_format_slot_list(slots_by_specialist)}"
+            ), None
+        if available_times:
+            return (
+                f"На {requested_token} свободного окна нет. "
+                f"Доступны: {', '.join(available_times[:5])}."
+            ), None
+        return f"На {requested_token} свободных окон нет. Могу предложить другое время.", None
 
     return _format_slot_list(slots_by_specialist), None
 
@@ -1150,12 +1173,14 @@ def execute_tool_action(
                     "specialist_name": specialist_name,
                 },
             )
+        requested_time = _extract_time_token(message_text)
         response, error = _list_slots(
             db,
             branch=branch,
             specialist_id=specialist_uuid,
             date_value=raw_date,
             duration_min=duration,
+            requested_time=requested_time,
             now=now,
         )
         if error:
@@ -1423,26 +1448,34 @@ def execute_tool_action(
                 "tool_action": tool_action,
                 "tool_decision": "ok",
                 "appointment_id": str(appointment.id),
+                "appointment_status": getattr(appointment, "status", None),
                 "reminder_jobs_scheduled": len(scheduled),
                 "specialist_id": str(specialist.id) if specialist else None,
                 "specialist_name": specialist.name if specialist else None,
                 "specialist_selection": specialist_selection,
+                "booking_blocked_reason": None,
             },
             {
                 "stage": "tool_registry",
                 "decision": "ok",
                 "tool_action": tool_action,
                 "appointment_id": str(appointment.id),
+                "appointment_status": getattr(appointment, "status", None),
                 "reminder_jobs_scheduled": len(scheduled),
                 "specialist_id": str(specialist.id) if specialist else None,
                 "specialist_selection": specialist_selection,
             },
             reason=provider_health_reason,
         )
+        appointment_status_token = str(getattr(appointment, "status", "") or "").strip().casefold()
+        if appointment_status_token in {"confirmed", "booked"}:
+            response_text = "Запись подтверждена. Хотите что-то изменить?"
+        else:
+            response_text = "Заявка на запись принята. Менеджер подтвердит время."
         return ToolExecutionResult(
             handled=True,
             ok=True,
-            response_text="Запись создана. Хотите что-то изменить?",
+            response_text=response_text,
             error_code=None,
             decision_meta=decision_meta,
             trace=trace,

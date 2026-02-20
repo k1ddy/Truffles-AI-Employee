@@ -1602,6 +1602,25 @@ def _has_duration_signal(
 ) -> bool:
     if not normalized:
         return False
+    slug = _normalize_client_slug(client_slug)
+    has_service_context = _message_has_service_token(normalized, slug) or any(
+        marker in normalized
+        for marker in (
+            "услуг",
+            "процед",
+            "сеанс",
+            "маник",
+            "педик",
+            "стриж",
+            "окраш",
+            "уклад",
+            "бров",
+            "ресниц",
+        )
+    )
+    # "Как долго вы работаете?" is a schedule question, not service duration.
+    if _looks_like_hours_question(normalized, client_slug=slug) and not has_service_context:
+        return False
     if _signal_contains_any(normalized, client_slug, "duration_keywords"):
         return True
     if re.search(r"\bзанимает\b", normalized):

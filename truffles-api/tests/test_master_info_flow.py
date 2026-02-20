@@ -4,6 +4,7 @@ from app.routers.webhook.info import (
     _detect_info_class_intents,
     _tokenize_for_matching,
 )
+from app.services import demo_salon_knowledge
 from app.services.demo_salon_knowledge import get_demo_salon_decision
 
 
@@ -151,6 +152,24 @@ def test_detect_info_class_intents_hours_signal_for_how_long_you_work_phrase():
     assert "duration" not in intents
     assert meta.get("info_signals", {}).get("hours") is True
     assert meta.get("info_signals", {}).get("duration") is False
+
+
+def test_compose_multi_truth_reply_how_long_you_work_drops_duration_component():
+    reply, meta = demo_salon_knowledge.compose_multi_truth_reply(
+        "Как долго вы работаете?",
+        "demo_salon",
+        {"intents": ["hours", "duration"], "service_query": "Стрижка"},
+        return_meta=True,
+    )
+
+    assert isinstance(reply, str) and reply
+    info_sections = (meta or {}).get("info_sections") or []
+    fact_intents = (meta or {}).get("fact_intents") or []
+    assert "hours" in info_sections
+    assert "hours" in fact_intents
+    assert "duration" not in info_sections
+    assert "service_duration" not in info_sections
+    assert "duration" not in fact_intents
 
 
 def test_detect_info_class_intents_contact_signal():

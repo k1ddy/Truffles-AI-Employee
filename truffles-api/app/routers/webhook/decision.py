@@ -3942,6 +3942,13 @@ TOOL_VERIFIER_SLOT_BY_FIELD: dict[str, str] = {
     "customer_name": "name",
     "appointment_id": "booking_reference",
 }
+TOOL_VERIFIER_BOOKING_CONFIRM_TEXT_MARKERS = (
+    "запись создана",
+    "запись подтверждена",
+    "вы записаны",
+    "запись оформлена",
+)
+TOOL_VERIFIER_BOOKING_CONFIRM_STATUS = {"confirmed", "booked"}
 
 
 def _is_booking_verification_handoff_intent(policy_intent: str | None, policy_tool_action: str | None) -> bool:
@@ -4027,6 +4034,16 @@ def _detect_tool_contract_error(
         appointment_id = decision_meta.get("appointment_id")
         if not (isinstance(appointment_id, str) and appointment_id.strip()):
             return "appointment_id_missing"
+    if tool_action == "calendar.book_slot":
+        response_token = normalize_for_matching(response_text)
+        if response_token and any(
+            marker in response_token for marker in TOOL_VERIFIER_BOOKING_CONFIRM_TEXT_MARKERS
+        ):
+            status_raw = decision_meta.get("appointment_status")
+            if status_raw is not None:
+                status_token = str(status_raw).strip().casefold()
+                if status_token not in TOOL_VERIFIER_BOOKING_CONFIRM_STATUS:
+                    return "booking_confirmation_status_mismatch"
     return None
 
 
@@ -9169,14 +9186,37 @@ async def _handle_webhook_payload(
                         policy_pack_refs_dropped = True
 
             if policy_validation_error is None and policy_action == "handoff":
-                # If LLM explicitly selected handoff, manager escalation is implied.
-                if not policy_needs_manager:
-                    policy_needs_manager = True
-                if message_text and not (
-                    is_human_request_message(message_text)
-                    or is_frustration_message(message_text)
-                ):
-                    policy_validation_error = "handoff_not_allowed"
+                style_reference_handoff_signal = bool(
+                    _policy_has_style_reference_hint(
+                        policy_intent=policy_intent,
+                        policy_reason=policy_reason,
+                    )
+                    or (
+                        message_text
+                        and _is_style_reference_request(message_text, has_media=has_media)
+                    )
+                )
+                if style_reference_handoff_signal and not has_media:
+                    previous_action = policy_action
+                    previous_tool_action = policy_tool_action
+                    policy_action = "collect"
+                    policy_tool_action = "collect"
+                    policy_needs_manager = False
+                    _register_policy_override(
+                        reason_code="required_slot_missing",
+                        reason="style_reference_handoff_recovered_to_collect",
+                        from_action=previous_action,
+                        from_tool_action=previous_tool_action,
+                    )
+                else:
+                    # If LLM explicitly selected handoff, manager escalation is implied.
+                    if not policy_needs_manager:
+                        policy_needs_manager = True
+                    if message_text and not (
+                        is_human_request_message(message_text)
+                        or is_frustration_message(message_text)
+                    ):
+                        policy_validation_error = "handoff_not_allowed"
 
             if policy_validation_error is None and policy_action == "collect":
                 merged_policy_slots = _merge_booking_plan_slots(
@@ -9680,6 +9720,14 @@ async def _handle_webhook_payload(
         )
     )
     policy_core_timeout_degrade = _is_timeout_degrade_failure(policy_core_failure)
+    if (
+        POLICY_CORE_RESCUE_MATRIX_ENABLED
+        and policy_core_runtime_active
+        and policy_core_mode == "degraded_fallback"
+        and policy_core_attempted
+        and policy_core_timeout_degrade
+    ):
+        degraded_policy_core_critical = True
     if degraded_policy_core_critical:
         policy_guard_reason_code = (
             "timeout_degrade" if policy_core_timeout_degrade else "contract_validation_failure"

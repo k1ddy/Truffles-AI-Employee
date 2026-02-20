@@ -636,6 +636,110 @@ def test_tool_registry_list_slots_allows_sync_stale_provider_health():
     assert list_slots_mock.called
 
 
+def test_tool_registry_list_slots_reports_requested_time_unavailable_explicitly():
+    db = Mock()
+    specialist_a = SimpleNamespace(id=uuid4(), name="Айгерим")
+    specialist_b = SimpleNamespace(id=uuid4(), name="Дана")
+    specialists = [specialist_a, specialist_b]
+
+    specialist_query = Mock()
+    specialist_query.filter.return_value.order_by.return_value.all.return_value = specialists
+    service_query = Mock()
+    service_query.filter.return_value.first.return_value = None
+
+    def _query(model):
+        if model is Service:
+            return service_query
+        return specialist_query
+
+    db.query.side_effect = _query
+
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+    slot_1745 = SimpleNamespace(start=datetime(2026, 2, 20, 17, 45, tzinfo=timezone.utc), available=True)
+    slot_1800 = SimpleNamespace(start=datetime(2026, 2, 20, 18, 0, tzinfo=timezone.utc), available=True)
+    slot_1900 = SimpleNamespace(start=datetime(2026, 2, 20, 19, 0, tzinfo=timezone.utc), available=True)
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "_resolve_specialist_filter",
+        return_value=(None, None, None),
+    ), patch.object(tool_registry_service, "SchedulingService") as scheduling_cls:
+        scheduling = scheduling_cls.return_value
+        scheduling.get_available_slots.side_effect = [
+            [slot_1745, slot_1800],
+            [slot_1900],
+        ]
+
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.list_slots",
+            tool_args={"start_at": "2026-02-20T18:30:00+05:00"},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Стрижка",
+            message_text="Можно на 18:30?",
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert "На 18:30 свободного окна нет." in (result.response_text or "")
+    assert "Доступны: 17:45, 18:00, 19:00." in (result.response_text or "")
+
+
+def test_tool_registry_list_slots_reports_requested_time_available_explicitly():
+    db = Mock()
+    specialist = SimpleNamespace(id=uuid4(), name="Айгерим")
+    specialist_query = Mock()
+    specialist_query.filter.return_value.order_by.return_value.all.return_value = [specialist]
+    service_query = Mock()
+    service_query.filter.return_value.first.return_value = None
+
+    def _query(model):
+        if model is Service:
+            return service_query
+        return specialist_query
+
+    db.query.side_effect = _query
+
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "none"},
+        timezone="Asia/Almaty",
+    )
+    slot_1745 = SimpleNamespace(start=datetime(2026, 2, 20, 17, 45, tzinfo=timezone.utc), available=True)
+    slot_1800 = SimpleNamespace(start=datetime(2026, 2, 20, 18, 0, tzinfo=timezone.utc), available=True)
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "_resolve_specialist_filter",
+        return_value=(None, None, None),
+    ), patch.object(tool_registry_service, "SchedulingService") as scheduling_cls:
+        scheduling_cls.return_value.get_available_slots.return_value = [slot_1745, slot_1800]
+
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.list_slots",
+            tool_args={"start_at": "2026-02-20T17:45:00+05:00"},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Стрижка",
+            message_text="Можно на 17:45?",
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert "Да, на 17:45 есть свободное окно." in (result.response_text or "")
+    assert "Свободные слоты:" in (result.response_text or "")
+
+
 def test_tool_registry_book_slot_allows_sync_missing_provider_health():
     db = Mock()
     branch = SimpleNamespace(
@@ -682,6 +786,55 @@ def test_tool_registry_book_slot_allows_sync_missing_provider_health():
     assert result.decision_meta.get("provider_health_reason") == "sync_missing"
     assert result.decision_meta.get("provider_health_degraded") is True
     assert result.trace.get("provider_health_reason") == "sync_missing"
+
+
+def test_tool_registry_book_slot_pending_status_uses_non_confirming_reply_template():
+    db = Mock()
+    branch = SimpleNamespace(
+        id=uuid4(),
+        client_id=uuid4(),
+        booking_settings={"availability_provider": "google_calendar"},
+        timezone="Asia/Almaty",
+    )
+    specialist = SimpleNamespace(id=uuid4(), name="Алия")
+    appointment = SimpleNamespace(
+        id=uuid4(),
+        specialist_id=specialist.id,
+        status="PENDING_CONFIRMATION",
+    )
+
+    with patch.object(tool_registry_service, "_resolve_branch", return_value=branch), patch.object(
+        tool_registry_service,
+        "get_provider_health",
+        return_value=SimpleNamespace(ready=True, reason=None),
+    ), patch.object(
+        tool_registry_service,
+        "_resolve_specialist_for_booking",
+        return_value=(specialist, "service_default", None),
+    ), patch.object(
+        tool_registry_service,
+        "_book_slot",
+        return_value=(appointment, None),
+    ), patch.object(
+        tool_registry_service, "enqueue_appointment_sync", return_value=None
+    ), patch.object(
+        tool_registry_service, "schedule_default_reminders", return_value=[]
+    ):
+        result = tool_registry_service.execute_tool_action(
+            db,
+            tool_action="calendar.book_slot",
+            tool_args={"start_at": "2026-02-20T10:00:00"},
+            conversation_id=uuid4(),
+            branch_id=branch.id,
+            client_slug="demo_salon",
+            service_query="Маникюр",
+        )
+
+    assert result.handled is True
+    assert result.ok is True
+    assert result.response_text == "Заявка на запись принята. Менеджер подтвердит время."
+    assert result.decision_meta.get("appointment_status") == "PENDING_CONFIRMATION"
+    assert result.decision_meta.get("booking_blocked_reason") is None
 
 
 def test_tool_registry_book_slot_blocks_on_token_expired_provider_health():
