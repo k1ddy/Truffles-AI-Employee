@@ -792,6 +792,7 @@ def _build_query_side_effect(
     user_query=None,
     branch_query=None,
     branch_phone_query=None,
+    marketing_query=None,
 ):
     def _default_first(value):
         query = Mock()
@@ -803,14 +804,31 @@ def _build_query_side_effect(
         query.filter.return_value.all.return_value = values
         return query
 
+    def _default_marketing():
+        query = Mock()
+        query.join.return_value = query
+        query.filter.return_value = query
+        query.order_by.return_value = query
+        query.first.return_value = None
+        return query
+
     client_query = client_query or _default_first(None)
     settings_query = settings_query or _default_first(None)
     conversation_query = conversation_query or _default_first(None)
     user_query = user_query or _default_first(None)
     branch_query = branch_query or _default_first(None)
     branch_phone_query = branch_phone_query or _default_all([])
+    marketing_query = marketing_query or _default_marketing()
 
-    def _query(model):
+    def _query(*models):
+        if len(models) == 2:
+            model_names = {getattr(model, "__name__", "") for model in models}
+            if model_names == {"MarketingCampaignDelivery", "MarketingCampaign"}:
+                return marketing_query
+            return Mock()
+        if len(models) != 1:
+            return Mock()
+        model = models[0]
         if model is Client:
             return client_query
         if model is ClientSettings:
@@ -16762,6 +16780,187 @@ def test_llm_policy_core_degraded_booking_guard_uses_safe_collect(monkeypatch):
     assert meta.get("action") == "booking_prompt"
 
 
+def test_llm_policy_core_degraded_timeout_uses_clarify_with_reason_code(monkeypatch):
+    monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
+
+    saved_message = Mock()
+    saved_message.message_metadata = {}
+
+    client = SimpleNamespace(id="client-123", name="demo_salon", config={})
+    settings = SimpleNamespace(
+        webhook_secret=None,
+        branch_resolution_mode="disabled",
+        remember_branch_preference=True,
+    )
+    conversation_id = uuid4()
+    conversation = SimpleNamespace(
+        id=conversation_id,
+        user_id="user-123",
+        client_id=client.id,
+        state=ConversationState.BOT_ACTIVE.value,
+        bot_status="active",
+        bot_muted_until=None,
+        last_message_at=None,
+        no_count=0,
+        telegram_topic_id=None,
+        escalated_at=None,
+        branch_id=None,
+        context={"booking": {"active": True}},
+    )
+    user = SimpleNamespace(id="user-123", context={})
+
+    client_query = Mock()
+    client_query.filter.return_value.first.return_value = client
+    settings_query = Mock()
+    settings_query.filter.return_value.first.return_value = settings
+    conversation_query = Mock()
+    conversation_query.filter.return_value.first.return_value = conversation
+    user_query = Mock()
+    user_query.filter.return_value.first.return_value = user
+
+    db = Mock()
+    db.query.side_effect = _build_query_side_effect(
+        client_query=client_query,
+        settings_query=settings_query,
+        conversation_query=conversation_query,
+        user_query=user_query,
+    )
+    db.add = Mock()
+    db.flush = Mock()
+    db.commit = Mock()
+
+    payload = WebhookRequest(
+        client_slug="demo_salon",
+        body=WebhookBody(
+            message="хочу записаться",
+            messageType="text",
+            metadata=WebhookMetadata(
+                remoteJid="77000000000@s.whatsapp.net",
+                messageId="msg-llm-policy-core-timeout-degraded-1",
+                timestamp=1234567899,
+            ),
+        ),
+    )
+
+    expected_reply_state = ExpectedReplyState(
+        context=conversation.context,
+        context_manager={},
+        expected_reply_type=None,
+        intent_queue=None,
+        expected_reply_matched=None,
+        expected_reply_shortcircuit=False,
+        expected_reply_blocked_by_info=False,
+        memory_expected_reply_type=None,
+        current_goal="booking",
+    )
+    intent_decomp_state = IntentDecompositionState(
+        intent_decomp_payload={"intents": ["booking"]},
+        intent_decomp_intents=["booking"],
+        intent_decomp_primary="booking",
+        intent_decomp_secondary=[],
+        intent_decomp_service_query=None,
+        intent_decomp_multi=False,
+        intent_decomp_used=True,
+        intent_decomp_set={"booking"},
+        consult_intent=False,
+        consult_topic=None,
+        consult_question=None,
+        intent_queue_choice=None,
+        pending_intent_queue=None,
+        pending_expected_reply_type=None,
+        intent_queue_expected_next=None,
+        intent_queue_event=None,
+        info_class_intents=set(),
+        info_class_meta={},
+        basic_info_message=False,
+        allow_service_carryover=False,
+        consult_return_pending=False,
+        consult_return_reason=None,
+        consult_return_prompt=None,
+        booking_signal=True,
+        booking_block_meta=None,
+        booking_wants_flow=True,
+        booking_blocked=False,
+        booking_active=True,
+        booking_context={"active": True},
+        booking={"active": True},
+        class_carryover=None,
+        context=conversation.context,
+        context_manager={},
+        current_goal="booking",
+    )
+    policy_result = {
+        "ok": False,
+        "payload": None,
+        "error": "timeout",
+        "raw": None,
+        "attempted": True,
+        "elapsed_ms": 42.0,
+    }
+
+    with patch(
+        "app.routers.webhook.decision._apply_expected_reply_contract",
+        return_value=expected_reply_state,
+    ), patch(
+        "app.routers.webhook.decision._run_intent_decomposition",
+        return_value=intent_decomp_state,
+    ), patch(
+        "app.routers.webhook.decision.route_llm_policy_core",
+        return_value=policy_result,
+    ), patch(
+        "app.routers.webhook.decision._collect_plan_consult_refs",
+        return_value=([], None),
+    ), patch(
+        "app.routers.webhook.decision._handle_policy_escalation_gate",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.decision._handle_knowledge_safe_mode_gate",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.decision._handle_minimum_data_safe_mode_gate",
+        return_value=None,
+    ), patch(
+        "app.routers.webhook.decision._resolve_action",
+        side_effect=AssertionError("timeout degraded guard should return before _resolve_action"),
+    ), patch(
+        "app.routers.webhook._legacy._get_policy_handler", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.send_bot_response", return_value=True
+    ), patch(
+        "app.routers.webhook._legacy._find_message_by_message_id", return_value=saved_message
+    ), patch(
+        "app.routers.webhook._legacy._get_user_branch_preference", return_value=None
+    ), patch(
+        "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
+    ):
+        response = asyncio.run(
+            webhook_router._handle_webhook_payload(
+                payload,
+                db,
+                provided_secret=None,
+                enforce_secret=False,
+                skip_persist=True,
+                conversation_id=conversation_id,
+            )
+        )
+
+    assert response.success is True
+    assert response.bot_response == webhook_router.MSG_FACT_GUARD_CLARIFY
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("policy_core_mode") == "degraded_fallback"
+    assert meta.get("policy_core_degrade_reason") == "policy_error:timeout"
+    assert meta.get("action") == "reply"
+    assert meta.get("intent") == "policy_core_guard"
+    trace = conversation.context.get("decision_trace", [])
+    assert any(
+        entry.get("stage") == "llm_policy_plan_delta"
+        and entry.get("decision") == "override_event"
+        and entry.get("reason_code") == "timeout_degrade"
+        for entry in trace
+        if isinstance(entry, dict)
+    )
+
+
 def test_llm_policy_core_degraded_booking_guard_retries_with_llm_rescue_then_uses_calendar_tool(
     monkeypatch,
 ):
@@ -16998,6 +17197,11 @@ def test_llm_policy_core_degraded_booking_guard_retries_with_llm_rescue_then_use
     assert meta.get("intent") == "calendar.list_slots"
     assert meta.get("policy_core_mode") == "policy_core"
     assert meta.get("tool_action") == "calendar.list_slots"
+    plan_audit = meta.get("llm_policy_plan_audit", {})
+    assert plan_audit.get("plan_tool_action") == "calendar.list_slots"
+    assert plan_audit.get("final_tool_action") == "calendar.list_slots"
+    assert plan_audit.get("override_applied") is False
+    assert plan_audit.get("override_reason_missing") is False
     llm_policy = meta.get("llm_policy_core", {})
     assert llm_policy.get("rescue_attempted") is True
     assert llm_policy.get("rescue_applied") is True

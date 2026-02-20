@@ -18,9 +18,13 @@
   - Implemented runtime `plan -> final` audit contract for LLM policy core in `truffles-api/app/routers/webhook/decision.py` with persisted `llm_policy_plan_audit` and trace stage `llm_policy_plan_delta`.
   - Added deterministic override whitelist reason-codes and wired reason-coded audit events for policy rewrites (`collect/list_slots -> book_slot`, `info -> collect`, `service_query -> location`, style-reference normalization).
   - Extended regression coverage in `truffles-api/tests/test_message_endpoint.py` (new explicit location rewrite audit test + assertions for normalization reason-codes) and hardened trace retention for the new audit stage in `truffles-api/app/routers/webhook/trace.py`.
+  - Implemented Track B step-1 guardrails in `truffles-api/app/routers/webhook/decision.py`: timeout-degrade now uses controlled `clarify/handoff` path with `timeout_degrade` reason-code (no silent degraded collect), policy guard paths emit `plan->final` sync, and rescue-applied plans now refresh `plan_action/plan_tool_action` to avoid false deltas.
+  - Tightened `plan->final` audit payload: added `override_reason_missing` signal in `decision_meta.llm_policy_plan_audit` and `llm_policy_core.plan_final_audit` to make missing reason-codes visible instead of silently defaulting.
+  - Added regression tests for timeout-degrade reason-coded override and rescue-plan audit continuity; fixed test query helper for marketing join path (`db.query(MarketingCampaignDelivery, MarketingCampaign)`).
+  - Ran judge-all replay against canonical valid lock baseline (`booking-lock-20260216-a88-fast5`) and collected fresh evidence in `/tmp/booking_quality/booking-replay-20260220-a1b1`.
 - next:
-  - Continue TP Track B runtime refactor by moving remaining semantic post-tool rewrites to explicit clarify/handoff reason-codes.
-  - Run lock/replay LLM quality suite on merged head and publish KPI delta table with `plan->final` override counters.
+  - Continue TP Track B runtime refactor for remaining post-tool semantic rewrites outside the current policy-core guard scope.
+  - Stabilize lock-run scenario generation path (`booking_dialog_scenarios.py --mode llm`) and produce fresh lock on current head (latest attempt hung before scenario emission).
 - evidence:
   - pytest -q truffles-api/tests/test_demo_salon_eval.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_booking_chaos_dialogs.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_message_endpoint.py
   - 289 passed, 2 warnings
@@ -35,4 +39,17 @@
   - pytest -q truffles-api/tests/test_message_endpoint.py -k "llm_policy_core"
   - Result: `59 passed, 163 deselected` for `llm_policy_core` slice; targeted override suite `3 passed`; cross-check suite `4 passed`.
   - pytest -q truffles-api/tests/test_reasoning_core.py::test_reasoning_core_stage_snapshot_matches_trace truffles-api/tests/test_outbox_payload_contract.py::test_stage_order_snapshot_hash truffles-api/tests/test_webhook_trace.py
-- last_updated: 2026-02-20T05:45:00+05:00
+  - pytest -q truffles-api/tests/test_message_endpoint.py -k "degraded_booking_guard_uses_safe_collect or degraded_timeout_uses_clarify_with_reason_code or degraded_booking_guard_retries_with_llm_rescue_then_uses_calendar_tool or service_query_rewrites_to_location_with_reason_code"
+  - pytest -q truffles-api/tests/test_message_endpoint.py
+  - pytest -q truffles-api/tests/test_booking_chaos_dialogs.py
+  - pytest -q truffles-api/tests/test_booking_quality_response_guard.py
+  - pytest -q truffles-api/tests/test_demo_salon_eval.py
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18131 --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode all --fail-on-thresholds --run-id booking-lock-20260220-a1b1 (infra blocked: scenario generation hang in `booking_dialog_scenarios.py`, no summary produced)
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --base-url http://127.0.0.1:18131 --scenarios-file /tmp/booking_quality/booking-lock-20260216-a88-fast5/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-20260216-a88-fast5/summary.json --count 5 --tool-hooks auto --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression --max-failures 20 --run-id booking-replay-20260220-a1b1
+  - /tmp/booking_quality/booking-replay-20260220-a1b1/summary.json
+  - /tmp/booking_quality/booking-replay-20260220-a1b1/brief.md
+  - /tmp/booking_quality/booking-replay-20260220-a1b1/responses.jsonl
+  - /tmp/booking_quality/booking-replay-20260220-a1b1/trace_bundle.jsonl
+  - replay KPI: `strict_pass_rate=0.9844` (`+0.0469` vs baseline `0.9375`), `hard_fail_rate=0.0`, `infra_valid=true`, `semantic_valid=true`, `comparison_blocked=false`.
+  - `plan->final` counters (replay): `audits_total=53/64 turns`, `override_applied_total=0`, `override_reason_missing_total=0`.
+- last_updated: 2026-02-20T06:52:00+05:00
