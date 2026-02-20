@@ -11,6 +11,7 @@ from app.schemas.console import (
     ConsoleClientCreateRequest,
     ConsoleClientLifecycleActionRequest,
     ConsoleClientUpdateRequest,
+    ConsoleCompanyCreateRequest,
     ConsoleCompanyUpdateRequest,
 )
 from app.services.console_errors import ConsoleAPIError
@@ -94,6 +95,41 @@ async def test_update_client_updates_fields(monkeypatch):
     assert response.status == "active"
     assert response.company_id == company_id
     assert response.company_name == "Company"
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_company_records_client_scoped_audit(monkeypatch):
+    selected_client_id = uuid4()
+    context = _mock_context(
+        role="platform_admin",
+        accessible_clients=[SimpleNamespace(id=selected_client_id, company_id=uuid4())],
+        client_id=selected_client_id,
+    )
+    db = Mock()
+    audit_calls: list[dict] = []
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda *args, **kwargs: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "record_audit_event",
+        lambda *_args, **kwargs: audit_calls.append(kwargs),
+    )
+
+    response = await console_router.create_company(
+        request=Mock(),
+        body=ConsoleCompanyCreateRequest(name="New Co"),
+        db=db,
+    )
+
+    assert response.company is not None
+    assert response.company.name == "New Co"
+    assert response.company.id is not None
+    assert len(audit_calls) == 1
+    assert audit_calls[0]["client_id"] == selected_client_id
+    assert audit_calls[0]["actor"] == context.agent
+    assert audit_calls[0]["event_type"] == "company_created"
     db.commit.assert_called_once()
 
 

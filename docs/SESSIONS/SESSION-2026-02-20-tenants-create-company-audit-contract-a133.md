@@ -1,0 +1,23 @@
+# SESSION 2026-02-20-tenants-create-company-audit-contract-a133 — Session 2026-02-20-tenants-create-company-audit-contract-a133
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-20-tenants-create-company-audit-contract-a133.md
+- branch: feat/2026-02-20-tenants-create-company-audit-contract-a133
+- worktree: /home/zhan/worktrees/2026-02-20-tenants-create-company-audit-contract-a133
+- base_ref: origin/main
+- scope: Fix /tenants quick-create company 500 by aligning create_company audit client scope with DB contract and add regression tests.
+- done:
+  - Fixed create_company audit client scope + regression tests
+  - Session created.
+  - Updated `create_company` audit call to always include `client_id` from console context.
+  - Aligned `AuditEvent.client_id` ORM nullability with DB (`nullable=False`).
+  - Added regression test for `create_company` audit scope.
+  - Ran targeted compile/lint/tests.
+- next:
+  - Open PR and request merge
+  - Open PR and hand off for merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-20-tenants-create-company-audit-contract-a133.md
+  - docs/REPORTS/2026-02-20-tenants-create-company-audit-contract-a133.md
+- last_updated: 2026-02-20
