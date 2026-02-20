@@ -471,6 +471,64 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         run: npm run test:e2e:smoke -- e2e/login.spec.ts
 
+  console-e2e-owner-admin-live:
+    needs: [changes]
+    if: needs.changes.outputs.console_web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: console-web
+    env:
+      PLAYWRIGHT_BASE_URL: https://console.truffles.kz
+      PLAYWRIGHT_WEB_SERVER: "0"
+      KEYCLOAK_ISSUER: ${{ secrets.CONSOLE_KEYCLOAK_ISSUER || 'https://auth.truffles.kz/realms/truffles' }}
+      E2E_USERNAME: ${{ secrets.CONSOLE_OWNER_E2E_USERNAME }}
+      E2E_PASSWORD: ${{ secrets.CONSOLE_OWNER_E2E_PASSWORD }}
+      E2E_USE_STORAGE_STATE: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard owner/admin e2e secrets
+        run: |
+          if [ -z "${E2E_USERNAME}" ] || [ -z "${E2E_PASSWORD}" ]; then
+            echo "ERROR: Missing CONSOLE_OWNER_E2E_USERNAME/CONSOLE_OWNER_E2E_PASSWORD." >&2
+            echo "Owner/Admin acceptance lane is mandatory for console_web changes." >&2
+            exit 1
+          fi
+
+      - name: Preflight Keycloak discovery
+        run: |
+          issuer="${KEYCLOAK_ISSUER%/}"
+          url="${issuer}/.well-known/openid-configuration"
+          echo "Checking Keycloak discovery endpoint..."
+          for i in 1 2 3 4 5; do
+            if curl -fsS --connect-timeout 5 --max-time 10 "$url" >/dev/null; then
+              echo "Keycloak discovery OK"
+              exit 0
+            fi
+            echo "Keycloak discovery retry $i/5 failed; sleeping 3s"
+            sleep 3
+          done
+          echo "Keycloak discovery failed after retries"
+          exit 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: console-web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright owner/admin smoke (live)
+        run: npx playwright test e2e/owner-admin-business.spec.ts --project=chromium --no-deps --reporter=list
+
   console-contract-predeploy:
     needs: [changes]
     if: needs.changes.outputs.console_contracts == 'true'
@@ -717,12 +775,13 @@ jobs:
         needs.lint.result == 'success' &&
         needs.unit-tests.result == 'success' &&
         (needs.console-e2e.result == 'success' || needs.console-e2e.result == 'skipped') &&
+        (needs.console-e2e-owner-admin-live.result == 'success' || needs.console-e2e-owner-admin-live.result == 'skipped') &&
         (needs.console-contract-predeploy.result == 'success' || needs.console-contract-predeploy.result == 'skipped') &&
         (needs.long-eval.result == 'success' || needs.long-eval.result == 'skipped') &&
         (needs.asr-eval.result == 'success' || needs.asr-eval.result == 'skipped') &&
         needs.secret-scan.result == 'success'
       }}
-    needs: [changes, lint, unit-tests, console-e2e, console-contract-predeploy, core-eval, long-eval, asr-eval, secret-scan]
+    needs: [changes, lint, unit-tests, console-e2e, console-e2e-owner-admin-live, console-contract-predeploy, core-eval, long-eval, asr-eval, secret-scan]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

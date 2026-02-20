@@ -31,7 +31,7 @@
 - `console-web/playwright.config.ts` (если требуется отдельный project/fixture)
 - `.github/workflows/ci.yml`
 - `docs/runbooks/OWNER_ADMIN_POSTMERGE_24H.md`
-- `docs/REPORTS/<date>-wave5-owner-admin-acceptance-lane-a88.md`
+- `docs/REPORTS/2026-02-20-wave5-owner-admin-acceptance-lane-a500.md`
 - `STATE.md`
 
 ## Plan
@@ -57,7 +57,7 @@
 - local playwright outputs for owner/admin + platform_admin suites
 - CI run URL + failed/passed job/step details
 - updated runbook section for owner/admin lane
-- `docs/REPORTS/<date>-wave5-owner-admin-acceptance-lane-a88.md`
+- `docs/REPORTS/2026-02-20-wave5-owner-admin-acceptance-lane-a500.md`
 - `STATE.md` FACT/GAP update
 
 ## Rollback

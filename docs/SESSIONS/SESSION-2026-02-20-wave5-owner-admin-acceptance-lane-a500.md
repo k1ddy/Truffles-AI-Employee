@@ -1,0 +1,21 @@
+# SESSION 2026-02-20-wave5-owner-admin-acceptance-lane-a500 — Session 2026-02-20-wave5-owner-admin-acceptance-lane-a500
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-18-wave5-owner-admin-acceptance-lane-a88.md
+- branch: feat/2026-02-20-wave5-owner-admin-acceptance-lane-a500
+- worktree: /home/zhan/worktrees/2026-02-20-wave5-owner-admin-acceptance-lane-a500
+- base_ref: origin/main
+- scope: Wave 5 owner/admin acceptance lane (dedicated CI gate + runbook/state/report sync).
+- done:
+  - Session created.
+  - Added mandatory `console-e2e-owner-admin-live` job to CI with dedicated owner/admin credentials contract.
+  - Wired owner/admin lane into `build-push` deploy gate.
+  - Updated owner/admin runbook + report + STATE facts/gaps.
+  - Validated local checks (`workflow guard`, `lint`, `build`, Playwright test listing).
+- next:
+  - Open PR and collect first CI run URL for runtime closure evidence.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-18-wave5-owner-admin-acceptance-lane-a88.md
+  - docs/REPORTS/2026-02-20-wave5-owner-admin-acceptance-lane-a500.md
+- last_updated: 2026-02-20

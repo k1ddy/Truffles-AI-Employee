@@ -20,6 +20,17 @@ Required evidence
 - Impact compare against baseline (`--baseline`).
 - Session/report запись с абсолютными timestamp.
 
+CI owner/admin acceptance lane (mandatory for `console_web` changes)
+- Workflow job: `console-e2e-owner-admin-live` in `.github/workflows/ci.yml`.
+- Required secrets:
+  - `CONSOLE_OWNER_E2E_USERNAME`
+  - `CONSOLE_OWNER_E2E_PASSWORD`
+- Run command (inside CI job):
+  - `npx playwright test e2e/owner-admin-business.spec.ts --project=chromium --no-deps --reporter=list`
+- Contract:
+  - Missing owner/admin credentials is a hard fail (not skip).
+  - `build-push` on main now waits for owner/admin lane result (`success|skipped`).
+
 ## 0) Integrity preflight (Wave 0.1 gate)
 
 Перед `T+0` запуском зафиксировать data-integrity precondition:
