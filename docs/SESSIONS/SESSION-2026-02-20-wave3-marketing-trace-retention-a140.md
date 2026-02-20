@@ -1,16 +1,24 @@
 # SESSION 2026-02-20-wave3-marketing-trace-retention-a140 — Session 2026-02-20-wave3-marketing-trace-retention-a140
 
-- status: active
+- status: done
 - owner: Top Architect / Brain / Hands
 - task_package: docs/TASK_PACKAGES/TP-2026-02-20-wave3-marketing-trace-retention-a140.md
 - branch: feat/2026-02-20-wave3-marketing-trace-retention-a140
 - worktree: /home/zhan/worktrees/2026-02-20-wave3-marketing-trace-retention-a140
 - base_ref: origin/main
-- scope: <fill scope>
+- scope: Close Wave 3 runtime GAP for `marketing_reply_context` trace retention and confirm post-merge behavior on runtime path.
 - done:
   - Session created.
+  - Merge `PR #765` confirmed on `main` (`456a099b7bb24c9c4c2148684a62860798d276d9`).
+  - Runtime probes executed (`/webhook/demo_salon` local + `https://api.truffles.kz/webhook/demo_salon`) with markers `MKLOCALD-1771552162-13224` and `MKEXTD-1771552253-11561`.
+  - SQL evidence confirms `decision_meta.marketing_reply_context=true` and `decision_trace` stage `marketing_reply_context` preserved at bounded trace length `40`.
 - next:
-  - Fill Task Package and execute plan.
+  - None (session closed after evidence sync).
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-wave3-marketing-trace-retention-a140.md
-- last_updated: 2026-02-20
+  - /tmp/marketing-live-20260220-traceclose/sql_MKLOCALD-1771552162-13224_summary.tsv
+  - /tmp/marketing-live-20260220-traceclose/sql_MKEXTD-1771552253-11561_summary.tsv
+  - /tmp/marketing-live-20260220-traceclose/sql_MKLOCALD-1771552162-13224_trace_marketing_stage.json
+  - /tmp/marketing-live-20260220-traceclose/sql_MKEXTD-1771552253-11561_trace_marketing_stage.json
+  - /tmp/marketing-live-20260220-traceclose/sql_latest20_marketing_reply_context_trace.tsv
+- last_updated: 2026-02-20T01:56:00Z
