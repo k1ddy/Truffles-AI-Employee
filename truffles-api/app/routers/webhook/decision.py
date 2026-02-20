@@ -4040,6 +4040,15 @@ def _normalize_policy_override_reason_code(reason_code: str | None) -> str:
     return POLICY_OVERRIDE_REASON_DEFAULT
 
 
+def _audit_policy_override_reason_code(reason_code: object | None) -> str | None:
+    if not isinstance(reason_code, str):
+        return None
+    normalized = reason_code.strip().casefold()
+    if normalized in POLICY_OVERRIDE_REASON_CODES:
+        return normalized
+    return None
+
+
 def _build_policy_plan_audit(
     *,
     plan_action: str | None,
@@ -4062,12 +4071,13 @@ def _build_policy_plan_audit(
 
     cleaned_events: list[dict[str, Any]] = []
     override_reason_codes: list[str] = []
+    event_missing_reason = False
     for event in override_events or []:
         if not isinstance(event, dict):
             continue
-        reason_code = _normalize_policy_override_reason_code(
-            event.get("reason_code") if isinstance(event.get("reason_code"), str) else None
-        )
+        reason_code = _audit_policy_override_reason_code(event.get("reason_code"))
+        if reason_code is None:
+            event_missing_reason = True
         cleaned_event: dict[str, Any] = {"reason_code": reason_code}
         for key in ("reason", "from_action", "from_tool_action", "to_action", "to_tool_action"):
             value = event.get(key)
@@ -4077,7 +4087,14 @@ def _build_policy_plan_audit(
         if reason_code not in override_reason_codes:
             override_reason_codes.append(reason_code)
 
-    override_reason_missing = bool(override_applied and not override_reason_codes)
+    override_reason_missing = bool(
+        override_applied
+        and (
+            not cleaned_events
+            or not override_reason_codes
+            or event_missing_reason
+        )
+    )
 
     return {
         "plan_action": plan_action,
@@ -8456,6 +8473,7 @@ async def _handle_webhook_payload(
     policy_plan_action = None
     policy_plan_tool_action = None
     policy_override_events: list[dict[str, Any]] = []
+    policy_override_reason_missing_detected = False
 
     def _sync_policy_plan_audit(*, emit_trace: bool = False) -> None:
         if not policy_plan_action and not policy_plan_tool_action:
@@ -8488,6 +8506,9 @@ async def _handle_webhook_payload(
             updates["llm_policy_override_reason_missing"] = bool(
                 plan_audit.get("override_reason_missing")
             )
+            updates["llm_policy_override_reason_missing_detected"] = bool(
+                policy_override_reason_missing_detected
+            )
             _update_message_decision_metadata(saved_message, updates)
         if emit_trace:
             trace_decision = "match"
@@ -8513,12 +8534,12 @@ async def _handle_webhook_payload(
 
     def _register_policy_override(
         *,
-        reason_code: str,
+        reason_code: str | None,
         reason: str,
         from_action: str | None,
         from_tool_action: str | None,
     ) -> None:
-        normalized_reason_code = _normalize_policy_override_reason_code(reason_code)
+        normalized_reason_code = _audit_policy_override_reason_code(reason_code)
         policy_override_events.append(
             {
                 "reason_code": normalized_reason_code,
@@ -9251,6 +9272,33 @@ async def _handle_webhook_payload(
                 else:
                     policy_pack_refs = resolved_policy_refs or []
 
+            if policy_valid and (policy_plan_action or policy_plan_tool_action):
+                plan_audit_precheck = _build_policy_plan_audit(
+                    plan_action=policy_plan_action,
+                    plan_tool_action=policy_plan_tool_action,
+                    final_action=policy_action,
+                    final_tool_action=policy_tool_action,
+                    override_events=policy_override_events,
+                )
+                if plan_audit_precheck.get("override_reason_missing"):
+                    policy_valid = False
+                    policy_validation_error = "override_reason_missing"
+                    policy_override_reason_missing_detected = True
+                    _record_decision_trace(
+                        conversation,
+                        {
+                            "stage": "llm_policy_plan_delta",
+                            "decision": "override_missing_reason_guard_block",
+                            "plan_action": plan_audit_precheck.get("plan_action"),
+                            "plan_tool_action": plan_audit_precheck.get("plan_tool_action"),
+                            "final_action": plan_audit_precheck.get("final_action"),
+                            "final_tool_action": plan_audit_precheck.get("final_tool_action"),
+                            "override_reason_codes": plan_audit_precheck.get("override_reason_codes")
+                            or [],
+                            "override_reason_missing": True,
+                        },
+                    )
+
         consult_normalized_to_info = bool(
             policy_valid
             and policy_tool_action == "consult"
@@ -9279,6 +9327,7 @@ async def _handle_webhook_payload(
             "intent": policy_intent,
             "validated": policy_valid,
             "validation_error": policy_validation_error,
+            "override_reason_missing_detected": policy_override_reason_missing_detected,
             "low_confidence_ok": policy_low_confidence_ok,
             "pack_refs_dropped": policy_pack_refs_dropped,
             "action_normalized": policy_action_normalized,
@@ -9324,6 +9373,7 @@ async def _handle_webhook_payload(
                 "rescue_elapsed_ms": policy_rescue_elapsed_ms,
                 "validated": policy_valid,
                 "validation_error": policy_validation_error,
+                "override_reason_missing_detected": policy_override_reason_missing_detected,
                 "low_confidence_ok": policy_low_confidence_ok,
                 "pack_refs_dropped": policy_pack_refs_dropped,
                 "action_normalized": policy_action_normalized,
@@ -9663,6 +9713,45 @@ async def _handle_webhook_payload(
                         "pending_guard": "policy_core_degraded",
                     },
                 )
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+
+        if policy_override_reason_missing_detected:
+            _apply_policy_guard_override(
+                final_action="collect",
+                final_tool_action="collect",
+                reason_code="contract_validation_failure",
+                reason="policy_core_override_reason_missing_clarify",
+            )
+            _sync_policy_plan_audit(emit_trace=True)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_core_guard",
+                    "decision": "override_missing_reason_clarify",
+                    "state": conversation.state,
+                    "mode": policy_core_mode,
+                    "reason": policy_core_degrade_reason,
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="reply",
+                intent="policy_core_guard",
+                source="llm_policy_core",
+                fast_intent=False,
+            )
+            bot_response, sent = _send_and_save(MSG_FACT_GUARD_CLARIFY)
+            result_message = (
+                "Policy core override missing reason clarify sent"
+                if sent
+                else "Policy core override missing reason clarify failed"
+            )
             db.commit()
             return WebhookResponse(
                 success=True,
