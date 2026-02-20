@@ -1219,6 +1219,7 @@ def _build_console_outbox_text_payload(
     source: str,
     now: datetime,
 ) -> dict:
+    # tenant_context.source follows tenancy contract enum; keep console origin separately.
     return {
         "schema_version": "outbox.v1",
         "event_type": "whatsapp.send_text",
@@ -1230,7 +1231,8 @@ def _build_console_outbox_text_payload(
             "branch_id": str(branch_id) if branch_id else None,
             "client_slug": client_slug,
             "instance_id": instance_id,
-            "source": source,
+            "source": "system",
+            "origin_source": source,
         },
         "conversation_id": str(conversation_id) if conversation_id else None,
         "channel": "whatsapp",

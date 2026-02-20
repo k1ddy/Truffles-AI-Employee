@@ -6,11 +6,25 @@
 - branch: feat/2026-02-20-outreach-human-lock-a200
 - worktree: /home/zhan/worktrees/2026-02-20-outreach-human-lock-a200
 - base_ref: origin/main
-- scope: <fill scope>
+- scope: Console outreach by phone/JID + per-client human lock, webhook silent gate, outbox-first send path, RBAC/UI/OpenAPI, and staging live-check evidence.
 - done:
-  - Session created.
+  - Implemented outreach + human lock backend/frontend/contract/test wave and merged origin/main into branch.
+  - Applied DB migration `033_add_conversation_human_locks.sql` in runtime DB (`pending=0`).
+  - Opened PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/777
+  - Ran staging live-check on temporary branch container (`truffles-api-a200-livecheck`, port `18150`):
+    - outreach queued and lock activated;
+    - locked inbound returned `bot_response=null`;
+    - release restored bot replies;
+    - outreach outbox row delivered `SENT`.
+  - Fixed post-livecheck blocker: outbox tenant context contract mismatch (`tenant_context.source`) and added regression tests.
+  - Added trace retention guard for `routing:human_lock_silent` and test.
 - next:
-  - Fill Task Package and execute plan.
+  - Resolve GAP: persisted `decision_trace` currently does not show `human_lock_silent` entry in DB despite locked inbound response path.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-outreach-human-lock-a200.md
+  - /tmp/outreach_hlock_livecheck_18150_fix2_20260220_152809/01_outreach_response.json
+  - /tmp/outreach_hlock_livecheck_18150_fix2_20260220_152809/04_locked_inbound_webhook_response.json
+  - /tmp/outreach_hlock_livecheck_18150_fix2_20260220_152809/09_released_inbound_webhook_response.json
+  - /tmp/outreach_hlock_livecheck_18150_fix2_20260220_152809/11_outbox_row_for_outreach.tsv
+  - /tmp/outreach_hlock_livecheck_18150_fix2_20260220_152809/15_human_lock_trace_rows.tsv
 - last_updated: 2026-02-20

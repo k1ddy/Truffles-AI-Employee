@@ -110,7 +110,8 @@ async def test_send_outreach_message_enqueues_outbox_and_sets_pause(monkeypatch)
     assert response.lock_until is not None
     assert captured["payload_json"]["event_type"] == "whatsapp.send_text"
     assert captured["payload_json"]["payload"]["text"] == "Здравствуйте"
-    assert captured["payload_json"]["tenant_context"]["source"] == "console_outreach"
+    assert captured["payload_json"]["tenant_context"]["source"] == "system"
+    assert captured["payload_json"]["tenant_context"]["origin_source"] == "console_outreach"
 
 
 @pytest.mark.asyncio
@@ -181,7 +182,8 @@ async def test_send_manager_message_enqueues_outbox_when_worker_enabled(monkeypa
     assert case.first_response_at is not None
     assert captured["payload_json"]["event_type"] == "whatsapp.send_text"
     assert captured["payload_json"]["payload"]["text"] == "Здравствуйте"
-    assert captured["payload_json"]["tenant_context"]["source"] == "console_message"
+    assert captured["payload_json"]["tenant_context"]["source"] == "system"
+    assert captured["payload_json"]["tenant_context"]["origin_source"] == "console_message"
 
 
 @pytest.mark.asyncio
