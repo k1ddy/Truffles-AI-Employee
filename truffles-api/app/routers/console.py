@@ -14214,6 +14214,8 @@ async def create_company(
     db.add(company)
     record_audit_event(
         db,
+        actor=context.agent,
+        client_id=context.client.id,
         actor_id=context.agent.id,
         actor_name=context.agent.name,
         event_type="company_created",
