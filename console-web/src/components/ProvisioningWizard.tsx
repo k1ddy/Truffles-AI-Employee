@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -823,6 +823,15 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         toast.error(message);
         reportInlineError({ code, message });
     };
+    const reportProvisioningError = useCallback(
+        (error: unknown, operation: string, endpoint: string) =>
+            reportError(error, {
+                includeProvisioningGuidance: true,
+                operation,
+                endpoint,
+            }),
+        [reportError],
+    );
 
     const { data: meData } = useQuery({
         queryKey: ["console-me"],
@@ -1392,21 +1401,33 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
 
     useEffect(() => {
         if (capabilitiesError) {
-            reportError(capabilitiesError);
+            reportProvisioningError(
+                capabilitiesError,
+                "загрузка capabilities",
+                "GET /api/proxy/admin/capabilities",
+            );
         }
-    }, [capabilitiesError, reportError]);
+    }, [capabilitiesError, reportProvisioningError]);
 
     useEffect(() => {
         if (onboardingContractError) {
-            reportError(onboardingContractError);
+            reportProvisioningError(
+                onboardingContractError,
+                "загрузка onboarding contract",
+                "GET /api/proxy/admin/onboarding/contract",
+            );
         }
-    }, [onboardingContractError, reportError]);
+    }, [onboardingContractError, reportProvisioningError]);
 
     useEffect(() => {
         if (referencePackError) {
-            reportError(referencePackError);
+            reportProvisioningError(
+                referencePackError,
+                "загрузка reference pack",
+                "GET /api/proxy/admin/reference-packs",
+            );
         }
-    }, [referencePackError, reportError]);
+    }, [referencePackError, reportProvisioningError]);
 
     useEffect(() => {
         if (capabilitiesTouched || !capabilitiesData) {
@@ -1492,7 +1513,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.success("Компания создана");
         },
         onError: (error) => {
-            reportError(error);
+            reportProvisioningError(error, "создание компании", "POST /api/proxy/admin/companies");
         },
     });
 
@@ -1508,7 +1529,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.success("Клиент создан");
         },
         onError: (error) => {
-            reportError(error);
+            reportProvisioningError(error, "создание клиента", "POST /api/proxy/admin/clients");
         },
     });
 
@@ -1533,7 +1554,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             );
         },
         onError: (error) => {
-            reportError(error);
+            reportProvisioningError(error, "создание филиала", "POST /api/proxy/admin/branches");
         },
     });
 
@@ -1556,7 +1577,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 reportValidationError("Сначала создайте филиал");
                 return;
             }
-            reportError(error);
+            reportProvisioningError(error, "обновление филиала", "PATCH /api/proxy/admin/branches/:id");
         },
     });
 
@@ -1579,7 +1600,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 reportValidationError("Сначала создайте филиал");
                 return;
             }
-            reportError(error);
+            reportProvisioningError(error, "подтверждение go-live", "POST /api/proxy/admin/branches/:id/go-live/approve");
         },
     });
 
@@ -1602,7 +1623,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 reportValidationError("Сначала создайте филиал");
                 return;
             }
-            reportError(error);
+            reportProvisioningError(error, "отклонение go-live", "POST /api/proxy/admin/branches/:id/go-live/reject");
         },
     });
 
@@ -1625,7 +1646,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 reportValidationError("Сначала создайте филиал");
                 return;
             }
-            reportError(error);
+            reportProvisioningError(error, "waiver go-live", "POST /api/proxy/admin/branches/:id/go-live/waive");
         },
     });
 
@@ -1642,7 +1663,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.success("Пользователь добавлен");
         },
         onError: (error) => {
-            reportError(error);
+            reportProvisioningError(error, "создание пользователя", "POST /api/proxy/admin/agents");
         },
     });
 
@@ -1659,7 +1680,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.success("Capabilities сохранены");
         },
         onError: (error) => {
-            reportError(error);
+            reportProvisioningError(error, "сохранение capabilities", "PATCH /api/proxy/admin/capabilities");
         },
     });
 
@@ -1676,7 +1697,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.success("Onboarding contract сохранён");
         },
         onError: (error) => {
-            reportError(error);
+            reportProvisioningError(error, "сохранение onboarding contract", "PATCH /api/proxy/admin/onboarding/contract");
         },
     });
 
@@ -1696,7 +1717,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.success("Reference pack обновлён");
         },
         onError: (error) => {
-            reportError(error);
+            reportProvisioningError(error, "обновление reference pack", "PUT /api/proxy/admin/reference-packs/:domain_slug");
         },
     });
 
@@ -1754,7 +1775,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             toast.success("Авто-онбординг выполнен");
         },
         onError: (error) => {
-            reportError(error);
+            reportProvisioningError(error, "запуск автопроцесса", "POST /api/proxy/admin/onboarding/autopilot");
         },
     });
 
@@ -1771,7 +1792,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             setIntegrationWebhookUrl(data.webhook_url ?? "");
         },
         onError: (error) => {
-            reportError(error);
+            reportProvisioningError(error, "получение webhook secret", "GET /api/proxy/admin/branches/webhook-secret");
         },
     });
 
@@ -1806,7 +1827,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 reportValidationError("Сначала создайте филиал");
                 return;
             }
-            reportError(error);
+            reportProvisioningError(error, "переход к следующему шагу onboarding", "POST /api/proxy/onboarding/advance");
         },
     });
 

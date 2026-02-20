@@ -24,6 +24,36 @@ type ParsedErrorShape = {
     trace_id?: string;
 } | undefined;
 
+type InlineErrorReportOptions = {
+    includeProvisioningGuidance?: boolean;
+    operation?: string;
+    endpoint?: string;
+};
+
+const PROVISIONING_SERVER_ERROR_CODES = new Set([
+    "SERVER_ERROR",
+    "DATABASE_ERROR",
+    "UPSTREAM_ERROR",
+    "UPSTREAM_INVALID_RESPONSE",
+    "PROXY_ERROR",
+    "UNKNOWN_ERROR",
+]);
+
+function buildProvisioningGuidanceMessage(
+    parsed: ParsedErrorShape,
+    options?: InlineErrorReportOptions,
+): string {
+    const operation = options?.operation?.trim() || "операция provisioning";
+    const endpoint = options?.endpoint?.trim() ? ` (${options.endpoint?.trim()})` : "";
+    const traceValue = parsed?.trace_id?.trim() || "n/a";
+    return [
+        `Что делать сейчас для «${operation}»${endpoint}:`,
+        "1) Проверьте контекст компании/клиента/филиала и обязательные поля.",
+        "2) Повторите действие один раз после обновления страницы.",
+        `3) Если ошибка повторяется: передайте в OPS trace=${traceValue} и время ошибки.`,
+    ].join(" ");
+}
+
 export function useInlineErrorSummary(limit = 8) {
     const { handleError } = useErrorHandler();
     const handleErrorRef = useRef(handleError);
@@ -54,13 +84,24 @@ export function useInlineErrorSummary(limit = 8) {
         return next;
     }, [limit]);
 
-    const reportError = useCallback((error: unknown): ParsedErrorShape => {
+    const reportError = useCallback((error: unknown, options?: InlineErrorReportOptions): ParsedErrorShape => {
         const parsed = handleErrorRef.current(error) as ParsedErrorShape;
         appendError({
             code: parsed?.code ?? "UNKNOWN_ERROR",
             message: parsed?.message ?? "Unexpected error",
             traceId: parsed?.trace_id ?? "",
         });
+        if (
+            options?.includeProvisioningGuidance
+            && parsed?.code
+            && PROVISIONING_SERVER_ERROR_CODES.has(parsed.code)
+        ) {
+            appendError({
+                code: "PROVISIONING_NEXT_STEP",
+                message: buildProvisioningGuidanceMessage(parsed, options),
+                traceId: parsed?.trace_id ?? "",
+            });
+        }
         return parsed;
     }, [appendError]);
 
