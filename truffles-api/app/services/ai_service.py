@@ -1070,9 +1070,9 @@ def get_conversation_history(db: Session, conversation_id: UUID, limit: int = MA
 
     history = []
     for msg in messages:
-        role = "assistant" if msg.role == "assistant" else "user"
-        if msg.role == "system":
-            continue  # Skip system messages
+        role = _map_history_role(getattr(msg, "role", None))
+        if role is None:
+            continue
         history.append({"role": role, "content": msg.content})
 
     if not history:
@@ -1108,18 +1108,27 @@ def _build_compact_history_summary(messages: List[Message]) -> str:
     summary_lines: list[str] = []
     max_lines = max(1, HIERARCHICAL_MEMORY_SUMMARY_MAX_LINES)
     for msg in messages:
-        role_value = str(getattr(msg, "role", "") or "").strip().casefold()
-        if role_value == "system":
+        role = _map_history_role(getattr(msg, "role", None))
+        if role is None:
             continue
         content = _trim_text(str(getattr(msg, "content", "") or "").strip(), 120)
         if not content:
             continue
-        role_prefix = "A" if role_value == "assistant" else "U"
+        role_prefix = "A" if role == "assistant" else "U"
         summary_lines.append(f"{role_prefix}: {content}")
     if not summary_lines:
         return ""
     compact = " | ".join(summary_lines[-max_lines:])
     return _trim_text(compact, HIERARCHICAL_MEMORY_SUMMARY_MAX_CHARS)
+
+
+def _map_history_role(value: str | None) -> str | None:
+    role = str(value or "").strip().casefold()
+    if not role or role == "system":
+        return None
+    if role in {"assistant", "manager"}:
+        return "assistant"
+    return "user"
 
 
 def normalize_for_matching(text: str) -> str:
