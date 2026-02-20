@@ -198,9 +198,9 @@ from app.schemas.console import (
     ConsoleOutboxListResponse,
     ConsoleOutboxRetryRequest,
     ConsoleOutboxRetryResponse,
-    ConsoleOwnerMode,
     ConsoleOutreachMessageRequest,
     ConsoleOutreachMessageResponse,
+    ConsoleOwnerMode,
     ConsoleOwnerOperationApplyRequest,
     ConsoleOwnerOperationApplyResponse,
     ConsoleOwnerOperationImpactResponse,
@@ -256,6 +256,7 @@ from app.services.agent_link_service import build_telegram_deep_link, create_age
 from app.services.alert_service import alert_warning
 from app.services.audit_service import AuditEvent, record_audit_event
 from app.services.capabilities_service import merge_capabilities, payload_to_dict
+from app.services.chatflow_service import get_instance_id, send_bot_response
 from app.services.console_auth import ConsoleAuthContext, get_console_context, require_console_permission
 from app.services.console_confirmations import create_confirmation, mark_confirmation_used, require_confirmation
 from app.services.console_errors import ConsoleAPIError, build_console_error_payload
@@ -306,7 +307,6 @@ from app.services.console_owner_admin import (
 from app.services.console_owner_admin import (
     safe_int as _safe_int,
 )
-from app.services.chatflow_service import get_instance_id, send_bot_response
 from app.services.escalation_service import resolve_telegram_routing
 from app.services.human_lock_service import (
     get_active_human_lock,

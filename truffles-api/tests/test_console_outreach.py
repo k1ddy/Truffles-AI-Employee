@@ -99,7 +99,7 @@ async def test_send_outreach_message_enqueues_outbox_and_sets_pause(monkeypatch)
             pause_bot_minutes=30,
             pause_reason="manual_pause",
         ),
-        request=Mock(headers={"Idempotency-Key": "idem-outreach-1"}),
+        request=Mock(headers={"Idempotency-Key": "idem"}),
         db=db,
     )
 
@@ -172,7 +172,7 @@ async def test_send_manager_message_enqueues_outbox_when_worker_enabled(monkeypa
     response = await console_router.send_manager_message(
         conversation_id=conversation.id,
         body=ConsoleManagerMessageRequest(content="Здравствуйте"),
-        request=Mock(headers={"Idempotency-Key": "idem-manager-1"}),
+        request=Mock(headers={"Idempotency-Key": "idem"}),
         db=db,
     )
 
