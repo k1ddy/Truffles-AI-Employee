@@ -22,9 +22,14 @@
   - Tightened `plan->final` audit payload: added `override_reason_missing` signal in `decision_meta.llm_policy_plan_audit` and `llm_policy_core.plan_final_audit` to make missing reason-codes visible instead of silently defaulting.
   - Added regression tests for timeout-degrade reason-coded override and rescue-plan audit continuity; fixed test query helper for marketing join path (`db.query(MarketingCampaignDelivery, MarketingCampaign)`).
   - Ran judge-all replay against canonical valid lock baseline (`booking-lock-20260216-a88-fast5`) and collected fresh evidence in `/tmp/booking_quality/booking-replay-20260220-a1b1`.
+  - Implemented infra hardening for scenario generation in `ops/diagnose.py` and `scripts/booking_dialog_scenarios.py`: API keys no longer passed via CLI args, timeout logs redact sensitive flags, scenario timeout budget auto-scales by LLM request profile, generator exposes explicit LLM batch/attempt/request-timeout controls, and progress breadcrumbs are emitted for timeout triage.
+  - Stabilized scenario contract reliability in generator by enforcing `check_booking -> confirm` ordering when booking coverage is requested (prevents random `check_confirm_sequence_missing` invalid runs).
+  - Added and passed focused infra tests for run-command redaction, dynamic scenario timeout budgeting, and scenario ordering guarantees (`15 passed` across diagnose/script test modules).
+  - Reproduced timeout failure path with clean/no-secret reason and validated successful `count=10` LLM dry-run artifact generation after infra fix (`debug-infra-default-a1`).
 - next:
   - Continue TP Track B runtime refactor for remaining post-tool semantic rewrites outside the current policy-core guard scope.
-  - Stabilize lock-run scenario generation path (`booking_dialog_scenarios.py --mode llm`) and produce fresh lock on current head (latest attempt hung before scenario emission).
+  - Execute fresh canonical lock-run (`judge-mode all`, fail-on-thresholds) on current `main` head and then replay vs this lock baseline.
+  - Wire structured scenario-generation progress into llm-quality summary/warnings for faster infra triage without reading raw stderr.
 - evidence:
   - pytest -q truffles-api/tests/test_demo_salon_eval.py truffles-api/tests/test_master_info_flow.py truffles-api/tests/test_booking_chaos_dialogs.py truffles-api/tests/test_booking_quality_response_guard.py truffles-api/tests/test_message_endpoint.py
   - 289 passed, 2 warnings
@@ -52,4 +57,13 @@
   - /tmp/booking_quality/booking-replay-20260220-a1b1/trace_bundle.jsonl
   - replay KPI: `strict_pass_rate=0.9844` (`+0.0469` vs baseline `0.9375`), `hard_fail_rate=0.0`, `infra_valid=true`, `semantic_valid=true`, `comparison_blocked=false`.
   - `plan->final` counters (replay): `audits_total=53/64 turns`, `override_applied_total=0`, `override_reason_missing_total=0`.
-- last_updated: 2026-02-20T06:52:00+05:00
+  - python3 -m py_compile ops/diagnose.py scripts/booking_dialog_scenarios.py
+  - ruff check ops/diagnose.py scripts/booking_dialog_scenarios.py truffles-api/tests/test_diagnose_run_command.py truffles-api/tests/test_booking_dialog_scenarios_script.py
+  - pytest -q truffles-api/tests/test_diagnose_run_command.py truffles-api/tests/test_booking_dialog_scenarios_script.py
+  - pytest -q truffles-api/tests/test_booking_quality_openai_key_resolution.py truffles-api/tests/test_booking_quality_status_gate.py truffles-api/tests/test_llm_quality_runtime_profiles.py truffles-api/tests/test_booking_quality_scenario_contract_gate.py
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --batch-size 5 --retry-count 0 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode off --dry-run --scenario-gen-timeout 60 --scenario-llm-batch-size 2 --scenario-llm-max-attempts 1 --scenario-llm-request-timeout 35 --scenario-progress-stderr --run-id debug-infra-timeout-60-a1
+  - timeout failure normalized as `scenario generation failed (TimeoutError: The read operation timed out)`; no API key leakage in stderr/command note.
+  - TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --batch-size 5 --retry-count 2 --retry-backoff 0.6 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode off --dry-run --scenario-progress-stderr --run-id debug-infra-default-a1
+  - /tmp/booking_quality/debug-infra-default-a1/summary.json
+  - /tmp/booking_quality/debug-infra-default-a1/brief.md
+- last_updated: 2026-02-20T08:15:00+05:00

@@ -9,6 +9,7 @@ import mimetypes
 import os
 import random
 import re
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -654,6 +655,21 @@ def _ensure_required_tags(
                 turns.insert(0, formatted)
             else:
                 turns.append(formatted)
+    check_idx = next(
+        (idx for idx, turn in enumerate(turns) if "check_booking" in (turn.get("tags") or [])),
+        None,
+    )
+    confirm_idx = next(
+        (idx for idx, turn in enumerate(turns) if "confirm" in (turn.get("tags") or [])),
+        None,
+    )
+    if (
+        check_idx is not None
+        and confirm_idx is not None
+        and check_idx > confirm_idx
+    ):
+        check_turn = turns.pop(check_idx)
+        turns.insert(confirm_idx, check_turn)
     return _prune_turns(turns, max_turns, set(required_tags))
 
 def _normalize_expect_token(token: Any, allowed: set[str] | None) -> str | None:
@@ -931,6 +947,7 @@ def _call_openai(
     api_key: str,
     model: str,
     base_url: str,
+    request_timeout: float = 40.0,
     max_tokens: int = 1800,
 ) -> str:
     payload = {
@@ -951,7 +968,7 @@ def _call_openai(
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=40) as resp:
+        with urllib.request.urlopen(req, timeout=max(5.0, float(request_timeout))) as resp:
             body = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raw = ""
@@ -1007,7 +1024,14 @@ def _parse_llm_json(content: str, *, repair_fn=None) -> dict[str, Any]:
         raise
 
 
-def _repair_llm_json(content: str, *, api_key: str, model: str, base_url: str) -> str | None:
+def _repair_llm_json(
+    content: str,
+    *,
+    api_key: str,
+    model: str,
+    base_url: str,
+    request_timeout: float,
+) -> str | None:
     if not content:
         return None
     payload = content
@@ -1020,7 +1044,13 @@ def _repair_llm_json(content: str, *, api_key: str, model: str, base_url: str) -
         f"Broken JSON:\n{payload}"
     )
     try:
-        return _call_openai(prompt, api_key=api_key, model=model, base_url=base_url)
+        return _call_openai(
+            prompt,
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            request_timeout=request_timeout,
+        )
     except Exception:
         return None
 
@@ -1039,15 +1069,43 @@ def _generate_llm_dialogs(
     api_key: str,
     coverage: list[str],
     seed: int | None,
+    llm_batch_size: int,
+    llm_max_attempts: int,
+    llm_request_timeout: float,
+    llm_attempt_backoff: float,
+    progress_stderr: bool,
 ) -> list[dict[str, Any]]:
+    def _emit_progress(payload: dict[str, Any]) -> None:
+        if not progress_stderr:
+            return
+        line = {"stage": "booking_scenario_llm_progress"}
+        line.update(payload)
+        sys.stderr.write(json.dumps(line, ensure_ascii=False) + "\n")
+        sys.stderr.flush()
+
     dialogs: list[dict[str, Any]] = []
     next_dialog_id = 1
-    batch_size = max(1, int(os.environ.get("BOOKING_SCENARIO_LLM_BATCH_SIZE", "2")))
-    max_attempts = max(1, int(os.environ.get("BOOKING_SCENARIO_LLM_MAX_ATTEMPTS", "3")))
+    batch_size = max(1, int(llm_batch_size))
+    max_attempts = max(1, int(llm_max_attempts))
+    request_timeout = max(5.0, float(llm_request_timeout))
+    attempt_backoff = max(0.0, float(llm_attempt_backoff))
 
+    batch_index = 0
     while len(dialogs) < count:
+        batch_index += 1
         remaining = count - len(dialogs)
         batch_count = min(batch_size, remaining)
+        _emit_progress(
+            {
+                "event": "batch_start",
+                "batch_index": batch_index,
+                "batch_count": batch_count,
+                "dialogs_ready": len(dialogs),
+                "dialogs_target": count,
+                "max_attempts": max_attempts,
+                "request_timeout": request_timeout,
+            }
+        )
         prompt = (
             "Generate JSON with key 'dialogs' as a list. "
             "Each dialog: {dialog_id, goal, turns}. "
@@ -1080,29 +1138,63 @@ def _generate_llm_dialogs(
         max_tokens = max(1800, batch_count * max(min_turns, 10) * 120)
         payload: dict[str, Any] | None = None
         last_error: Exception | None = None
-        for _attempt in range(max_attempts):
+        for attempt_idx in range(max_attempts):
+            attempt_no = attempt_idx + 1
+            started_at = time.time()
             try:
                 content = _call_openai(
                     prompt,
                     api_key=api_key,
                     model=model,
                     base_url=base_url,
+                    request_timeout=request_timeout,
                     max_tokens=max_tokens,
                 )
                 payload = _parse_llm_json(
                     content,
                     repair_fn=lambda raw: _repair_llm_json(
-                        raw, api_key=api_key, model=model, base_url=base_url
+                        raw,
+                        api_key=api_key,
+                        model=model,
+                        base_url=base_url,
+                        request_timeout=request_timeout,
                     ),
                 )
                 raw_dialogs = payload.get("dialogs") if isinstance(payload, dict) else None
                 if isinstance(raw_dialogs, list) and raw_dialogs:
+                    _emit_progress(
+                        {
+                            "event": "batch_attempt_success",
+                            "batch_index": batch_index,
+                            "attempt": attempt_no,
+                            "elapsed_ms": round((time.time() - started_at) * 1000, 2),
+                            "dialogs_returned": len(raw_dialogs),
+                        }
+                    )
                     break
                 last_error = ValueError("llm payload has no dialogs")
+                _emit_progress(
+                    {
+                        "event": "batch_attempt_empty",
+                        "batch_index": batch_index,
+                        "attempt": attempt_no,
+                        "elapsed_ms": round((time.time() - started_at) * 1000, 2),
+                    }
+                )
             except Exception as exc:
                 payload = None
                 last_error = exc
-                continue
+                _emit_progress(
+                    {
+                        "event": "batch_attempt_error",
+                        "batch_index": batch_index,
+                        "attempt": attempt_no,
+                        "elapsed_ms": round((time.time() - started_at) * 1000, 2),
+                        "error": str(exc)[:300],
+                    }
+                )
+            if attempt_no < max_attempts and attempt_backoff > 0.0:
+                time.sleep(attempt_backoff * (2 ** attempt_idx))
         raw_dialogs = payload.get("dialogs") if isinstance(payload, dict) else None
         if not isinstance(raw_dialogs, list) or not raw_dialogs:
             if last_error:
@@ -1154,7 +1246,36 @@ def main() -> None:
     parser.add_argument("--llm-model", default="gpt-4o-mini")
     parser.add_argument("--llm-base-url", default=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com"))
     parser.add_argument("--llm-api-key", default=os.environ.get("OPENAI_API_KEY"))
+    parser.add_argument(
+        "--llm-batch-size",
+        type=int,
+        default=int(os.environ.get("BOOKING_SCENARIO_LLM_BATCH_SIZE", "2")),
+    )
+    parser.add_argument(
+        "--llm-max-attempts",
+        type=int,
+        default=int(os.environ.get("BOOKING_SCENARIO_LLM_MAX_ATTEMPTS", "3")),
+    )
+    parser.add_argument(
+        "--llm-request-timeout",
+        type=float,
+        default=float(os.environ.get("BOOKING_SCENARIO_LLM_REQUEST_TIMEOUT_SEC", "60")),
+    )
+    parser.add_argument(
+        "--llm-attempt-backoff",
+        type=float,
+        default=float(os.environ.get("BOOKING_SCENARIO_LLM_ATTEMPT_BACKOFF_SEC", "0.6")),
+    )
+    parser.add_argument("--progress-stderr", action="store_true")
     args = parser.parse_args()
+    if args.llm_batch_size < 1:
+        raise SystemExit("--llm-batch-size must be >= 1")
+    if args.llm_max_attempts < 1:
+        raise SystemExit("--llm-max-attempts must be >= 1")
+    if args.llm_request_timeout <= 0:
+        raise SystemExit("--llm-request-timeout must be > 0")
+    if args.llm_attempt_backoff < 0:
+        raise SystemExit("--llm-attempt-backoff must be >= 0")
     llm_api_key_source: str | None = None
     if args.mode == "llm":
         resolved_key, resolved_source = _resolve_openai_api_key(args.llm_api_key)
@@ -1190,6 +1311,11 @@ def main() -> None:
             api_key=args.llm_api_key,
             coverage=coverage,
             seed=args.seed,
+            llm_batch_size=args.llm_batch_size,
+            llm_max_attempts=args.llm_max_attempts,
+            llm_request_timeout=args.llm_request_timeout,
+            llm_attempt_backoff=args.llm_attempt_backoff,
+            progress_stderr=bool(args.progress_stderr),
         )
         if not dialogs:
             raise SystemExit("LLM mode returned empty dialogs")

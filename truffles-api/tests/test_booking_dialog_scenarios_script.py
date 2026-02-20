@@ -122,7 +122,9 @@ def test_merge_expectations_drops_info_override_without_info_tags():
 def test_generate_llm_dialogs_retries_after_json_error(monkeypatch):
     calls = {"parse": 0, "openai": 0}
 
-    def _fake_openai(prompt, *, api_key, model, base_url, max_tokens=1800):
+    def _fake_openai(
+        prompt, *, api_key, model, base_url, request_timeout=40.0, max_tokens=1800
+    ):
         calls["openai"] += 1
         return "{}"
 
@@ -153,8 +155,6 @@ def test_generate_llm_dialogs_retries_after_json_error(monkeypatch):
             ]
         }
 
-    monkeypatch.setenv("BOOKING_SCENARIO_LLM_BATCH_SIZE", "1")
-    monkeypatch.setenv("BOOKING_SCENARIO_LLM_MAX_ATTEMPTS", "2")
     monkeypatch.setattr(_module, "_call_openai", _fake_openai)
     monkeypatch.setattr(_module, "_parse_llm_json", _fake_parse)
     monkeypatch.setattr(_module, "_infer_context_from_dialog", lambda _dialog, _rng: {"service": "Стрижка"})
@@ -184,6 +184,11 @@ def test_generate_llm_dialogs_retries_after_json_error(monkeypatch):
         api_key="test-key",
         coverage=["booking", "info", "interrupt", "handoff"],
         seed=7,
+        llm_batch_size=1,
+        llm_max_attempts=2,
+        llm_request_timeout=15.0,
+        llm_attempt_backoff=0.0,
+        progress_stderr=False,
     )
 
     assert len(dialogs) == 1
@@ -209,6 +214,29 @@ def test_ensure_required_tags_adds_check_booking_and_confirm_for_booking_coverag
 
     assert "check_booking" in tags
     assert "confirm" in tags
+
+
+def test_ensure_required_tags_reorders_check_before_confirm():
+    ctx = _module._build_context(random.Random(11))
+    turns = [
+        {"kind": "text", "text": "Да, подтверждаю.", "tags": ["confirm"], "expect": {}},
+        {"kind": "text", "text": "Проверьте мою запись.", "tags": ["check_booking"], "expect": {}},
+    ]
+
+    enriched = _module._ensure_required_tags(
+        turns,
+        ctx,
+        max_turns=12,
+        coverage=["booking", "interrupt"],
+    )
+    check_idx = next(
+        idx for idx, turn in enumerate(enriched) if "check_booking" in (turn.get("tags") or [])
+    )
+    confirm_idx = next(
+        idx for idx, turn in enumerate(enriched) if "confirm" in (turn.get("tags") or [])
+    )
+
+    assert check_idx < confirm_idx
 
 
 def test_call_openai_classifies_quota_error(monkeypatch):
