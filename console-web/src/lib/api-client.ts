@@ -493,7 +493,7 @@ export type IncidentAction = {
     title: string;
     description: string;
     href?: string | null;
-    job_type?: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | null;
+    job_type?: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state" | null;
     mode?: "dry_run" | "execute" | null;
     params?: Record<string, unknown> | null;
     dry_run_first: boolean;
@@ -520,6 +520,11 @@ export type IncidentItem = {
     client_id?: string | null;
     client_slug?: string | null;
     branch_id?: string | null;
+    incident_state: "open" | "in_progress" | "resolved";
+    incident_state_updated_at?: string | null;
+    incident_state_owner?: string | null;
+    incident_state_due_at?: string | null;
+    incident_state_note?: string | null;
     metrics: Record<string, string | number | boolean | null>;
     actions: IncidentAction[];
 };

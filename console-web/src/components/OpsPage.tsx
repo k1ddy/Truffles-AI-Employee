@@ -261,6 +261,26 @@ function incidentSeverityLabel(severity: "critical" | "warn" | "info"): string {
     return "info";
 }
 
+function incidentStateChipClass(state: IncidentItem["incident_state"]): string {
+    if (state === "resolved") {
+        return "bg-emerald-100 text-emerald-800";
+    }
+    if (state === "in_progress") {
+        return "bg-blue-100 text-blue-800";
+    }
+    return "bg-slate-100 text-slate-700";
+}
+
+function incidentStateLabel(state: IncidentItem["incident_state"]): string {
+    if (state === "resolved") {
+        return "закрыт";
+    }
+    if (state === "in_progress") {
+        return "в работе";
+    }
+    return "открыт";
+}
+
 function formatJsonPreview(payload: Record<string, unknown> | null, limit = 160): string {
     if (!payload) {
         return "—";
@@ -624,10 +644,25 @@ export default function OpsPage() {
         };
     }, [remindersData]);
 
-    const selectedJob = useMemo(
-        () => opsJobsCatalog?.items?.find((item) => item.job_type === jobType) ?? null,
-        [opsJobsCatalog, jobType],
+    const opsCatalogItems = useMemo(
+        () => (opsJobsCatalog?.items ?? []).filter((item) => item.job_type !== "incident_state"),
+        [opsJobsCatalog],
     );
+
+    const selectedJob = useMemo(
+        () => opsCatalogItems.find((item) => item.job_type === jobType) ?? null,
+        [opsCatalogItems, jobType],
+    );
+
+    useEffect(() => {
+        if (!opsCatalogItems.length) {
+            return;
+        }
+        if (opsCatalogItems.some((item) => item.job_type === jobType)) {
+            return;
+        }
+        setJobType(opsCatalogItems[0].job_type);
+    }, [jobType, opsCatalogItems]);
 
     const buildRunJobPayload = (mode: OpsJobMode): OpsJobRunRequest => {
         const params: Record<string, unknown> = {};
@@ -684,6 +719,39 @@ export default function OpsPage() {
             void refetchOpsJobs();
             void refetchOutbox();
             void refetchIncidents();
+        } catch (error) {
+            handleError(error);
+        } finally {
+            setIncidentActionRunningId(null);
+        }
+    };
+
+    const runIncidentStateTransition = async (
+        incident: IncidentItem,
+        targetState: IncidentItem["incident_state"],
+    ) => {
+        const actionId = `state:${incident.id}:${targetState}`;
+        setIncidentActionRunningId(actionId);
+        try {
+            const payload: OpsJobRunRequest = {
+                job_type: "incident_state",
+                mode: "execute",
+                params: {
+                    incident_id: incident.id,
+                    incident_state: targetState,
+                    reason_code: incident.reason_code,
+                    branch_id: incident.branch_id ?? undefined,
+                },
+            };
+            const response = await opsApi.runJob(payload);
+            const job = response.data.job;
+            if (job.status === "success") {
+                toast.success(`Инцидент переведен в "${incidentStateLabel(targetState)}"`);
+            } else {
+                toast.error(job.error_message || "Не удалось обновить состояние инцидента");
+            }
+            void refetchIncidents();
+            void refetchOpsJobs();
         } catch (error) {
             handleError(error);
         } finally {
@@ -798,15 +866,69 @@ export default function OpsPage() {
                                         )}
                                         <div className="flex flex-wrap items-center justify-between gap-2">
                                             <p className="text-sm font-semibold">{item.title}</p>
-                                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${incidentChipClass(item.severity)}`}>
-                                                {incidentSeverityLabel(item.severity)}
-                                            </span>
+                                            <div className="flex items-center gap-1">
+                                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${incidentChipClass(item.severity)}`}>
+                                                    {incidentSeverityLabel(item.severity)}
+                                                </span>
+                                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${incidentStateChipClass(item.incident_state)}`}>
+                                                    {incidentStateLabel(item.incident_state)}
+                                                </span>
+                                            </div>
                                         </div>
                                         <p className="mt-1 text-xs text-muted-foreground">{item.reason_label}</p>
                                         <p className="mt-1 text-xs text-muted-foreground">{item.summary}</p>
                                         <p className="mt-1 text-[11px] text-muted-foreground">
                                             client: {item.client_slug || "n/a"} · detected: {new Date(item.detected_at).toLocaleString("ru-RU")}
                                         </p>
+                                        {(item.incident_state_updated_at || item.incident_state_owner || item.incident_state_due_at || item.incident_state_note) && (
+                                            <p className="mt-1 text-[11px] text-muted-foreground">
+                                                updated: {item.incident_state_updated_at ? new Date(item.incident_state_updated_at).toLocaleString("ru-RU") : "—"}
+                                                {item.incident_state_owner ? ` · owner: ${item.incident_state_owner}` : ""}
+                                                {item.incident_state_due_at ? ` · due: ${new Date(item.incident_state_due_at).toLocaleString("ru-RU")}` : ""}
+                                                {item.incident_state_note ? ` · note: ${item.incident_state_note}` : ""}
+                                            </p>
+                                        )}
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                            {item.incident_state !== "in_progress" && (
+                                                <button
+                                                    type="button"
+                                                    className="btn-ghost text-xs"
+                                                    disabled={!canWriteOps || incidentActionRunningId === `state:${item.id}:in_progress`}
+                                                    onClick={() => {
+                                                        void runIncidentStateTransition(item, "in_progress");
+                                                    }}
+                                                    data-testid={`ops-incident-state-${item.id}-in-progress`}
+                                                >
+                                                    {incidentActionRunningId === `state:${item.id}:in_progress` ? "Выполняю..." : "В работу"}
+                                                </button>
+                                            )}
+                                            {item.incident_state !== "resolved" && (
+                                                <button
+                                                    type="button"
+                                                    className="btn-ghost text-xs"
+                                                    disabled={!canWriteOps || incidentActionRunningId === `state:${item.id}:resolved`}
+                                                    onClick={() => {
+                                                        void runIncidentStateTransition(item, "resolved");
+                                                    }}
+                                                    data-testid={`ops-incident-state-${item.id}-resolved`}
+                                                >
+                                                    {incidentActionRunningId === `state:${item.id}:resolved` ? "Выполняю..." : "Закрыть"}
+                                                </button>
+                                            )}
+                                            {item.incident_state === "resolved" && (
+                                                <button
+                                                    type="button"
+                                                    className="btn-ghost text-xs"
+                                                    disabled={!canWriteOps || incidentActionRunningId === `state:${item.id}:open`}
+                                                    onClick={() => {
+                                                        void runIncidentStateTransition(item, "open");
+                                                    }}
+                                                    data-testid={`ops-incident-state-${item.id}-open`}
+                                                >
+                                                    {incidentActionRunningId === `state:${item.id}:open` ? "Выполняю..." : "Открыть снова"}
+                                                </button>
+                                            )}
+                                        </div>
                                         <div className="mt-2 rounded-md border border-border/60 bg-background px-3 py-2 text-[11px]">
                                             <p className="font-semibold text-foreground">Что сделать сейчас (5 минут)</p>
                                             <ol className="mt-1 list-decimal space-y-1 pl-4 text-muted-foreground" data-testid={`ops-incident-fast-steps-${item.id}`}>
@@ -1295,7 +1417,7 @@ export default function OpsPage() {
                                 value={jobType}
                                 onChange={(event) => setJobType(event.target.value as OpsJobType)}
                             >
-                                {(opsJobsCatalog?.items || []).map((item) => (
+                                {opsCatalogItems.map((item) => (
                                     <option key={item.job_type} value={item.job_type}>
                                         {item.label}
                                     </option>

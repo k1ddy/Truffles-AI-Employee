@@ -258,6 +258,26 @@ function workspaceIncidentSteps(item: IncidentItem): string[] {
     ];
 }
 
+function workspaceIncidentStateLabel(state: IncidentItem["incident_state"]): string {
+    if (state === "resolved") {
+        return "закрыт";
+    }
+    if (state === "in_progress") {
+        return "в работе";
+    }
+    return "открыт";
+}
+
+function workspaceIncidentStatePillClass(state: IncidentItem["incident_state"]): string {
+    if (state === "resolved") {
+        return "bg-emerald-100 text-emerald-700";
+    }
+    if (state === "in_progress") {
+        return "bg-blue-100 text-blue-700";
+    }
+    return "bg-slate-100 text-slate-700";
+}
+
 export default function CompanyWorkspacePage() {
     const { data: session } = useSession();
     const searchParams = useSearchParams();
@@ -1123,8 +1143,21 @@ export default function CompanyWorkspacePage() {
                         <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-xs text-amber-900">
                             <div className="font-semibold">{workspaceIncident.title}</div>
                             <div className="mt-1">{workspaceIncident.reason_label}</div>
+                            <div className="mt-1">
+                                <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase ${workspaceIncidentStatePillClass(workspaceIncident.incident_state)}`}>
+                                    {workspaceIncidentStateLabel(workspaceIncident.incident_state)}
+                                </span>
+                            </div>
                             <div className="mt-1 font-mono">reason={workspaceIncident.reason_code} · severity={workspaceIncident.severity}</div>
                             <div className="mt-1 text-amber-900/80">{workspaceIncident.summary}</div>
+                            {(workspaceIncident.incident_state_updated_at || workspaceIncident.incident_state_owner || workspaceIncident.incident_state_due_at || workspaceIncident.incident_state_note) && (
+                                <div className="mt-1 text-amber-900/80">
+                                    updated={workspaceIncident.incident_state_updated_at ? formatDateLabel(workspaceIncident.incident_state_updated_at) : "-"}
+                                    {workspaceIncident.incident_state_owner ? ` · owner=${workspaceIncident.incident_state_owner}` : ""}
+                                    {workspaceIncident.incident_state_due_at ? ` · due=${formatDateLabel(workspaceIncident.incident_state_due_at)}` : ""}
+                                    {workspaceIncident.incident_state_note ? ` · note=${workspaceIncident.incident_state_note}` : ""}
+                                </div>
+                            )}
                         </div>
                         <div className="rounded-lg border border-border/60 bg-muted/10 p-3 text-xs">
                             <div className="font-semibold uppercase tracking-[0.12em] text-muted-foreground">Что делать сейчас</div>

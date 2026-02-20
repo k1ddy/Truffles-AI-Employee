@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.models import AlertEvent
 from app.routers import console as console_router
 from app.schemas.console import ConsoleOpsJobRunRequest
 from app.services.console_errors import ConsoleAPIError
@@ -136,6 +137,75 @@ async def test_run_ops_job_integration_reconcile_success(monkeypatch):
     assert response.job.result_payload["checked"] == 2
     assert response.job.result_payload["artifact"]["artifact_type"] == "integration_reconcile_report"
     db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_ops_job_incident_state_success(monkeypatch):
+    request = SimpleNamespace(query_params={})
+    db = _build_db_with_job_identity()
+    context = _build_context()
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "_require_ops_access", lambda _context, action="read": None)
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+
+    async def _fake_runner(_db, *, context, mode, params):
+        assert mode == "execute"
+        assert params["incident_id"] == "outbox-demo"
+        assert params["incident_state"] == "resolved"
+        assert context.client.id
+        return {"mode": "execute", "incident_id": "outbox-demo", "incident_state": "resolved"}
+
+    monkeypatch.setattr(console_router, "_run_incident_state_job", _fake_runner)
+
+    response = await console_router.run_ops_job(
+        body=ConsoleOpsJobRunRequest(
+            job_type="incident_state",
+            mode="execute",
+            params={"incident_id": "outbox-demo", "incident_state": "resolved"},
+        ),
+        request=request,
+        db=db,
+    )
+
+    assert response.job.status == "success"
+    assert response.job.result_payload["incident_state"] == "resolved"
+    assert response.job.result_payload["artifact"]["artifact_type"] == "incident_state_report"
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_incident_state_job_execute_adds_alert_event():
+    db = Mock()
+    captured: dict[str, object] = {}
+
+    def _capture_add(obj):
+        captured["obj"] = obj
+
+    db.add.side_effect = _capture_add
+    context = _build_context()
+
+    result = await console_router._run_incident_state_job(
+        db,
+        context=context,
+        mode="execute",
+        params={
+            "incident_id": "outbox-demo",
+            "incident_state": "in_progress",
+            "owner": "ops@truffles",
+            "note": "working on provider binding",
+            "reason_code": "provider_billing_blocked",
+            "due_at": "2026-02-21T10:00:00+00:00",
+        },
+    )
+
+    assert result["incident_state"] == "in_progress"
+    assert result["incident_id"] == "outbox-demo"
+    event = captured.get("obj")
+    assert isinstance(event, AlertEvent)
+    assert event.alert_type == "console_incident_state"
+    assert event.alert_metadata["incident_id"] == "outbox-demo"
+    assert event.alert_metadata["incident_state"] == "in_progress"
+    assert event.alert_metadata["owner"] == "ops@truffles"
 
 
 @pytest.mark.asyncio

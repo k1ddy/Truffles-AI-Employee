@@ -819,6 +819,7 @@ class ConsoleBusinessActionItem(BaseModel):
 
 ConsoleIncidentSeverity = Literal["critical", "warn", "info"]
 ConsoleIncidentScope = Literal["fleet", "client", "branch"]
+ConsoleIncidentState = Literal["open", "in_progress", "resolved"]
 ConsoleIncidentReasonCode = Literal[
     "outbox_backlog",
     "provider_billing_blocked",
@@ -836,7 +837,9 @@ class ConsoleIncidentAction(BaseModel):
     title: str
     description: str
     href: Optional[str] = None
-    job_type: Optional[Literal["outbox_process", "integration_reconcile", "heal", "metrics_snapshot"]] = None
+    job_type: Optional[
+        Literal["outbox_process", "integration_reconcile", "heal", "metrics_snapshot", "incident_state"]
+    ] = None
     mode: Optional[Literal["dry_run", "execute"]] = None
     params: Optional[dict] = None
     dry_run_first: bool = True
@@ -856,6 +859,11 @@ class ConsoleIncidentItem(BaseModel):
     client_id: Optional[UUID] = None
     client_slug: Optional[str] = None
     branch_id: Optional[UUID] = None
+    incident_state: ConsoleIncidentState = "open"
+    incident_state_updated_at: Optional[str] = None
+    incident_state_owner: Optional[str] = None
+    incident_state_due_at: Optional[str] = None
+    incident_state_note: Optional[str] = None
     metrics: dict[str, str | int | float | bool | None] = {}
     actions: list[ConsoleIncidentAction] = []
 
@@ -1205,7 +1213,7 @@ class ConsoleReminderRetryResponse(BaseModel):
     matched: int
 
 
-ConsoleOpsJobType = Literal["outbox_process", "integration_reconcile", "heal", "metrics_snapshot"]
+ConsoleOpsJobType = Literal["outbox_process", "integration_reconcile", "heal", "metrics_snapshot", "incident_state"]
 ConsoleOpsJobMode = Literal["dry_run", "execute"]
 ConsoleOpsJobStatus = Literal["success", "failed"]
 
