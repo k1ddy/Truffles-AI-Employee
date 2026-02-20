@@ -4077,8 +4077,7 @@ def _build_policy_plan_audit(
         if reason_code not in override_reason_codes:
             override_reason_codes.append(reason_code)
 
-    if override_applied and not override_reason_codes:
-        override_reason_codes = [POLICY_OVERRIDE_REASON_DEFAULT]
+    override_reason_missing = bool(override_applied and not override_reason_codes)
 
     return {
         "plan_action": plan_action,
@@ -4092,6 +4091,7 @@ def _build_policy_plan_audit(
             override_reason_codes[-1] if override_reason_codes else None
         ),
         "override_reason_codes": override_reason_codes,
+        "override_reason_missing": override_reason_missing,
         "override_events": cleaned_events,
     }
 
@@ -4670,6 +4670,19 @@ def _normalize_controller_fallback_reason(*, error: str | None) -> str | None:
 def _policy_core_reason_supports_info_rescue(reason: str | None) -> bool:
     classification = _classify_policy_core_degrade_reason(reason)
     return bool(classification.get("info_rescue_eligible"))
+
+
+def _is_timeout_degrade_failure(failure: dict[str, Any] | None) -> bool:
+    if not isinstance(failure, dict):
+        return False
+    category = failure.get("category")
+    code = failure.get("code")
+    if not (isinstance(category, str) and isinstance(code, str)):
+        return False
+    normalized_code = code.strip().casefold()
+    if category in {"llm_degraded", "policy_error"}:
+        return normalized_code in {"timeout", "deadline_exceeded", "budget_exceeded"}
+    return False
 
 
 def _is_retryable_policy_core_error_code(code: str | None) -> bool:
@@ -8462,26 +8475,39 @@ async def _handle_webhook_payload(
             llm_policy_core_meta["plan_final_audit"] = plan_audit
             llm_policy_core_meta["override_reason_code"] = plan_audit.get("override_reason_code")
             llm_policy_core_meta["override_reason_codes"] = plan_audit.get("override_reason_codes")
+            llm_policy_core_meta["override_reason_missing"] = bool(
+                plan_audit.get("override_reason_missing")
+            )
         if saved_message:
             updates: dict[str, Any] = {"llm_policy_plan_audit": plan_audit}
             if isinstance(llm_policy_core_meta, dict):
                 updates["llm_policy_core"] = llm_policy_core_meta
             override_reason_codes = plan_audit.get("override_reason_codes") or []
-            if override_reason_codes:
-                updates["llm_policy_override_reason_codes"] = override_reason_codes
-                updates["llm_policy_override_reason_code"] = plan_audit.get("override_reason_code")
+            updates["llm_policy_override_reason_codes"] = override_reason_codes
+            updates["llm_policy_override_reason_code"] = plan_audit.get("override_reason_code")
+            updates["llm_policy_override_reason_missing"] = bool(
+                plan_audit.get("override_reason_missing")
+            )
             _update_message_decision_metadata(saved_message, updates)
         if emit_trace:
+            trace_decision = "match"
+            if plan_audit.get("override_applied"):
+                trace_decision = (
+                    "override_missing_reason"
+                    if plan_audit.get("override_reason_missing")
+                    else "override"
+                )
             _record_decision_trace(
                 conversation,
                 {
                     "stage": "llm_policy_plan_delta",
-                    "decision": "override" if plan_audit.get("override_applied") else "match",
+                    "decision": trace_decision,
                     "plan_action": plan_audit.get("plan_action"),
                     "plan_tool_action": plan_audit.get("plan_tool_action"),
                     "final_action": plan_audit.get("final_action"),
                     "final_tool_action": plan_audit.get("final_tool_action"),
                     "override_reason_codes": plan_audit.get("override_reason_codes") or [],
+                    "override_reason_missing": bool(plan_audit.get("override_reason_missing")),
                 },
             )
 
@@ -8521,6 +8547,28 @@ async def _handle_webhook_payload(
         if isinstance(llm_policy_core_meta, dict):
             _sync_policy_plan_audit()
 
+    def _apply_policy_guard_override(
+        *,
+        final_action: str,
+        final_tool_action: str,
+        reason_code: str,
+        reason: str,
+    ) -> None:
+        nonlocal policy_action, policy_tool_action
+        previous_action = policy_action
+        previous_tool_action = policy_tool_action
+        policy_action = final_action
+        policy_tool_action = final_tool_action
+        if previous_action != policy_action or previous_tool_action != policy_tool_action:
+            _register_policy_override(
+                reason_code=reason_code,
+                reason=reason,
+                from_action=previous_action,
+                from_tool_action=previous_tool_action,
+            )
+        else:
+            _sync_policy_plan_audit()
+
     policy_core_runtime_active = bool(
         LLM_POLICY_CORE_ENABLED
         and routing["allow_bot_reply"]
@@ -8529,6 +8577,7 @@ async def _handle_webhook_payload(
     )
     policy_core_mode = "degraded_fallback"
     policy_core_degrade_reason = "envelope_missing"
+    policy_core_failure = _classify_policy_core_degrade_reason(policy_core_degrade_reason)
 
     if policy_core_runtime_active:
         policy_slot_state: dict[str, str] = {}
@@ -8824,8 +8873,10 @@ async def _handle_webhook_payload(
                                         policy_intent = rescue_intent
                                     if rescue_action:
                                         policy_action = rescue_action
+                                        policy_plan_action = rescue_action
                                     if rescue_tool_action:
                                         policy_tool_action = rescue_tool_action
+                                        policy_plan_tool_action = rescue_tool_action
                                     rescue_confidence = rescue_payload.get("confidence")
                                     if isinstance(rescue_confidence, (int, float)):
                                         policy_confidence = float(rescue_confidence)
@@ -9492,7 +9543,11 @@ async def _handle_webhook_payload(
             )
         )
     )
+    policy_core_timeout_degrade = _is_timeout_degrade_failure(policy_core_failure)
     if degraded_policy_core_critical:
+        policy_guard_reason_code = (
+            "timeout_degrade" if policy_core_timeout_degrade else "contract_validation_failure"
+        )
         if explicit_manager_request_signal:
             handover_message = message_text or "Клиент запросил менеджера."
             _, reused, telegram_sent = _reuse_active_handover(
@@ -9538,6 +9593,13 @@ async def _handle_webhook_payload(
             else:
                 bot_response = MSG_ESCALATED
                 result_message = "Policy core degraded handoff skipped (already pending)"
+            _apply_policy_guard_override(
+                final_action="handoff",
+                final_tool_action="handoff",
+                reason_code=policy_guard_reason_code,
+                reason="policy_core_guard_handoff_safe",
+            )
+            _sync_policy_plan_audit(emit_trace=True)
             _record_decision_trace(
                 conversation,
                 {
@@ -9576,6 +9638,13 @@ async def _handle_webhook_payload(
             else:
                 bot_response = None
                 result_message = "Policy core degraded manager-active hold"
+            _apply_policy_guard_override(
+                final_action="handoff",
+                final_tool_action="handoff",
+                reason_code=policy_guard_reason_code,
+                reason="policy_core_guard_pending_hold",
+            )
+            _sync_policy_plan_audit(emit_trace=True)
             _record_decision_trace(
                 conversation,
                 {
@@ -9594,6 +9663,45 @@ async def _handle_webhook_payload(
                         "pending_guard": "policy_core_degraded",
                     },
                 )
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+
+        if policy_core_timeout_degrade:
+            _apply_policy_guard_override(
+                final_action="collect",
+                final_tool_action="collect",
+                reason_code="timeout_degrade",
+                reason="policy_core_timeout_degrade_clarify",
+            )
+            _sync_policy_plan_audit(emit_trace=True)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_core_guard",
+                    "decision": "timeout_clarify",
+                    "state": conversation.state,
+                    "mode": policy_core_mode,
+                    "reason": policy_core_degrade_reason,
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="reply",
+                intent="policy_core_guard",
+                source="llm_policy_core",
+                fast_intent=False,
+            )
+            bot_response, sent = _send_and_save(MSG_FACT_GUARD_CLARIFY)
+            result_message = (
+                "Policy core timeout degrade clarify sent"
+                if sent
+                else "Policy core timeout degrade clarify failed"
+            )
             db.commit()
             return WebhookResponse(
                 success=True,
@@ -9686,6 +9794,13 @@ async def _handle_webhook_payload(
                 )
             _set_conversation_context(conversation, context)
 
+        _apply_policy_guard_override(
+            final_action="collect",
+            final_tool_action="collect",
+            reason_code=policy_guard_reason_code,
+            reason="policy_core_degraded_collect_guard",
+        )
+        _sync_policy_plan_audit(emit_trace=True)
         _record_decision_trace(
             conversation,
             {
