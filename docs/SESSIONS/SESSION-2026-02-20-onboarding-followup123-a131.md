@@ -1,0 +1,26 @@
+# SESSION 2026-02-20-onboarding-followup123-a131 — Session 2026-02-20-onboarding-followup123-a131
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-20-onboarding-followup123-a131.md
+- branch: feat/2026-02-20-onboarding-followup123-a131
+- worktree: /home/zhan/worktrees/2026-02-20-onboarding-followup123-a131
+- base_ref: origin/main
+- scope: Follow-up `1/2/3` after onboarding any-niche merge: delivery closure (noise-free criticals), Console UX/UI + contract sync for reference scope, and docs cleanup for missing end2end-TZ canonical file.
+- done:
+  - Session created.
+  - Step 1: delivery readiness classification updated to count only delivery outbox events; billing warn/critical thresholds added.
+  - Step 1: tests updated in `truffles-api/tests/test_console_onboarding_state.py` for billing warn/critical and non-delivery row filtering.
+  - Step 2: Console pages updated to display reference scope and reason in tenants/fleet attention views.
+  - Step 2: OpenAPI + frontend generated types synchronized for `reference_branch_ids` and `reference_branch_reason`.
+  - Step 3: canonical end2end-TZ umbrella TP restored to close broken refs.
+  - Validation suite completed (py_compile/ruff/pytest/openapi/lint/build/ops diagnose).
+- next:
+  - Merge latest `origin/main` into branch (no rebase), resolve conflicts if any.
+  - Run `scripts/session_check.sh`, prepare PR with report/evidence.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-20-onboarding-followup123-a131.md
+  - docs/REPORTS/2026-02-20-onboarding-followup123-a131.md
+  - /tmp/onboarding_followup123_a131/onboarding-fleet-check.json
+  - /tmp/onboarding_followup123_a131/onboarding-delivery-stabilize.json
+- last_updated: 2026-02-20

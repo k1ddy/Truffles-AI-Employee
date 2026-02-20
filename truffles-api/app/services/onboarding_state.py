@@ -85,6 +85,10 @@ _READINESS_FAILED_24H_FAIL = 100
 _READINESS_STALE_24H_WARN = 5
 _READINESS_STALE_24H_FAIL = 20
 _READINESS_PROVIDER_AUTH_24H_FAIL = 1
+_READINESS_PROVIDER_BILLING_24H_WARN = 1
+_READINESS_PROVIDER_BILLING_24H_FAIL = 3
+_DELIVERY_OUTBOX_EVENT_PREFIXES = ("whatsapp.send_", "telegram.send_", "instagram.send_", "web.send_")
+_DELIVERY_OUTBOX_EVENT_EXACT = {"provider_gateway.outbound"}
 _READINESS_BLOCKER_PREFIX_GO_NO_GO = "go_no_go:"
 _READINESS_CRITICAL_BLOCKERS = {
     "delivery:backlog_critical",
@@ -102,6 +106,7 @@ _READINESS_BLOCKER_QUESTIONS = {
     "delivery:failed_24h_warn": "Какие причины ошибок доставки за 24 часа приоритетны для устранения?",
     "delivery:stale_processing_critical": "Почему сообщения застряли в stale_processing и как устраняем это сейчас?",
     "delivery:stale_processing_warn": "Какая причина stale_processing и какой план превентивного контроля?",
+    "delivery:provider_billing_blocked_warn": "Есть сигнал billing_blocked у провайдера: кто проверяет оплату/баланс сегодня?",
     "delivery:provider_billing_blocked_critical": "Провайдер заблокировал биллинг: когда будет продление и кто подтверждает?",
     "delivery:provider_auth_critical": "Ошибка авторизации у провайдера: какие ключи/токены нужно обновить сейчас?",
     "traffic:whatsapp_capability_mismatch": "Почему идет WhatsApp трафик при отключенном capability WhatsApp?",
@@ -946,6 +951,24 @@ def _classify_delivery_failure_reason(last_error: Optional[str]) -> str:
     return "unknown"
 
 
+def _extract_outbox_event_type(payload_json: Optional[dict]) -> Optional[str]:
+    if not isinstance(payload_json, dict):
+        return None
+    value = payload_json.get("event_type")
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return normalized or None
+
+
+def _is_delivery_outbox_event(event_type: Optional[str]) -> bool:
+    if not event_type:
+        return False
+    if event_type in _DELIVERY_OUTBOX_EVENT_EXACT:
+        return True
+    return any(event_type.startswith(prefix) for prefix in _DELIVERY_OUTBOX_EVENT_PREFIXES)
+
+
 def _build_delivery_health_readiness_dimension(
     db: Session,
     branch: Branch,
@@ -962,7 +985,7 @@ def _build_delivery_health_readiness_dimension(
         or 0
     )
     failed_rows = (
-        db.query(OutboxMessage.last_error)
+        db.query(OutboxMessage.last_error, OutboxMessage.payload_json)
         .filter(
             OutboxMessage.client_id == branch.client_id,
             OutboxMessage.branch_id == branch.id,
@@ -971,9 +994,13 @@ def _build_delivery_health_readiness_dimension(
         )
         .all()
     )
-    failed_24h_total = len(failed_rows)
+    failed_24h_total = 0
     delivery_reason_counts: dict[str, int] = {}
     for row in failed_rows:
+        event_type = _extract_outbox_event_type(getattr(row, "payload_json", None))
+        if not _is_delivery_outbox_event(event_type):
+            continue
+        failed_24h_total += 1
         reason = _classify_delivery_failure_reason(getattr(row, "last_error", None))
         delivery_reason_counts[reason] = int(delivery_reason_counts.get(reason, 0)) + 1
     stale_processing_24h_total = int(delivery_reason_counts.get("stale_processing", 0))
@@ -996,8 +1023,10 @@ def _build_delivery_health_readiness_dimension(
     elif stale_processing_24h_total >= _READINESS_STALE_24H_WARN:
         blocker_codes.append("delivery:stale_processing_warn")
 
-    if billing_blocked_24h_total > 0:
+    if billing_blocked_24h_total >= _READINESS_PROVIDER_BILLING_24H_FAIL:
         blocker_codes.append("delivery:provider_billing_blocked_critical")
+    elif billing_blocked_24h_total >= _READINESS_PROVIDER_BILLING_24H_WARN:
+        blocker_codes.append("delivery:provider_billing_blocked_warn")
 
     if provider_auth_24h_total >= _READINESS_PROVIDER_AUTH_24H_FAIL:
         blocker_codes.append("delivery:provider_auth_critical")

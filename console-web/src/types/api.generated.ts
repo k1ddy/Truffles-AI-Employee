@@ -2019,6 +2019,9 @@ export interface components {
             active_branches?: number | null;
             degraded_branches?: number | null;
             go_live_ready_branches?: number | null;
+            /** Format: uuid */
+            reference_branch_ids?: string[] | null;
+            reference_branch_reason?: string | null;
         };
         ClientCreateRequest: {
             slug: string;
@@ -2091,6 +2094,9 @@ export interface components {
             degraded_branches: number;
             /** @default 0 */
             go_live_ready_branches: number;
+            /** @default [] */
+            reference_branch_ids: string[];
+            reference_branch_reason?: string | null;
             /** @default 0 */
             stale_branches: number;
             /** @default 0 */
