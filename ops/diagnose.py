@@ -4068,6 +4068,27 @@ def _normalize_scenario_generation_error(stderr):
     if not text:
         return "scenario generation failed"
     lines = [line.strip() for line in text.splitlines() if line.strip()]
+    last_progress = None
+    for line in reversed(lines):
+        try:
+            payload = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("stage") != "booking_scenario_llm_progress":
+            continue
+        batch_idx = payload.get("batch_index")
+        attempt = payload.get("attempt")
+        event = payload.get("event")
+        if batch_idx is None and attempt is None and event is None:
+            continue
+        last_progress = (
+            f"batch={batch_idx if batch_idx is not None else '?'} "
+            f"attempt={attempt if attempt is not None else '?'} "
+            f"event={event if event is not None else '?'}"
+        )
+        break
     for line in reversed(lines):
         marker = "RuntimeError:"
         idx = line.find(marker)
@@ -4082,11 +4103,39 @@ def _normalize_scenario_generation_error(stderr):
         return "openai_forbidden: provider returned HTTP 403"
     if "openai_api_key is required" in lower:
         return "missing_openai_api_key"
+    if "timed out" in lower or "timeout" in lower:
+        if last_progress:
+            return f"scenario_generation_timeout ({last_progress})"
+        return "scenario_generation_timeout"
     tail = lines[-1] if lines else text
     return tail[:500]
 
+def _llm_quality_scenario_timeout(args, *, count):
+    configured = getattr(args, "scenario_gen_timeout", None)
+    if configured is not None:
+        try:
+            base_timeout = max(10.0, float(configured))
+        except Exception:
+            base_timeout = None
+    else:
+        base_timeout = None
+    if base_timeout is None:
+        try:
+            base_timeout = max(10.0, float(os.getenv("DIAGNOSE_SCENARIO_GEN_TIMEOUT_SEC", "180")))
+        except Exception:
+            base_timeout = 180.0
+    if getattr(args, "mode", None) != "llm":
+        return base_timeout
+    llm_batch_size = max(1, int(getattr(args, "scenario_llm_batch_size", 2)))
+    llm_max_attempts = max(1, int(getattr(args, "scenario_llm_max_attempts", 1)))
+    llm_request_timeout = max(5.0, float(getattr(args, "scenario_llm_request_timeout", 40.0)))
+    estimated_calls = int(math.ceil(max(1, int(count)) / float(llm_batch_size)))
+    estimated_budget = (estimated_calls * llm_max_attempts * llm_request_timeout) + 25.0
+    return max(base_timeout, estimated_budget)
+
+
 def _llm_quality_generate_batch(args, *, count, seed):
-    scenario_timeout = float(os.getenv("DIAGNOSE_SCENARIO_GEN_TIMEOUT_SEC", "180"))
+    scenario_timeout = _llm_quality_scenario_timeout(args, count=count)
     script_path = _llm_quality_dialog_script()
     cmd = [
         sys.executable,
@@ -4117,9 +4166,21 @@ def _llm_quality_generate_batch(args, *, count, seed):
             cmd += ["--llm-model", args.llm_model]
         if args.llm_base_url:
             cmd += ["--llm-base-url", args.llm_base_url]
-        if args.llm_api_key:
-            cmd += ["--llm-api-key", args.llm_api_key]
-    result = run_command(cmd, timeout=scenario_timeout)
+        if getattr(args, "scenario_llm_batch_size", None):
+            cmd += ["--llm-batch-size", str(args.scenario_llm_batch_size)]
+        if getattr(args, "scenario_llm_max_attempts", None):
+            cmd += ["--llm-max-attempts", str(args.scenario_llm_max_attempts)]
+        if getattr(args, "scenario_llm_request_timeout", None):
+            cmd += ["--llm-request-timeout", str(args.scenario_llm_request_timeout)]
+        if getattr(args, "scenario_llm_attempt_backoff", None):
+            cmd += ["--llm-attempt-backoff", str(args.scenario_llm_attempt_backoff)]
+        if getattr(args, "scenario_progress_stderr", False):
+            cmd.append("--progress-stderr")
+    child_env = {}
+    if args.mode == "llm" and args.llm_api_key:
+        # Keep API keys out of command args and timeout logs.
+        child_env["OPENAI_API_KEY"] = str(args.llm_api_key)
+    result = run_command(cmd, timeout=scenario_timeout, env=child_env or None)
     if result.returncode != 0:
         return None, None, _normalize_scenario_generation_error(result.stderr or "")
     try:
@@ -5725,6 +5786,47 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--media-mode", choices=["text", "payload"], default="text")
     parser.add_argument("--media-kind", choices=["photo", "audio"], default="photo")
     parser.add_argument("--scenario-coverage", default="booking,info,interrupt")
+    parser.add_argument(
+        "--scenario-gen-timeout",
+        type=float,
+        default=None,
+        help=(
+            "Timeout in seconds for one scenario generator subprocess. "
+            "When omitted, DIAGNOSE_SCENARIO_GEN_TIMEOUT_SEC or 180 is used."
+        ),
+    )
+    parser.add_argument(
+        "--scenario-llm-batch-size",
+        type=int,
+        default=2,
+        help="LLM dialogs requested per OpenAI call inside booking_dialog_scenarios.py",
+    )
+    parser.add_argument(
+        "--scenario-llm-max-attempts",
+        type=int,
+        default=1,
+        help=(
+            "Inner retries inside booking_dialog_scenarios.py. "
+            "Outer retries are controlled by --retry-count."
+        ),
+    )
+    parser.add_argument(
+        "--scenario-llm-request-timeout",
+        type=float,
+        default=60.0,
+        help="HTTP timeout in seconds for one OpenAI call inside scenario generation.",
+    )
+    parser.add_argument(
+        "--scenario-llm-attempt-backoff",
+        type=float,
+        default=0.6,
+        help="Backoff seconds between inner scenario LLM attempts.",
+    )
+    parser.add_argument(
+        "--scenario-progress-stderr",
+        action="store_true",
+        help="Emit scenario generation batch/attempt progress to stderr.",
+    )
     parser.add_argument("--llm-model", default="gpt-4o-mini")
     parser.add_argument(
         "--llm-base-url",
@@ -8068,6 +8170,16 @@ def _ensure_bot_active_before_suite(args, context):
 def _run_llm_quality(args):
     if args.count < 1:
         raise SystemExit("llm-quality: --count must be >= 1")
+    if getattr(args, "scenario_llm_batch_size", 1) < 1:
+        raise SystemExit("llm-quality: --scenario-llm-batch-size must be >= 1")
+    if getattr(args, "scenario_llm_max_attempts", 1) < 1:
+        raise SystemExit("llm-quality: --scenario-llm-max-attempts must be >= 1")
+    if getattr(args, "scenario_llm_request_timeout", 1.0) <= 0:
+        raise SystemExit("llm-quality: --scenario-llm-request-timeout must be > 0")
+    if getattr(args, "scenario_llm_attempt_backoff", 0.0) < 0:
+        raise SystemExit("llm-quality: --scenario-llm-attempt-backoff must be >= 0")
+    if getattr(args, "scenario_gen_timeout", None) is not None and args.scenario_gen_timeout <= 0:
+        raise SystemExit("llm-quality: --scenario-gen-timeout must be > 0")
     rng = random.Random(args.seed or int(time.time()))
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     run_id = args.run_id or _llm_quality_build_default_run_id(timestamp)
@@ -17424,23 +17536,73 @@ def _run_integrity_gate(args):
     return 0
 
 _RUN_COMMAND_TIMEOUT_SEC = float(os.getenv("DIAGNOSE_CMD_TIMEOUT_SEC", "30"))
+_RUN_COMMAND_REDACTED_VALUE = "<redacted>"
+_RUN_COMMAND_SENSITIVE_FLAGS = {
+    "--llm-api-key",
+    "--judge-api-key",
+    "--api-key",
+    "--token",
+    "--access-token",
+    "--password",
+    "--webhook-secret",
+}
 
 
-def run_command(command, *, timeout=None):
+def _sanitize_command_for_logging(command):
+    sanitized = []
+    redact_next = False
+    for raw_part in command:
+        part = str(raw_part)
+        if redact_next:
+            sanitized.append(_RUN_COMMAND_REDACTED_VALUE)
+            redact_next = False
+            continue
+        if not part:
+            sanitized.append(part)
+            continue
+        lower = part.lower()
+        if lower in _RUN_COMMAND_SENSITIVE_FLAGS:
+            sanitized.append(part)
+            redact_next = True
+            continue
+        if "=" in part and part.startswith("--"):
+            key, _value = part.split("=", 1)
+            if key.lower() in _RUN_COMMAND_SENSITIVE_FLAGS:
+                sanitized.append(f"{key}={_RUN_COMMAND_REDACTED_VALUE}")
+                continue
+        if lower.startswith("authorization:") and "bearer " in lower:
+            sanitized.append("Authorization: Bearer <redacted>")
+            continue
+        sanitized.append(part)
+    return sanitized
+
+
+def _render_command_for_logging(command):
+    sanitized = _sanitize_command_for_logging(command)
+    return " ".join(shlex.quote(str(part)) for part in sanitized)
+
+
+def run_command(command, *, timeout=None, env=None):
     effective_timeout = _RUN_COMMAND_TIMEOUT_SEC if timeout is None else timeout
+    merged_env = None
+    if env:
+        merged_env = os.environ.copy()
+        for key, value in env.items():
+            merged_env[str(key)] = str(value)
     try:
         return subprocess.run(
             command,
             capture_output=True,
             text=True,
             timeout=effective_timeout,
+            env=merged_env,
         )
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout if isinstance(exc.stdout, str) else ""
         stderr = exc.stderr if isinstance(exc.stderr, str) else ""
         timeout_note = (
             f"[timeout] command exceeded {effective_timeout}s: "
-            f"{' '.join(str(part) for part in command)}"
+            f"{_render_command_for_logging(command)}"
         )
         stderr = (stderr + "\n" + timeout_note).strip()
         return subprocess.CompletedProcess(command, 124, stdout=stdout, stderr=stderr)
