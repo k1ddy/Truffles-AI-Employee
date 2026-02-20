@@ -1,0 +1,23 @@
+# SESSION 2026-02-20-outreach-inbox-ux-a200 — Session 2026-02-20-outreach-inbox-ux-a200
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-20-outreach-inbox-ux-a200.md
+- branch: fix/2026-02-20-outreach-inbox-ux-a200
+- worktree: /home/zhan/worktrees/2026-02-20-outreach-inbox-ux-a200
+- base_ref: origin/main
+- scope: Inbox UX hardening for outreach visibility and adaptive height without backend/API changes.
+- done:
+  - Synced canonical `main` to `origin/main` and confirmed PR `#777` already merged.
+  - Updated inbox layout containers to `flex/min-h-0` and removed rigid viewport formulas from inbox sections.
+  - Added explicit CTA `Связаться с клиентом` in case header.
+  - Made outreach panel collapsible and clarified labels in Russian (`Ручное сообщение клиенту (WhatsApp)`).
+  - Added inbox page frame height handling in `ConsoleShell`.
+  - Ran local checks:
+    - `npm --prefix console-web run lint -- --file src/components/InboxView.tsx --file src/components/CaseConversation.tsx --file src/components/ConsoleShell.tsx`
+    - `npm --prefix console-web run build`
+- next:
+  - Run `scripts/session_check.sh`, commit, push branch, open PR for UX patch.
+- evidence:
+  - console-web lint/build outputs in current terminal session.
+- last_updated: 2026-02-20

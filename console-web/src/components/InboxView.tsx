@@ -233,7 +233,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     }
 
     return (
-        <div className="space-y-6" data-testid="inbox-view">
+        <div className="flex h-full min-h-0 flex-col gap-4" data-testid="inbox-view">
             <div>
                 <h1 className="text-2xl font-semibold">Заявки</h1>
                 <p className="text-sm text-muted-foreground">
@@ -242,9 +242,9 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
             </div>
 
             <div
-                className={`grid grid-cols-1 gap-6 ${gridClass}`}
+                className={`grid flex-1 min-h-0 grid-cols-1 gap-4 ${gridClass}`}
             >
-                <section className="card-surface flex flex-col min-h-[620px] p-4 xl:overflow-hidden xl:h-[calc(100vh-240px)]" data-testid="inbox-list">
+                <section className="card-surface flex h-full min-h-0 flex-col p-4 xl:overflow-hidden" data-testid="inbox-list">
                     <CaseList
                         variant="compact"
                         selectedCaseId={selectedCaseId}
@@ -256,14 +256,14 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                     />
                 </section>
 
-                <section className="flex flex-col gap-4 min-h-[620px] xl:h-[calc(100vh-240px)]" data-testid="inbox-conversation">
+                <section className="flex h-full min-h-0 flex-col gap-4" data-testid="inbox-conversation">
                     {!selectedCaseId && renderEmptyPane("Выберите заявку", "Кликните по карточке слева, чтобы открыть диалог.")}
                     {selectedCaseId && (
-                        <div className="flex flex-col gap-4 h-full">
+                        <div className="flex min-h-0 flex-1 flex-col gap-4">
                             {caseLoading && renderLoadingPane()}
                             {caseError && renderErrorPane()}
                             {!caseLoading && !caseError && caseDetail && (
-                                <div className="card-surface flex flex-col h-full overflow-hidden">
+                                <div className="card-surface flex min-h-0 flex-1 flex-col overflow-hidden">
                                     <CaseConversation
                                         caseDetail={caseDetail}
                                         caseId={selectedCaseId}
@@ -297,7 +297,7 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                 </section>
 
                 {showDetailsColumn && (
-                    <section className="hidden xl:flex flex-col gap-4 min-h-[620px] xl:h-[calc(100vh-240px)] xl:overflow-y-auto" data-testid="inbox-details">
+                    <section className="hidden h-full min-h-0 flex-col gap-4 overflow-y-auto xl:flex" data-testid="inbox-details">
                         {!selectedCaseId && renderEmptyPane("Детали", "Выберите заявку, чтобы увидеть контекст и trace.")}
                         {selectedCaseId && (
                             <div className="flex flex-col gap-4" data-testid="case-details">

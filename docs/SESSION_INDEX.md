@@ -4,6 +4,7 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
+| 2026-02-20-outreach-inbox-ux-a200 | active | fix/2026-02-20-outreach-inbox-ux-a200 | /home/zhan/worktrees/2026-02-20-outreach-inbox-ux-a200 | docs/TASK_PACKAGES/TP-2026-02-20-outreach-inbox-ux-a200.md | 2026-02-20 |
 | 2026-02-20-wave5-owner-admin-acceptance-lane-a500 | done | feat/2026-02-20-wave5-owner-admin-acceptance-lane-a500 | /home/zhan/worktrees/2026-02-20-wave5-owner-admin-acceptance-lane-a500 | docs/TASK_PACKAGES/TP-2026-02-18-wave5-owner-admin-acceptance-lane-a88.md | 2026-02-20 |
 | 2026-02-20-wave3-marketing-trace-retention-a140 | done | feat/2026-02-20-wave3-marketing-trace-retention-a140 | /home/zhan/worktrees/2026-02-20-wave3-marketing-trace-retention-a140 | docs/TASK_PACKAGES/TP-2026-02-20-wave3-marketing-trace-retention-a140.md | 2026-02-20T01:56:00Z |
 | 2026-02-20-tenants-create-company-audit-contract-a133 | done | feat/2026-02-20-tenants-create-company-audit-contract-a133 | /home/zhan/worktrees/2026-02-20-tenants-create-company-audit-contract-a133 | docs/TASK_PACKAGES/TP-2026-02-20-tenants-create-company-audit-contract-a133.md | 2026-02-20 |
