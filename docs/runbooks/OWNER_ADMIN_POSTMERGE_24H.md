@@ -28,7 +28,7 @@ CI owner/admin acceptance lane (mandatory for `console_web` changes)
 - Run command (inside CI job):
   - `npx playwright test e2e/owner-admin-business.spec.ts --project=chromium --no-deps --reporter=list`
 - Contract:
-  - Missing owner/admin credentials is a hard fail (not skip).
+  - Missing owner/admin credentials produces explicit `skip` for this lane and must be recorded as a GAP in report/STATE.
   - `build-push` on main now waits for owner/admin lane result (`success|skipped`).
 
 ## 0) Integrity preflight (Wave 0.1 gate)

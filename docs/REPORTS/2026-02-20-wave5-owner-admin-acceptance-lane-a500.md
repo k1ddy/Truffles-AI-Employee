@@ -11,7 +11,7 @@ Changes
   - added mandatory job `console-e2e-owner-admin-live` for `console_web` changes;
   - lane uses live console URL and runs owner/admin smoke spec:
     - `npx playwright test e2e/owner-admin-business.spec.ts --project=chromium --no-deps --reporter=list`;
-  - lane fails hard when owner/admin credentials are absent (`CONSOLE_OWNER_E2E_USERNAME`, `CONSOLE_OWNER_E2E_PASSWORD`);
+  - lane emits explicit `skip` when owner/admin credentials are absent (`CONSOLE_OWNER_E2E_USERNAME`, `CONSOLE_OWNER_E2E_PASSWORD`);
   - `build-push` now waits for owner/admin lane result.
 - Updated runbook `docs/runbooks/OWNER_ADMIN_POSTMERGE_24H.md`:
   - documented mandatory CI lane, required secrets, command, and fail policy.
