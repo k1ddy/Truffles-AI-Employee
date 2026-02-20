@@ -9659,34 +9659,37 @@ def _run_llm_quality(args):
                         booking_stats["filled_slots_total"], slot_count
                     )
 
-                evaluation_reasons = _llm_quality_evaluate_turn(
-                    meta=meta,
-                    trace_entries=trace_entries,
-                    trace_error=trace_error,
-                    state=state,
-                    conv_meta=conv_meta,
-                    handover_meta=handover_meta,
-                    bot_response=bot_response,
-                    expected_response=expected_response,
-                    expected_action=expected_action,
-                    expected_info_sections=expected_info_sections,
-                    expected_reply_type=expected_reply_type,
-                    expected_state=expected_state,
-                    expected_reply=expected_reply,
-                    actual_expected_reply_type=expected_reply_type_value,
-                    info_tags=info_tags,
-                    info_answered=info_answered,
-                    booking_active=booking_active,
-                    booking_progress_expected=progress_expected,
-                    booking_progressed=booking_progressed,
-                    allow_booking_stall=allow_booking_stall,
-                    outbox_text=outbox_text,
-                    tool_signals=tool_signals,
-                    outbox_summary=outbox_summary,
-                    outbox_payload_status=outbox_payload_status,
-                    meta_error=meta_error,
-                    webhook_error=response_error,
-                )
+                if args.dry_run:
+                    evaluation_reasons = []
+                else:
+                    evaluation_reasons = _llm_quality_evaluate_turn(
+                        meta=meta,
+                        trace_entries=trace_entries,
+                        trace_error=trace_error,
+                        state=state,
+                        conv_meta=conv_meta,
+                        handover_meta=handover_meta,
+                        bot_response=bot_response,
+                        expected_response=expected_response,
+                        expected_action=expected_action,
+                        expected_info_sections=expected_info_sections,
+                        expected_reply_type=expected_reply_type,
+                        expected_state=expected_state,
+                        expected_reply=expected_reply,
+                        actual_expected_reply_type=expected_reply_type_value,
+                        info_tags=info_tags,
+                        info_answered=info_answered,
+                        booking_active=booking_active,
+                        booking_progress_expected=progress_expected,
+                        booking_progressed=booking_progressed,
+                        allow_booking_stall=allow_booking_stall,
+                        outbox_text=outbox_text,
+                        tool_signals=tool_signals,
+                        outbox_summary=outbox_summary,
+                        outbox_payload_status=outbox_payload_status,
+                        meta_error=meta_error,
+                        webhook_error=response_error,
+                    )
                 if evaluation_reasons:
                     stats["turns_failed"] += 1
                 else:
@@ -10339,6 +10342,9 @@ def _run_llm_quality(args):
             baseline_canonical_reason = None
 
     threshold_results, threshold_breaches = _llm_quality_check_thresholds(metrics)
+    if args.dry_run:
+        threshold_results = {}
+        threshold_breaches = []
     tool_evidence_policy = args.tool_evidence_policy
     if args.dry_run:
         tool_evidence_policy = "off"
@@ -10356,6 +10362,8 @@ def _run_llm_quality(args):
     )
     comparison_enforced = bool(args.fail_on_regression)
     comparison_block_reasons = []
+    if args.dry_run:
+        comparison_block_reasons.append("dry_run")
     if comparison_enforced and not infra_status["valid"]:
         comparison_block_reasons.append("infra_invalid")
     if comparison_enforced and baseline_metrics is not None and baseline_canonical is False:
@@ -10372,14 +10380,17 @@ def _run_llm_quality(args):
             metrics, baseline_metrics, args.regression_tolerance
         )
     semantic_reasons = []
-    if threshold_breaches:
-        semantic_reasons.append("threshold_breach")
-    if comparison_enforced:
-        if comparison_blocked:
-            for reason in comparison_block_reasons:
-                semantic_reasons.append(f"comparison_blocked:{reason}")
-        elif regression_breaches:
-            semantic_reasons.append("regression_breach")
+    if args.dry_run:
+        semantic_reasons.append("comparison_blocked:dry_run")
+    else:
+        if threshold_breaches:
+            semantic_reasons.append("threshold_breach")
+        if comparison_enforced:
+            if comparison_blocked:
+                for reason in comparison_block_reasons:
+                    semantic_reasons.append(f"comparison_blocked:{reason}")
+            elif regression_breaches:
+                semantic_reasons.append("regression_breach")
     semantic_status = {"valid": not semantic_reasons, "reasons": semantic_reasons}
     top_failures = _llm_quality_top_failure_reasons(failure_counts, limit=3)
     safe_config = {

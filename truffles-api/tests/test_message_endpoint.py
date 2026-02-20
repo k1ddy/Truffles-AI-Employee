@@ -25,6 +25,7 @@ from app.routers import webhook as webhook_router
 from app.routers.webhook import response as webhook_response
 from app.routers.webhook.decision import (
     _classify_policy_core_degrade_reason,
+    _detect_tool_contract_error,
     _policy_core_reason_supports_info_rescue,
     _policy_has_style_reference_hint,
     _validate_policy_check_confirm_contract,
@@ -12256,6 +12257,9 @@ def test_llm_policy_core_degraded_collect_keeps_style_reference_prompt(monkeypat
     assert response.success is True
     assert "фото/референс" in (response.bot_response or "").lower()
     assert "какую услугу хотите записаться" in (response.bot_response or "").lower()
+    meta = saved_message.message_metadata.get("decision_meta", {})
+    assert meta.get("policy_core_mode") == "policy_core"
+    assert meta.get("policy_core_degrade_reason") is None
 
 
 def test_llm_policy_core_info_lateness_signal_uses_lateness_reply(monkeypatch):
@@ -17503,6 +17507,34 @@ def test_validate_policy_check_confirm_contract_rejects_mismatch():
         )
         == "check_confirm_action_mismatch"
     )
+
+
+def test_detect_tool_contract_error_blocks_created_text_without_confirmed_status():
+    error = _detect_tool_contract_error(
+        tool_action="calendar.book_slot",
+        tool_ok=True,
+        response_text="Запись создана. Хотите что-то изменить?",
+        decision_meta={
+            "tool_decision": "ok",
+            "appointment_id": "apt-1",
+            "appointment_status": "PENDING_CONFIRMATION",
+        },
+    )
+    assert error == "booking_confirmation_status_mismatch"
+
+
+def test_detect_tool_contract_error_allows_created_text_for_confirmed_status():
+    error = _detect_tool_contract_error(
+        tool_action="calendar.book_slot",
+        tool_ok=True,
+        response_text="Запись подтверждена.",
+        decision_meta={
+            "tool_decision": "ok",
+            "appointment_id": "apt-1",
+            "appointment_status": "CONFIRMED",
+        },
+    )
+    assert error is None
 
 
 def test_unknown_state_fallback_sends_reply():
