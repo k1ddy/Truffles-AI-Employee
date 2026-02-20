@@ -54,6 +54,7 @@ from app.models import (
     MarketingCampaign,
     MarketingCampaignDelivery,
     Message,
+    OutboxMessage,
     User,
 )
 from app.ports.messaging import MessageOptions
@@ -2743,7 +2744,20 @@ def _ensure_rag_meta_defaults(message: Message | None) -> None:
     _update_message_decision_metadata(message, updates)
 
 
-MARKETING_REPLY_CONTEXT_LOOKBACK_DAYS = 30
+MARKETING_REPLY_CONTEXT_LOOKBACK_HOURS = 72
+MARKETING_REPLY_CONTEXT_AMBIGUITY_WINDOW_HOURS = 6
+MARKETING_REPLY_CONTEXT_ATTACHABLE_STATUSES = {"queued", "sent", "delivered", "pending"}
+
+
+def _record_marketing_reply_context_skip(conversation: Conversation, *, reason: str) -> None:
+    _record_decision_trace(
+        conversation,
+        {
+            "stage": "marketing_reply_context",
+            "decision": "skipped",
+            "reason": reason,
+        },
+    )
 
 
 def _maybe_attach_marketing_reply_context(
@@ -2756,9 +2770,23 @@ def _maybe_attach_marketing_reply_context(
     if not conversation or not saved_message:
         return None
 
-    lookback_start = now - timedelta(days=MARKETING_REPLY_CONTEXT_LOOKBACK_DAYS)
-    row = (
-        db.query(MarketingCampaignDelivery, MarketingCampaign)
+    # Keep marketing context scoped to the current inbound only.
+    context = _get_conversation_context(conversation)
+    if "marketing_context" in context:
+        context.pop("marketing_context", None)
+        _set_conversation_context(conversation, context)
+
+    inbound_text = str(getattr(saved_message, "content", "") or "").strip()
+    if not inbound_text:
+        _record_marketing_reply_context_skip(conversation, reason="empty_text")
+        return None
+    if _is_placeholder_text(inbound_text):
+        _record_marketing_reply_context_skip(conversation, reason="placeholder_text")
+        return None
+
+    lookback_start = now - timedelta(hours=MARKETING_REPLY_CONTEXT_LOOKBACK_HOURS)
+    rows_result = (
+        db.query(MarketingCampaignDelivery)
         .join(MarketingCampaign, MarketingCampaign.id == MarketingCampaignDelivery.campaign_id)
         .filter(
             MarketingCampaignDelivery.client_id == conversation.client_id,
@@ -2766,20 +2794,78 @@ def _maybe_attach_marketing_reply_context(
             MarketingCampaignDelivery.created_at >= lookback_start,
         )
         .order_by(MarketingCampaignDelivery.created_at.desc(), MarketingCampaignDelivery.id.desc())
-        .first()
+        .limit(2)
+        .all()
     )
-    if not row:
+    rows = rows_result if isinstance(rows_result, list) else []
+    if not rows:
+        _record_marketing_reply_context_skip(conversation, reason="no_recent_delivery")
         return None
 
-    delivery, campaign = row
-    if campaign.client_id != conversation.client_id:
+    eligible_rows: list[tuple[MarketingCampaignDelivery, MarketingCampaign, str]] = []
+    for row in rows:
+        delivery = row
+        campaign: MarketingCampaign | None = None
+        if isinstance(row, (tuple, list)):
+            delivery = row[0]
+            if len(row) > 1 and hasattr(row[1], "id"):
+                campaign = row[1]
+        if campaign is None:
+            campaign = (
+                db.query(MarketingCampaign)
+                .filter(MarketingCampaign.id == getattr(delivery, "campaign_id", None))
+                .first()
+            )
+        if not campaign:
+            continue
+
+        outbox_status = ""
+        if isinstance(row, (tuple, list)) and len(row) > 2 and isinstance(row[2], str):
+            outbox_status = row[2].strip().upper()
+        else:
+            outbox_id = getattr(delivery, "outbox_id", None)
+            if outbox_id:
+                outbox_row = db.query(OutboxMessage).filter(OutboxMessage.id == outbox_id).first()
+                candidate_status = getattr(outbox_row, "status", None)
+                if isinstance(candidate_status, str):
+                    outbox_status = candidate_status.strip().upper()
+        if campaign.client_id != conversation.client_id:
+            continue
+        created_at = getattr(delivery, "created_at", None)
+        if isinstance(created_at, datetime) and created_at < lookback_start:
+            continue
+        status_before = (delivery.status or "queued").strip().lower() or "queued"
+        if status_before not in MARKETING_REPLY_CONTEXT_ATTACHABLE_STATUSES:
+            continue
+        if outbox_status == "FAILED":
+            continue
+        eligible_rows.append((delivery, campaign, status_before))
+
+    if not eligible_rows:
+        _record_marketing_reply_context_skip(conversation, reason="no_eligible_delivery")
         return None
 
-    status_before = (delivery.status or "queued").strip().lower() or "queued"
-    if status_before != "replied":
-        delivery.status = "replied"
-        delivery.updated_at = now
-        db.add(delivery)
+    if len(eligible_rows) > 1:
+        latest_created_at = getattr(eligible_rows[0][0], "created_at", None)
+        second_created_at = getattr(eligible_rows[1][0], "created_at", None)
+        if isinstance(latest_created_at, datetime) and isinstance(second_created_at, datetime):
+            ambiguity_window = timedelta(hours=MARKETING_REPLY_CONTEXT_AMBIGUITY_WINDOW_HOURS)
+            if (latest_created_at - second_created_at) <= ambiguity_window:
+                _record_marketing_reply_context_skip(
+                    conversation,
+                    reason="ambiguous_recent_deliveries",
+                )
+                return None
+
+    delivery, campaign, status_before = eligible_rows[0]
+
+    if status_before not in MARKETING_REPLY_CONTEXT_ATTACHABLE_STATUSES:
+        _record_marketing_reply_context_skip(conversation, reason="non_attachable_status")
+        return None
+
+    delivery.status = "replied"
+    delivery.updated_at = now
+    db.add(delivery)
 
     marketing_context = {
         "campaign_id": str(campaign.id),
@@ -6413,15 +6499,6 @@ async def _handle_webhook_payload(
             _update_message_decision_metadata(saved_message, dedup_meta_updates)
         if trace_id and saved_message:
             _update_message_decision_metadata(saved_message, {"trace_id": trace_id})
-        marketing_context = _maybe_attach_marketing_reply_context(
-            db,
-            conversation=conversation,
-            saved_message=saved_message,
-            now=datetime.now(timezone.utc),
-        )
-        if marketing_context:
-            timing_context["marketing_campaign_id"] = marketing_context.get("campaign_id")
-
         if enqueue_only:
             return await _handle_enqueue_only_accept(
                 db=db,
@@ -6544,6 +6621,15 @@ async def _handle_webhook_payload(
             context = _get_conversation_context(conversation)
             context = _set_asr_inflight(context, None)
             _set_conversation_context(conversation, context)
+
+    marketing_context = _maybe_attach_marketing_reply_context(
+        db,
+        conversation=conversation,
+        saved_message=saved_message,
+        now=datetime.now(timezone.utc),
+    )
+    if marketing_context:
+        timing_context["marketing_campaign_id"] = marketing_context.get("campaign_id")
 
     asr_low_confidence = False
     if transcript and media_info and _is_voice_note(media_info):
