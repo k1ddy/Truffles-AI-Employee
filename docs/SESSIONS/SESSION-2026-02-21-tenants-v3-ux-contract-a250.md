@@ -16,10 +16,18 @@
   - Начата декомпозиция `tenants/page.tsx`: логика page filters + URL sync вынесена в `use-tenants-page-filters.ts`.
   - Добавлены e2e сценарии `Scenario B/C/D` в `platform-admin.spec.ts`.
   - Укреплён `auth.setup.ts`: добавлен `ensureAuthenticatedConsole` без хрупкой привязки к единственному `logout-button` чекпойнту.
+  - Добавлен recovery в `auth.setup.ts` для `ChunkLoadError` (retry + reload), стабилизирован setup-run.
+  - Выполнен runtime e2e прогон `Scenario B/C/D` на `https://console.truffles.kz` под platform_admin storage state: 3/3 passed.
+  - Продолжена декомпозиция Tenants: выделен hook `use-tenants-page-filters.ts` и очищен `page.tsx` от URL/filter sync деталей.
+  - Добавлен backend foundation по ТЗ: новые endpoint wrappers
+    - `GET /console/v1/admin/tenants/portfolio`
+    - `GET /console/v1/admin/tenants/company-cockpit`
+  - Добавлены schema models и unit tests для новых wrappers/хелпера query-request адаптации.
   - Прогнаны проверки: `corepack pnpm -C console-web lint`, `corepack pnpm -C console-web build`.
 - next:
-  - Дожать e2e-auth инфраструктуру (`.auth/console.json`/Keycloak доступность) и прогнать `platform-admin` suite полностью.
+  - Подключить `portfolio/company-cockpit` endpoints в `console-web` API client и заменить часть compose-логики на server contract.
   - Продолжить декомпозицию `tenants/page.tsx` (вынос секций portfolio/changes/onboarding в отдельные компоненты).
+  - Добить локальный localhost e2e auth-state без зависимости на `console.truffles.kz` cookie-domain.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
@@ -27,4 +35,7 @@
   - console-web/src/components/TenantsTopControls.tsx
   - console-web/e2e/auth.setup.ts
   - console-web/e2e/platform-admin.spec.ts
+  - truffles-api/app/schemas/console.py
+  - truffles-api/app/routers/console.py
+  - truffles-api/tests/test_console_tenants_list.py
 - last_updated: 2026-02-21

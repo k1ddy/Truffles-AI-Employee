@@ -241,6 +241,8 @@ from app.schemas.console import (
     ConsoleTelegramTrail,
     ConsoleTelegramVerifyRequest,
     ConsoleTelegramVerifyResponse,
+    ConsoleTenantsCompanyCockpitResponse,
+    ConsoleTenantsPortfolioResponse,
     ConsoleTenantsSensitiveAccessAuditRequest,
     ConsoleTenantsSensitiveAccessAuditResponse,
     ConsoleTenantsWeeklySnapshotCreateRequest,
@@ -1606,6 +1608,17 @@ def _reject_unknown_query_params(request: Request, allowed: set[str]) -> None:
 def _validate_limit(limit: int) -> None:
     if limit < 1 or limit > 100:
         raise ConsoleAPIError(400, "INVALID_PARAM", "limit must be between 1 and 100")
+
+
+def _request_with_query_params(request: Request, params: dict[str, object | None]) -> Request:
+    scope = dict(request.scope)
+    normalized: dict[str, str] = {}
+    for key, value in params.items():
+        if value is None:
+            continue
+        normalized[key] = str(value)
+    scope["query_string"] = urlencode(normalized).encode("utf-8")
+    return Request(scope, receive=request.receive)
 
 
 def _parse_uuid_param(name: str, value: Optional[str]) -> Optional[UUID]:
@@ -12860,6 +12873,190 @@ async def list_branches(
         items=[_serialize_branch(branch) for branch in items],
         cursor=next_cursor,
         has_more=has_more,
+    )
+
+
+@router.get(
+    "/admin/tenants/portfolio",
+    response_model=ConsoleTenantsPortfolioResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_tenants_portfolio(
+    request: Request,
+    cursor: Optional[str] = None,
+    limit: int = 20,
+    q: Optional[str] = None,
+    company_id: Optional[str] = None,
+    lifecycle: Optional[str] = None,
+    attention_limit: int = 20,
+    stale_after_minutes: int = Query(
+        _INTEGRATION_DEFAULT_STALE_MINUTES,
+        ge=_INTEGRATION_MIN_STALE_MINUTES,
+        le=_INTEGRATION_MAX_STALE_MINUTES,
+    ),
+    include_low: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleTenantsPortfolioResponse:
+    _reject_unknown_query_params(
+        request,
+        {
+            "cursor",
+            "limit",
+            "q",
+            "company_id",
+            "lifecycle",
+            "attention_limit",
+            "stale_after_minutes",
+            "include_low",
+        },
+    )
+    _validate_limit(limit)
+    _validate_limit(attention_limit)
+    lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
+
+    clients_request = _request_with_query_params(
+        request,
+        {
+            "cursor": cursor,
+            "limit": limit,
+            "q": q,
+            "company_id": company_id,
+            "lifecycle": lifecycle_mode,
+            "include_fleet": "true",
+            "include_summary": "true",
+        },
+    )
+    clients_response = await list_clients(
+        request=clients_request,
+        cursor=cursor,
+        limit=limit,
+        q=q,
+        company_id=company_id,
+        lifecycle=lifecycle_mode,
+        include_fleet="true",
+        include_summary="true",
+        db=db,
+    )
+
+    attention_request = _request_with_query_params(
+        request,
+        {
+            "limit": attention_limit,
+            "stale_after_minutes": stale_after_minutes,
+            "include_low": include_low,
+        },
+    )
+    attention_response = await list_fleet_attention(
+        request=attention_request,
+        limit=attention_limit,
+        stale_after_minutes=stale_after_minutes,
+        include_low=include_low,
+        db=db,
+    )
+
+    return ConsoleTenantsPortfolioResponse(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        clients=clients_response,
+        fleet_attention=attention_response,
+    )
+
+
+@router.get(
+    "/admin/tenants/company-cockpit",
+    response_model=ConsoleTenantsCompanyCockpitResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_tenants_company_cockpit(
+    request: Request,
+    company_id: str,
+    client_id: Optional[str] = None,
+    lifecycle: Optional[str] = None,
+    client_limit: int = 20,
+    branch_limit: int = 20,
+    client_cursor: Optional[str] = None,
+    branch_cursor: Optional[str] = None,
+    client_q: Optional[str] = None,
+    branch_q: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleTenantsCompanyCockpitResponse:
+    _reject_unknown_query_params(
+        request,
+        {
+            "company_id",
+            "client_id",
+            "lifecycle",
+            "client_limit",
+            "branch_limit",
+            "client_cursor",
+            "branch_cursor",
+            "client_q",
+            "branch_q",
+        },
+    )
+    _validate_limit(client_limit)
+    _validate_limit(branch_limit)
+    lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
+
+    company_uuid = _parse_uuid_param("company_id", company_id)
+    if company_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid company_id")
+
+    selected_client_uuid = _parse_uuid_param("client_id", client_id)
+
+    clients_request = _request_with_query_params(
+        request,
+        {
+            "cursor": client_cursor,
+            "limit": client_limit,
+            "q": client_q,
+            "company_id": str(company_uuid),
+            "lifecycle": lifecycle_mode,
+            "include_fleet": "true",
+        },
+    )
+    clients_response = await list_clients(
+        request=clients_request,
+        cursor=client_cursor,
+        limit=client_limit,
+        q=client_q,
+        company_id=str(company_uuid),
+        lifecycle=lifecycle_mode,
+        include_fleet="true",
+        db=db,
+    )
+
+    if selected_client_uuid is None and clients_response.items:
+        selected_client_uuid = clients_response.items[0].id
+
+    if selected_client_uuid is None:
+        branches_response = ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
+    else:
+        branches_request = _request_with_query_params(
+            request,
+            {
+                "cursor": branch_cursor,
+                "limit": branch_limit,
+                "q": branch_q,
+                "client_id": str(selected_client_uuid),
+                "lifecycle": lifecycle_mode,
+            },
+        )
+        branches_response = await list_branches(
+            request=branches_request,
+            cursor=branch_cursor,
+            limit=branch_limit,
+            q=branch_q,
+            client_id=str(selected_client_uuid),
+            lifecycle=lifecycle_mode,
+            db=db,
+        )
+
+    return ConsoleTenantsCompanyCockpitResponse(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        company_id=company_uuid,
+        selected_client_id=selected_client_uuid,
+        clients=clients_response,
+        branches=branches_response,
     )
 
 
