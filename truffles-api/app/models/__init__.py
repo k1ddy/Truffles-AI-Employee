@@ -29,6 +29,7 @@ from app.models.outbox_status_event import OutboxStatusEvent
 from app.models.prompt import Prompt
 from app.models.reference_pack import ReferencePack
 from app.models.specialist import Specialist
+from app.models.tenants_weekly_snapshot import TenantsWeeklySnapshot
 from app.models.user import User
 
 __all__ = [
@@ -64,4 +65,5 @@ __all__ = [
     "LearnedResponse",
     "KnowledgeVersion",
     "Specialist",
+    "TenantsWeeklySnapshot",
 ]
