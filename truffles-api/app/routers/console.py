@@ -323,6 +323,8 @@ from app.services.console_owner_admin import (
 )
 from app.services.escalation_service import resolve_telegram_routing
 from app.services.human_lock_service import (
+    HUMAN_LOCK_SCOPE_CONVERSATION,
+    HUMAN_LOCK_SCOPE_REMOTE,
     get_active_human_lock,
     normalize_phone_to_jid,
     release_human_lock,
@@ -1205,6 +1207,10 @@ def _is_env_enabled(value: Optional[str], *, default: bool = False) -> bool:
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _is_human_lock_v2_enabled() -> bool:
+    return _is_env_enabled(os.environ.get("HUMAN_LOCK_V2_ENABLED"), default=True)
+
+
 def _coerce_utc_datetime(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -1234,7 +1240,58 @@ def _build_human_lock_status_payload(
         remaining_seconds=remaining_seconds,
         source=lock.source,
         reason=lock.reason,
+        locked_by_name=getattr(lock, "locked_by_name", None),
+        lock_scope=getattr(lock, "lock_scope", None),
     )
+
+
+def _build_case_human_lock_snapshot(
+    db: Session,
+    *,
+    client_id: UUID,
+    conversation: Conversation | None,
+) -> dict:
+    if not conversation:
+        return {
+            "human_lock_active": False,
+            "human_lock_until": None,
+            "human_lock_remaining_seconds": None,
+            "human_lock_source": None,
+            "human_lock_reason": None,
+            "human_lock_by": None,
+        }
+
+    now_utc = datetime.now(timezone.utc)
+    remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
+    lock = get_active_human_lock(
+        db,
+        client_id=client_id,
+        remote_jid=remote_jid,
+        conversation_id=conversation.id,
+        now=now_utc,
+    )
+    if not lock:
+        return {
+            "human_lock_active": False,
+            "human_lock_until": None,
+            "human_lock_remaining_seconds": None,
+            "human_lock_source": None,
+            "human_lock_reason": None,
+            "human_lock_by": None,
+        }
+
+    lock_until = _coerce_utc_datetime(lock.lock_until)
+    remaining_seconds = (
+        max(0, int((lock_until - now_utc).total_seconds())) if lock_until else None
+    )
+    return {
+        "human_lock_active": True,
+        "human_lock_until": lock_until.isoformat() if lock_until else None,
+        "human_lock_remaining_seconds": remaining_seconds,
+        "human_lock_source": lock.source,
+        "human_lock_reason": lock.reason,
+        "human_lock_by": lock.locked_by_name,
+    }
 
 
 def _build_console_outbox_text_payload(
@@ -6020,6 +6077,7 @@ async def list_cases(
     phone: Optional[str] = None,
     has_delivery_error: bool = False,
     has_pending_outbox: bool = False,
+    has_human_lock: bool = False,
     last_activity_since: Optional[str] = None,
     sort_by: Optional[str] = None,
     date_from: Optional[str] = None,
@@ -6040,6 +6098,7 @@ async def list_cases(
             "phone",
             "has_delivery_error",
             "has_pending_outbox",
+            "has_human_lock",
             "last_activity_since",
             "sort_by",
             "date_from",
@@ -6063,6 +6122,11 @@ async def list_cases(
         "has_pending_outbox",
         request.query_params.get("has_pending_outbox"),
         default=has_pending_outbox,
+    )
+    has_human_lock = _parse_bool_param(
+        "has_human_lock",
+        request.query_params.get("has_human_lock"),
+        default=has_human_lock,
     )
     last_activity_since_dt = _parse_datetime_param("last_activity_since", last_activity_since)
     sort_by_value = _parse_sort_param("sort_by", request.query_params.get("sort_by"))
@@ -6165,6 +6229,19 @@ async def list_cases(
             )
             .exists()
         )
+    if has_human_lock:
+        now_utc = datetime.now(timezone.utc)
+        count_query = count_query.filter(
+            db.query(ConversationHumanLock.id)
+            .filter(
+                ConversationHumanLock.client_id == context.client.id,
+                ConversationHumanLock.conversation_id == Conversation.id,
+                ConversationHumanLock.lock_scope == HUMAN_LOCK_SCOPE_CONVERSATION,
+                ConversationHumanLock.active.is_(True),
+                ConversationHumanLock.lock_until > now_utc,
+            )
+            .exists()
+        )
     if last_activity_since_dt:
         count_query = count_query.filter(
             db.query(Message.id)
@@ -6177,6 +6254,7 @@ async def list_cases(
         )
     # Full count for queue visibility (before cursor pagination).
     total_count = count_query.order_by(None).count()
+    now_utc = datetime.now(timezone.utc)
 
     latest_message_subq = (
         db.query(
@@ -6243,6 +6321,30 @@ async def list_cases(
         .subquery()
     )
 
+    human_lock_subq = (
+        db.query(
+            ConversationHumanLock.conversation_id.label("conversation_id"),
+            ConversationHumanLock.lock_until.label("lock_until"),
+            ConversationHumanLock.source.label("source"),
+            ConversationHumanLock.reason.label("reason"),
+            ConversationHumanLock.locked_by_name.label("locked_by_name"),
+            func.row_number()
+            .over(
+                partition_by=ConversationHumanLock.conversation_id,
+                order_by=ConversationHumanLock.lock_until.desc(),
+            )
+            .label("rn"),
+        )
+        .filter(
+            ConversationHumanLock.client_id == context.client.id,
+            ConversationHumanLock.lock_scope == HUMAN_LOCK_SCOPE_CONVERSATION,
+            ConversationHumanLock.active.is_(True),
+            ConversationHumanLock.lock_until > now_utc,
+            ConversationHumanLock.conversation_id.isnot(None),
+        )
+        .subquery()
+    )
+
     query = base_query.outerjoin(
         latest_message_subq,
         and_(
@@ -6253,6 +6355,13 @@ async def list_cases(
     query = query.outerjoin(last_inbound_subq, last_inbound_subq.c.conversation_id == Conversation.id)
     query = query.outerjoin(last_outbound_subq, last_outbound_subq.c.conversation_id == Conversation.id)
     query = query.outerjoin(outbox_subq, outbox_subq.c.conversation_id == Conversation.id)
+    query = query.outerjoin(
+        human_lock_subq,
+        and_(
+            human_lock_subq.c.conversation_id == Conversation.id,
+            human_lock_subq.c.rn == 1,
+        ),
+    )
 
     if has_delivery_error:
         query = query.filter(outbox_subq.c.failed_count > 0)
@@ -6262,6 +6371,8 @@ async def list_cases(
 
     if last_activity_since_dt:
         query = query.filter(latest_message_subq.c.created_at >= last_activity_since_dt)
+    if has_human_lock:
+        query = query.filter(human_lock_subq.c.lock_until.is_not(None))
 
     # Sorting & Pagination (Cursor based on selected sort)
     sort_expr = Handover.created_at
@@ -6295,6 +6406,10 @@ async def list_cases(
         last_outbound_subq.c.last_outbound_at,
         outbox_subq.c.pending_count,
         outbox_subq.c.failed_count,
+        human_lock_subq.c.lock_until,
+        human_lock_subq.c.source,
+        human_lock_subq.c.reason,
+        human_lock_subq.c.locked_by_name,
     ).limit(limit + 1).all()
     
     has_more = len(items) > limit
@@ -6312,6 +6427,10 @@ async def list_cases(
             _last_outbound_at,
             _pending_count,
             _failed_count,
+            _lock_until,
+            _lock_source,
+            _lock_reason,
+            _lock_by_name,
         ) = items[-1]
         cursor_value = _resolve_case_sort_cursor(
             sort_by=sort_by_value,
@@ -6355,6 +6474,14 @@ async def list_cases(
                 ),
                 has_delivery_error=bool(failed_count and failed_count > 0),
                 has_pending_outbox=bool(pending_count and pending_count > 0),
+                human_lock_active=bool(lock_until),
+                human_lock_until=lock_until.isoformat() if lock_until else None,
+                human_lock_remaining_seconds=(
+                    max(0, int((lock_until - now_utc).total_seconds())) if lock_until else None
+                ),
+                human_lock_source=lock_source,
+                human_lock_reason=lock_reason,
+                human_lock_by=lock_by_name,
             )
             for (
                 handover,
@@ -6368,6 +6495,10 @@ async def list_cases(
                 last_outbound_at,
                 pending_count,
                 failed_count,
+                lock_until,
+                lock_source,
+                lock_reason,
+                lock_by_name,
             ) in items
         ],
         cursor=next_cursor,
@@ -6629,6 +6760,24 @@ async def resolve_case(
         entity_id=case.id,
         branch_id=branch_id,
     )
+    remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
+    released_lock = release_human_lock(
+        db,
+        client_id=context.client.id,
+        remote_jid=remote_jid,
+        conversation_id=conversation.id,
+        now=datetime.now(timezone.utc),
+    )
+    if released_lock:
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="human_lock_release_auto",
+            entity_type="conversation",
+            entity_id=conversation.id,
+            payload={"reason": "case_resolved"},
+            branch_id=branch_id,
+        )
 
     try:
         db.commit()
@@ -6770,6 +6919,24 @@ async def return_case(
         entity_id=case.id,
         branch_id=branch_id,
     )
+    remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
+    released_lock = release_human_lock(
+        db,
+        client_id=context.client.id,
+        remote_jid=remote_jid,
+        conversation_id=conversation.id,
+        now=datetime.now(timezone.utc),
+    )
+    if released_lock:
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="human_lock_release_auto",
+            entity_type="conversation",
+            entity_id=conversation.id,
+            payload={"reason": "case_returned"},
+            branch_id=branch_id,
+        )
 
     try:
         db.commit()
@@ -7079,6 +7246,11 @@ async def get_case(
         )
 
     case_health = _fetch_case_health(db, conversation) if conversation else {}
+    human_lock_snapshot = _build_case_human_lock_snapshot(
+        db,
+        client_id=context.client.id,
+        conversation=conversation,
+    )
     handover_meta = case.meta if isinstance(case.meta, dict) else None
     handover_media_refs = (
         handover_meta.get("media_refs")
@@ -7123,6 +7295,7 @@ async def get_case(
         needs_reply=case_health.get("needs_reply"),
         has_delivery_error=case_health.get("has_delivery_error"),
         has_pending_outbox=case_health.get("has_pending_outbox"),
+        **human_lock_snapshot,
         telegram_trail=telegram_trail,
     )
 
@@ -7147,6 +7320,16 @@ async def send_manager_message(
     require_console_permission(context, "inbox", "write")
     idempotency_key = _get_idempotency_key(request)
     normalized_content = _normalize_required_text(body.content, "content")
+    pause_enabled = bool(getattr(body, "pause_enabled", True))
+    pause_minutes = _normalize_pause_minutes(
+        getattr(body, "pause_minutes", None),
+        default=30,
+        allow_zero=True,
+    )
+    pause_reason = _normalize_optional_text(getattr(body, "pause_reason", None)) or "manual_reply"
+    human_lock_scope = (
+        HUMAN_LOCK_SCOPE_CONVERSATION if _is_human_lock_v2_enabled() else HUMAN_LOCK_SCOPE_REMOTE
+    )
 
     # Verify access to conversation via handover
     case = db.query(Handover).filter(
@@ -7306,18 +7489,19 @@ async def send_manager_message(
                 else:
                     delivery_error = "chatflow_send_failed"
 
-            if delivery_status in {"queued", "delivered"}:
+            if delivery_status in {"queued", "delivered"} and pause_enabled and pause_minutes > 0:
                 upsert_human_lock(
                     db,
                     client_id=context.client.id,
                     remote_jid=remote_jid,
-                    lock_until=now_utc + timedelta(minutes=30),
+                    lock_until=now_utc + timedelta(minutes=pause_minutes),
                     conversation_id=conversation.id,
                     branch_id=conversation.branch_id,
                     locked_by_id=context.agent.id,
                     locked_by_name=context.agent.name,
                     source="console_message",
-                    reason="manual_reply",
+                    reason=pause_reason,
+                    lock_scope=human_lock_scope,
                 )
     except Exception as exc:
         logger.error("WhatsApp delivery error: %s", exc)
@@ -7401,16 +7585,19 @@ async def send_outreach_message(
     pause_minutes = _normalize_pause_minutes(body.pause_bot_minutes, default=30, allow_zero=True)
     pause_reason = _normalize_optional_text(body.pause_reason)
     idempotency_key = _get_idempotency_key(request)
+    human_lock_scope = (
+        HUMAN_LOCK_SCOPE_CONVERSATION if _is_human_lock_v2_enabled() else HUMAN_LOCK_SCOPE_REMOTE
+    )
 
-    conversation: Conversation | None = None
-    branch_id = body.branch_id
-    if body.conversation_id:
-        conversation = _resolve_console_conversation_or_404(
-            db,
-            client_id=context.client.id,
-            conversation_id=body.conversation_id,
-        )
-        branch_id = conversation.branch_id
+    if not body.conversation_id:
+        raise ConsoleAPIError(400, "CONVERSATION_REQUIRED", "conversation_id is required for outreach")
+
+    conversation: Conversation | None = _resolve_console_conversation_or_404(
+        db,
+        client_id=context.client.id,
+        conversation_id=body.conversation_id,
+    )
+    branch_id = conversation.branch_id
     if branch_id is not None:
         _require_branch_access(context, branch_id, message="Access to this branch denied")
     elif conversation is None:
@@ -7560,6 +7747,7 @@ async def send_outreach_message(
                 locked_by_name=context.agent.name,
                 source="console_outreach",
                 reason=pause_reason or "manual_pause",
+                lock_scope=human_lock_scope,
             )
             lock_until = _coerce_utc_datetime(lock.lock_until)
     except Exception as exc:
@@ -7623,6 +7811,7 @@ async def get_conversation_human_lock_status(
         db,
         client_id=context.client.id,
         remote_jid=remote_jid,
+        conversation_id=conversation.id,
         now=now_utc,
     )
     db.commit()
@@ -7647,6 +7836,9 @@ async def pause_conversation_human_lock(
 
     minutes = _normalize_pause_minutes(body.minutes, default=30, allow_zero=False)
     reason = _normalize_optional_text(body.reason) or "manual_pause"
+    human_lock_scope = (
+        HUMAN_LOCK_SCOPE_CONVERSATION if _is_human_lock_v2_enabled() else HUMAN_LOCK_SCOPE_REMOTE
+    )
     conversation = _resolve_console_conversation_or_404(
         db,
         client_id=context.client.id,
@@ -7673,6 +7865,7 @@ async def pause_conversation_human_lock(
         locked_by_name=context.agent.name,
         source="console_pause",
         reason=reason,
+        lock_scope=human_lock_scope,
     )
     record_audit_event(
         db,
@@ -7719,6 +7912,7 @@ async def release_conversation_human_lock(
         db,
         client_id=context.client.id,
         remote_jid=remote_jid,
+        conversation_id=conversation.id,
         now=now_utc,
     )
     record_audit_event(
@@ -7749,6 +7943,9 @@ async def send_manager_media(
     request: Request,
     file: UploadFile = File(...),
     caption: Optional[str] = Form(None),
+    pause_enabled: Optional[bool] = Form(True),
+    pause_minutes: Optional[int] = Form(30),
+    pause_reason: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ) -> ConsoleManagerMessageResponse:
     """Send a media message from the manager to the customer via WhatsApp."""
@@ -7762,6 +7959,12 @@ async def send_manager_media(
     idempotency_key = _get_idempotency_key(request)
     normalized_caption = _normalize_media_caption(caption)
     media_type = _resolve_console_media_type(file.filename, file.content_type)
+    pause_enabled = bool(pause_enabled)
+    pause_minutes = _normalize_pause_minutes(pause_minutes, default=30, allow_zero=True)
+    pause_reason = _normalize_optional_text(pause_reason) or "manual_reply"
+    human_lock_scope = (
+        HUMAN_LOCK_SCOPE_CONVERSATION if _is_human_lock_v2_enabled() else HUMAN_LOCK_SCOPE_REMOTE
+    )
 
     case = db.query(Handover).filter(
         Handover.conversation_id == conversation_id,
@@ -7827,6 +8030,23 @@ async def send_manager_media(
         if idempotency and idempotency.record:
             release_idempotency(db, record=idempotency.record)
         raise
+
+    if delivery_status in {"delivered", "queued"}:
+        remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
+        if remote_jid and pause_enabled and pause_minutes > 0:
+            upsert_human_lock(
+                db,
+                client_id=context.client.id,
+                remote_jid=remote_jid,
+                lock_until=datetime.now(timezone.utc) + timedelta(minutes=pause_minutes),
+                conversation_id=conversation.id,
+                branch_id=conversation.branch_id,
+                locked_by_id=context.agent.id,
+                locked_by_name=context.agent.name,
+                source="console_media",
+                reason=pause_reason,
+                lock_scope=human_lock_scope,
+            )
 
     if delivery_status in {"delivered", "queued"} and conversation.telegram_topic_id:
         try:

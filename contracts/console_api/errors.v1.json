@@ -80,6 +80,17 @@
             },
             "retryable": false
         },
+        "CONVERSATION_REQUIRED": {
+            "http_status": 400,
+            "message_template": "Conversation required",
+            "ui_behavior": {
+                "action": "toast",
+                "toast": true,
+                "toast_type": "error",
+                "description": "Show error toast indicating outreach requires a conversation"
+            },
+            "retryable": false
+        },
         "INVALID_PARAM": {
             "http_status": 400,
             "message_template": "Invalid parameter",

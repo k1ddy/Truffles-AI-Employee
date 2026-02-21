@@ -163,6 +163,13 @@ paths:
           type: boolean
           default: false
           title: Has Pending Outbox
+      - name: has_human_lock
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Has Human Lock
       - name: last_activity_since
         in: query
         required: false
@@ -5390,6 +5397,23 @@ components:
           - type: string
           - type: 'null'
           title: Caption
+        pause_enabled:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Pause Enabled
+          default: true
+        pause_minutes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Pause Minutes
+          default: 30
+        pause_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pause Reason
       type: object
       required:
       - file
@@ -7380,6 +7404,36 @@ components:
           - type: boolean
           - type: 'null'
           title: Has Pending Outbox
+        human_lock_active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Human Lock Active
+        human_lock_until:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Human Lock Until
+        human_lock_remaining_seconds:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Human Lock Remaining Seconds
+        human_lock_source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Human Lock Source
+        human_lock_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Human Lock Reason
+        human_lock_by:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Human Lock By
         telegram_trail:
           anyOf:
           - $ref: '#/components/schemas/ConsoleTelegramTrail'
@@ -8248,6 +8302,16 @@ components:
           - type: string
           - type: 'null'
           title: Reason
+        locked_by_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Locked By Name
+        lock_scope:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Lock Scope
       type: object
       required:
       - active
@@ -9017,6 +9081,19 @@ components:
         content:
           type: string
           title: Content
+        pause_enabled:
+          type: boolean
+          title: Pause Enabled
+          default: true
+        pause_minutes:
+          type: integer
+          title: Pause Minutes
+          default: 30
+        pause_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pause Reason
       type: object
       required:
       - content
@@ -9520,10 +9597,8 @@ components:
           format: uuid
           title: Delivery Id
         conversation_id:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+          type: string
+          format: uuid
           title: Conversation Id
         recipient_jid:
           anyOf:
@@ -11644,6 +11719,7 @@ components:
       required:
       - destination
       - content
+      - conversation_id
       title: ConsoleOutreachMessageRequest
     ConsoleOutreachMessageResponse:
       properties:

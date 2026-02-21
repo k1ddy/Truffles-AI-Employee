@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.models import Conversation, Message, User
+from app.routers.webhook.trace import _record_message_decision_meta, _update_message_decision_metadata
 from app.schemas.webhook import WebhookResponse
 from app.services.ai_service import normalize_for_matching
 from app.services.human_lock_service import get_active_human_lock, normalize_remote_jid
@@ -357,6 +358,7 @@ def _handle_reengage_and_mute_gate(
     expected_reply_shortcircuit: bool,
     now: datetime,
     send_and_save,
+    saved_message=None,
 ) -> tuple[WebhookResponse | None, list[str], bool]:
     from app.services.ai_service import classify_confirmation
 
@@ -387,6 +389,7 @@ def _handle_reengage_and_mute_gate(
             db,
             client_id=client_id,
             remote_jid=normalized_remote_jid,
+            conversation_id=conversation.id,
             now=now,
         )
         if human_lock:
@@ -404,6 +407,26 @@ def _handle_reengage_and_mute_gate(
                     "lock_until": lock_until.isoformat() if lock_until else None,
                 },
             )
+            if saved_message is not None:
+                _record_message_decision_meta(
+                    saved_message,
+                    action="human_lock_silent",
+                    intent=None,
+                    source="routing",
+                    fast_intent=False,
+                )
+                _update_message_decision_metadata(
+                    saved_message,
+                    {
+                        "human_lock": {
+                            "active": True,
+                            "until": lock_until.isoformat() if lock_until else None,
+                            "source": getattr(human_lock, "source", None),
+                            "reason": getattr(human_lock, "reason", None),
+                            "locked_by": getattr(human_lock, "locked_by_name", None),
+                        }
+                    },
+                )
             db.commit()
             return (
                 WebhookResponse(
