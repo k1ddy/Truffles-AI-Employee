@@ -1,0 +1,23 @@
+# SESSION 2026-02-21-marketing-p1p3-a1 — Marketing Pro P1/P2/P3 Delivery
+
+- status: active
+- owner: Brain | Top Architect | Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md
+- branch: feat/2026-02-21-marketing-p1p3-a1
+- worktree: /home/zhan/worktrees/2026-02-21-marketing-p1p3-a1
+- base_ref: origin/main
+- scope: Реализация P1/P2/P3 по вкладке Marketing (backend state/preflight/diagnostics, UI execute flow, tests/e2e).
+- done:
+  - Implemented backend canonical marketing status `status_v2` with migration and router/schema updates.
+  - Implemented marketing UI improvements (explicit API errors, preflight hints, execute modal, diagnostics classes).
+  - Added/updated marketing test coverage (`test_marketing_service`, console marketing tests, message endpoint slices, e2e marketing spec).
+- next:
+  - Open PR and capture review comments/blockers.
+  - Resolve non-marketing frontend type drift and e2e auth setup blockers in a follow-up track.
+- evidence:
+  - `python3 -m py_compile truffles-api/app/routers/console.py truffles-api/app/schemas/console.py truffles-api/app/routers/webhook/decision.py`
+  - `cd truffles-api && ruff check app/routers/console.py app/schemas/console.py app/services/marketing tests/test_console_marketing_campaigns.py tests/test_webhook_marketing_reply_context.py`
+  - `cd truffles-api && pytest -q tests/test_marketing_service.py tests/test_console_marketing_campaigns.py tests/test_webhook_marketing_reply_context.py tests/test_message_endpoint.py -k "marketing or campaign"`
+  - `cd truffles-api && python3 scripts/generate_openapi.py --check`
+  - `cd console-web && npm run lint -- --file src/app/marketing/page.tsx --file src/lib/api-client.ts`
+- last_updated: 2026-02-21

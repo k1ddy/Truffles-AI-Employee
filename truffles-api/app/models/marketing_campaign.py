@@ -17,6 +17,7 @@ class MarketingCampaign(Base):
     name = Column(Text, nullable=False)
     message_text = Column(Text, nullable=False)
     status = Column(Text, nullable=False, default="draft")
+    status_v2 = Column(Text, nullable=False, default="draft")
     segment_code = Column(Text, nullable=False, default="reactivation_30_120")
     audience_mode = Column(Text, nullable=False, default="branch_active_conversations")
     audience_filter = Column(JSONB, nullable=False, default=dict)

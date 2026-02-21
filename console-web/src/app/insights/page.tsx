@@ -7,6 +7,25 @@ import { useSession } from "next-auth/react";
 import AccessDenied from "@/components/AccessDenied";
 import { authApi, canAccessConsole, opsApi } from "@/lib/api-client";
 
+type AnalyticsTrendPoint = {
+    date?: string | null;
+    bot_closed_rate?: number | null;
+    booking_conversion_rate?: number | null;
+    first_response_p50_seconds?: number | null;
+    after_hours_coverage_rate?: number | null;
+    escalation_quality_rate?: number | null;
+    outbox_failed_total?: number | null;
+    no_response_alert_total?: number | null;
+};
+type TopIntentPoint = {
+    intent: string;
+    share?: number | null;
+};
+type TopSectionPoint = {
+    section: string;
+    share?: number | null;
+};
+
 function formatMetricDate(value?: string | null): string {
     if (!value) {
         return "—";
@@ -338,9 +357,9 @@ export default function InsightsPage() {
     }
 
     const reportDate = formatMetricDate(metrics?.date ?? selectedDate);
-    const topIntents = metrics?.top_intents ?? [];
-    const topSections = metrics?.top_info_sections ?? [];
-    const analyticsTrend = metrics?.analytics_trend ?? [];
+    const topIntents = (metrics?.top_intents ?? []) as TopIntentPoint[];
+    const topSections = (metrics?.top_info_sections ?? []) as TopSectionPoint[];
+    const analyticsTrend = (metrics?.analytics_trend ?? []) as AnalyticsTrendPoint[];
     const trendRangeLabel = analyticsTrend.length
         ? `${formatMetricDate(analyticsTrend[0].date)} – ${formatMetricDate(
             analyticsTrend[analyticsTrend.length - 1].date,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 from uuid import UUID
@@ -41,7 +42,7 @@ MARKETING_STATUS_PAUSED = "paused"
 MARKETING_STATUS_COMPLETED = "completed"
 MARKETING_STATUS_CANCELLED = "cancelled"
 MARKETING_STATUS_FAILED = "failed"
-MARKETING_STATUS_VALUES = {
+MARKETING_STATUS_CANONICAL_VALUES = {
     MARKETING_STATUS_DRAFT,
     MARKETING_STATUS_IN_REVIEW,
     MARKETING_STATUS_APPROVED,
@@ -51,13 +52,22 @@ MARKETING_STATUS_VALUES = {
     MARKETING_STATUS_COMPLETED,
     MARKETING_STATUS_CANCELLED,
     MARKETING_STATUS_FAILED,
+}
+MARKETING_STATUS_VALUES = {
+    *MARKETING_STATUS_CANONICAL_VALUES,
     # Backward-compat statuses from Wave 3.
     "ready",
     "executed",
 }
+MARKETING_LEGACY_STATUS_MAP = {
+    "ready": MARKETING_STATUS_APPROVED,
+    "executed": MARKETING_STATUS_COMPLETED,
+}
 
 MARKETING_FREQUENCY_CAP_DAYS = 7
 MARKETING_PERMANENT_FAILURE_LOOKBACK_DAYS = 90
+MARKETING_TEMPLATE_GATE_ENABLED_ENV = "MARKETING_TEMPLATE_GATE_ENABLED"
+MARKETING_TEMPLATE_APPROVED_STATES = {"approved", "active", "ready"}
 
 _CANCELLED_APPOINTMENT_STATUSES = {"CANCELLED", "CANCELED", "cancelled", "canceled"}
 _NO_SHOW_APPOINTMENT_STATUSES = {"NO_SHOW", "no_show"}
@@ -92,6 +102,33 @@ _TRANSITIONS: dict[str, set[str]] = {
         MARKETING_STATUS_CANCELLED,
     },
 }
+
+
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def normalize_marketing_status(value: Optional[str]) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in MARKETING_STATUS_CANONICAL_VALUES:
+        return normalized
+    return MARKETING_LEGACY_STATUS_MAP.get(normalized, MARKETING_STATUS_DRAFT)
+
+
+def resolve_marketing_campaign_status(campaign: MarketingCampaign) -> str:
+    status_v2 = getattr(campaign, "status_v2", None)
+    if isinstance(status_v2, str) and status_v2 in MARKETING_STATUS_CANONICAL_VALUES:
+        return status_v2
+    return normalize_marketing_status(getattr(campaign, "status", None))
+
+
+def _set_campaign_status(campaign: MarketingCampaign, status: str) -> None:
+    canonical = normalize_marketing_status(status)
+    campaign.status = canonical
+    campaign.status_v2 = canonical
 
 
 def check_marketing_transition(current_status: str, target_status: str) -> bool:
@@ -463,6 +500,97 @@ def _resolve_suppression_reasons(
     return reasons
 
 
+def _resolve_effective_delivery_status(delivery_status: Optional[str], outbox_status: Optional[str]) -> str:
+    normalized_delivery = (delivery_status or "").strip().lower()
+    if normalized_delivery == "replied":
+        return "replied"
+    normalized_outbox = (outbox_status or "").strip().upper()
+    if normalized_outbox == "SENT":
+        return "sent"
+    if normalized_outbox == "FAILED":
+        return "failed"
+    if normalized_delivery in {"queued", "sent", "failed", "replied"}:
+        return normalized_delivery
+    return "queued"
+
+
+def derive_marketing_terminal_status(
+    *,
+    queued_count: int,
+    failed_count: int,
+    total_count: int,
+) -> Optional[str]:
+    if total_count <= 0 or queued_count > 0:
+        return None
+    if failed_count > 0:
+        return MARKETING_STATUS_FAILED
+    return MARKETING_STATUS_COMPLETED
+
+
+def _campaign_template_state(campaign: MarketingCampaign) -> Optional[str]:
+    for source in (campaign.audience_filter, campaign.preflight_snapshot):
+        if not isinstance(source, dict):
+            continue
+        value = source.get("template_state")
+        if isinstance(value, str) and value.strip():
+            return value.strip().lower()
+    return None
+
+
+def refresh_marketing_campaign_lifecycle(
+    db: Session,
+    *,
+    campaign: MarketingCampaign,
+    now: Optional[datetime] = None,
+) -> dict[str, int]:
+    now = now or datetime.now(timezone.utc)
+    rows = (
+        db.query(
+            MarketingCampaignDelivery.status.label("delivery_status"),
+            OutboxMessage.status.label("outbox_status"),
+        )
+        .outerjoin(OutboxMessage, OutboxMessage.id == MarketingCampaignDelivery.outbox_id)
+        .filter(MarketingCampaignDelivery.campaign_id == campaign.id)
+        .all()
+    )
+
+    counts = {"queued": 0, "sent": 0, "failed": 0, "replied": 0}
+    for row in rows:
+        status_value = _resolve_effective_delivery_status(
+            getattr(row, "delivery_status", None),
+            getattr(row, "outbox_status", None),
+        )
+        counts[status_value] += 1
+
+    terminal_status = derive_marketing_terminal_status(
+        queued_count=counts["queued"],
+        failed_count=counts["failed"],
+        total_count=sum(counts.values()),
+    )
+    current_status = resolve_marketing_campaign_status(campaign)
+    if terminal_status and current_status not in {
+        MARKETING_STATUS_COMPLETED,
+        MARKETING_STATUS_FAILED,
+        MARKETING_STATUS_CANCELLED,
+    }:
+        _set_campaign_status(campaign, terminal_status)
+        campaign.run_completed_at = now
+        campaign.updated_at = now
+        db.add(campaign)
+        db.flush()
+    elif counts["queued"] > 0 and current_status not in {
+        MARKETING_STATUS_RUNNING,
+        MARKETING_STATUS_COMPLETED,
+        MARKETING_STATUS_FAILED,
+        MARKETING_STATUS_CANCELLED,
+    }:
+        _set_campaign_status(campaign, MARKETING_STATUS_RUNNING)
+        campaign.updated_at = now
+        db.add(campaign)
+        db.flush()
+    return counts
+
+
 def materialize_marketing_campaign_audience(
     db: Session,
     *,
@@ -638,6 +766,7 @@ def build_marketing_campaign_preflight(
     now: Optional[datetime] = None,
 ) -> dict[str, Any]:
     now = now or datetime.now(timezone.utc)
+    campaign_status = resolve_marketing_campaign_status(campaign)
     total_count = (
         db.query(func.count(MarketingCampaignRecipient.id))
         .filter(MarketingCampaignRecipient.campaign_id == campaign.id)
@@ -657,9 +786,14 @@ def build_marketing_campaign_preflight(
 
     outbox_snapshot = build_outbox_health_snapshot(db, now=now)
     runtime_blocked = outbox_snapshot.get("status") == "critical"
-    approval_ok = campaign.status in {MARKETING_STATUS_APPROVED, MARKETING_STATUS_SCHEDULED}
+    approval_ok = campaign_status in {MARKETING_STATUS_APPROVED, MARKETING_STATUS_SCHEDULED}
     preview_ok = int(total_count) > 0
     eligible_ok = eligible_count > 0
+    template_gate_enabled = _env_flag(MARKETING_TEMPLATE_GATE_ENABLED_ENV, default=False)
+    template_state = _campaign_template_state(campaign)
+    template_ok = True
+    if template_gate_enabled:
+        template_ok = template_state in MARKETING_TEMPLATE_APPROVED_STATES
 
     blocked_reasons: list[str] = []
     if runtime_blocked:
@@ -670,6 +804,8 @@ def build_marketing_campaign_preflight(
         blocked_reasons.append("audience_snapshot_missing")
     if not eligible_ok:
         blocked_reasons.append("eligible_recipients_empty")
+    if not template_ok:
+        blocked_reasons.append("template_not_approved")
 
     preflight_valid = len(blocked_reasons) == 0
     snapshot = {
@@ -682,6 +818,9 @@ def build_marketing_campaign_preflight(
         "approval_ok": approval_ok,
         "preview_ok": preview_ok,
         "runtime_blocked": runtime_blocked,
+        "template_gate_enabled": template_gate_enabled,
+        "template_state": template_state,
+        "template_ok": template_ok,
         "blocked_reasons": blocked_reasons,
         "preflight_valid": preflight_valid,
     }
@@ -697,7 +836,7 @@ def mark_campaign_under_review(campaign: MarketingCampaign, *, now: Optional[dat
     now = now or datetime.now(timezone.utc)
     if not check_marketing_transition(campaign.status, MARKETING_STATUS_IN_REVIEW):
         raise ValueError("invalid_transition_to_in_review")
-    campaign.status = MARKETING_STATUS_IN_REVIEW
+    _set_campaign_status(campaign, MARKETING_STATUS_IN_REVIEW)
     campaign.requested_review_at = now
     campaign.updated_at = now
 
@@ -706,7 +845,7 @@ def mark_campaign_approved(campaign: MarketingCampaign, *, approved_by: UUID, no
     now = now or datetime.now(timezone.utc)
     if not check_marketing_transition(campaign.status, MARKETING_STATUS_APPROVED):
         raise ValueError("invalid_transition_to_approved")
-    campaign.status = MARKETING_STATUS_APPROVED
+    _set_campaign_status(campaign, MARKETING_STATUS_APPROVED)
     campaign.approved_by = approved_by
     campaign.approved_at = now
     campaign.updated_at = now
@@ -716,7 +855,7 @@ def mark_campaign_paused(campaign: MarketingCampaign, *, now: Optional[datetime]
     now = now or datetime.now(timezone.utc)
     if not check_marketing_transition(campaign.status, MARKETING_STATUS_PAUSED):
         raise ValueError("invalid_transition_to_paused")
-    campaign.status = MARKETING_STATUS_PAUSED
+    _set_campaign_status(campaign, MARKETING_STATUS_PAUSED)
     campaign.updated_at = now
 
 
@@ -724,7 +863,7 @@ def mark_campaign_resume(campaign: MarketingCampaign, *, now: Optional[datetime]
     now = now or datetime.now(timezone.utc)
     if not check_marketing_transition(campaign.status, MARKETING_STATUS_APPROVED):
         raise ValueError("invalid_transition_to_approved")
-    campaign.status = MARKETING_STATUS_APPROVED
+    _set_campaign_status(campaign, MARKETING_STATUS_APPROVED)
     campaign.updated_at = now
 
 
@@ -829,12 +968,15 @@ def run_marketing_campaign_execute(
         existing_jids.add(normalized_jid)
 
     if queued_count > 0:
-        campaign.status = MARKETING_STATUS_RUNNING
+        _set_campaign_status(campaign, MARKETING_STATUS_RUNNING)
         campaign.executed_at = now
         campaign.run_started_at = campaign.run_started_at or now
+        campaign.run_completed_at = None
     campaign.updated_at = now
     db.add(campaign)
     db.flush()
+    if queued_count <= 0:
+        refresh_marketing_campaign_lifecycle(db, campaign=campaign, now=now)
     return {
         "queued_count": queued_count,
         "skipped_count": skipped_count,
@@ -917,6 +1059,7 @@ def retry_failed_marketing_deliveries(
     campaign.updated_at = now
     db.add(campaign)
     db.flush()
+    refresh_marketing_campaign_lifecycle(db, campaign=campaign, now=now)
     return {
         "retried_count": retried_count,
         "skipped_count": skipped_count,
