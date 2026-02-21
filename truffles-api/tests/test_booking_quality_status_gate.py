@@ -1,5 +1,6 @@
 import ast
 import hashlib
+import os
 from pathlib import Path
 
 
@@ -12,6 +13,12 @@ def _load_quality_helpers():
         "LLM_QUALITY_THRESHOLDS",
         "LLM_QUALITY_THRESHOLD_DIRECTIONS",
         "LLM_QUALITY_REGRESSION_KEYS",
+        "LLM_QUALITY_BLOCKING_REASONS",
+        "LLM_POLICY_OVERRIDE_REASON_WHITELIST",
+        "LLM_POLICY_OVERRIDE_KEYWORD_REASON_CODES",
+        "LLM_QUALITY_REGEX_LEXICON_TOKENS",
+        "LLM_QUALITY_REGEX_LEXICON_RESOLVER_PREFIXES",
+        "LLM_QUALITY_REGEX_LEXICON_TEST_PREFIX",
     }
     wanted_functions = {
         "_llm_quality_normalize_tool_token",
@@ -25,6 +32,13 @@ def _load_quality_helpers():
         "_llm_quality_build_infra_status",
         "_llm_quality_check_thresholds",
         "_llm_quality_check_regression",
+        "_llm_quality_collect_override_reason_codes",
+        "_llm_quality_init_rewrite_governance_state",
+        "_llm_quality_track_rewrite_governance",
+        "_llm_quality_finalize_rewrite_governance",
+        "_llm_quality_collect_blocking_reasons",
+        "_llm_quality_is_lexicon_regex_delta_file",
+        "_llm_quality_build_lexicon_regex_delta_status",
     }
 
     selected_nodes = []
@@ -37,7 +51,7 @@ def _load_quality_helpers():
             selected_nodes.append(node)
 
     module = ast.Module(body=selected_nodes, type_ignores=[])
-    namespace = {"hashlib": hashlib}
+    namespace = {"hashlib": hashlib, "os": os}
     exec(compile(module, str(script_path), "exec"), namespace, namespace)
     return namespace
 
@@ -181,3 +195,89 @@ def test_timeout_degrade_reason_classifier_detects_deadline_and_timeout_markers(
     assert is_timeout("policy_error:deadline_exceeded") is True
     assert is_timeout("provider_timeout") is True
     assert is_timeout("policy_validation:low_confidence") is False
+
+
+def test_rewrite_governance_blocks_missing_and_unknown_reason_codes():
+    ns = _load_quality_helpers()
+    init_state = ns["_llm_quality_init_rewrite_governance_state"]
+    track = ns["_llm_quality_track_rewrite_governance"]
+    finalize = ns["_llm_quality_finalize_rewrite_governance"]
+
+    state = init_state()
+    track(
+        state,
+        {
+            "policy_core_mode": "policy_core",
+            "llm_policy_override_reason_code": "contract_validation_failure",
+        },
+    )
+    track(
+        state,
+        {
+            "policy_core_mode": "policy_core",
+            "llm_policy_override_reason_missing_detected": True,
+        },
+    )
+    track(
+        state,
+        {
+            "policy_core_mode": "policy_core",
+            "llm_policy_override_reason_codes": ["custom_override"],
+        },
+    )
+    status = finalize(
+        state,
+        max_post_llm_semantic_rewrite_rate=0.5,
+        max_keyword_override_rate=0.0,
+    )
+
+    assert status["valid"] is False
+    assert status["rewrite_turns"] == 3
+    assert status["rewrite_reason_missing_turns"] == 1
+    assert status["rewrite_unknown_reason_turns"] == 1
+    assert "rewrite_reason_missing" in status["blocking_counts"]
+    assert "rewrite_reason_unknown" in status["blocking_counts"]
+    assert status["rewrite_reason_coverage"] < 1.0
+
+
+def test_collect_blocking_reasons_merges_governance_counts():
+    ns = _load_quality_helpers()
+    collect = ns["_llm_quality_collect_blocking_reasons"]
+    result = collect(
+        {"expected_reply_type_mismatch": 2},
+        extra_counts={
+            "post_llm_semantic_rewrite_budget_exceeded": 1,
+            "rewrite_reason_missing": 3,
+        },
+    )
+    assert result["count"] == 6
+    assert result["reasons"]["expected_reply_type_mismatch"] == 2
+    assert result["reasons"]["post_llm_semantic_rewrite_budget_exceeded"] == 1
+    assert result["reasons"]["rewrite_reason_missing"] == 3
+
+
+def test_lexicon_regex_delta_gate_requires_resolver_and_tests():
+    ns = _load_quality_helpers()
+    build_gate = ns["_llm_quality_build_lexicon_regex_delta_status"]
+
+    invalid = build_gate(
+        mode="block",
+        repo_root="/tmp/repo",
+        base_ref="origin/main",
+        changed_files=["truffles-api/app/knowledge/generic/SYSTEM_LEXICONS.yaml"],
+    )
+    assert invalid["valid"] is False
+    assert "resolver_delta_missing" in invalid["reasons"]
+    assert "contract_test_delta_missing" in invalid["reasons"]
+
+    valid = build_gate(
+        mode="block",
+        repo_root="/tmp/repo",
+        base_ref="origin/main",
+        changed_files=[
+            "truffles-api/app/knowledge/generic/SYSTEM_LEXICONS.yaml",
+            "truffles-api/app/routers/webhook/decision.py",
+            "truffles-api/tests/test_message_endpoint.py",
+        ],
+    )
+    assert valid["valid"] is True

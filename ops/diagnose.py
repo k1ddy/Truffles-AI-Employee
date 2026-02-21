@@ -837,7 +837,31 @@ LLM_QUALITY_BLOCKING_REASONS = (
     "expected_reply_type_mismatch",
     "tool_decision_mismatch",
     "judge_fail",
+    "post_llm_semantic_rewrite_budget_exceeded",
+    "keyword_override_budget_exceeded",
+    "rewrite_reason_missing",
+    "rewrite_reason_unknown",
+    "lexicon_regex_delta_violation",
 )
+LLM_POLICY_OVERRIDE_REASON_WHITELIST = {
+    "safety_policy_block",
+    "contract_validation_failure",
+    "required_slot_missing",
+    "tool_unavailable",
+    "timeout_degrade",
+    "idempotency_replay_guard",
+}
+LLM_POLICY_OVERRIDE_KEYWORD_REASON_CODES = {
+    "keyword_override",
+    "lexicon_override",
+    "regex_override",
+}
+LLM_QUALITY_REGEX_LEXICON_TOKENS = ("lexicon", "regex", "system_lexicons")
+LLM_QUALITY_REGEX_LEXICON_RESOLVER_PREFIXES = (
+    "truffles-api/app/routers/webhook/",
+    "truffles-api/app/services/",
+)
+LLM_QUALITY_REGEX_LEXICON_TEST_PREFIX = "truffles-api/tests/"
 LLM_QUALITY_REASON_LABELS = {
     "decision_meta_missing": "decision_meta missing for inbound turn",
     "decision_trace_missing": "decision_trace missing for inbound turn",
@@ -860,6 +884,11 @@ LLM_QUALITY_REASON_LABELS = {
     "manager_action_failed": "manager callback failed",
     "handoff_state_mismatch": "state mismatch after manager action",
     "handoff_status_mismatch": "handover status mismatch after manager action",
+    "post_llm_semantic_rewrite_budget_exceeded": "post-LLM semantic rewrite rate exceeded configured budget",
+    "keyword_override_budget_exceeded": "keyword/regex override rate exceeded configured budget",
+    "rewrite_reason_missing": "post-LLM rewrite executed without explicit whitelist reason-code",
+    "rewrite_reason_unknown": "post-LLM rewrite used non-whitelist reason-code",
+    "lexicon_regex_delta_violation": "lexicon/regex delta without resolver + contract test delta",
 }
 LLM_QUALITY_TAXONOMY_CATEGORIES = ("expectation", "canon", "code", "data", "unknown")
 LLM_QUALITY_REASON_TAXONOMY = {
@@ -884,6 +913,11 @@ LLM_QUALITY_REASON_TAXONOMY = {
     "manager_action_failed": "code",
     "handoff_state_mismatch": "code",
     "handoff_status_mismatch": "code",
+    "post_llm_semantic_rewrite_budget_exceeded": "code",
+    "keyword_override_budget_exceeded": "code",
+    "rewrite_reason_missing": "canon",
+    "rewrite_reason_unknown": "canon",
+    "lexicon_regex_delta_violation": "canon",
 }
 LLM_QUALITY_HARD_FAIL_REASONS = {
     "decision_meta_missing",
@@ -4270,7 +4304,251 @@ def _llm_quality_top_failure_reasons(failure_counts, limit=3):
     return top
 
 
-def _llm_quality_collect_blocking_reasons(failure_counts):
+def _llm_quality_collect_override_reason_codes(meta):
+    if not isinstance(meta, dict):
+        return []
+    raw_codes = []
+    primary = meta.get("llm_policy_override_reason_code")
+    if isinstance(primary, str) and primary.strip():
+        raw_codes.append(primary.strip().casefold())
+    extras = meta.get("llm_policy_override_reason_codes")
+    if isinstance(extras, str):
+        extras = [item.strip() for item in extras.split(",") if item.strip()]
+    if isinstance(extras, list):
+        for item in extras:
+            if isinstance(item, str) and item.strip():
+                raw_codes.append(item.strip().casefold())
+    return list(dict.fromkeys(raw_codes))
+
+
+def _llm_quality_init_rewrite_governance_state():
+    return {
+        "turns_seen": 0,
+        "policy_core_turns": 0,
+        "rewrite_turns": 0,
+        "rewrite_with_reason_turns": 0,
+        "rewrite_reason_missing_turns": 0,
+        "rewrite_unknown_reason_turns": 0,
+        "keyword_override_turns": 0,
+        "reason_counts": {},
+    }
+
+
+def _llm_quality_track_rewrite_governance(state, meta):
+    if not isinstance(state, dict):
+        return
+    state["turns_seen"] = int(state.get("turns_seen", 0) or 0) + 1
+    if not isinstance(meta, dict):
+        return
+    policy_core_mode = str(meta.get("policy_core_mode") or "").strip()
+    if policy_core_mode in {"policy_core", "degraded_fallback"}:
+        state["policy_core_turns"] = int(state.get("policy_core_turns", 0) or 0) + 1
+
+    reason_codes = _llm_quality_collect_override_reason_codes(meta)
+    missing_reason = bool(meta.get("llm_policy_override_reason_missing")) or bool(
+        meta.get("llm_policy_override_reason_missing_detected")
+    )
+    rewrite_turn = bool(reason_codes) or missing_reason
+    if not rewrite_turn:
+        return
+
+    state["rewrite_turns"] = int(state.get("rewrite_turns", 0) or 0) + 1
+    if missing_reason:
+        state["rewrite_reason_missing_turns"] = int(
+            state.get("rewrite_reason_missing_turns", 0) or 0
+        ) + 1
+
+    unknown_reason = False
+    keyword_override = False
+    reason_counts = state.setdefault("reason_counts", {})
+    for code in reason_codes:
+        reason_counts[code] = int(reason_counts.get(code, 0) or 0) + 1
+        if code not in LLM_POLICY_OVERRIDE_REASON_WHITELIST:
+            unknown_reason = True
+        if code in LLM_POLICY_OVERRIDE_KEYWORD_REASON_CODES:
+            keyword_override = True
+
+    if unknown_reason:
+        state["rewrite_unknown_reason_turns"] = int(
+            state.get("rewrite_unknown_reason_turns", 0) or 0
+        ) + 1
+    if keyword_override:
+        state["keyword_override_turns"] = int(state.get("keyword_override_turns", 0) or 0) + 1
+    if reason_codes and not unknown_reason and not missing_reason:
+        state["rewrite_with_reason_turns"] = int(state.get("rewrite_with_reason_turns", 0) or 0) + 1
+
+
+def _llm_quality_finalize_rewrite_governance(
+    state,
+    *,
+    max_post_llm_semantic_rewrite_rate,
+    max_keyword_override_rate,
+):
+    state = state if isinstance(state, dict) else {}
+    turns_seen = int(state.get("turns_seen", 0) or 0)
+    policy_core_turns = int(state.get("policy_core_turns", 0) or 0)
+    rewrite_turns = int(state.get("rewrite_turns", 0) or 0)
+    rewrite_with_reason_turns = int(state.get("rewrite_with_reason_turns", 0) or 0)
+    rewrite_reason_missing_turns = int(state.get("rewrite_reason_missing_turns", 0) or 0)
+    rewrite_unknown_reason_turns = int(state.get("rewrite_unknown_reason_turns", 0) or 0)
+    keyword_override_turns = int(state.get("keyword_override_turns", 0) or 0)
+    denominator = max(policy_core_turns or turns_seen, 1)
+    rewrite_rate = round(rewrite_turns / denominator, 4)
+    keyword_override_rate = round(keyword_override_turns / denominator, 4)
+    rewrite_reason_coverage = (
+        1.0 if rewrite_turns == 0 else round(rewrite_with_reason_turns / max(rewrite_turns, 1), 4)
+    )
+
+    blocking_counts = {}
+    reasons = []
+    if rewrite_rate > max_post_llm_semantic_rewrite_rate:
+        blocking_counts["post_llm_semantic_rewrite_budget_exceeded"] = rewrite_turns
+        reasons.append("post_llm_semantic_rewrite_budget_exceeded")
+    if keyword_override_rate > max_keyword_override_rate:
+        blocking_counts["keyword_override_budget_exceeded"] = keyword_override_turns
+        reasons.append("keyword_override_budget_exceeded")
+    if rewrite_reason_missing_turns > 0:
+        blocking_counts["rewrite_reason_missing"] = rewrite_reason_missing_turns
+        reasons.append("rewrite_reason_missing")
+    if rewrite_unknown_reason_turns > 0:
+        blocking_counts["rewrite_reason_unknown"] = rewrite_unknown_reason_turns
+        reasons.append("rewrite_reason_unknown")
+
+    return {
+        "valid": not reasons,
+        "reasons": reasons,
+        "blocking_counts": blocking_counts,
+        "turns_seen": turns_seen,
+        "policy_core_turns": policy_core_turns,
+        "rewrite_turns": rewrite_turns,
+        "rewrite_with_reason_turns": rewrite_with_reason_turns,
+        "rewrite_reason_missing_turns": rewrite_reason_missing_turns,
+        "rewrite_unknown_reason_turns": rewrite_unknown_reason_turns,
+        "keyword_override_turns": keyword_override_turns,
+        "post_llm_semantic_rewrite_rate": rewrite_rate,
+        "keyword_override_rate": keyword_override_rate,
+        "rewrite_reason_coverage": rewrite_reason_coverage,
+        "max_post_llm_semantic_rewrite_rate": max_post_llm_semantic_rewrite_rate,
+        "max_keyword_override_rate": max_keyword_override_rate,
+        "allowed_reason_codes": sorted(LLM_POLICY_OVERRIDE_REASON_WHITELIST),
+        "reason_counts": state.get("reason_counts", {}),
+    }
+
+
+def _llm_quality_collect_git_changed_files(repo_root, base_ref):
+    changed = set()
+    scan_warnings = []
+    commands = [
+        (
+            [
+                "git",
+                "-C",
+                repo_root,
+                "diff",
+                "--name-only",
+                "--diff-filter=ACMR",
+                f"{base_ref}...HEAD",
+            ],
+            "base_diff",
+        ),
+        (["git", "-C", repo_root, "diff", "--name-only", "--diff-filter=ACMR"], "worktree_diff"),
+        (
+            ["git", "-C", repo_root, "diff", "--name-only", "--cached", "--diff-filter=ACMR"],
+            "staged_diff",
+        ),
+    ]
+    for cmd, label in commands:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        except Exception as exc:
+            scan_warnings.append(f"{label}_exec_error:{exc.__class__.__name__}")
+            continue
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
+            if stderr:
+                scan_warnings.append(f"{label}_error:{stderr[:120]}")
+            else:
+                scan_warnings.append(f"{label}_error:rc{result.returncode}")
+            continue
+        for line in (result.stdout or "").splitlines():
+            path = line.strip()
+            if path:
+                changed.add(path)
+    return sorted(changed), scan_warnings
+
+
+def _llm_quality_is_lexicon_regex_delta_file(path):
+    normalized = str(path or "").strip().replace("\\", "/").casefold()
+    if not normalized:
+        return False
+    if not normalized.startswith("truffles-api/"):
+        return False
+    basename = os.path.basename(normalized)
+    if basename == "system_lexicons.yaml":
+        return True
+    return any(token in normalized for token in LLM_QUALITY_REGEX_LEXICON_TOKENS)
+
+
+def _llm_quality_build_lexicon_regex_delta_status(
+    *,
+    mode,
+    repo_root,
+    base_ref,
+    changed_files=None,
+):
+    mode = str(mode or "off").strip().casefold()
+    if mode == "off":
+        return {
+            "mode": mode,
+            "valid": True,
+            "enforced": False,
+            "reasons": [],
+            "scan_warnings": [],
+            "changed_files": 0,
+            "lexicon_regex_delta_files": [],
+            "resolver_delta_detected": False,
+            "test_delta_detected": False,
+        }
+
+    scan_warnings = []
+    if changed_files is None:
+        changed_files, scan_warnings = _llm_quality_collect_git_changed_files(
+            repo_root, base_ref
+        )
+    normalized_files = sorted({str(path or "").strip().replace("\\", "/") for path in changed_files or []})
+    lexicon_regex_delta_files = [
+        path for path in normalized_files if _llm_quality_is_lexicon_regex_delta_file(path)
+    ]
+    resolver_delta = any(
+        any(path.startswith(prefix) for prefix in LLM_QUALITY_REGEX_LEXICON_RESOLVER_PREFIXES)
+        for path in normalized_files
+    )
+    test_delta = any(
+        path.startswith(LLM_QUALITY_REGEX_LEXICON_TEST_PREFIX) and path.endswith(".py")
+        for path in normalized_files
+    )
+    reasons = []
+    if lexicon_regex_delta_files:
+        if not resolver_delta:
+            reasons.append("resolver_delta_missing")
+        if not test_delta:
+            reasons.append("contract_test_delta_missing")
+    enforced = mode == "block"
+    valid = not reasons if enforced else True
+    return {
+        "mode": mode,
+        "valid": valid,
+        "enforced": enforced,
+        "reasons": reasons,
+        "scan_warnings": scan_warnings,
+        "changed_files": len(normalized_files),
+        "lexicon_regex_delta_files": lexicon_regex_delta_files,
+        "resolver_delta_detected": resolver_delta,
+        "test_delta_detected": test_delta,
+    }
+
+
+def _llm_quality_collect_blocking_reasons(failure_counts, extra_counts=None):
     counts = {}
     total = 0
     for reason in LLM_QUALITY_BLOCKING_REASONS:
@@ -4279,6 +4557,17 @@ def _llm_quality_collect_blocking_reasons(failure_counts):
             continue
         counts[reason] = value
         total += value
+    if isinstance(extra_counts, dict):
+        for reason, raw_value in extra_counts.items():
+            try:
+                value = int(raw_value or 0)
+            except Exception:
+                continue
+            if value <= 0:
+                continue
+            reason_key = str(reason)
+            counts[reason_key] = counts.get(reason_key, 0) + value
+            total += value
     return {"count": total, "reasons": counts}
 
 
@@ -4297,6 +4586,11 @@ def _llm_quality_next_step_for_reason(reason):
         "unknown_state": "inspect conversation.state transitions before/after handoff",
         "handover_missing": "check handoff row creation when state is manager_active",
         "info_section_miss": "verify info_sections and intents emitted in meta/trace",
+        "post_llm_semantic_rewrite_budget_exceeded": "reduce post-LLM rewrites or tighten guard conditions to fit rewrite budget",
+        "keyword_override_budget_exceeded": "remove keyword/regex semantic overrides and rely on policy-core output",
+        "rewrite_reason_missing": "add explicit whitelist reason-code for every post-LLM rewrite path",
+        "rewrite_reason_unknown": "replace non-whitelist reason-codes with approved override reasons",
+        "lexicon_regex_delta_violation": "pair lexicon/regex changes with resolver update and contract regression tests",
     }
     return mapping.get(reason, "inspect top failing turns in responses.jsonl and trace_bundle.jsonl")
 
@@ -5943,6 +6237,29 @@ def _parse_llm_quality_args(argv):
         help="Stop early after this many failed turns (0 disables).",
     )
     parser.add_argument("--regression-tolerance", type=float, default=0.02)
+    parser.add_argument(
+        "--max-post-llm-semantic-rewrite-rate",
+        type=float,
+        default=0.02,
+        help="Blocking budget for post-LLM semantic rewrites (fraction of policy-core turns).",
+    )
+    parser.add_argument(
+        "--max-keyword-override-rate",
+        type=float,
+        default=0.0,
+        help="Blocking budget for keyword/regex semantic overrides (fraction of policy-core turns).",
+    )
+    parser.add_argument(
+        "--lexicon-regex-delta-gate",
+        choices=["off", "warn", "block"],
+        default=os.environ.get("LLM_QUALITY_LEXICON_REGEX_DELTA_GATE", "block"),
+        help="Static guard for lexicon/regex deltas without resolver+test updates.",
+    )
+    parser.add_argument(
+        "--delta-gate-base-ref",
+        default=os.environ.get("LLM_QUALITY_DELTA_GATE_BASE_REF", "origin/main"),
+        help="Base ref used to scan changed files for lexicon/regex delta gate.",
+    )
     parser.add_argument(
         "--judge-mode", choices=["off", "sample", "all", "critical"], default="off"
     )
@@ -8738,6 +9055,7 @@ def _run_llm_quality(args):
     taxonomy_counts = {key: 0 for key in LLM_QUALITY_TAXONOMY_CATEGORIES}
     taxonomy_by_reason = {}
     tool_hook_state = {}
+    rewrite_governance_state = _llm_quality_init_rewrite_governance_state()
 
     def _bump_state(state, expected_response, replied):
         key = state or "unknown"
@@ -9342,6 +9660,10 @@ def _run_llm_quality(args):
                         )
                         if _llm_quality_is_policy_core_infra_reason(degrade_reason):
                             stats["policy_core_infra_errors"] += 1
+                _llm_quality_track_rewrite_governance(
+                    rewrite_governance_state,
+                    meta if isinstance(meta, dict) else None,
+                )
                 _llm_quality_collect_dedup_stats(
                     meta if isinstance(meta, dict) else None,
                     dedup_stats,
@@ -10327,6 +10649,30 @@ def _run_llm_quality(args):
             else None,
         },
     }
+    rewrite_governance = _llm_quality_finalize_rewrite_governance(
+        rewrite_governance_state,
+        max_post_llm_semantic_rewrite_rate=args.max_post_llm_semantic_rewrite_rate,
+        max_keyword_override_rate=args.max_keyword_override_rate,
+    )
+    metrics["rates"]["post_llm_semantic_rewrite_rate"] = rewrite_governance[
+        "post_llm_semantic_rewrite_rate"
+    ]
+    metrics["rates"]["keyword_override_rate"] = rewrite_governance["keyword_override_rate"]
+    metrics["rates"]["rewrite_reason_coverage"] = rewrite_governance["rewrite_reason_coverage"]
+    lexicon_regex_delta_gate = _llm_quality_build_lexicon_regex_delta_status(
+        mode=args.lexicon_regex_delta_gate,
+        repo_root=_llm_quality_repo_root(),
+        base_ref=args.delta_gate_base_ref,
+    )
+    governance_blocking_counts = dict(rewrite_governance.get("blocking_counts") or {})
+    if (
+        lexicon_regex_delta_gate.get("enforced")
+        and not lexicon_regex_delta_gate.get("valid", True)
+    ):
+        governance_blocking_counts["lexicon_regex_delta_violation"] = max(
+            len(lexicon_regex_delta_gate.get("reasons") or []),
+            1,
+        )
 
     baseline_path = os.path.join(_llm_quality_repo_root(), "ops", "results", "booking_quality.json")
     baseline_source = baseline_path
@@ -10375,7 +10721,10 @@ def _run_llm_quality(args):
     if args.dry_run:
         threshold_results = {}
         threshold_breaches = []
-    blocking_reasons = _llm_quality_collect_blocking_reasons(failure_counts)
+    blocking_reasons = _llm_quality_collect_blocking_reasons(
+        failure_counts,
+        extra_counts=governance_blocking_counts,
+    )
     blocking_reason_count = blocking_reasons.get("count", 0)
     tool_evidence_policy = args.tool_evidence_policy
     if args.dry_run:
@@ -10453,6 +10802,10 @@ def _run_llm_quality(args):
         "max_failures": args.max_failures,
         "baseline_summary": args.baseline_summary,
         "regression_tolerance": args.regression_tolerance,
+        "max_post_llm_semantic_rewrite_rate": args.max_post_llm_semantic_rewrite_rate,
+        "max_keyword_override_rate": args.max_keyword_override_rate,
+        "lexicon_regex_delta_gate": args.lexicon_regex_delta_gate,
+        "delta_gate_base_ref": args.delta_gate_base_ref,
         "judge_mode": judge_mode,
         "judge_required": judge_required,
         "llm_api_key_source": llm_api_key_source,
@@ -10485,6 +10838,8 @@ def _run_llm_quality(args):
         "delta": delta,
         "failure_counts": failure_counts,
         "blocking_reasons": blocking_reasons,
+        "rewrite_governance": rewrite_governance,
+        "lexicon_regex_delta_gate": lexicon_regex_delta_gate,
         "top_failures": top_failures,
         "failures": failures,
         "coverage": coverage_stats,
@@ -10502,6 +10857,18 @@ def _run_llm_quality(args):
             "semantic_reasons": semantic_status["reasons"],
             "blocking_reason_count": blocking_reason_count,
             "blocking_reasons": blocking_reasons.get("reasons", {}),
+            "rewrite_governance_valid": rewrite_governance.get("valid", True),
+            "rewrite_governance_reasons": rewrite_governance.get("reasons", []),
+            "post_llm_semantic_rewrite_rate": rewrite_governance.get(
+                "post_llm_semantic_rewrite_rate"
+            ),
+            "keyword_override_rate": rewrite_governance.get("keyword_override_rate"),
+            "rewrite_reason_coverage": rewrite_governance.get("rewrite_reason_coverage"),
+            "lexicon_regex_delta_gate_valid": lexicon_regex_delta_gate.get("valid", True),
+            "lexicon_regex_delta_gate_enforced": lexicon_regex_delta_gate.get(
+                "enforced", False
+            ),
+            "lexicon_regex_delta_gate_reasons": lexicon_regex_delta_gate.get("reasons", []),
             "tool_evidence_valid": tool_evidence_status.get("valid"),
             "tool_evidence_reasons": tool_evidence_status.get("reasons"),
             "scenario_contract_valid": scenario_contract.get("valid"),
