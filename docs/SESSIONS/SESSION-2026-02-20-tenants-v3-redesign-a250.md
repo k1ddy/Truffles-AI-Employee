@@ -1,0 +1,42 @@
+# SESSION 2026-02-20-tenants-v3-redesign-a250 — Session 2026-02-20-tenants-v3-redesign-a250
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
+- branch: feat/2026-02-20-tenants-v3-redesign-a250
+- worktree: /home/zhan/worktrees/2026-02-20-tenants-v3-redesign-a250
+- base_ref: origin/main
+- scope: Tenants V3 Wave 0 baseline lock for platform_admin (worktree bootstrap, live smoke/a11y/runtime evidence)
+- done:
+  - Session created.
+  - Added redesign task package: `docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md`.
+  - Added baseline report: `docs/REPORTS/2026-02-20-tenants-v3-redesign-plan.md`.
+  - Installed worktree deps for console e2e (`npm --prefix console-web ci`).
+  - Ran live Tenants smoke lane: `e2e/platform-admin.spec.ts --grep "Platform Admin Tenants"` -> `8 passed` (after transient network/auth flakes on first attempts).
+  - Ran Tenants a11y lane: `e2e/tenants-a11y.spec.ts` -> `2 skipped` (availability/gate skip, no hard fail signal).
+  - Captured runtime + KPI baseline snapshots:
+    - `curl https://console.truffles.kz/api/health/full` (3 samples, `unhealthy`, API 502, version `2934de8a`)
+    - `/tmp/platform_admin_kpi_tenants_v3_wave0_20260220.json`
+    - `/tmp/platform_admin_kpi_tenants_v3_wave0_20260220_r2.json`
+  - Implemented Wave 1-2 starter in `Tenants`:
+    - default workspace switched to `portfolio` (removed `all` mode),
+    - added explicit `tenants-context-lens` with branch/client/all clear actions,
+    - tightened inline error scope to active workspace mode.
+  - Updated e2e contract (`platform-admin.spec.ts`) to new workspace IA (`tenants-context-lens`, no `tenants-mode-all`).
+  - Validation:
+    - `npm --prefix console-web run lint -- --file src/app/tenants/page.tsx --file e2e/platform-admin.spec.ts` (pass)
+    - `npx tsc --noEmit` (pass)
+    - `npm --prefix console-web run build` (pass)
+    - live playwright against deployed env fails on new selector (`tenants-context-lens`) as expected before deploy.
+- next:
+  - Wave 1 continuation: split `Tenants` UI into portfolio/onboarding/changes/decommission modules (reduce monolith in `page.tsx`).
+  - Wave 2 continuation: move filter state from implicit header context to explicit page-level filter model + query params.
+  - Add strict fail-closed Tenants a11y lane (no skip-based pass).
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
+  - docs/REPORTS/2026-02-20-tenants-v3-redesign-plan.md
+  - console-web/src/app/tenants/page.tsx
+  - console-web/e2e/platform-admin.spec.ts
+  - /tmp/platform_admin_kpi_tenants_v3_wave0_20260220.json
+  - /tmp/platform_admin_kpi_tenants_v3_wave0_20260220_r2.json
+- last_updated: 2026-02-20

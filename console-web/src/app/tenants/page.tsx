@@ -126,7 +126,7 @@ type FleetLifecycleFilter = "all" | "lead" | "contracting" | "onboarding" | "go_
 type FleetPaymentFilter = "all" | "pending" | "confirmed" | "rejected" | "unknown";
 type FleetServiceFilter = "all" | "ok" | "degraded" | "attention";
 type FleetAttentionLevel = "high" | "medium" | "low";
-type TenantsWorkspaceMode = "all" | "portfolio" | "onboarding" | "changes" | "decommission";
+type TenantsWorkspaceMode = "portfolio" | "onboarding" | "changes" | "decommission";
 type TenantsViewPreset = "operator" | "platform";
 
 type ActionQueueIntent =
@@ -384,9 +384,6 @@ function formatDateTimeLabel(value: string | undefined): string {
 }
 
 function resolveErrorScopeFromWorkspace(workspaceMode: TenantsWorkspaceMode): string {
-    if (workspaceMode === "all") {
-        return "global";
-    }
     return workspaceMode;
 }
 
@@ -866,7 +863,7 @@ export default function TenantsPage() {
     const [branchQuery, setBranchQuery] = useState("");
     const [companyQuery, setCompanyQuery] = useState("");
     const [tenantLifecycle, setTenantLifecycle] = useState<TenantLifecycleMode>("active");
-    const [workspaceMode, setWorkspaceMode] = useState<TenantsWorkspaceMode>("all");
+    const [workspaceMode, setWorkspaceMode] = useState<TenantsWorkspaceMode>("portfolio");
     const [viewPreset, setViewPreset] = useState<TenantsViewPreset>("operator");
     const [fleetLifecycleFilter, setFleetLifecycleFilter] = useState<FleetLifecycleFilter>("all");
     const [fleetPaymentFilter, setFleetPaymentFilter] = useState<FleetPaymentFilter>("all");
@@ -1189,12 +1186,10 @@ export default function TenantsPage() {
         [workspaceMode],
     );
     const visibleInlineErrors = useMemo(() => {
-        if (workspaceMode === "all") {
-            return inlineErrors;
-        }
         return inlineErrors.filter((error) => error.scope === "global" || error.scope === activeErrorScope);
-    }, [activeErrorScope, inlineErrors, workspaceMode]);
-    const activeErrorScopeLabel = workspaceMode === "all" ? "all" : activeErrorScope;
+    }, [activeErrorScope, inlineErrors]);
+    const activeErrorScopeLabel = activeErrorScope;
+    const hasContextLensFilters = Boolean(selectedCompanyId || selectedClientId || selectedBranchId);
     const latestPublishedBranchChange = useMemo(() => {
         const items = branchChangesQuery.data?.items ?? [];
         return (
@@ -1400,6 +1395,9 @@ export default function TenantsPage() {
     const setBranchContext = (branchId?: string | null) => {
         setConsoleBranchContext(branchId);
         refreshContext();
+    };
+    const clearContextLens = () => {
+        setCompanyContext(null);
     };
 
     const handleQuickCreateCompany = async () => {
@@ -2247,10 +2245,10 @@ export default function TenantsPage() {
             .slice(0, 8);
     }, [tenantLifecycle, fleetAttention, operationalKpi, clientsSummary]);
 
-    const showPortfolio = workspaceMode === "all" || workspaceMode === "portfolio";
-    const showOnboarding = workspaceMode === "all" || workspaceMode === "onboarding";
-    const showChangeManagement = workspaceMode === "all" || workspaceMode === "changes";
-    const showDecommission = workspaceMode === "all" || workspaceMode === "decommission";
+    const showPortfolio = workspaceMode === "portfolio";
+    const showOnboarding = workspaceMode === "onboarding";
+    const showChangeManagement = workspaceMode === "changes";
+    const showDecommission = workspaceMode === "decommission";
     const showClientsSection = showPortfolio || showDecommission;
     const decommissionFocused = workspaceMode === "decommission";
 
@@ -2289,23 +2287,59 @@ export default function TenantsPage() {
                         </span>
                     ) : null}
                 </div>
+                <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="tenants-context-lens">
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                        Context Lens (влияет на списки)
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className="rounded-full border border-border/60 px-2 py-1">
+                            company: {selectedCompanyName ?? "all"}
+                        </span>
+                        <span className="rounded-full border border-border/60 px-2 py-1">
+                            client: {selectedClientName ?? "all"}
+                        </span>
+                        <span className="rounded-full border border-border/60 px-2 py-1">
+                            branch: {selectedBranchName ?? "all"}
+                        </span>
+                        <button
+                            className="btn-ghost"
+                            onClick={() => setBranchContext(null)}
+                            disabled={!selectedBranchId}
+                            data-testid="tenants-context-clear-branch"
+                        >
+                            Очистить branch
+                        </button>
+                        <button
+                            className="btn-ghost"
+                            onClick={() => setClientContext(null, selectedCompanyId)}
+                            disabled={!selectedClientId}
+                            data-testid="tenants-context-clear-client"
+                        >
+                            Очистить client
+                        </button>
+                        <button
+                            className="btn-ghost"
+                            onClick={clearContextLens}
+                            disabled={!hasContextLensFilters}
+                            data-testid="tenants-context-clear-all"
+                        >
+                            Сбросить фильтры
+                        </button>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                        Фильтры портфеля задаются контекстом из header и влияют на выборки companies/clients/branches.
+                    </div>
+                </div>
                 <TenantsScopedErrorSummary
                     errors={visibleInlineErrors}
                     scopeLabel={activeErrorScopeLabel}
-                    showScopeClear={workspaceMode !== "all"}
+                    showScopeClear
                     onClearScope={() => clearErrors(activeErrorScope)}
                     onClearAll={() => clearErrors()}
                 />
                 <div className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-workspace-modes">
                     <div className="text-xs text-muted-foreground mb-2">Рабочая зона Tenants:</div>
                     <div className="flex flex-wrap items-center gap-2">
-                        <button
-                            className={workspaceMode === "all" ? "btn-primary" : "btn-ghost"}
-                            onClick={() => setWorkspaceMode("all")}
-                            data-testid="tenants-mode-all"
-                        >
-                            Все зоны
-                        </button>
                         <button
                             className={workspaceMode === "portfolio" ? "btn-primary" : "btn-ghost"}
                             onClick={() => setWorkspaceMode("portfolio")}
