@@ -4,6 +4,7 @@ from unittest.mock import Mock
 from uuid import UUID, uuid4
 
 import pytest
+from starlette.requests import Request
 
 from app.routers import console as console_router
 from app.services.console_errors import ConsoleAPIError
@@ -130,6 +131,138 @@ def _build_list_query_mock() -> Mock:
     query.all.return_value = []
     return query
 
+
+def _build_request(query: str = "") -> Request:
+    async def _receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "query_string": query.encode("utf-8"),
+            "headers": [],
+        },
+        receive=_receive,
+    )
+
+
+def test_request_with_query_params_rewrites_query_string() -> None:
+    request = _build_request("foo=bar")
+
+    derived = console_router._request_with_query_params(
+        request,
+        {"limit": 10, "cursor": None, "lifecycle": "active"},
+    )
+
+    assert dict(derived.query_params) == {"limit": "10", "lifecycle": "active"}
+
+
+@pytest.mark.asyncio
+async def test_get_tenants_portfolio_composes_clients_and_attention(monkeypatch) -> None:
+    clients_response = console_router.ConsoleClientListResponse(items=[], cursor=None, has_more=False, summary=None)
+    attention_response = console_router.ConsoleFleetAttentionResponse(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        stale_after_minutes=120,
+        summary=console_router.ConsoleFleetAttentionSummary(
+            active_clients_total=0,
+            clients_with_attention=0,
+            high_risk_clients=0,
+            medium_risk_clients=0,
+            low_risk_clients=0,
+            stale_branches_total=0,
+            integration_error_branches_total=0,
+            integration_warn_branches_total=0,
+            outbox_failed_24h_total=0,
+            pending_handovers_total=0,
+        ),
+        items=[],
+    )
+    captured: dict[str, dict[str, object]] = {}
+
+    async def _fake_list_clients(**kwargs):
+        captured["clients"] = kwargs
+        return clients_response
+
+    async def _fake_list_fleet_attention(**kwargs):
+        captured["attention"] = kwargs
+        return attention_response
+
+    monkeypatch.setattr(console_router, "list_clients", _fake_list_clients)
+    monkeypatch.setattr(console_router, "list_fleet_attention", _fake_list_fleet_attention)
+
+    response = await console_router.get_tenants_portfolio(
+        request=_build_request(),
+        limit=5,
+        attention_limit=3,
+        lifecycle="active",
+        db=Mock(),
+    )
+
+    assert response.clients == clients_response
+    assert response.fleet_attention == attention_response
+    assert captured["clients"]["limit"] == 5
+    assert captured["clients"]["include_fleet"] == "true"
+    assert captured["clients"]["include_summary"] == "true"
+    assert captured["attention"]["limit"] == 3
+
+
+@pytest.mark.asyncio
+async def test_get_tenants_company_cockpit_uses_selected_or_first_client(monkeypatch) -> None:
+    company_id = uuid4()
+    first_client_id = uuid4()
+    clients_response = console_router.ConsoleClientListResponse(
+        items=[
+            console_router.ConsoleClient(
+                id=first_client_id,
+                slug="alpha",
+                status="active",
+                company_id=company_id,
+            )
+        ],
+        cursor=None,
+        has_more=False,
+        summary=None,
+    )
+    branches_response = console_router.ConsoleBranchListResponse(
+        items=[
+            console_router.ConsoleBranch(
+                id=uuid4(),
+                slug="branch-1",
+                name="Branch 1",
+                is_active=True,
+            )
+        ],
+        cursor=None,
+        has_more=False,
+    )
+    captured: dict[str, dict[str, object]] = {}
+
+    async def _fake_list_clients(**kwargs):
+        captured["clients"] = kwargs
+        return clients_response
+
+    async def _fake_list_branches(**kwargs):
+        captured["branches"] = kwargs
+        return branches_response
+
+    monkeypatch.setattr(console_router, "list_clients", _fake_list_clients)
+    monkeypatch.setattr(console_router, "list_branches", _fake_list_branches)
+
+    response = await console_router.get_tenants_company_cockpit(
+        request=_build_request(),
+        company_id=str(company_id),
+        lifecycle="active",
+        db=Mock(),
+    )
+
+    assert response.company_id == company_id
+    assert response.selected_client_id == first_client_id
+    assert response.clients == clients_response
+    assert response.branches == branches_response
+    assert captured["clients"]["company_id"] == str(company_id)
+    assert captured["branches"]["client_id"] == str(first_client_id)
 
 @pytest.mark.asyncio
 async def test_list_clients_defaults_to_active_lifecycle(monkeypatch) -> None:

@@ -2435,6 +2435,201 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/tenants/portfolio:
+    get:
+      tags:
+      - console
+      summary: Get Tenants Portfolio
+      operationId: get_tenants_portfolio_console_v1_admin_tenants_portfolio_get
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+          title: Limit
+      - name: q
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Q
+      - name: company_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Company Id
+      - name: lifecycle
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Lifecycle
+      - name: attention_limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+          title: Attention Limit
+      - name: stale_after_minutes
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1440
+          minimum: 5
+          default: 60
+          title: Stale After Minutes
+      - name: include_low
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Include Low
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleTenantsPortfolioResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/tenants/company-cockpit:
+    get:
+      tags:
+      - console
+      summary: Get Tenants Company Cockpit
+      operationId: get_tenants_company_cockpit_console_v1_admin_tenants_company_cockpit_get
+      parameters:
+      - name: company_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Company Id
+      - name: client_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Client Id
+      - name: lifecycle
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Lifecycle
+      - name: client_limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+          title: Client Limit
+      - name: branch_limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+          title: Branch Limit
+      - name: client_cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Client Cursor
+      - name: branch_cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Branch Cursor
+      - name: client_q
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Client Q
+      - name: branch_q
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Branch Q
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleTenantsCompanyCockpitResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/tenants/weekly-snapshots:
     get:
       tags:
@@ -13113,6 +13308,47 @@ components:
       - delivery_status
       - verification_code
       title: ConsoleTelegramVerifyResponse
+    ConsoleTenantsCompanyCockpitResponse:
+      properties:
+        generated_at:
+          type: string
+          title: Generated At
+        company_id:
+          type: string
+          format: uuid
+          title: Company Id
+        selected_client_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Selected Client Id
+        clients:
+          $ref: '#/components/schemas/ConsoleClientListResponse'
+        branches:
+          $ref: '#/components/schemas/ConsoleBranchListResponse'
+      type: object
+      required:
+      - generated_at
+      - company_id
+      - clients
+      - branches
+      title: ConsoleTenantsCompanyCockpitResponse
+    ConsoleTenantsPortfolioResponse:
+      properties:
+        generated_at:
+          type: string
+          title: Generated At
+        clients:
+          $ref: '#/components/schemas/ConsoleClientListResponse'
+        fleet_attention:
+          $ref: '#/components/schemas/ConsoleFleetAttentionResponse'
+      type: object
+      required:
+      - generated_at
+      - clients
+      - fleet_attention
+      title: ConsoleTenantsPortfolioResponse
     ConsoleTenantsSensitiveAccessAuditRequest:
       properties:
         branch_id:

@@ -218,6 +218,20 @@ class ConsoleBranchListResponse(BaseModel):
     has_more: bool
 
 
+class ConsoleTenantsPortfolioResponse(BaseModel):
+    generated_at: str
+    clients: ConsoleClientListResponse
+    fleet_attention: ConsoleFleetAttentionResponse
+
+
+class ConsoleTenantsCompanyCockpitResponse(BaseModel):
+    generated_at: str
+    company_id: UUID
+    selected_client_id: Optional[UUID] = None
+    clients: ConsoleClientListResponse
+    branches: ConsoleBranchListResponse
+
+
 ConsoleTenantsSnapshotWorkspaceMode = Literal["portfolio", "onboarding", "changes", "decommission"]
 ConsoleTenantsSnapshotLifecycleMode = Literal["active", "archived", "all"]
 ConsoleTenantsSnapshotKpiId = Literal[
