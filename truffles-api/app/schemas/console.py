@@ -846,6 +846,13 @@ class ConsoleCase(BaseModel):
     needs_reply: Optional[bool] = None
     has_delivery_error: Optional[bool] = None
     has_pending_outbox: Optional[bool] = None
+    # Human lock (bot pause)
+    human_lock_active: Optional[bool] = None
+    human_lock_until: Optional[str] = None
+    human_lock_remaining_seconds: Optional[int] = None
+    human_lock_source: Optional[str] = None
+    human_lock_reason: Optional[str] = None
+    human_lock_by: Optional[str] = None
     # Telegram trail (for escalation visibility)
     telegram_trail: Optional[ConsoleTelegramTrail] = None
 
@@ -881,6 +888,9 @@ class ConsoleMessageListResponse(BaseModel):
 
 class ConsoleManagerMessageRequest(BaseModel):
     content: str
+    pause_enabled: bool = True
+    pause_minutes: int = 30
+    pause_reason: Optional[StrictStr] = None
 
 
 class ConsoleManagerMessageResponse(BaseModel):
@@ -894,7 +904,7 @@ ConsoleOutreachDeliveryStatus = Literal["queued", "delivered", "failed"]
 class ConsoleOutreachMessageRequest(ConsoleRequestModel):
     destination: StrictStr
     content: StrictStr
-    conversation_id: Optional[UUID] = None
+    conversation_id: UUID
     branch_id: Optional[UUID] = None
     pause_bot_minutes: Optional[int] = 30
     pause_reason: Optional[StrictStr] = None
@@ -922,6 +932,8 @@ class ConsoleHumanLockStatus(BaseModel):
     remaining_seconds: Optional[int] = None
     source: Optional[str] = None
     reason: Optional[str] = None
+    locked_by_name: Optional[str] = None
+    lock_scope: Optional[str] = None
 
 
 class ConsoleHumanLockStatusResponse(BaseModel):

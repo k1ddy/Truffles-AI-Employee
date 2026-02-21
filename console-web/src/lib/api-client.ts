@@ -40,6 +40,7 @@ export const ErrorCodes = {
     CLIENT_SELECTION_REQUIRED: "CLIENT_SELECTION_REQUIRED",
     COMPANY_SELECTION_REQUIRED: "COMPANY_SELECTION_REQUIRED",
     BRANCH_SELECTION_REQUIRED: "BRANCH_SELECTION_REQUIRED",
+    CONVERSATION_REQUIRED: "CONVERSATION_REQUIRED",
     TENANT_MISMATCH: "TENANT_MISMATCH",
     BRANCH_ACCESS_DENIED: "BRANCH_ACCESS_DENIED",
     NOT_FOUND: "NOT_FOUND",
@@ -96,7 +97,7 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
     },
     outreach: {
         read: ["platform_admin", "owner", "admin", "manager", "support", "viewer", "specialist"],
-        write: ["platform_admin", "owner", "admin", "manager", "support", "viewer", "specialist"],
+        write: ["platform_admin", "owner", "admin", "manager"],
     },
     knowledge: {
         read: ["platform_admin", "owner", "admin", "manager", "viewer"],
@@ -219,6 +220,11 @@ const errorConfigs: Record<ErrorCode, ErrorConfig> = {
     BRANCH_SELECTION_REQUIRED: {
         http_status: 400,
         ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
+        retryable: false,
+    },
+    CONVERSATION_REQUIRED: {
+        http_status: 400,
+        ui_behavior: { action: "toast", toast: true, toast_type: "error" },
         retryable: false,
     },
     TENANT_MISMATCH: {

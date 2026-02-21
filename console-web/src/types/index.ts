@@ -48,6 +48,12 @@ export interface Case {
     needs_reply?: boolean | null;
     has_delivery_error?: boolean | null;
     has_pending_outbox?: boolean | null;
+    human_lock_active?: boolean | null;
+    human_lock_until?: string | null;
+    human_lock_remaining_seconds?: number | null;
+    human_lock_source?: string | null;
+    human_lock_reason?: string | null;
+    human_lock_by?: string | null;
 }
 
 export interface Message {

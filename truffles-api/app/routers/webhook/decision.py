@@ -7678,6 +7678,7 @@ async def _handle_webhook_payload(
         expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
         now=now,
         send_and_save=_send_and_save,
+        saved_message=saved_message,
     )
     if reengage_response:
         return reengage_response

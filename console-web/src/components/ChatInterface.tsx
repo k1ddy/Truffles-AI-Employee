@@ -19,6 +19,7 @@ interface ChatInterfaceProps {
     onDraftChange?: (value: string) => void;
     composerBefore?: ReactNode;
     frame?: "card" | "plain";
+    pauseConfig?: PauseConfig;
 }
 
 type LocalMessageStatus = "sending" | "failed";
@@ -37,18 +38,37 @@ interface SendManagerMessageResponse {
     message?: Message;
 }
 
-async function sendMessage(conversationId: string, content: string) {
-    const response = await api.post(`/conversations/${conversationId}/messages`, {
-        content,
-    });
+type PauseConfig = {
+    enabled: boolean;
+    minutes: number;
+    reason?: string;
+};
+
+async function sendMessage(conversationId: string, content: string, pauseConfig?: PauseConfig) {
+    const payload: Record<string, unknown> = { content };
+    if (pauseConfig) {
+        payload.pause_enabled = pauseConfig.enabled;
+        payload.pause_minutes = pauseConfig.minutes;
+        if (pauseConfig.reason) {
+            payload.pause_reason = pauseConfig.reason;
+        }
+    }
+    const response = await api.post(`/conversations/${conversationId}/messages`, payload);
     return response.data as SendManagerMessageResponse;
 }
 
-async function sendMediaMessage(conversationId: string, file: File, caption?: string) {
+async function sendMediaMessage(conversationId: string, file: File, caption?: string, pauseConfig?: PauseConfig) {
     const formData = new FormData();
     formData.append("file", file);
     if (caption && caption.trim()) {
         formData.append("caption", caption.trim());
+    }
+    if (pauseConfig) {
+        formData.append("pause_enabled", String(pauseConfig.enabled));
+        formData.append("pause_minutes", String(pauseConfig.minutes));
+        if (pauseConfig.reason) {
+            formData.append("pause_reason", pauseConfig.reason);
+        }
     }
     const response = await api.post(`/conversations/${conversationId}/messages/media`, formData);
     return response.data as SendManagerMessageResponse;
@@ -104,6 +124,7 @@ export default function ChatInterface({
     onDraftChange,
     composerBefore,
     frame = "card",
+    pauseConfig,
 }: ChatInterfaceProps) {
     const isControlled = typeof onDraftChange === "function";
     const [internalDraft, setInternalDraft] = useState("");
@@ -151,7 +172,7 @@ export default function ChatInterface({
             return;
         }
         removeLocalMessage(message.localId);
-        sendMutation.mutate(content);
+        sendMutation.mutate({ content, pause: pauseConfig });
     };
 
     const displayMessages = localMessages.length ? [...localMessages, ...messages] : messages;
@@ -222,8 +243,9 @@ export default function ChatInterface({
 
     // Send message mutation with optimistic updates
     const sendMutation = useMutation({
-        mutationFn: (content: string) => sendMessage(conversationId, content),
-        onMutate: async (content) => {
+        mutationFn: ({ content, pause }: { content: string; pause?: PauseConfig }) =>
+            sendMessage(conversationId, content, pause),
+        onMutate: async ({ content }) => {
             await queryClient.cancelQueries({ queryKey: ["messages", caseId] });
             const localId = createLocalId("temp");
             const optimisticMessage: LocalMessage = {
@@ -280,8 +302,8 @@ export default function ChatInterface({
     });
 
     const mediaMutation = useMutation({
-        mutationFn: ({ file, caption }: { file: File; caption?: string }) =>
-            sendMediaMessage(conversationId, file, caption),
+        mutationFn: ({ file, caption, pause }: { file: File; caption?: string; pause?: PauseConfig }) =>
+            sendMediaMessage(conversationId, file, caption, pause),
         onMutate: async ({ file, caption }) => {
             const mediaType = resolveMediaType(file);
             const localId = createLocalId("temp-media");
@@ -398,13 +420,13 @@ export default function ChatInterface({
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (attachedFile) {
-            mediaMutation.mutate({ file: attachedFile, caption: inputValue });
+            mediaMutation.mutate({ file: attachedFile, caption: inputValue, pause: pauseConfig });
             return;
         }
         const content = inputValue.trim();
         if (!content) return;
         setInputValue(""); // Clear immediately for better UX
-        sendMutation.mutate(content);
+        sendMutation.mutate({ content, pause: pauseConfig });
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
