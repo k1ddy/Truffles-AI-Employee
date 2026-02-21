@@ -299,7 +299,7 @@ test.describe('Platform Admin Tenants', () => {
             return;
         }
 
-        await expect(clients.getByText(/Клиенты не найдены|фильтр по компании из контекста/i)).toBeVisible();
+        await expect(clients.getByText(/Клиенты не найдены|page filter company_id/i)).toBeVisible();
     });
 
     test('should render operational KPI panel on Tenants @smoke', async ({ page }) => {
@@ -366,6 +366,7 @@ test.describe('Platform Admin Tenants', () => {
     test('should switch Tenants workspace modes @smoke', async ({ page }) => {
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
+            await expect(page.getByTestId('tenants-context-lens')).toBeVisible();
             const workspaceGuide = page.getByTestId('tenants-workspace-guide');
             if (await workspaceGuide.isVisible().catch(() => false)) {
                 await expect(workspaceGuide).toBeVisible();
@@ -382,10 +383,6 @@ test.describe('Platform Admin Tenants', () => {
 
             await page.getByTestId('tenants-mode-portfolio').click();
             await expect(page.getByTestId('tenants-portfolio-companies')).toBeVisible();
-
-            await page.getByTestId('tenants-mode-all').click();
-            await expect(page.getByTestId('tenants-onboarding-section')).toBeVisible();
-            await expect(page.getByTestId('tenants-change-management')).toBeVisible();
             return;
         }
 

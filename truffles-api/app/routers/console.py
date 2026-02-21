@@ -246,6 +246,7 @@ from app.schemas.console import (
     ConsoleTenantsWeeklySnapshotCreateRequest,
     ConsoleTenantsWeeklySnapshotCreateResponse,
     ConsoleTenantsWeeklySnapshotListResponse,
+    ConsoleTenantsWeeklySnapshotPayload,
     ConsoleTenantsWeeklySnapshotRecord,
     ConsoleWebhookSecretResponse,
 )
@@ -1815,10 +1816,18 @@ def _normalize_tenants_weekly_snapshot_week_key(value: str) -> str:
     return normalized
 
 
-def _normalize_tenants_weekly_snapshot_payload(value: Optional[dict]) -> dict:
+def _normalize_tenants_weekly_snapshot_payload(
+    value: Optional[dict | ConsoleTenantsWeeklySnapshotPayload],
+) -> dict:
+    if isinstance(value, ConsoleTenantsWeeklySnapshotPayload):
+        return value.model_dump(mode="json")
     if not isinstance(value, dict):
         raise ConsoleAPIError(400, "INVALID_PARAM", "snapshot must be object")
-    return value
+    try:
+        normalized = ConsoleTenantsWeeklySnapshotPayload.model_validate(value)
+    except ValidationError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "snapshot schema invalid") from exc
+    return normalized.model_dump(mode="json")
 
 
 def _normalize_tenants_sensitive_access_field(value: str) -> str:
@@ -1838,13 +1847,39 @@ def _normalize_tenants_sensitive_access_action(value: str) -> str:
 def _serialize_tenants_weekly_snapshot_record(event: AuditEvent) -> ConsoleTenantsWeeklySnapshotRecord:
     payload = event.payload if isinstance(event.payload, dict) else {}
     week_key = payload.get("week_key")
-    snapshot = payload.get("snapshot")
+    snapshot_payload = payload.get("snapshot")
+    try:
+        snapshot = ConsoleTenantsWeeklySnapshotPayload.model_validate(snapshot_payload)
+    except ValidationError:
+        snapshot = ConsoleTenantsWeeklySnapshotPayload(
+            generatedAt=event.created_at.isoformat(),
+            sourceWindow=0,
+            workspaceMode="portfolio",
+            lifecycleMode="active",
+            kpi={
+                "onboardingCoverage": 0,
+                "goLiveReadiness": 0,
+                "serviceStability": 0,
+                "decommissionShare": 0,
+                "changeFailure": 0,
+                "rollbackShare": 0,
+                "blockedSignals": 0,
+            },
+            drilldown=[],
+            attentionSummary={
+                "activeClientsTotal": 0,
+                "highRiskClients": 0,
+                "mediumRiskClients": 0,
+                "outboxFailed24hTotal": 0,
+                "pendingHandoversTotal": 0,
+            },
+        )
     return ConsoleTenantsWeeklySnapshotRecord(
         id=event.id,
         created_at=event.created_at.isoformat(),
         client_id=event.client_id,
         week_key=week_key if isinstance(week_key, str) else "",
-        snapshot=snapshot if isinstance(snapshot, dict) else {},
+        snapshot=snapshot,
         actor_name=event.actor_name,
     )
 

@@ -897,12 +897,54 @@ export type MarketingCampaignRetryResponse = {
     retried_count: number;
     skipped_count: number;
 };
+export type TenantsOperationalSnapshotWorkspaceMode = "portfolio" | "onboarding" | "changes" | "decommission";
+export type TenantsOperationalSnapshotLifecycleMode = "active" | "archived" | "all";
+export type TenantsOperationalSnapshotKpiId =
+    | "onboardingCoverage"
+    | "goLiveReadiness"
+    | "serviceStability"
+    | "decommissionShare"
+    | "changeFailure"
+    | "rollbackShare"
+    | "blockedSignals";
+export type TenantsOperationalSnapshotKpiStatus = "ok" | "warn" | "critical";
+export type TenantsOperationalSnapshotKpi = {
+    onboardingCoverage: number;
+    goLiveReadiness: number;
+    serviceStability: number;
+    decommissionShare: number;
+    changeFailure: number;
+    rollbackShare: number;
+    blockedSignals: number;
+};
+export type TenantsOperationalSnapshotDrilldownItem = {
+    id: TenantsOperationalSnapshotKpiId;
+    status: TenantsOperationalSnapshotKpiStatus;
+    value: number;
+    reason: string;
+};
+export type TenantsOperationalSnapshotAttentionSummary = {
+    activeClientsTotal: number;
+    highRiskClients: number;
+    mediumRiskClients: number;
+    outboxFailed24hTotal: number;
+    pendingHandoversTotal: number;
+};
+export type TenantsOperationalSnapshotPayload = {
+    generatedAt: string;
+    sourceWindow: number;
+    workspaceMode: TenantsOperationalSnapshotWorkspaceMode;
+    lifecycleMode: TenantsOperationalSnapshotLifecycleMode;
+    kpi: TenantsOperationalSnapshotKpi;
+    drilldown: TenantsOperationalSnapshotDrilldownItem[];
+    attentionSummary: TenantsOperationalSnapshotAttentionSummary;
+};
 export type TenantsWeeklySnapshotRecord = {
     id: string;
     created_at: string;
     client_id: string;
     week_key: string;
-    snapshot: Record<string, unknown>;
+    snapshot: TenantsOperationalSnapshotPayload;
     actor_name?: string | null;
 };
 export type TenantsWeeklySnapshotListResponse = {
@@ -913,7 +955,7 @@ export type TenantsWeeklySnapshotListResponse = {
 export type CreateTenantsWeeklySnapshotRequest = {
     client_id: string;
     week_key: string;
-    snapshot: Record<string, unknown>;
+    snapshot: TenantsOperationalSnapshotPayload;
 };
 export type CreateTenantsWeeklySnapshotResponse = {
     item: TenantsWeeklySnapshotRecord;

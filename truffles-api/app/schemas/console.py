@@ -218,12 +218,69 @@ class ConsoleBranchListResponse(BaseModel):
     has_more: bool
 
 
+ConsoleTenantsSnapshotWorkspaceMode = Literal["portfolio", "onboarding", "changes", "decommission"]
+ConsoleTenantsSnapshotLifecycleMode = Literal["active", "archived", "all"]
+ConsoleTenantsSnapshotKpiId = Literal[
+    "onboardingCoverage",
+    "goLiveReadiness",
+    "serviceStability",
+    "decommissionShare",
+    "changeFailure",
+    "rollbackShare",
+    "blockedSignals",
+]
+ConsoleTenantsSnapshotKpiStatus = Literal["ok", "warn", "critical"]
+
+
+class ConsoleTenantsWeeklySnapshotKpi(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    onboardingCoverage: float
+    goLiveReadiness: float
+    serviceStability: float
+    decommissionShare: float
+    changeFailure: float
+    rollbackShare: float
+    blockedSignals: int
+
+
+class ConsoleTenantsWeeklySnapshotDrilldownItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: ConsoleTenantsSnapshotKpiId
+    status: ConsoleTenantsSnapshotKpiStatus
+    value: float
+    reason: str
+
+
+class ConsoleTenantsWeeklySnapshotAttentionSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    activeClientsTotal: int
+    highRiskClients: int
+    mediumRiskClients: int
+    outboxFailed24hTotal: int
+    pendingHandoversTotal: int
+
+
+class ConsoleTenantsWeeklySnapshotPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    generatedAt: str
+    sourceWindow: int
+    workspaceMode: ConsoleTenantsSnapshotWorkspaceMode
+    lifecycleMode: ConsoleTenantsSnapshotLifecycleMode
+    kpi: ConsoleTenantsWeeklySnapshotKpi
+    drilldown: list[ConsoleTenantsWeeklySnapshotDrilldownItem]
+    attentionSummary: ConsoleTenantsWeeklySnapshotAttentionSummary
+
+
 class ConsoleTenantsWeeklySnapshotRecord(BaseModel):
     id: UUID
     created_at: str
     client_id: UUID
     week_key: str
-    snapshot: dict
+    snapshot: ConsoleTenantsWeeklySnapshotPayload
     actor_name: Optional[str] = None
 
 
@@ -236,7 +293,7 @@ class ConsoleTenantsWeeklySnapshotListResponse(BaseModel):
 class ConsoleTenantsWeeklySnapshotCreateRequest(ConsoleRequestModel):
     client_id: UUID
     week_key: StrictStr
-    snapshot: dict
+    snapshot: ConsoleTenantsWeeklySnapshotPayload
 
 
 class ConsoleTenantsWeeklySnapshotCreateResponse(BaseModel):
