@@ -7,10 +7,10 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.models import Conversation, Message, User
+from app.routers.webhook.trace import _record_message_decision_meta, _update_message_decision_metadata
 from app.schemas.webhook import WebhookResponse
 from app.services.ai_service import normalize_for_matching
 from app.services.human_lock_service import get_active_human_lock, normalize_remote_jid
-from app.routers.webhook.trace import _record_message_decision_meta, _update_message_decision_metadata
 
 
 def _get_intent_queue(context: dict) -> list[str]:
