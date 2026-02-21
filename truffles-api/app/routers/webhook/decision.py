@@ -11501,6 +11501,8 @@ async def _handle_webhook_payload(
                 verifier_prompt = MSG_FACT_GUARD_CLARIFY
                 verifier_action = "reply"
                 verifier_intent = "policy_verifier"
+                verifier_source = "llm_policy_core"
+                verifier_result_message: str | None = None
                 if verifier_slot == "service":
                     verifier_prompt = MSG_BOOKING_ASK_SERVICE
                     verifier_action = "booking_prompt"
@@ -11517,45 +11519,91 @@ async def _handle_webhook_payload(
                     verifier_prompt = MSG_BOOKING_ASK_REFERENCE
                     verifier_action = "check_booking_prompt"
                     verifier_intent = "check_booking"
-                    time_match = (
-                        re.search(r"\b([01]?\d|2[0-3])[:.][0-5]\d\b", message_text)
-                        if isinstance(message_text, str)
-                        else None
-                    )
-                    normalized_message = (
-                        normalize_for_matching(message_text) if isinstance(message_text, str) else ""
-                    )
-                    reschedule_request = bool(
-                        normalized_message
-                        and _looks_like_booking_reschedule_request(message_text)
-                        and not _looks_like_booking_verification_request(message_text)
-                    )
-                    availability_request = bool(
-                        time_match
-                        and normalized_message
-                        and not _looks_like_booking_verification_request(message_text)
-                        and not _looks_like_booking_reschedule_request(message_text)
-                        and any(
-                            marker in normalized_message
-                            for marker in ("можно", "есть", "свобод", "доступ")
+                    if policy_tool_action == "calendar.reschedule":
+                        handover_message = message_text or "Клиент просит изменить время записи."
+                        _, reused, telegram_sent = _reuse_active_handover(
+                            db=db,
+                            conversation=conversation,
+                            user=user,
+                            message=handover_message,
+                            source="policy_verifier",
+                            intent="check_booking",
                         )
-                    )
-                    if reschedule_request:
-                        requested_time = time_match.group(0).replace(".", ":") if time_match else None
-                        verifier_prompt = (
-                            f"На какую дату вам удобно, если время {requested_time}?"
-                            if requested_time
-                            else MSG_BOOKING_ASK_DATETIME
+                        if reused:
+                            verifier_prompt = MSG_ESCALATED
+                            verifier_result_message = (
+                                f"Booking verification handoff reused, "
+                                f"telegram={'sent' if telegram_sent else 'failed'}"
+                            )
+                        elif (
+                            conversation.state == ConversationState.BOT_ACTIVE.value
+                            and routing.get("allow_handover_create", False)
+                        ):
+                            _record_escalation_metric("intent")
+                            result = escalate_to_pending(
+                                db=db,
+                                conversation=conversation,
+                                user_message=handover_message,
+                                trigger_type="intent",
+                                trigger_value="booking_verification",
+                            )
+                            if result.ok:
+                                handover = result.value
+                                telegram_sent = send_telegram_notification(
+                                    db=db,
+                                    handover=handover,
+                                    conversation=conversation,
+                                    user=user,
+                                    message=handover_message,
+                                )
+                                verifier_prompt = MSG_ESCALATED
+                                verifier_result_message = (
+                                    f"Booking verification handoff, "
+                                    f"telegram={'sent' if telegram_sent else 'failed'}"
+                                )
+                            else:
+                                verifier_prompt = MSG_AI_ERROR
+                                verifier_result_message = "Booking verification handoff failed"
+                        else:
+                            verifier_prompt = MSG_ESCALATED
+                            verifier_result_message = "Booking verification handoff skipped (already pending)"
+                        verifier_action = "escalate"
+                        verifier_intent = "check_booking"
+                        verifier_source = "booking_verification"
+                        _record_decision_trace(
+                            conversation,
+                            {
+                                "stage": "llm_policy_core_tool",
+                                "decision": "booking_verification_handoff",
+                                "state": conversation.state,
+                                "tool_action": policy_tool_action,
+                                "reason": "reschedule_missing_reference",
+                            },
                         )
-                        verifier_action = "booking_prompt"
-                        verifier_intent = "booking"
-                        verifier_slot = "datetime"
-                    elif availability_request:
-                        requested_time = time_match.group(0).replace(".", ":")
-                        verifier_prompt = f"На какую дату вам удобно, если время {requested_time}?"
-                        verifier_action = "booking_prompt"
-                        verifier_intent = "booking"
-                        verifier_slot = "datetime"
+                    else:
+                        time_match = (
+                            re.search(r"\b([01]?\d|2[0-3])[:.][0-5]\d\b", message_text)
+                            if isinstance(message_text, str)
+                            else None
+                        )
+                        normalized_message = (
+                            normalize_for_matching(message_text) if isinstance(message_text, str) else ""
+                        )
+                        availability_request = bool(
+                            time_match
+                            and normalized_message
+                            and not _looks_like_booking_verification_request(message_text)
+                            and any(
+                                marker in normalized_message
+                                for marker in ("можно", "есть", "свобод", "доступ")
+                            )
+                        )
+                        if availability_request:
+                            requested_time = time_match.group(0).replace(".", ":")
+                            verifier_prompt = f"На какую дату вам удобно, если время {requested_time}?"
+                            verifier_action = "booking_prompt"
+                            verifier_intent = "booking"
+                            verifier_slot = "datetime"
                 if verifier_slot in BOOKING_SLOT_ORDER:
                     context = _get_conversation_context(conversation)
                     booking_state = dict(booking) if isinstance(booking, dict) else {}
@@ -11602,15 +11650,22 @@ async def _handle_webhook_payload(
                     saved_message,
                     action=verifier_action,
                     intent=verifier_intent,
-                    source="llm_policy_core",
+                    source=verifier_source,
                     fast_intent=False,
                 )
                 bot_response, sent = _send_and_save(verifier_prompt)
-                result_message = (
-                    "Policy verifier blocked unsafe tool execution"
-                    if sent
-                    else "Policy verifier blocked tool execution; response_send=failed"
-                )
+                if verifier_result_message is None:
+                    result_message = (
+                        "Policy verifier blocked unsafe tool execution"
+                        if sent
+                        else "Policy verifier blocked tool execution; response_send=failed"
+                    )
+                else:
+                    result_message = (
+                        verifier_result_message
+                        if sent
+                        else f"{verifier_result_message}; response_send=failed"
+                    )
                 db.commit()
                 return WebhookResponse(
                     success=True,

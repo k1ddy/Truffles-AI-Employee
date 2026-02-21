@@ -11122,7 +11122,7 @@ def test_llm_policy_core_book_slot_rebases_stale_start_at_to_current_slot(monkey
     assert meta.get("booking_start_at_rebased") is True
 
 
-def test_llm_policy_core_reschedule_missing_reference_prompts_booking_reference(monkeypatch):
+def test_llm_policy_core_reschedule_missing_reference_escalates_to_handoff(monkeypatch):
     monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
@@ -11214,6 +11214,8 @@ def test_llm_policy_core_reschedule_missing_reference_prompts_booking_reference(
         "elapsed_ms": 10.0,
     }
     domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
+    handover = SimpleNamespace(id=uuid4(), status="pending")
+    escalate_result = SimpleNamespace(ok=True, value=handover, error=None)
 
     execute_tool_action_mock = Mock()
 
@@ -11244,7 +11246,14 @@ def test_llm_policy_core_reschedule_missing_reference_prompts_booking_reference(
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
         "app.routers.webhook._legacy.semantic_service_match", return_value=None
-    ):
+    ), patch(
+        "app.routers.webhook.decision._reuse_active_handover",
+        return_value=(None, False, False),
+    ) as reuse_handover_mock, patch(
+        "app.routers.webhook.decision.escalate_to_pending", return_value=escalate_result
+    ) as escalate_mock, patch(
+        "app.routers.webhook.decision.send_telegram_notification", return_value=True
+    ) as telegram_mock:
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
                 payload,
@@ -11257,20 +11266,25 @@ def test_llm_policy_core_reschedule_missing_reference_prompts_booking_reference(
         )
 
     assert response.success is True
-    assert response.bot_response == webhook_router.MSG_BOOKING_ASK_REFERENCE
-    assert response.bot_response != webhook_router.MSG_FACT_GUARD_CLARIFY
+    assert response.bot_response == webhook_router.MSG_ESCALATED
     assert execute_tool_action_mock.called is False
+    assert reuse_handover_mock.called
+    assert escalate_mock.called
+    assert telegram_mock.called
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("tool_action") == "calendar.reschedule"
     assert meta.get("tool_decision") == "verifier_blocked"
     assert meta.get("tool_args_error") == "tool_args_required_missing"
     assert meta.get("tool_args_error_field") == "appointment_id"
     assert meta.get("tool_verifier_slot") == "booking_reference"
-    assert meta.get("action") == "check_booking_prompt"
+    assert meta.get("action") == "escalate"
     assert meta.get("intent") == "check_booking"
+    assert meta.get("source") == "booking_verification"
 
 
-def test_llm_policy_core_reschedule_missing_reference_availability_phrase_prompts_datetime(monkeypatch):
+def test_llm_policy_core_reschedule_missing_reference_availability_phrase_escalates_to_handoff(
+    monkeypatch,
+):
     monkeypatch.setenv("LLM_POLICY_CORE_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
@@ -11362,6 +11376,8 @@ def test_llm_policy_core_reschedule_missing_reference_availability_phrase_prompt
         "elapsed_ms": 10.0,
     }
     domain_result = (DomainIntent.IN_DOMAIN, 0.7, 0.1, {"out_hits": 0, "strict_in_hits": 1})
+    handover = SimpleNamespace(id=uuid4(), status="pending")
+    escalate_result = SimpleNamespace(ok=True, value=handover, error=None)
 
     execute_tool_action_mock = Mock()
 
@@ -11392,7 +11408,14 @@ def test_llm_policy_core_reschedule_missing_reference_availability_phrase_prompt
         "app.routers.webhook._legacy.should_process_debounced_message", AsyncMock(return_value=True)
     ), patch(
         "app.routers.webhook._legacy.semantic_service_match", return_value=None
-    ):
+    ), patch(
+        "app.routers.webhook.decision._reuse_active_handover",
+        return_value=(None, False, False),
+    ) as reuse_handover_mock, patch(
+        "app.routers.webhook.decision.escalate_to_pending", return_value=escalate_result
+    ) as escalate_mock, patch(
+        "app.routers.webhook.decision.send_telegram_notification", return_value=True
+    ) as telegram_mock:
         response = asyncio.run(
             webhook_router._handle_webhook_payload(
                 payload,
@@ -11405,15 +11428,19 @@ def test_llm_policy_core_reschedule_missing_reference_availability_phrase_prompt
         )
 
     assert response.success is True
-    assert response.bot_response == "На какую дату вам удобно, если время 18:30?"
+    assert response.bot_response == webhook_router.MSG_ESCALATED
     assert execute_tool_action_mock.called is False
+    assert reuse_handover_mock.called
+    assert escalate_mock.called
+    assert telegram_mock.called
     meta = saved_message.message_metadata.get("decision_meta", {})
     assert meta.get("tool_action") == "calendar.reschedule"
     assert meta.get("tool_decision") == "verifier_blocked"
     assert meta.get("tool_args_error_field") == "appointment_id"
-    assert meta.get("tool_verifier_slot") == "datetime"
-    assert meta.get("action") == "booking_prompt"
-    assert meta.get("intent") == "booking"
+    assert meta.get("tool_verifier_slot") == "booking_reference"
+    assert meta.get("action") == "escalate"
+    assert meta.get("intent") == "check_booking"
+    assert meta.get("source") == "booking_verification"
 
 
 def test_llm_policy_core_get_booking_invalid_reference_maps_to_booking_reference_slot():
