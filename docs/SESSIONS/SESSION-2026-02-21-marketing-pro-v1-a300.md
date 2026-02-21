@@ -1,0 +1,28 @@
+# SESSION 2026-02-21-marketing-pro-v1-a300 — Session 2026-02-21-marketing-pro-v1-a300
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md
+- branch: feat/2026-02-21-marketing-pro-v1-a300
+- worktree: /home/zhan/worktrees/2026-02-21-marketing-pro-v1-a300
+- base_ref: origin/main
+- scope: Marketing Pro v1 end-to-end implementation (backend lifecycle/audience/preflight/execute/retry + console UI + contracts/docs/tests)
+- done:
+  - Added Marketing Pro data model extensions and migration `034_marketing_pro_v1.sql`.
+  - Implemented dedicated marketing service layer (`app/services/marketing/service.py`) with segment audience materialization, suppression filters, preflight build, lifecycle transitions, execute, retry logic.
+  - Refactored console marketing endpoints for lifecycle actions (`request-approval`, `approve`, `pause`, `resume`), audience, preflight, and execute gate integration.
+  - Extended console schemas and API client types for new marketing contracts.
+  - Rebuilt marketing console page to lifecycle-first UX with audience table and preflight blocking visibility.
+  - Synced OpenAPI contract (`contracts/console_api/openapi.v1.yaml`) from generated spec after endpoint additions.
+  - Added/updated tests and docs (`test_console_marketing_campaigns.py`, `docs/CONSOLE_AUDIT/pages/marketing.md`, `STATE.md`, `STRUCTURE.md`).
+- next:
+  - Run runtime live-check for marketing campaign lifecycle and capture DB trace/meta evidence before merge.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md
+  - truffles-api/migrations/034_marketing_pro_v1.sql
+  - truffles-api/app/services/marketing/service.py
+  - truffles-api/app/routers/console.py
+  - truffles-api/tests/test_console_marketing_campaigns.py
+  - console-web/src/app/marketing/page.tsx
+  - contracts/console_api/openapi.v1.yaml
+- last_updated: 2026-02-21

@@ -838,9 +838,21 @@ export type KnowledgeRollbackResponse = {
 export type LearningCandidate = components["schemas"]["LearningCandidate"];
 export type LearningCandidateListResponse = components["schemas"]["LearningCandidateListResponse"];
 export type LearningCandidateActionResponse = components["schemas"]["LearningCandidateActionResponse"];
-export type MarketingCampaignStatus = "draft" | "ready" | "executed" | "paused";
+export type MarketingCampaignStatus =
+    | "draft"
+    | "ready"
+    | "executed"
+    | "paused"
+    | "in_review"
+    | "approved"
+    | "scheduled"
+    | "running"
+    | "completed"
+    | "cancelled"
+    | "failed";
 export type MarketingDeliveryStatus = "queued" | "sent" | "failed" | "replied";
 export type MarketingAudienceMode = "branch_active_conversations";
+export type MarketingSegmentCode = "reactivation_30_120" | "no_show_recovery_14d" | "engaged_no_booking_7d";
 export type MarketingCampaign = {
     id: string;
     client_id: string;
@@ -848,8 +860,16 @@ export type MarketingCampaign = {
     name: string;
     message_text: string;
     status: MarketingCampaignStatus;
+    segment_code: MarketingSegmentCode;
     audience_mode: MarketingAudienceMode;
     preview_total: number;
+    preflight_valid: boolean;
+    preflight_snapshot?: Record<string, unknown> | null;
+    approved_by?: string | null;
+    approved_at?: string | null;
+    requested_review_at?: string | null;
+    run_started_at?: string | null;
+    run_completed_at?: string | null;
     last_preview_at?: string | null;
     executed_at?: string | null;
     created_at?: string | null;
@@ -860,6 +880,7 @@ export type MarketingCampaignCreateRequest = {
     branch_id: string;
     name: string;
     message_text: string;
+    segment_code?: MarketingSegmentCode;
     audience_mode?: MarketingAudienceMode;
 };
 export type MarketingCampaignCreateResponse = { campaign: MarketingCampaign };
@@ -869,6 +890,8 @@ export type MarketingCampaignPreviewResponse = {
     branch_id: string;
     audience_mode: MarketingAudienceMode;
     estimated_recipients: number;
+    eligible_count: number;
+    suppressed_count: number;
     sample_conversation_ids: string[];
     sample_recipient_jids: string[];
 };
@@ -902,6 +925,39 @@ export type MarketingCampaignRetryResponse = {
     campaign_id: string;
     retried_count: number;
     skipped_count: number;
+    skipped_permanent: number;
+};
+export type MarketingCampaignLifecycleActionRequest = { reason?: string | null };
+export type MarketingCampaignAudienceResponse = {
+    campaign_id: string;
+    total_count: number;
+    eligible_count: number;
+    suppressed_count: number;
+    items: MarketingCampaignRecipient[];
+};
+export type MarketingCampaignRecipient = {
+    id: string;
+    campaign_id: string;
+    recipient_jid: string;
+    user_id?: string | null;
+    conversation_id?: string | null;
+    segment_code: MarketingSegmentCode;
+    reason_codes: string[];
+    suppressed: boolean;
+    suppression_reasons: string[];
+    updated_at?: string | null;
+};
+export type MarketingCampaignPreflightResponse = {
+    campaign_id: string;
+    generated_at: string;
+    preflight_valid: boolean;
+    blocked_reasons: string[];
+    outbox_health_status: string;
+    outbox_pending: number;
+    outbox_failed_24h: number;
+    audience_total: number;
+    eligible_count: number;
+    suppressed_count: number;
 };
 export type TenantsOperationalSnapshotWorkspaceMode = "portfolio" | "onboarding" | "changes" | "decommission";
 export type TenantsOperationalSnapshotLifecycleMode = "active" | "archived" | "all";
@@ -1186,6 +1242,24 @@ export const adminApi = {
         apiClient.post<MarketingCampaignCreateResponse>("/admin/marketing/campaigns", data),
     previewMarketingCampaign: (campaignId: string, data?: MarketingCampaignPreviewRequest) =>
         apiClient.post<MarketingCampaignPreviewResponse>(`/admin/marketing/campaigns/${campaignId}/preview`, data ?? {}),
+    getMarketingCampaignAudience: (
+        campaignId: string,
+        params?: { include_suppressed?: boolean; limit?: number },
+    ) =>
+        apiClient.get<MarketingCampaignAudienceResponse>(`/admin/marketing/campaigns/${campaignId}/audience`, { params }),
+    requestMarketingCampaignApproval: (campaignId: string, data?: MarketingCampaignLifecycleActionRequest) =>
+        apiClient.post<MarketingCampaignCreateResponse>(
+            `/admin/marketing/campaigns/${campaignId}/request-approval`,
+            data ?? {},
+        ),
+    approveMarketingCampaign: (campaignId: string, data?: MarketingCampaignLifecycleActionRequest) =>
+        apiClient.post<MarketingCampaignCreateResponse>(`/admin/marketing/campaigns/${campaignId}/approve`, data ?? {}),
+    pauseMarketingCampaign: (campaignId: string, data?: MarketingCampaignLifecycleActionRequest) =>
+        apiClient.post<MarketingCampaignCreateResponse>(`/admin/marketing/campaigns/${campaignId}/pause`, data ?? {}),
+    resumeMarketingCampaign: (campaignId: string, data?: MarketingCampaignLifecycleActionRequest) =>
+        apiClient.post<MarketingCampaignCreateResponse>(`/admin/marketing/campaigns/${campaignId}/resume`, data ?? {}),
+    getMarketingCampaignPreflight: (campaignId: string) =>
+        apiClient.get<MarketingCampaignPreflightResponse>(`/admin/marketing/campaigns/${campaignId}/preflight`),
     executeMarketingCampaign: (campaignId: string, data: MarketingCampaignExecuteRequest) =>
         apiClient.post<MarketingCampaignExecuteResponse>(`/admin/marketing/campaigns/${campaignId}/execute`, data),
     getMarketingCampaignDiagnostics: (campaignId: string, params?: { sample_limit?: number }) =>

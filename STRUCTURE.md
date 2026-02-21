@@ -90,9 +90,15 @@
 | `truffles-api/app/services/tool_registry_service.py` | Tool registry executor (calendar/catalog) for LLM plan | Backend |
 | `truffles-api/app/services/appointment_reminder_service.py` | Appointment reminder/follow-up jobs + outbox enqueue | Backend |
 | `truffles-api/app/services/metrics_daily_service.py` | Daily metrics snapshot (metrics_daily) | Backend |
+| `truffles-api/app/services/marketing/service.py` | Marketing Pro lifecycle/audience/preflight/execute/retry logic | Backend |
 | `truffles-api/app/models/alert_event.py` | DB model for alert events (analytics) | Backend |
 | `truffles-api/app/models/console_confirmation.py` | DB model for confirmation requests (Console) | Backend |
 | `truffles-api/app/models/console_macro.py` | DB model for Inbox macros (Console) | Backend |
+| `truffles-api/app/models/marketing_campaign.py` | Marketing campaign model (status/approval/preflight fields) | Backend |
+| `truffles-api/app/models/marketing_campaign_recipient.py` | Materialized audience snapshot per campaign | Backend |
+| `truffles-api/app/models/marketing_delivery_event.py` | Marketing delivery timeline/audit events | Backend |
+| `truffles-api/app/models/marketing_consent.py` | Marketing consent state (`opt_in/opt_out`) | Backend |
+| `truffles-api/app/models/marketing_suppression.py` | Manual/automatic suppression registry | Backend |
 | `truffles-api/app/models/outbox_status_event.py` | DB model for outbox status events (analytics) | Backend |
 | `truffles-api/app/knowledge_gateway_app.py` | Отдельный app для Knowledge Gateway | Backend |
 | `truffles-api/app/provider_gateway_app.py` | Отдельный app для Provider Gateway | Backend |
@@ -110,9 +116,11 @@
 | `truffles-api/migrations/020_add_handover_meta.sql` | Migration: handovers meta snapshot + trigger_message_id | Backend/OPS |
 | `truffles-api/migrations/021_add_outbox_status_events.sql` | Migration: outbox_status_events (status history) | Backend/OPS |
 | `truffles-api/migrations/022_add_alert_events.sql` | Migration: alert_events (no_response, etc.) | Backend/OPS |
+| `truffles-api/migrations/034_marketing_pro_v1.sql` | Migration: Marketing Pro v1 schema (campaign state + audience/suppression/delivery events) | Backend/OPS |
 | `truffles-api/scripts/console_e2e_seed.py` | Seed для стабильных console‑e2e данных | Backend/QA |
 | `console-web/` | Console UI (Next.js, Dockerfile) | Frontend |
 | `console-web/src/app/insights/page.tsx` | Insights/Analytics page (read-only daily metrics) | Frontend |
+| `console-web/src/app/marketing/page.tsx` | Marketing Pro lifecycle UI (preview/approval/preflight/execute) | Frontend |
 | `console-web/src/components/TenantsScopedErrorSummary.tsx` | Scoped error summary для Tenants workspace зон | Frontend |
 | `console-web/src/components/TenantsSensitiveIdCell.tsx` | Mask/reveal/copy ячейка чувствительного `instance_id` с audit hook | Frontend |
 | `console-web/e2e/` | Playwright smoke/login/setup тесты (storageState) | Frontend/QA |
@@ -124,6 +132,7 @@
 | `docs/CONSOLE_GUIDE.md` | Guide по Console (API, тесты, дебаг) | Frontend/Backend |
 | `docs/CONSOLE_AUDIT/` | Полная инвентаризация Console (ролевая карта + страницы + код/интеграции) | Frontend/Backend/Architect |
 | `docs/CONSOLE_AUDIT/pages/insights.md` | Audit page: Insights/Analytics | Frontend/Architect |
+| `docs/CONSOLE_AUDIT/pages/marketing.md` | Audit page: Marketing lifecycle + audience/preflight | Frontend/Architect |
 | `docs/CONSOLE_AUDIT/UX_BACKLOG.md` | UX backlog (bugs/UX debt) по реализованной Console | Frontend/Backend/Architect |
 | `docs/runbooks/CHAOS_SIM.md` | Chaos-sim runbook (human-like диалоги, evaluator, артефакты) | QA/OPS/Brain |
 | `docs/runbooks/DIALOG_REPORT.md` | Dialog-report runbook (one-command анализ диалогов) | QA/OPS/Brain |

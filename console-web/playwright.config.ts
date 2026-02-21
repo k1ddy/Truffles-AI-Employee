@@ -44,6 +44,10 @@ export default defineConfig({
         ? {
               command: 'npm run dev -- -H 0.0.0.0 -p 3000',
               url: baseURL,
+              env: {
+                  ...process.env,
+                  NEXTAUTH_URL: baseURL,
+              },
               reuseExistingServer: !process.env.CI,
           }
         : undefined,

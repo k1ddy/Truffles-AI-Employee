@@ -13,8 +13,17 @@ import {
     parseApiError,
     type MarketingCampaign,
     type MarketingCampaignDiagnosticsResponse,
+    type MarketingCampaignPreflightResponse,
+    type MarketingCampaignRecipient,
+    type MarketingSegmentCode,
 } from "@/lib/api-client";
 import { useConsoleContextScope } from "@/lib/use-console-context-scope";
+
+const SEGMENT_OPTIONS: Array<{ value: MarketingSegmentCode; label: string }> = [
+    { value: "reactivation_30_120", label: "Возврат 30-120 дней" },
+    { value: "no_show_recovery_14d", label: "После no-show (14 дней)" },
+    { value: "engaged_no_booking_7d", label: "Интерес без записи (7 дней)" },
+];
 
 function formatDateTime(value?: string | null): string {
     if (!value) {
@@ -28,37 +37,67 @@ function formatDateTime(value?: string | null): string {
 }
 
 function campaignStatusLabel(status: MarketingCampaign["status"]): string {
-    if (status === "draft") {
-        return "Черновик";
-    }
-    if (status === "ready") {
-        return "Готова";
-    }
-    if (status === "executed") {
-        return "Отправлена";
-    }
-    return "Пауза";
+    const labels: Record<MarketingCampaign["status"], string> = {
+        draft: "Черновик",
+        ready: "Готова",
+        executed: "Отправлена",
+        paused: "На паузе",
+        in_review: "На ревью",
+        approved: "Подтверждена",
+        scheduled: "Запланирована",
+        running: "В отправке",
+        completed: "Завершена",
+        cancelled: "Отменена",
+        failed: "Ошибка",
+    };
+    return labels[status] ?? status;
 }
 
 function campaignStatusClass(status: MarketingCampaign["status"]): string {
-    if (status === "executed") {
+    if (status === "completed" || status === "executed") {
         return "bg-emerald-100 text-emerald-700";
     }
-    if (status === "ready") {
+    if (status === "approved" || status === "scheduled" || status === "running") {
         return "bg-sky-100 text-sky-700";
+    }
+    if (status === "in_review") {
+        return "bg-indigo-100 text-indigo-700";
     }
     if (status === "paused") {
         return "bg-amber-100 text-amber-700";
     }
+    if (status === "failed" || status === "cancelled") {
+        return "bg-red-100 text-red-700";
+    }
     return "bg-muted text-muted-foreground";
+}
+
+function segmentLabel(segment: MarketingSegmentCode): string {
+    return SEGMENT_OPTIONS.find((item) => item.value === segment)?.label ?? segment;
+}
+
+function formatReason(value: string): string {
+    return value.replaceAll("_", " ");
+}
+
+function parseBoundedInt(value: string, fallback: number, min: number, max: number): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return fallback;
+    }
+    return Math.min(max, Math.max(min, Math.trunc(parsed)));
 }
 
 export default function MarketingPage() {
     const { data: session } = useSession();
     const [name, setName] = useState("");
     const [messageText, setMessageText] = useState("");
+    const [segmentCode, setSegmentCode] = useState<MarketingSegmentCode>("reactivation_30_120");
     const [sampleLimit, setSampleLimit] = useState(5);
     const [maxRecipients, setMaxRecipients] = useState(200);
+    const [audienceLimit, setAudienceLimit] = useState(100);
+    const [includeSuppressed, setIncludeSuppressed] = useState(true);
+    const [lifecycleReason, setLifecycleReason] = useState("");
     const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
     const [busyAction, setBusyAction] = useState<string | null>(null);
 
@@ -84,13 +123,7 @@ export default function MarketingPage() {
     const selectedBranchId = scope.branchId || meData?.selected_branch_id || branchOptions[0]?.id || "";
 
     useEffect(() => {
-        if (!branchOptions.length) {
-            return;
-        }
-        if (scope.branchId) {
-            return;
-        }
-        if (!selectedBranchId) {
+        if (!branchOptions.length || scope.branchId || !selectedBranchId) {
             return;
         }
         setScopeBranchId(selectedBranchId);
@@ -147,17 +180,58 @@ export default function MarketingPage() {
         enabled: !!session && canReadMarketing && !!selectedCampaignId,
     });
 
+    const {
+        data: preflightData,
+        isLoading: preflightLoading,
+        refetch: refetchPreflight,
+    } = useQuery({
+        queryKey: ["marketing-preflight", selectedCampaignId],
+        queryFn: async () => {
+            const response = await adminApi.getMarketingCampaignPreflight(selectedCampaignId ?? "");
+            return response.data;
+        },
+        enabled: !!session && canReadMarketing && !!selectedCampaignId,
+    });
+
+    const {
+        data: audienceData,
+        isLoading: audienceLoading,
+        refetch: refetchAudience,
+    } = useQuery({
+        queryKey: ["marketing-audience", selectedCampaignId, includeSuppressed, audienceLimit],
+        queryFn: async () => {
+            const response = await adminApi.getMarketingCampaignAudience(selectedCampaignId ?? "", {
+                include_suppressed: includeSuppressed,
+                limit: audienceLimit,
+            });
+            return response.data;
+        },
+        enabled: !!session && canReadMarketing && !!selectedCampaignId,
+    });
+
     if (meLoading) {
         return <div className="p-6 text-sm text-muted-foreground">Загрузка...</div>;
     }
 
     if (!canReadMarketing) {
-        return (
-            <AccessDenied
-                message="Нужна роль owner/admin/platform_admin для управления кампаниями."
-            />
-        );
+        return <AccessDenied message="Нужна роль owner/admin/platform_admin для управления кампаниями." />;
     }
+
+    const selectedStatus = selectedCampaign?.status;
+    const canRequestApproval = selectedStatus ? ["draft", "ready"].includes(selectedStatus) : false;
+    const canApprove = selectedStatus ? ["in_review", "ready"].includes(selectedStatus) : false;
+    const canPause = selectedStatus ? ["approved", "scheduled", "running", "executed"].includes(selectedStatus) : false;
+    const canResume = selectedStatus === "paused";
+    const canExecute = selectedStatus ? ["approved", "scheduled"].includes(selectedStatus) : false;
+
+    const diagnostics: MarketingCampaignDiagnosticsResponse | null = diagnosticsData ?? null;
+    const preflight: MarketingCampaignPreflightResponse | null = preflightData ?? null;
+    const audienceRows: MarketingCampaignRecipient[] = audienceData?.items ?? [];
+
+    const withReasonPayload = () => {
+        const normalized = lifecycleReason.trim();
+        return normalized ? { reason: normalized } : {};
+    };
 
     const createCampaign = async () => {
         if (!selectedBranchId) {
@@ -179,6 +253,7 @@ export default function MarketingPage() {
                 branch_id: selectedBranchId,
                 name: name.trim(),
                 message_text: messageText.trim(),
+                segment_code: segmentCode,
                 audience_mode: "branch_active_conversations",
             });
             setName("");
@@ -200,8 +275,92 @@ export default function MarketingPage() {
         setBusyAction("preview");
         try {
             await adminApi.previewMarketingCampaign(selectedCampaign.id, { sample_limit: sampleLimit });
-            await Promise.all([refetchCampaigns(), refetchDiagnostics()]);
-            toast.success("Preview обновлён.");
+            await Promise.all([refetchCampaigns(), refetchAudience(), refetchPreflight()]);
+            toast.success("Preview и audience обновлены.");
+        } catch (error) {
+            const parsed = parseApiError(error);
+            toast.error(parsed.message);
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const requestApproval = async () => {
+        if (!selectedCampaign) {
+            return;
+        }
+        setBusyAction("request-approval");
+        try {
+            await adminApi.requestMarketingCampaignApproval(selectedCampaign.id, withReasonPayload());
+            await Promise.all([refetchCampaigns(), refetchPreflight()]);
+            toast.success("Кампания отправлена на подтверждение.");
+        } catch (error) {
+            const parsed = parseApiError(error);
+            toast.error(parsed.message);
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const approveCampaign = async () => {
+        if (!selectedCampaign) {
+            return;
+        }
+        setBusyAction("approve");
+        try {
+            await adminApi.approveMarketingCampaign(selectedCampaign.id, withReasonPayload());
+            await Promise.all([refetchCampaigns(), refetchPreflight()]);
+            toast.success("Кампания подтверждена.");
+        } catch (error) {
+            const parsed = parseApiError(error);
+            toast.error(parsed.message);
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const pauseCampaign = async () => {
+        if (!selectedCampaign) {
+            return;
+        }
+        setBusyAction("pause");
+        try {
+            await adminApi.pauseMarketingCampaign(selectedCampaign.id, withReasonPayload());
+            await refetchCampaigns();
+            toast.success("Кампания поставлена на паузу.");
+        } catch (error) {
+            const parsed = parseApiError(error);
+            toast.error(parsed.message);
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const resumeCampaign = async () => {
+        if (!selectedCampaign) {
+            return;
+        }
+        setBusyAction("resume");
+        try {
+            await adminApi.resumeMarketingCampaign(selectedCampaign.id, withReasonPayload());
+            await Promise.all([refetchCampaigns(), refetchPreflight()]);
+            toast.success("Кампания возобновлена.");
+        } catch (error) {
+            const parsed = parseApiError(error);
+            toast.error(parsed.message);
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const refreshPreflight = async () => {
+        if (!selectedCampaign) {
+            return;
+        }
+        setBusyAction("preflight");
+        try {
+            await refetchPreflight();
+            toast.success("Preflight обновлён.");
         } catch (error) {
             const parsed = parseApiError(error);
             toast.error(parsed.message);
@@ -224,7 +383,7 @@ export default function MarketingPage() {
                 confirm_send: true,
                 max_recipients: maxRecipients,
             });
-            await Promise.all([refetchCampaigns(), refetchDiagnostics()]);
+            await Promise.all([refetchCampaigns(), refetchDiagnostics(), refetchPreflight()]);
             toast.success(`Поставлено в очередь: ${response.data.queued_count}`);
         } catch (error) {
             const parsed = parseApiError(error);
@@ -249,7 +408,7 @@ export default function MarketingPage() {
                 limit: 100,
             });
             await refetchDiagnostics();
-            toast.success(`Повторено: ${response.data.retried_count}`);
+            toast.success(`Повторено: ${response.data.retried_count}, permanent: ${response.data.skipped_permanent}`);
         } catch (error) {
             const parsed = parseApiError(error);
             toast.error(parsed.message);
@@ -258,14 +417,12 @@ export default function MarketingPage() {
         }
     };
 
-    const diagnostics: MarketingCampaignDiagnosticsResponse | null = diagnosticsData ?? null;
-
     return (
         <div className="space-y-6 p-6">
             <div>
                 <h1 className="text-2xl font-semibold">Маркетинг</h1>
                 <p className="mt-1 text-sm text-muted-foreground">
-                    Кампании branch-scope: preview, confirm execute, diagnostics и retry failed.
+                    Полный цикл кампании: аудитория, approval, preflight, execute и retry.
                 </p>
             </div>
 
@@ -290,7 +447,7 @@ export default function MarketingPage() {
                 </div>
             </div>
 
-            <div className="grid gap-6 lg:grid-cols-[340px,1fr]">
+            <div className="grid gap-6 lg:grid-cols-[360px,1fr]">
                 <section className="rounded-xl border bg-card p-4">
                     <h2 className="text-lg font-semibold">Новая кампания</h2>
                     <div className="mt-3 space-y-3">
@@ -300,6 +457,17 @@ export default function MarketingPage() {
                             value={name}
                             onChange={(event) => setName(event.target.value)}
                         />
+                        <select
+                            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm"
+                            value={segmentCode}
+                            onChange={(event) => setSegmentCode(event.target.value as MarketingSegmentCode)}
+                        >
+                            {SEGMENT_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                    {option.label}
+                                </option>
+                            ))}
+                        </select>
                         <textarea
                             className="min-h-[120px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                             placeholder="Текст WhatsApp сообщения"
@@ -339,9 +507,8 @@ export default function MarketingPage() {
                                                         {campaignStatusLabel(campaign.status)}
                                                     </span>
                                                 </div>
-                                                <p className="mt-1 text-xs text-muted-foreground">
-                                                    preview: {campaign.preview_total}
-                                                </p>
+                                                <p className="mt-1 text-xs text-muted-foreground">{segmentLabel(campaign.segment_code)}</p>
+                                                <p className="mt-1 text-xs text-muted-foreground">preview: {campaign.preview_total}</p>
                                             </button>
                                         </li>
                                     );
@@ -361,9 +528,7 @@ export default function MarketingPage() {
                             <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div>
                                     <h2 className="text-lg font-semibold">{selectedCampaign.name}</h2>
-                                    <p className="mt-1 text-sm text-muted-foreground">
-                                        {selectedCampaign.message_text}
-                                    </p>
+                                    <p className="mt-1 text-sm text-muted-foreground">{selectedCampaign.message_text}</p>
                                 </div>
                                 <span className={`rounded-full px-3 py-1 text-xs ${campaignStatusClass(selectedCampaign.status)}`}>
                                     {campaignStatusLabel(selectedCampaign.status)}
@@ -376,8 +541,8 @@ export default function MarketingPage() {
                                     <div className="mt-1 text-lg font-semibold">{selectedCampaign.preview_total}</div>
                                 </div>
                                 <div className="rounded-lg border bg-background p-3">
-                                    <div className="text-xs text-muted-foreground">Последний preview</div>
-                                    <div className="mt-1 text-sm font-medium">{formatDateTime(selectedCampaign.last_preview_at)}</div>
+                                    <div className="text-xs text-muted-foreground">Approval</div>
+                                    <div className="mt-1 text-sm font-medium">{formatDateTime(selectedCampaign.approved_at)}</div>
                                 </div>
                                 <div className="rounded-lg border bg-background p-3">
                                     <div className="text-xs text-muted-foreground">Последний execute</div>
@@ -389,53 +554,252 @@ export default function MarketingPage() {
                                 </div>
                             </div>
 
-                            <div className="mt-5 flex flex-wrap items-end gap-3">
+                            <div className="mt-5 space-y-4 rounded-lg border bg-background p-3">
                                 <label className="text-sm">
-                                    <div className="mb-1 text-xs text-muted-foreground">sample_limit</div>
+                                    <div className="mb-1 text-xs text-muted-foreground">Причина (audit)</div>
                                     <input
-                                        type="number"
-                                        min={1}
-                                        max={20}
-                                        className="h-10 w-28 rounded-lg border border-border bg-background px-3 text-sm"
-                                        value={sampleLimit}
-                                        onChange={(event) => setSampleLimit(Number(event.target.value || 5))}
+                                        className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm"
+                                        placeholder="необязательно"
+                                        value={lifecycleReason}
+                                        onChange={(event) => setLifecycleReason(event.target.value)}
                                     />
                                 </label>
-                                <label className="text-sm">
-                                    <div className="mb-1 text-xs text-muted-foreground">max_recipients</div>
-                                    <input
-                                        type="number"
-                                        min={1}
-                                        max={500}
-                                        className="h-10 w-32 rounded-lg border border-border bg-background px-3 text-sm"
-                                        value={maxRecipients}
-                                        onChange={(event) => setMaxRecipients(Number(event.target.value || 200))}
-                                    />
-                                </label>
-                                <button
-                                    type="button"
-                                    className="h-10 rounded-lg border border-border bg-background px-4 text-sm font-medium"
-                                    onClick={previewCampaign}
-                                    disabled={busyAction === "preview"}
-                                >
-                                    {busyAction === "preview" ? "Preview..." : "Preview"}
-                                </button>
-                                <button
-                                    type="button"
-                                    className="h-10 rounded-lg bg-foreground px-4 text-sm font-medium text-background disabled:cursor-not-allowed disabled:opacity-60"
-                                    onClick={executeCampaign}
-                                    disabled={busyAction === "execute"}
-                                >
-                                    {busyAction === "execute" ? "Execute..." : "Confirm & Execute"}
-                                </button>
-                                <button
-                                    type="button"
-                                    className="h-10 rounded-lg border border-border bg-background px-4 text-sm font-medium"
-                                    onClick={retryFailed}
-                                    disabled={busyAction === "retry"}
-                                >
-                                    {busyAction === "retry" ? "Retry..." : "Retry Failed"}
-                                </button>
+
+                                <div className="flex flex-wrap items-end gap-3">
+                                    <label className="text-sm">
+                                        <div className="mb-1 text-xs text-muted-foreground">sample_limit</div>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={20}
+                                            className="h-10 w-28 rounded-lg border border-border bg-card px-3 text-sm"
+                                            value={sampleLimit}
+                                            onChange={(event) => setSampleLimit(parseBoundedInt(event.target.value, 5, 1, 20))}
+                                        />
+                                    </label>
+                                    <button
+                                        type="button"
+                                        className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-medium"
+                                        onClick={previewCampaign}
+                                        disabled={busyAction === "preview"}
+                                    >
+                                        {busyAction === "preview" ? "Preview..." : "Preview аудитории"}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                                        onClick={requestApproval}
+                                        disabled={!canRequestApproval || busyAction === "request-approval"}
+                                    >
+                                        {busyAction === "request-approval" ? "..." : "На ревью"}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                                        onClick={approveCampaign}
+                                        disabled={!canApprove || busyAction === "approve"}
+                                    >
+                                        {busyAction === "approve" ? "..." : "Approve"}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                                        onClick={pauseCampaign}
+                                        disabled={!canPause || busyAction === "pause"}
+                                    >
+                                        {busyAction === "pause" ? "..." : "Pause"}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                                        onClick={resumeCampaign}
+                                        disabled={!canResume || busyAction === "resume"}
+                                    >
+                                        {busyAction === "resume" ? "..." : "Resume"}
+                                    </button>
+                                </div>
+
+                                <div className="flex flex-wrap items-end gap-3 border-t pt-3">
+                                    <label className="text-sm">
+                                        <div className="mb-1 text-xs text-muted-foreground">max_recipients</div>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={500}
+                                            className="h-10 w-32 rounded-lg border border-border bg-card px-3 text-sm"
+                                            value={maxRecipients}
+                                            onChange={(event) => setMaxRecipients(parseBoundedInt(event.target.value, 200, 1, 500))}
+                                        />
+                                    </label>
+                                    <button
+                                        type="button"
+                                        className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-medium"
+                                        onClick={refreshPreflight}
+                                        disabled={busyAction === "preflight"}
+                                    >
+                                        {busyAction === "preflight" ? "..." : "Refresh preflight"}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="h-10 rounded-lg bg-foreground px-4 text-sm font-medium text-background disabled:cursor-not-allowed disabled:opacity-60"
+                                        onClick={executeCampaign}
+                                        disabled={busyAction === "execute" || !canExecute || !preflight?.preflight_valid}
+                                    >
+                                        {busyAction === "execute" ? "Execute..." : "Confirm & Execute"}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-medium"
+                                        onClick={retryFailed}
+                                        disabled={busyAction === "retry"}
+                                    >
+                                        {busyAction === "retry" ? "Retry..." : "Retry failed"}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="mt-6 border-t pt-4">
+                                <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">Preflight</h3>
+                                {preflightLoading ? (
+                                    <p className="mt-2 text-sm text-muted-foreground">Загрузка...</p>
+                                ) : preflight ? (
+                                    <>
+                                        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                                            <div className="rounded-lg border bg-background p-3">
+                                                <div className="text-xs text-muted-foreground">Статус</div>
+                                                <div className={`mt-1 text-sm font-semibold ${preflight.preflight_valid ? "text-emerald-700" : "text-red-700"}`}>
+                                                    {preflight.preflight_valid ? "Готово к execute" : "Заблокировано"}
+                                                </div>
+                                            </div>
+                                            <div className="rounded-lg border bg-background p-3">
+                                                <div className="text-xs text-muted-foreground">Outbox status</div>
+                                                <div className="mt-1 text-sm font-medium">{preflight.outbox_health_status}</div>
+                                            </div>
+                                            <div className="rounded-lg border bg-background p-3">
+                                                <div className="text-xs text-muted-foreground">Audience</div>
+                                                <div className="mt-1 text-sm font-medium">{preflight.audience_total}</div>
+                                            </div>
+                                            <div className="rounded-lg border bg-background p-3">
+                                                <div className="text-xs text-muted-foreground">Eligible</div>
+                                                <div className="mt-1 text-sm font-medium">{preflight.eligible_count}</div>
+                                            </div>
+                                            <div className="rounded-lg border bg-background p-3">
+                                                <div className="text-xs text-muted-foreground">Suppressed</div>
+                                                <div className="mt-1 text-sm font-medium">{preflight.suppressed_count}</div>
+                                            </div>
+                                        </div>
+                                        <div className="mt-3 rounded-lg border bg-background p-3">
+                                            <div className="text-xs text-muted-foreground">Blocked reasons</div>
+                                            {preflight.blocked_reasons.length ? (
+                                                <div className="mt-2 flex flex-wrap gap-2">
+                                                    {preflight.blocked_reasons.map((item) => (
+                                                        <span key={item} className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">
+                                                            {formatReason(item)}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="mt-2 text-xs text-emerald-700">Блокировок нет.</p>
+                                            )}
+                                        </div>
+                                    </>
+                                ) : (
+                                    <p className="mt-2 text-sm text-muted-foreground">Preflight недоступен.</p>
+                                )}
+                            </div>
+
+                            <div className="mt-6 border-t pt-4">
+                                <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">Audience</h3>
+                                <div className="mt-3 flex flex-wrap items-end gap-3">
+                                    <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                                        <input
+                                            type="checkbox"
+                                            checked={includeSuppressed}
+                                            onChange={(event) => setIncludeSuppressed(event.target.checked)}
+                                        />
+                                        Показывать suppressed
+                                    </label>
+                                    <label className="text-sm">
+                                        <div className="mb-1 text-xs text-muted-foreground">limit</div>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={500}
+                                            className="h-10 w-24 rounded-lg border border-border bg-background px-3 text-sm"
+                                            value={audienceLimit}
+                                            onChange={(event) => setAudienceLimit(parseBoundedInt(event.target.value, 100, 1, 500))}
+                                        />
+                                    </label>
+                                    <button
+                                        type="button"
+                                        className="h-10 rounded-lg border border-border bg-background px-4 text-sm font-medium"
+                                        onClick={() => refetchAudience()}
+                                    >
+                                        Reload audience
+                                    </button>
+                                    <div className="text-xs text-muted-foreground">
+                                        total: {audienceData?.total_count ?? 0} | eligible: {audienceData?.eligible_count ?? 0} | suppressed: {audienceData?.suppressed_count ?? 0}
+                                    </div>
+                                </div>
+
+                                {audienceLoading ? (
+                                    <p className="mt-2 text-sm text-muted-foreground">Загрузка...</p>
+                                ) : audienceRows.length ? (
+                                    <div className="mt-3 overflow-x-auto rounded-lg border bg-background">
+                                        <table className="min-w-full text-xs">
+                                            <thead className="bg-muted/40 text-left text-muted-foreground">
+                                                <tr>
+                                                    <th className="px-3 py-2 font-medium">Recipient</th>
+                                                    <th className="px-3 py-2 font-medium">Context</th>
+                                                    <th className="px-3 py-2 font-medium">Reasons</th>
+                                                    <th className="px-3 py-2 font-medium">Suppression</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {audienceRows.map((row) => (
+                                                    <tr key={row.id} className="border-t border-border/60 align-top">
+                                                        <td className="px-3 py-2">
+                                                            <div className="font-medium text-foreground">{row.recipient_jid}</div>
+                                                            <div className="mt-1 text-muted-foreground">{segmentLabel(row.segment_code)}</div>
+                                                        </td>
+                                                        <td className="px-3 py-2 text-muted-foreground">
+                                                            <div>conv: {row.conversation_id ?? "-"}</div>
+                                                            <div className="mt-1">user: {row.user_id ?? "-"}</div>
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            <div className="flex flex-wrap gap-1">
+                                                                {row.reason_codes.length ? (
+                                                                    row.reason_codes.map((reason) => (
+                                                                        <span key={reason} className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] text-sky-700">
+                                                                            {formatReason(reason)}
+                                                                        </span>
+                                                                    ))
+                                                                ) : (
+                                                                    <span className="text-muted-foreground">-</span>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            {row.suppressed ? (
+                                                                <div className="flex flex-wrap gap-1">
+                                                                    {row.suppression_reasons.map((reason) => (
+                                                                        <span key={reason} className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] text-red-700">
+                                                                            {formatReason(reason)}
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            ) : (
+                                                                <span className="text-emerald-700">eligible</span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                ) : (
+                                    <p className="mt-2 text-sm text-muted-foreground">Audience пустой. Сначала запустите preview.</p>
+                                )}
                             </div>
 
                             <div className="mt-6 border-t pt-4">

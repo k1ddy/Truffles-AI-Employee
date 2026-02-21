@@ -23,6 +23,10 @@ from app.models.knowledge_version import KnowledgeVersion
 from app.models.learned_response import LearnedResponse
 from app.models.marketing_campaign import MarketingCampaign
 from app.models.marketing_campaign_delivery import MarketingCampaignDelivery
+from app.models.marketing_campaign_recipient import MarketingCampaignRecipient
+from app.models.marketing_consent import MarketingConsent
+from app.models.marketing_delivery_event import MarketingDeliveryEvent
+from app.models.marketing_suppression import MarketingSuppression
 from app.models.message import Message
 from app.models.outbox_message import OutboxMessage
 from app.models.outbox_status_event import OutboxStatusEvent
@@ -48,6 +52,10 @@ __all__ = [
     "Message",
     "MarketingCampaign",
     "MarketingCampaignDelivery",
+    "MarketingCampaignRecipient",
+    "MarketingConsent",
+    "MarketingSuppression",
+    "MarketingDeliveryEvent",
     "Handover",
     "InboxEvent",
     "ClientSettings",
