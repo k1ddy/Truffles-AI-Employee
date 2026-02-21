@@ -24,6 +24,7 @@ import {
 } from "@/lib/api-client";
 import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
 import {
+    readConsoleContextScopeFromStorage,
     setConsoleBranchContext,
     setConsoleClientContext,
     setConsoleCompanyContext,
@@ -1370,7 +1371,6 @@ export default function TenantsPage() {
         return inlineErrors.filter((error) => error.scope === "global" || error.scope === activeErrorScope);
     }, [activeErrorScope, inlineErrors]);
     const activeErrorScopeLabel = activeErrorScope;
-    const hasContextLensFilters = Boolean(selectedCompanyId || selectedClientId || selectedBranchId);
     const latestPublishedBranchChange = useMemo(() => {
         const items = branchChangesQuery.data?.items ?? [];
         return (
@@ -1616,10 +1616,11 @@ export default function TenantsPage() {
         }));
     };
     const applyContextToPageFilters = () => {
+        const scope = readConsoleContextScopeFromStorage();
         setPageFilters({
-            companyId: selectedCompanyId,
-            clientId: selectedClientId,
-            branchId: selectedBranchId,
+            companyId: scope.companyId || null,
+            clientId: scope.clientId || null,
+            branchId: scope.branchId || null,
         });
     };
     const clearPageFilters = () => {
@@ -2515,9 +2516,11 @@ export default function TenantsPage() {
                     contextCompanyId={selectedCompanyId}
                     contextClientId={selectedClientId}
                     contextBranchId={selectedBranchId}
-                    hasContextLensFilters={hasContextLensFilters}
                     onClearBranchContext={() => setBranchContext(null)}
-                    onClearClientContext={() => setClientContext(null, selectedCompanyId)}
+                    onClearClientContext={() => {
+                        const scope = readConsoleContextScopeFromStorage();
+                        setClientContext(null, scope.companyId || null);
+                    }}
                     onClearContext={clearContextLens}
                     pageFilterCompanyId={pageFilterCompanyId}
                     pageFilterClientId={pageFilterClientId}
