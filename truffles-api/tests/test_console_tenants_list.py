@@ -551,6 +551,50 @@ def test_normalize_tenants_weekly_snapshot_payload_rejects_non_object() -> None:
     assert exc_info.value.code == "INVALID_PARAM"
 
 
+def _sample_weekly_snapshot(now: datetime, blocked_signals: int = 1) -> dict:
+    return {
+        "generatedAt": now.isoformat(),
+        "sourceWindow": 12,
+        "workspaceMode": "portfolio",
+        "lifecycleMode": "active",
+        "kpi": {
+            "onboardingCoverage": 88,
+            "goLiveReadiness": 76,
+            "serviceStability": 97,
+            "decommissionShare": 6,
+            "changeFailure": 3,
+            "rollbackShare": 4,
+            "blockedSignals": blocked_signals,
+        },
+        "drilldown": [
+            {
+                "id": "blockedSignals",
+                "status": "warn",
+                "value": blocked_signals,
+                "reason": "blocked signal detected",
+            }
+        ],
+        "attentionSummary": {
+            "activeClientsTotal": 10,
+            "highRiskClients": 1,
+            "mediumRiskClients": 2,
+            "outboxFailed24hTotal": 0,
+            "pendingHandoversTotal": 1,
+        },
+    }
+
+
+def test_normalize_tenants_weekly_snapshot_payload_rejects_invalid_schema() -> None:
+    now = datetime.now(timezone.utc)
+    invalid_payload = _sample_weekly_snapshot(now)
+    invalid_payload["kpi"] = {"blockedSignals": 1}
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        console_router._normalize_tenants_weekly_snapshot_payload(invalid_payload)
+
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
 def test_serialize_tenants_weekly_snapshot_record_maps_payload() -> None:
     now = datetime.now(timezone.utc)
     event = SimpleNamespace(
@@ -560,15 +604,35 @@ def test_serialize_tenants_weekly_snapshot_record_maps_payload() -> None:
         actor_name="Platform Admin",
         payload={
             "week_key": "2026-W08",
-            "snapshot": {"generatedAt": now.isoformat(), "kpi": {"blockedSignals": 1}},
+            "snapshot": _sample_weekly_snapshot(now, blocked_signals=1),
         },
     )
 
     record = console_router._serialize_tenants_weekly_snapshot_record(event)
 
     assert record.week_key == "2026-W08"
-    assert record.snapshot["kpi"]["blockedSignals"] == 1
+    assert record.snapshot.kpi.blockedSignals == 1
     assert record.actor_name == "Platform Admin"
+
+
+def test_serialize_tenants_weekly_snapshot_record_falls_back_for_legacy_payload() -> None:
+    now = datetime.now(timezone.utc)
+    event = SimpleNamespace(
+        id=uuid4(),
+        created_at=now,
+        client_id=uuid4(),
+        actor_name="Platform Admin",
+        payload={
+            "week_key": "2026-W08",
+            "snapshot": {"generatedAt": now.isoformat()},
+        },
+    )
+
+    record = console_router._serialize_tenants_weekly_snapshot_record(event)
+
+    assert record.week_key == "2026-W08"
+    assert record.snapshot.kpi.blockedSignals == 0
+    assert record.snapshot.workspaceMode == "portfolio"
 
 
 class _ClientQuery:
@@ -607,7 +671,7 @@ async def test_save_tenants_weekly_snapshot_updates_existing_week(monkeypatch) -
         client_id=client_id,
         actor_id=None,
         actor_name=None,
-        payload={"week_key": "2026-W08", "snapshot": {"generatedAt": now.isoformat(), "kpi": {"blockedSignals": 3}}},
+        payload={"week_key": "2026-W08", "snapshot": _sample_weekly_snapshot(now, blocked_signals=3)},
     )
     request = SimpleNamespace(query_params={})
     context = SimpleNamespace(
@@ -631,14 +695,16 @@ async def test_save_tenants_weekly_snapshot_updates_existing_week(monkeypatch) -
         payload=console_router.ConsoleTenantsWeeklySnapshotCreateRequest(
             client_id=client_id,
             week_key="2026-W08",
-            snapshot={"generatedAt": now.isoformat(), "kpi": {"blockedSignals": 1}},
+            snapshot=console_router.ConsoleTenantsWeeklySnapshotPayload.model_validate(
+                _sample_weekly_snapshot(now, blocked_signals=1),
+            ),
         ),
         db=db,
     )
 
     assert response.item.id == event_id
     assert response.item.week_key == "2026-W08"
-    assert response.item.snapshot["kpi"]["blockedSignals"] == 1
+    assert response.item.snapshot.kpi.blockedSignals == 1
     assert existing_event.actor_name == "Platform Admin"
     assert record_audit_mock.call_count == 0
     db.commit.assert_called_once()

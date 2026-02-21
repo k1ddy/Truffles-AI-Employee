@@ -299,7 +299,7 @@ test.describe('Platform Admin Tenants', () => {
             return;
         }
 
-        await expect(clients.getByText(/Клиенты не найдены|фильтр по компании из контекста/i)).toBeVisible();
+        await expect(clients.getByText(/Клиенты не найдены|page filter company_id/i)).toBeVisible();
     });
 
     test('should render operational KPI panel on Tenants @smoke', async ({ page }) => {
