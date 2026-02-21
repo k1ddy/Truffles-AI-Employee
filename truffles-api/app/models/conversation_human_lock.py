@@ -15,6 +15,7 @@ class ConversationHumanLock(Base):
     branch_id = Column(UUID(as_uuid=True), ForeignKey("branches.id"), nullable=True)
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=True)
     remote_jid = Column(Text, nullable=False)
+    lock_scope = Column(Text, nullable=False, default="conversation")
     source = Column(Text, nullable=False, default="console")
     reason = Column(Text, nullable=True)
     locked_by_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True)

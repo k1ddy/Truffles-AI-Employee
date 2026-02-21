@@ -326,9 +326,26 @@ class ConsoleTenantsSensitiveAccessAuditResponse(BaseModel):
     audit_id: UUID
 
 
-ConsoleMarketingCampaignStatus = Literal["draft", "ready", "executed", "paused"]
+ConsoleMarketingCampaignStatus = Literal[
+    "draft",
+    "ready",
+    "executed",
+    "paused",
+    "in_review",
+    "approved",
+    "scheduled",
+    "running",
+    "completed",
+    "cancelled",
+    "failed",
+]
 ConsoleMarketingAudienceMode = Literal["branch_active_conversations"]
 ConsoleMarketingDeliveryStatus = Literal["queued", "sent", "failed", "replied"]
+ConsoleMarketingSegmentCode = Literal[
+    "reactivation_30_120",
+    "no_show_recovery_14d",
+    "engaged_no_booking_7d",
+]
 
 
 class ConsoleMarketingCampaign(BaseModel):
@@ -338,8 +355,16 @@ class ConsoleMarketingCampaign(BaseModel):
     name: str
     message_text: str
     status: ConsoleMarketingCampaignStatus
+    segment_code: ConsoleMarketingSegmentCode = "reactivation_30_120"
     audience_mode: ConsoleMarketingAudienceMode
     preview_total: int = 0
+    preflight_valid: bool = False
+    preflight_snapshot: Optional[dict] = None
+    approved_by: Optional[UUID] = None
+    approved_at: Optional[str] = None
+    requested_review_at: Optional[str] = None
+    run_started_at: Optional[str] = None
+    run_completed_at: Optional[str] = None
     last_preview_at: Optional[str] = None
     executed_at: Optional[str] = None
     created_at: Optional[str] = None
@@ -350,6 +375,7 @@ class ConsoleMarketingCampaignCreateRequest(ConsoleRequestModel):
     branch_id: UUID
     name: StrictStr
     message_text: StrictStr
+    segment_code: ConsoleMarketingSegmentCode = "reactivation_30_120"
     audience_mode: ConsoleMarketingAudienceMode = "branch_active_conversations"
 
 
@@ -370,6 +396,8 @@ class ConsoleMarketingCampaignPreviewResponse(BaseModel):
     branch_id: UUID
     audience_mode: ConsoleMarketingAudienceMode
     estimated_recipients: int
+    eligible_count: int = 0
+    suppressed_count: int = 0
     sample_conversation_ids: list[UUID]
     sample_recipient_jids: list[str]
 
@@ -415,6 +443,50 @@ class ConsoleMarketingCampaignRetryResponse(BaseModel):
     campaign_id: UUID
     retried_count: int
     skipped_count: int
+    skipped_permanent: int = 0
+
+
+class ConsoleMarketingCampaignAudienceRequest(ConsoleRequestModel):
+    include_suppressed: bool = True
+    limit: int = 100
+
+
+class ConsoleMarketingCampaignRecipient(BaseModel):
+    id: UUID
+    campaign_id: UUID
+    recipient_jid: str
+    user_id: Optional[UUID] = None
+    conversation_id: Optional[UUID] = None
+    segment_code: ConsoleMarketingSegmentCode
+    reason_codes: list[str] = []
+    suppressed: bool = False
+    suppression_reasons: list[str] = []
+    updated_at: Optional[str] = None
+
+
+class ConsoleMarketingCampaignAudienceResponse(BaseModel):
+    campaign_id: UUID
+    total_count: int
+    eligible_count: int
+    suppressed_count: int
+    items: list[ConsoleMarketingCampaignRecipient]
+
+
+class ConsoleMarketingCampaignPreflightResponse(BaseModel):
+    campaign_id: UUID
+    generated_at: str
+    preflight_valid: bool
+    blocked_reasons: list[str] = []
+    outbox_health_status: str
+    outbox_pending: int = 0
+    outbox_failed_24h: int = 0
+    audience_total: int = 0
+    eligible_count: int = 0
+    suppressed_count: int = 0
+
+
+class ConsoleMarketingCampaignLifecycleActionRequest(ConsoleRequestModel):
+    reason: Optional[StrictStr] = None
 
 
 class ConsoleMacro(BaseModel):
@@ -860,6 +932,13 @@ class ConsoleCase(BaseModel):
     needs_reply: Optional[bool] = None
     has_delivery_error: Optional[bool] = None
     has_pending_outbox: Optional[bool] = None
+    # Human lock (bot pause)
+    human_lock_active: Optional[bool] = None
+    human_lock_until: Optional[str] = None
+    human_lock_remaining_seconds: Optional[int] = None
+    human_lock_source: Optional[str] = None
+    human_lock_reason: Optional[str] = None
+    human_lock_by: Optional[str] = None
     # Telegram trail (for escalation visibility)
     telegram_trail: Optional[ConsoleTelegramTrail] = None
 
@@ -895,6 +974,9 @@ class ConsoleMessageListResponse(BaseModel):
 
 class ConsoleManagerMessageRequest(BaseModel):
     content: str
+    pause_enabled: bool = True
+    pause_minutes: int = 30
+    pause_reason: Optional[StrictStr] = None
 
 
 class ConsoleManagerMessageResponse(BaseModel):
@@ -908,7 +990,7 @@ ConsoleOutreachDeliveryStatus = Literal["queued", "delivered", "failed"]
 class ConsoleOutreachMessageRequest(ConsoleRequestModel):
     destination: StrictStr
     content: StrictStr
-    conversation_id: Optional[UUID] = None
+    conversation_id: UUID
     branch_id: Optional[UUID] = None
     pause_bot_minutes: Optional[int] = 30
     pause_reason: Optional[StrictStr] = None
@@ -936,6 +1018,8 @@ class ConsoleHumanLockStatus(BaseModel):
     remaining_seconds: Optional[int] = None
     source: Optional[str] = None
     reason: Optional[str] = None
+    locked_by_name: Optional[str] = None
+    lock_scope: Optional[str] = None
 
 
 class ConsoleHumanLockStatusResponse(BaseModel):

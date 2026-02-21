@@ -163,6 +163,13 @@ paths:
           type: boolean
           default: false
           title: Has Pending Outbox
+      - name: has_human_lock
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Has Human Lock
       - name: last_activity_since
         in: query
         required: false
@@ -2892,6 +2899,272 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/marketing/campaigns/{campaign_id}/audience:
+    get:
+      tags:
+      - console
+      summary: Get Marketing Campaign Audience
+      operationId: get_marketing_campaign_audience_console_v1_admin_marketing_campaigns__campaign_id__audience_get
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Campaign Id
+      - name: include_suppressed
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: true
+          title: Include Suppressed
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 100
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleMarketingCampaignAudienceResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/marketing/campaigns/{campaign_id}/request-approval:
+    post:
+      tags:
+      - console
+      summary: Request Marketing Campaign Approval
+      operationId: request_marketing_campaign_approval_console_v1_admin_marketing_campaigns__campaign_id__request_approval_post
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Campaign Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleMarketingCampaignLifecycleActionRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleMarketingCampaignCreateResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/marketing/campaigns/{campaign_id}/approve:
+    post:
+      tags:
+      - console
+      summary: Approve Marketing Campaign
+      operationId: approve_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__approve_post
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Campaign Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleMarketingCampaignLifecycleActionRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleMarketingCampaignCreateResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/marketing/campaigns/{campaign_id}/preflight:
+    get:
+      tags:
+      - console
+      summary: Get Marketing Campaign Preflight
+      operationId: get_marketing_campaign_preflight_console_v1_admin_marketing_campaigns__campaign_id__preflight_get
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Campaign Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleMarketingCampaignPreflightResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/marketing/campaigns/{campaign_id}/pause:
+    post:
+      tags:
+      - console
+      summary: Pause Marketing Campaign
+      operationId: pause_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__pause_post
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Campaign Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleMarketingCampaignLifecycleActionRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleMarketingCampaignCreateResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/marketing/campaigns/{campaign_id}/resume:
+    post:
+      tags:
+      - console
+      summary: Resume Marketing Campaign
+      operationId: resume_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__resume_post
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Campaign Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleMarketingCampaignLifecycleActionRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleMarketingCampaignCreateResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/marketing/campaigns/{campaign_id}/execute:
     post:
       tags:
@@ -5124,6 +5397,23 @@ components:
           - type: string
           - type: 'null'
           title: Caption
+        pause_enabled:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Pause Enabled
+          default: true
+        pause_minutes:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Pause Minutes
+          default: 30
+        pause_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pause Reason
       type: object
       required:
       - file
@@ -7114,6 +7404,36 @@ components:
           - type: boolean
           - type: 'null'
           title: Has Pending Outbox
+        human_lock_active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Human Lock Active
+        human_lock_until:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Human Lock Until
+        human_lock_remaining_seconds:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Human Lock Remaining Seconds
+        human_lock_source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Human Lock Source
+        human_lock_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Human Lock Reason
+        human_lock_by:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Human Lock By
         telegram_trail:
           anyOf:
           - $ref: '#/components/schemas/ConsoleTelegramTrail'
@@ -7982,6 +8302,16 @@ components:
           - type: string
           - type: 'null'
           title: Reason
+        locked_by_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Locked By Name
+        lock_scope:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Lock Scope
       type: object
       required:
       - active
@@ -8751,6 +9081,19 @@ components:
         content:
           type: string
           title: Content
+        pause_enabled:
+          type: boolean
+          title: Pause Enabled
+          default: true
+        pause_minutes:
+          type: integer
+          title: Pause Minutes
+          default: 30
+        pause_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pause Reason
       type: object
       required:
       - content
@@ -8794,7 +9137,22 @@ components:
           - ready
           - executed
           - paused
+          - in_review
+          - approved
+          - scheduled
+          - running
+          - completed
+          - cancelled
+          - failed
           title: Status
+        segment_code:
+          type: string
+          enum:
+          - reactivation_30_120
+          - no_show_recovery_14d
+          - engaged_no_booking_7d
+          title: Segment Code
+          default: reactivation_30_120
         audience_mode:
           const: branch_active_conversations
           title: Audience Mode
@@ -8802,6 +9160,41 @@ components:
           type: integer
           title: Preview Total
           default: 0
+        preflight_valid:
+          type: boolean
+          title: Preflight Valid
+          default: false
+        preflight_snapshot:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Preflight Snapshot
+        approved_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Approved By
+        approved_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Approved At
+        requested_review_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Requested Review At
+        run_started_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Run Started At
+        run_completed_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Run Completed At
         last_preview_at:
           anyOf:
           - type: string
@@ -8832,6 +9225,34 @@ components:
       - status
       - audience_mode
       title: ConsoleMarketingCampaign
+    ConsoleMarketingCampaignAudienceResponse:
+      properties:
+        campaign_id:
+          type: string
+          format: uuid
+          title: Campaign Id
+        total_count:
+          type: integer
+          title: Total Count
+        eligible_count:
+          type: integer
+          title: Eligible Count
+        suppressed_count:
+          type: integer
+          title: Suppressed Count
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleMarketingCampaignRecipient'
+          type: array
+          title: Items
+      type: object
+      required:
+      - campaign_id
+      - total_count
+      - eligible_count
+      - suppressed_count
+      - items
+      title: ConsoleMarketingCampaignAudienceResponse
     ConsoleMarketingCampaignCreateRequest:
       properties:
         branch_id:
@@ -8844,6 +9265,14 @@ components:
         message_text:
           type: string
           title: Message Text
+        segment_code:
+          type: string
+          enum:
+          - reactivation_30_120
+          - no_show_recovery_14d
+          - engaged_no_booking_7d
+          title: Segment Code
+          default: reactivation_30_120
         audience_mode:
           const: branch_active_conversations
           title: Audience Mode
@@ -8939,6 +9368,16 @@ components:
       - skipped_count
       - status
       title: ConsoleMarketingCampaignExecuteResponse
+    ConsoleMarketingCampaignLifecycleActionRequest:
+      properties:
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      additionalProperties: false
+      type: object
+      title: ConsoleMarketingCampaignLifecycleActionRequest
     ConsoleMarketingCampaignListResponse:
       properties:
         items:
@@ -8950,6 +9389,54 @@ components:
       required:
       - items
       title: ConsoleMarketingCampaignListResponse
+    ConsoleMarketingCampaignPreflightResponse:
+      properties:
+        campaign_id:
+          type: string
+          format: uuid
+          title: Campaign Id
+        generated_at:
+          type: string
+          title: Generated At
+        preflight_valid:
+          type: boolean
+          title: Preflight Valid
+        blocked_reasons:
+          items:
+            type: string
+          type: array
+          title: Blocked Reasons
+          default: []
+        outbox_health_status:
+          type: string
+          title: Outbox Health Status
+        outbox_pending:
+          type: integer
+          title: Outbox Pending
+          default: 0
+        outbox_failed_24h:
+          type: integer
+          title: Outbox Failed 24H
+          default: 0
+        audience_total:
+          type: integer
+          title: Audience Total
+          default: 0
+        eligible_count:
+          type: integer
+          title: Eligible Count
+          default: 0
+        suppressed_count:
+          type: integer
+          title: Suppressed Count
+          default: 0
+      type: object
+      required:
+      - campaign_id
+      - generated_at
+      - preflight_valid
+      - outbox_health_status
+      title: ConsoleMarketingCampaignPreflightResponse
     ConsoleMarketingCampaignPreviewRequest:
       properties:
         sample_limit:
@@ -8977,6 +9464,14 @@ components:
         estimated_recipients:
           type: integer
           title: Estimated Recipients
+        eligible_count:
+          type: integer
+          title: Eligible Count
+          default: 0
+        suppressed_count:
+          type: integer
+          title: Suppressed Count
+          default: 0
         sample_conversation_ids:
           items:
             type: string
@@ -8997,6 +9492,66 @@ components:
       - sample_conversation_ids
       - sample_recipient_jids
       title: ConsoleMarketingCampaignPreviewResponse
+    ConsoleMarketingCampaignRecipient:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        campaign_id:
+          type: string
+          format: uuid
+          title: Campaign Id
+        recipient_jid:
+          type: string
+          title: Recipient Jid
+        user_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: User Id
+        conversation_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Conversation Id
+        segment_code:
+          type: string
+          enum:
+          - reactivation_30_120
+          - no_show_recovery_14d
+          - engaged_no_booking_7d
+          title: Segment Code
+        reason_codes:
+          items:
+            type: string
+          type: array
+          title: Reason Codes
+          default: []
+        suppressed:
+          type: boolean
+          title: Suppressed
+          default: false
+        suppression_reasons:
+          items:
+            type: string
+          type: array
+          title: Suppression Reasons
+          default: []
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+      type: object
+      required:
+      - id
+      - campaign_id
+      - recipient_jid
+      - segment_code
+      title: ConsoleMarketingCampaignRecipient
     ConsoleMarketingCampaignRetryRequest:
       properties:
         confirm_retry:
@@ -9025,6 +9580,10 @@ components:
         skipped_count:
           type: integer
           title: Skipped Count
+        skipped_permanent:
+          type: integer
+          title: Skipped Permanent
+          default: 0
       type: object
       required:
       - campaign_id
@@ -9038,10 +9597,8 @@ components:
           format: uuid
           title: Delivery Id
         conversation_id:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
+          type: string
+          format: uuid
           title: Conversation Id
         recipient_jid:
           anyOf:
@@ -11162,6 +11719,7 @@ components:
       required:
       - destination
       - content
+      - conversation_id
       title: ConsoleOutreachMessageRequest
     ConsoleOutreachMessageResponse:
       properties:

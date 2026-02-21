@@ -20,6 +20,7 @@ interface CaseConversationProps {
     canSend: boolean;
     canWrite: boolean;
     canOutreach?: boolean;
+    canReadOutreach?: boolean;
     draft?: string;
     onDraftChange?: (value: string) => void;
     onResolved?: () => void;
@@ -72,6 +73,28 @@ function SlaBadge({ status }: { status?: string }) {
     );
 }
 
+const HUMAN_LOCK_SOURCE_LABELS: Record<string, string> = {
+    console_message: "Ответ менеджера",
+    console_outreach: "Outreach",
+    console_pause: "Ручная пауза",
+    console_media: "Медиа",
+};
+
+const HUMAN_LOCK_REASON_LABELS: Record<string, string> = {
+    manual_reply: "Ответ менеджера",
+    manual_pause: "Ручная пауза",
+};
+
+function formatHumanLockLabel(value?: string | null, lookup?: Record<string, string>) {
+    if (!value) {
+        return null;
+    }
+    if (lookup && lookup[value]) {
+        return lookup[value];
+    }
+    return value;
+}
+
 export default function CaseConversation({
     caseDetail,
     caseId,
@@ -83,6 +106,7 @@ export default function CaseConversation({
     canSend,
     canWrite,
     canOutreach = false,
+    canReadOutreach = canOutreach,
     draft,
     onDraftChange,
     onResolved,
@@ -171,6 +195,9 @@ export default function CaseConversation({
     const [outreachDestination, setOutreachDestination] = useState(defaultDestination);
     const [outreachContent, setOutreachContent] = useState("");
     const [pauseMinutes, setPauseMinutes] = useState(30);
+    const [outreachPauseEnabled, setOutreachPauseEnabled] = useState(true);
+    const [replyPauseEnabled, setReplyPauseEnabled] = useState(true);
+    const [replyPauseMinutes, setReplyPauseMinutes] = useState(30);
     const [outreachExpanded, setOutreachExpanded] = useState(false);
     const outreachPanelRef = useRef<HTMLDivElement | null>(null);
 
@@ -178,6 +205,9 @@ export default function CaseConversation({
         setOutreachDestination(caseDetail.customer_phone || caseDetail.customer_remote_jid || "");
         setOutreachContent("");
         setPauseMinutes(30);
+        setOutreachPauseEnabled(true);
+        setReplyPauseEnabled(true);
+        setReplyPauseMinutes(30);
         setOutreachExpanded(false);
     }, [caseId, caseDetail.customer_phone, caseDetail.customer_remote_jid]);
 
@@ -187,7 +217,7 @@ export default function CaseConversation({
             const response = await outreachApi.getHumanLockStatus(caseDetail.conversation_id);
             return response.data;
         },
-        enabled: canOutreach && Boolean(caseDetail.conversation_id),
+        enabled: canReadOutreach && Boolean(caseDetail.conversation_id),
         refetchInterval: 15000,
     });
 
@@ -198,7 +228,8 @@ export default function CaseConversation({
                 content: outreachContent.trim(),
                 conversation_id: caseDetail.conversation_id,
                 branch_id: caseDetail.branch_id || null,
-                pause_bot_minutes: 30,
+                pause_bot_minutes: outreachPauseEnabled ? pauseMinutes : 0,
+                pause_reason: outreachPauseEnabled ? "manual_pause" : undefined,
             });
             return response.data;
         },
@@ -216,12 +247,17 @@ export default function CaseConversation({
             setOutreachContent("");
             queryClient.invalidateQueries({ queryKey: ["messages", caseId] });
             queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+            queryClient.invalidateQueries({ queryKey: ["cases"] });
             queryClient.invalidateQueries({ queryKey: ["human-lock", caseDetail.conversation_id] });
         },
         onError: (error: unknown) => {
             const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
             if (code === "INTEGRATION_UNAVAILABLE") {
                 toast.error("Интеграция WhatsApp не настроена для филиала");
+                return;
+            }
+            if (code === "CONVERSATION_REQUIRED") {
+                toast.error("Outreach доступен только в рамках заявки");
                 return;
             }
             toast.error("Не удалось отправить outreach");
@@ -239,6 +275,8 @@ export default function CaseConversation({
         onSuccess: () => {
             toast.success("Бот поставлен на паузу");
             queryClient.invalidateQueries({ queryKey: ["human-lock", caseDetail.conversation_id] });
+            queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+            queryClient.invalidateQueries({ queryKey: ["cases"] });
         },
         onError: () => {
             toast.error("Не удалось включить паузу бота");
@@ -253,6 +291,8 @@ export default function CaseConversation({
         onSuccess: () => {
             toast.success("Пауза бота снята");
             queryClient.invalidateQueries({ queryKey: ["human-lock", caseDetail.conversation_id] });
+            queryClient.invalidateQueries({ queryKey: ["case", caseId] });
+            queryClient.invalidateQueries({ queryKey: ["cases"] });
         },
         onError: () => {
             toast.error("Не удалось снять паузу бота");
@@ -285,11 +325,38 @@ export default function CaseConversation({
         isInboxLayout ? "mx-5" : ""
     }`;
     const humanLockStatus = humanLockQuery.data?.status;
-    const lockRemainingSeconds = humanLockStatus?.remaining_seconds ?? null;
+    const fallbackLockStatus = {
+        active: Boolean(caseDetail.human_lock_active),
+        lock_until: caseDetail.human_lock_until ?? null,
+        remaining_seconds: caseDetail.human_lock_remaining_seconds ?? null,
+        source: caseDetail.human_lock_source ?? null,
+        reason: caseDetail.human_lock_reason ?? null,
+        locked_by_name: caseDetail.human_lock_by ?? null,
+    };
+    const effectiveLockStatus = humanLockStatus ?? fallbackLockStatus;
+    const lockRemainingSeconds =
+        effectiveLockStatus?.remaining_seconds ??
+        (effectiveLockStatus?.lock_until
+            ? Math.max(
+                0,
+                Math.floor((new Date(effectiveLockStatus.lock_until).getTime() - Date.now()) / 1000)
+            )
+            : null);
     const lockRemainingLabel =
         lockRemainingSeconds && lockRemainingSeconds > 0
             ? `${Math.ceil(lockRemainingSeconds / 60)} мин`
             : null;
+    const humanLockActive = Boolean(effectiveLockStatus?.active);
+    const lockSourceLabel = formatHumanLockLabel(effectiveLockStatus?.source, HUMAN_LOCK_SOURCE_LABELS);
+    const lockReasonLabel = formatHumanLockLabel(effectiveLockStatus?.reason, HUMAN_LOCK_REASON_LABELS);
+    const lockByLabel = effectiveLockStatus?.locked_by_name || null;
+    const lockMeta = [
+        lockByLabel ? `Кто: ${lockByLabel}` : null,
+        lockReasonLabel ? `Причина: ${lockReasonLabel}` : null,
+        lockSourceLabel ? `Источник: ${lockSourceLabel}` : null,
+    ]
+        .filter(Boolean)
+        .join(" · ");
     const outreachBusy =
         sendOutreachMutation.isPending || pauseMutation.isPending || releasePauseMutation.isPending;
     const canSubmitOutreach = Boolean(outreachDestination.trim() && outreachContent.trim());
@@ -299,6 +366,94 @@ export default function CaseConversation({
             outreachPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
         });
     };
+    const replyPauseConfig = {
+        enabled: replyPauseEnabled,
+        minutes: replyPauseMinutes,
+        reason: "manual_reply",
+    };
+    const replyPauseControls = canWrite ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs">
+            <label className="flex items-center gap-2">
+                <input
+                    type="checkbox"
+                    checked={replyPauseEnabled}
+                    onChange={(event) => setReplyPauseEnabled(event.target.checked)}
+                    className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                    data-testid="reply-pause-toggle"
+                />
+                Пауза после ответа
+            </label>
+            <input
+                type="number"
+                min={0}
+                max={1440}
+                value={replyPauseMinutes}
+                onChange={(event) => {
+                    const next = Number(event.target.value);
+                    const normalized = Number.isFinite(next) ? Math.min(Math.max(next, 0), 1440) : 0;
+                    setReplyPauseMinutes(normalized);
+                }}
+                disabled={!replyPauseEnabled}
+                className="w-20 rounded border border-border/60 bg-background px-2 py-1 text-xs"
+                data-testid="reply-pause-minutes"
+            />
+            <span className="text-muted-foreground">мин</span>
+            <div className="flex items-center gap-1">
+                {[15, 30, 60, 120].map((preset) => (
+                    <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setReplyPauseMinutes(preset)}
+                        className="rounded border border-border/60 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground hover:text-foreground"
+                        disabled={!replyPauseEnabled}
+                        data-testid={`reply-pause-preset-${preset}`}
+                    >
+                        {preset}
+                    </button>
+                ))}
+            </div>
+        </div>
+    ) : null;
+    const composerExtras = composerBefore ? (
+        <div className="flex flex-col gap-2">
+            {composerBefore}
+            {replyPauseControls}
+        </div>
+    ) : (
+        replyPauseControls
+    );
+    const humanLockPanel = (
+        <div
+            className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs ${
+                humanLockActive
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                    : "border-border/60 bg-muted/30 text-muted-foreground"
+            }`}
+            data-testid="human-lock-header"
+        >
+            <div className="flex flex-col gap-1">
+                <span className="font-semibold">
+                    {humanLockActive
+                        ? `Бот на паузе${lockRemainingLabel ? ` · ${lockRemainingLabel}` : ""}`
+                        : "Бот активен"}
+                </span>
+                {humanLockActive && lockMeta && (
+                    <span className="text-[11px] text-emerald-900/80">{lockMeta}</span>
+                )}
+            </div>
+            {humanLockActive && canOutreach && (
+                <button
+                    type="button"
+                    onClick={() => releasePauseMutation.mutate()}
+                    disabled={releasePauseMutation.isPending}
+                    className="rounded border border-emerald-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-white disabled:opacity-50"
+                    data-testid="human-lock-release-header"
+                >
+                    {releasePauseMutation.isPending ? "Снимаем..." : "Снять паузу"}
+                </button>
+            )}
+        </div>
+    );
 
     return (
         <div className={`flex flex-col h-full ${isInboxLayout ? "gap-4" : "gap-5"}`} data-testid="case-conversation">
@@ -416,6 +571,7 @@ export default function CaseConversation({
                         </div>
                     </div>
                 </div>
+                {caseDetail.conversation_id && humanLockPanel}
             </div>
 
             <div className={contextClass}>
@@ -447,13 +603,13 @@ export default function CaseConversation({
                         <div className="flex items-center gap-2">
                             <span
                                 className={`rounded px-2 py-0.5 text-xs font-semibold ${
-                                    humanLockStatus?.active
+                                    humanLockActive
                                         ? "bg-emerald-100 text-emerald-800"
                                         : "bg-muted text-muted-foreground"
                                 }`}
                                 data-testid="human-lock-badge"
                             >
-                                {humanLockStatus?.active
+                                {humanLockActive
                                     ? `Бот на паузе${lockRemainingLabel ? ` (${lockRemainingLabel})` : ""}`
                                     : "Бот активен"}
                             </span>
@@ -490,15 +646,30 @@ export default function CaseConversation({
                                     <span className="text-xs text-muted-foreground">Пауза (мин)</span>
                                     <input
                                         type="number"
-                                        min={1}
+                                        min={0}
                                         max={1440}
                                         value={pauseMinutes}
-                                        onChange={(event) => setPauseMinutes(Number(event.target.value) || 30)}
+                                        onChange={(event) => {
+                                            const next = Number(event.target.value);
+                                            const normalized = Number.isFinite(next) ? Math.min(Math.max(next, 0), 1440) : 0;
+                                            setPauseMinutes(normalized);
+                                        }}
+                                        disabled={!outreachPauseEnabled}
                                         className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
                                         data-testid="human-lock-minutes"
                                     />
                                 </label>
                             </div>
+                            <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                <input
+                                    type="checkbox"
+                                    checked={outreachPauseEnabled}
+                                    onChange={(event) => setOutreachPauseEnabled(event.target.checked)}
+                                    className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                    data-testid="outreach-pause-toggle"
+                                />
+                                Ставить паузу после отправки
+                            </label>
                             <label className="mt-2 block space-y-1">
                                 <span className="text-xs text-muted-foreground">Сообщение клиенту</span>
                                 <textarea
@@ -528,7 +699,13 @@ export default function CaseConversation({
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => pauseMutation.mutate()}
+                                    onClick={() => {
+                                        if (!pauseMinutes || pauseMinutes < 1) {
+                                            toast.error("Укажите длительность паузы");
+                                            return;
+                                        }
+                                        pauseMutation.mutate();
+                                    }}
                                     disabled={outreachBusy}
                                     className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-foreground disabled:opacity-50"
                                     data-testid="human-lock-pause"
@@ -538,7 +715,7 @@ export default function CaseConversation({
                                 <button
                                     type="button"
                                     onClick={() => releasePauseMutation.mutate()}
-                                    disabled={outreachBusy || !humanLockStatus?.active}
+                                    disabled={outreachBusy || !humanLockActive}
                                     className="rounded border border-border/60 px-3 py-2 text-xs font-semibold text-muted-foreground disabled:opacity-50"
                                     data-testid="human-lock-release"
                                 >
@@ -562,7 +739,8 @@ export default function CaseConversation({
                     canSend={canSend}
                     draft={draft}
                     onDraftChange={onDraftChange}
-                    composerBefore={composerBefore}
+                    composerBefore={composerExtras}
+                    pauseConfig={replyPauseConfig}
                     frame={chatFrame}
                 />
             </div>

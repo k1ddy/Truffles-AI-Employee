@@ -49,6 +49,7 @@ const DEFAULT_FILTERS: CaseFilters = {
     query: undefined,
     hasDeliveryError: false,
     hasPendingOutbox: false,
+    hasHumanLock: false,
     dateFrom: undefined,
     dateTo: undefined,
     sortBy: "activity",
@@ -74,6 +75,7 @@ function normalizeStoredPrefs(raw: InboxCaseListPrefs | null): InboxCaseListPref
             query: filters.query,
             hasDeliveryError: Boolean(filters.hasDeliveryError),
             hasPendingOutbox: Boolean(filters.hasPendingOutbox),
+            hasHumanLock: Boolean(filters.hasHumanLock),
             dateFrom: filters.dateFrom,
             dateTo: filters.dateTo,
             sortBy,
@@ -192,7 +194,12 @@ export default function CaseList({
     const branchFilterEnabled = showBranchFilter && selectableBranches.length > 1;
     const statusFilterActive = filters.status !== "open";
     const advancedFiltersActive = Boolean(
-        filters.branchId || filters.dateFrom || filters.dateTo || filters.hasDeliveryError || filters.hasPendingOutbox
+        filters.branchId
+        || filters.dateFrom
+        || filters.dateTo
+        || filters.hasDeliveryError
+        || filters.hasPendingOutbox
+        || filters.hasHumanLock
     );
     const advancedFiltersVisible = showAdvancedFilters || advancedFiltersActive;
     const filtersToggleLabel = filtersCollapsed
@@ -262,6 +269,7 @@ export default function CaseList({
                 if (filters.query) params.append("q", filters.query);
                 if (filters.hasDeliveryError) params.append("has_delivery_error", "true");
                 if (filters.hasPendingOutbox) params.append("has_pending_outbox", "true");
+                if (filters.hasHumanLock) params.append("has_human_lock", "true");
                 if (filters.dateFrom) params.append("date_from", filters.dateFrom);
                 if (filters.dateTo) params.append("date_to", filters.dateTo);
                 if (includeSort) {
@@ -552,7 +560,7 @@ export default function CaseList({
                             {advancedToggleLabel}
                         </button>
                     )}
-                    {(statusFilterActive || (branchFilterEnabled && filters.branchId) || filters.dateFrom || filters.dateTo || filters.assignedToMe || filters.query || filters.hasDeliveryError || filters.hasPendingOutbox) && (
+                    {(statusFilterActive || (branchFilterEnabled && filters.branchId) || filters.dateFrom || filters.dateTo || filters.assignedToMe || filters.query || filters.hasDeliveryError || filters.hasPendingOutbox || filters.hasHumanLock) && (
                         <button
                             onClick={() => {
                                 setSearchValue("");
@@ -627,6 +635,16 @@ export default function CaseList({
                             />
                             <span className="text-sm text-foreground/80">В очереди</span>
                         </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={filters.hasHumanLock}
+                                onChange={(e) => { resetPagination(); setFilters({ ...filters, hasHumanLock: e.target.checked }); }}
+                                className="w-4 h-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                data-testid="cases-filter-human-lock"
+                            />
+                            <span className="text-sm text-foreground/80">Бот на паузе</span>
+                        </label>
                     </div>
                 )}
                 {!filtersCompact && (
@@ -655,6 +673,7 @@ export default function CaseList({
                         const contactPhone = c.customer_phone || c.customer_remote_jid?.split("@")[0] || "";
                         const preview = c.last_message_preview || c.user_message || "-";
                         const isSelected = selectedCaseId === c.id;
+                        const hasHumanLock = !!c.human_lock_active;
                         const statusClass = c.status === "active"
                             ? "bg-green-100 text-green-800"
                             : c.status === "pending"
@@ -695,6 +714,11 @@ export default function CaseList({
                                     {isLive && (
                                         <span className="px-2 py-0.5 rounded font-semibold bg-green-100 text-green-800">
                                             На связи
+                                        </span>
+                                    )}
+                                    {hasHumanLock && (
+                                        <span className="px-2 py-0.5 rounded font-semibold bg-amber-100 text-amber-800">
+                                            Пауза
                                         </span>
                                     )}
                                     {hasIssue && (
@@ -756,16 +780,23 @@ export default function CaseList({
                                     <tr key={c.id} className="border-b border-border/60 hover:bg-muted/60" data-testid="cases-row">
                                         <td className="p-4 font-mono text-sm">{c.id.slice(0, 8)}...</td>
                                         <td className="p-4">
-                                            <span
-                                                className={`px-2 py-1 rounded text-xs font-medium ${c.status === "active"
-                                                    ? "bg-green-100 text-green-800"
-                                                    : c.status === "pending"
-                                                        ? "bg-yellow-100 text-yellow-800"
-                                                        : "bg-muted text-muted-foreground"
-                                                    }`}
-                                            >
-                                                {getStatusLabel(c.status)}
-                                            </span>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span
+                                                    className={`px-2 py-1 rounded text-xs font-medium ${c.status === "active"
+                                                        ? "bg-green-100 text-green-800"
+                                                        : c.status === "pending"
+                                                            ? "bg-yellow-100 text-yellow-800"
+                                                            : "bg-muted text-muted-foreground"
+                                                        }`}
+                                                >
+                                                    {getStatusLabel(c.status)}
+                                                </span>
+                                                {c.human_lock_active && (
+                                                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">
+                                                        Пауза
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="p-4">
                                             <span className={`px-2 py-1 rounded text-xs font-medium ${sla.className}`}>
