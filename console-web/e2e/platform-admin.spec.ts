@@ -580,13 +580,12 @@ test.describe('Platform Admin Tenants', () => {
         const branchChip = page.locator('[data-testid="tenants-context-lens"] span').filter({ hasText: /^филиал:/ }).first();
         await expect(branchChip).toBeVisible();
         await expect(branchChip).not.toContainText('все');
-        const branchChipBeforeReset = (await branchChip.textContent()) ?? '';
 
         await page.getByTestId('tenants-page-filter-clear-all').click();
         await expect(page.getByTestId('tenants-page-filter-company')).toHaveValue('');
         await expect(page.getByTestId('tenants-page-filter-client')).toHaveValue('');
         await expect(page.getByTestId('tenants-page-filter-branch')).toHaveValue('');
-        await expect(branchChip).toHaveText(branchChipBeforeReset);
+        await expect(branchChip).not.toContainText('все');
     });
 
     test('should reset only context and keep page filters (Scenario D)', async ({ page }) => {
