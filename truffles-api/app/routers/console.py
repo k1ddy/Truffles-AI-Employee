@@ -42,6 +42,7 @@ from app.models import (
     LearnedResponse,
     MarketingCampaign,
     MarketingCampaignDelivery,
+    MarketingCampaignRecipient,
     Message,
     OutboxMessage,
     ReferencePack,
@@ -141,14 +142,18 @@ from app.schemas.console import (
     ConsoleManagerMessageRequest,
     ConsoleManagerMessageResponse,
     ConsoleMarketingCampaign,
+    ConsoleMarketingCampaignAudienceResponse,
     ConsoleMarketingCampaignCreateRequest,
     ConsoleMarketingCampaignCreateResponse,
     ConsoleMarketingCampaignDiagnosticsResponse,
     ConsoleMarketingCampaignExecuteRequest,
     ConsoleMarketingCampaignExecuteResponse,
+    ConsoleMarketingCampaignLifecycleActionRequest,
     ConsoleMarketingCampaignListResponse,
+    ConsoleMarketingCampaignPreflightResponse,
     ConsoleMarketingCampaignPreviewRequest,
     ConsoleMarketingCampaignPreviewResponse,
+    ConsoleMarketingCampaignRecipient,
     ConsoleMarketingCampaignRetryRequest,
     ConsoleMarketingCampaignRetryResponse,
     ConsoleMarketingDeliverySample,
@@ -345,6 +350,23 @@ from app.services.learning_service import evaluate_candidate_eligibility, get_le
 from app.services.manager_message_service import (
     notify_client_manager_status,
     process_console_media_upload,
+)
+from app.services.marketing import (
+    MARKETING_SEGMENT_CODES,
+    MARKETING_STATUS_APPROVED,
+    MARKETING_STATUS_DRAFT,
+    MARKETING_STATUS_IN_REVIEW,
+    MARKETING_STATUS_PAUSED,
+    MARKETING_STATUS_VALUES,
+    build_marketing_campaign_preflight,
+    fetch_marketing_audience_preview,
+    mark_campaign_approved,
+    mark_campaign_paused,
+    mark_campaign_resume,
+    mark_campaign_under_review,
+    materialize_marketing_campaign_audience,
+    retry_failed_marketing_deliveries,
+    run_marketing_campaign_execute,
 )
 from app.services.metrics_daily_service import (
     get_metrics_daily_backfill_max_days,
@@ -2090,6 +2112,8 @@ _MARKETING_SAMPLE_LIMIT_MAX = 20
 _MARKETING_EXECUTE_MAX_LIMIT = 500
 _MARKETING_RETRY_LIMIT_DEFAULT = 100
 _MARKETING_RETRY_LIMIT_MAX = 500
+_MARKETING_AUDIENCE_LIMIT_DEFAULT = 100
+_MARKETING_AUDIENCE_LIMIT_MAX = 500
 
 
 def _require_marketing_access(context: ConsoleAuthContext, *, action: str) -> None:
@@ -2102,6 +2126,7 @@ def _require_marketing_access(context: ConsoleAuthContext, *, action: str) -> No
 
 
 def _serialize_marketing_campaign(campaign: MarketingCampaign) -> ConsoleMarketingCampaign:
+    segment_code = campaign.segment_code if campaign.segment_code in MARKETING_SEGMENT_CODES else "reactivation_30_120"
     return ConsoleMarketingCampaign(
         id=campaign.id,
         client_id=campaign.client_id,
@@ -2109,8 +2134,16 @@ def _serialize_marketing_campaign(campaign: MarketingCampaign) -> ConsoleMarketi
         name=campaign.name,
         message_text=campaign.message_text,
         status=campaign.status,
+        segment_code=segment_code,
         audience_mode=campaign.audience_mode,
         preview_total=int(campaign.preview_total or 0),
+        preflight_valid=bool(campaign.preflight_valid),
+        preflight_snapshot=campaign.preflight_snapshot if isinstance(campaign.preflight_snapshot, dict) else None,
+        approved_by=campaign.approved_by,
+        approved_at=campaign.approved_at.isoformat() if campaign.approved_at else None,
+        requested_review_at=campaign.requested_review_at.isoformat() if campaign.requested_review_at else None,
+        run_started_at=campaign.run_started_at.isoformat() if campaign.run_started_at else None,
+        run_completed_at=campaign.run_completed_at.isoformat() if campaign.run_completed_at else None,
         last_preview_at=campaign.last_preview_at.isoformat() if campaign.last_preview_at else None,
         executed_at=campaign.executed_at.isoformat() if campaign.executed_at else None,
         created_at=campaign.created_at.isoformat() if campaign.created_at else None,
@@ -2171,6 +2204,18 @@ def _normalize_marketing_retry_limit(limit: Optional[int]) -> int:
     return limit
 
 
+def _normalize_marketing_audience_limit(limit: Optional[int]) -> int:
+    if limit is None:
+        return _MARKETING_AUDIENCE_LIMIT_DEFAULT
+    if limit < 1 or limit > _MARKETING_AUDIENCE_LIMIT_MAX:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"limit must be between 1 and {_MARKETING_AUDIENCE_LIMIT_MAX}",
+        )
+    return limit
+
+
 def _resolve_marketing_campaign(
     context: ConsoleAuthContext,
     db: Session,
@@ -2221,6 +2266,28 @@ def _serialize_marketing_delivery_sample(
         outbox_status=outbox_status,
         last_error=last_error,
         updated_at=delivery.updated_at.isoformat() if delivery.updated_at else None,
+    )
+
+
+def _serialize_marketing_recipient(
+    recipient: MarketingCampaignRecipient,
+) -> ConsoleMarketingCampaignRecipient:
+    reason_codes = recipient.reason_codes if isinstance(recipient.reason_codes, list) else []
+    suppression_reasons = (
+        recipient.suppression_reasons if isinstance(recipient.suppression_reasons, list) else []
+    )
+    segment_code = recipient.segment_code if recipient.segment_code in MARKETING_SEGMENT_CODES else "reactivation_30_120"
+    return ConsoleMarketingCampaignRecipient(
+        id=recipient.id,
+        campaign_id=recipient.campaign_id,
+        recipient_jid=recipient.recipient_jid,
+        user_id=recipient.user_id,
+        conversation_id=recipient.conversation_id,
+        segment_code=segment_code,
+        reason_codes=[str(value) for value in reason_codes],
+        suppressed=bool(recipient.suppressed),
+        suppression_reasons=[str(value) for value in suppression_reasons],
+        updated_at=recipient.updated_at.isoformat() if recipient.updated_at else None,
     )
 
 
@@ -13253,7 +13320,7 @@ async def list_marketing_campaigns(
 
     branch_uuid = _parse_uuid_param("branch_id", branch_id)
     status_value = _normalize_optional_text(status)
-    if status_value and status_value not in {"draft", "ready", "executed", "paused"}:
+    if status_value and status_value not in MARKETING_STATUS_VALUES:
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
 
     query = db.query(MarketingCampaign).filter(MarketingCampaign.client_id == context.client.id)
@@ -13285,6 +13352,9 @@ async def create_marketing_campaign(
     branch = _resolve_marketing_branch(context, db, payload.branch_id)
     name = _normalize_required_text(payload.name, "name")
     message_text = _normalize_required_text(payload.message_text, "message_text")
+    segment_code = _normalize_required_text(payload.segment_code, "segment_code")
+    if segment_code not in MARKETING_SEGMENT_CODES:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported segment_code")
     if len(name) > 120:
         raise ConsoleAPIError(400, "INVALID_PARAM", "name too long")
     if len(message_text) > 2000:
@@ -13297,16 +13367,18 @@ async def create_marketing_campaign(
         created_by=context.agent.id,
         name=name,
         message_text=message_text,
-        status="draft",
+        status=MARKETING_STATUS_DRAFT,
+        segment_code=segment_code,
         audience_mode=payload.audience_mode,
         audience_filter={},
         preview_total=0,
+        preflight_snapshot={},
+        preflight_valid=False,
         created_at=now,
         updated_at=now,
     )
     db.add(campaign)
-    db.commit()
-    db.refresh(campaign)
+    db.flush()
 
     record_audit_event(
         db,
@@ -13320,8 +13392,11 @@ async def create_marketing_campaign(
         payload={
             "campaign_name": campaign.name,
             "audience_mode": campaign.audience_mode,
+            "segment_code": campaign.segment_code,
         },
     )
+    db.commit()
+    db.refresh(campaign)
 
     return ConsoleMarketingCampaignCreateResponse(campaign=_serialize_marketing_campaign(campaign))
 
@@ -13345,44 +13420,293 @@ async def preview_marketing_campaign(
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
 
     campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
-
-    branch = _resolve_marketing_branch(context, db, campaign.branch_id)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
     sample_limit = _normalize_marketing_sample_limit(payload.sample_limit)
-    audience_query = (
-        db.query(
-            Conversation.id.label("conversation_id"),
-            Conversation.user_id.label("user_id"),
-            User.remote_jid.label("recipient_jid"),
-        )
-        .join(User, User.id == Conversation.user_id)
-        .filter(
-            Conversation.client_id == context.client.id,
-            Conversation.branch_id == branch.id,
-            Conversation.channel == "whatsapp",
-            User.remote_jid.isnot(None),
-            func.length(func.trim(User.remote_jid)) > 0,
-        )
-        .order_by(Conversation.last_message_at.desc().nullslast(), Conversation.id.desc())
-    )
-    estimated_recipients = audience_query.count()
-    sample_rows = audience_query.limit(sample_limit).all()
-
     now = datetime.now(timezone.utc)
-    campaign.preview_total = estimated_recipients
-    campaign.last_preview_at = now
-    campaign.status = "ready" if estimated_recipients > 0 else "draft"
-    campaign.updated_at = now
-    db.add(campaign)
+    preview = materialize_marketing_campaign_audience(
+        db,
+        campaign=campaign,
+        segment_code=campaign.segment_code,
+        sample_limit=sample_limit,
+        now=now,
+    )
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=campaign.branch_id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="marketing_campaign_previewed",
+        entity_type="marketing_campaign",
+        entity_id=campaign.id,
+        payload={
+            "estimated_recipients": preview["estimated_recipients"],
+            "eligible_count": preview["eligible_count"],
+            "suppressed_count": preview["suppressed_count"],
+        },
+    )
     db.commit()
 
     return ConsoleMarketingCampaignPreviewResponse(
         campaign_id=campaign.id,
         branch_id=campaign.branch_id,
         audience_mode=campaign.audience_mode,
-        estimated_recipients=estimated_recipients,
-        sample_conversation_ids=[row.conversation_id for row in sample_rows if row.conversation_id],
-        sample_recipient_jids=[row.recipient_jid for row in sample_rows if row.recipient_jid],
+        estimated_recipients=preview["estimated_recipients"],
+        eligible_count=preview["eligible_count"],
+        suppressed_count=preview["suppressed_count"],
+        sample_conversation_ids=preview["sample_conversation_ids"],
+        sample_recipient_jids=preview["sample_recipient_jids"],
     )
+
+
+@router.get(
+    "/admin/marketing/campaigns/{campaign_id}/audience",
+    response_model=ConsoleMarketingCampaignAudienceResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_marketing_campaign_audience(
+    campaign_id: str,
+    request: Request,
+    include_suppressed: bool = True,
+    limit: int = Query(_MARKETING_AUDIENCE_LIMIT_DEFAULT),
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignAudienceResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="view audience")
+    _reject_unknown_query_params(request, {"include_suppressed", "limit"})
+
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+    limit_value = _normalize_marketing_audience_limit(limit)
+
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
+    items = fetch_marketing_audience_preview(
+        db,
+        campaign_id=campaign.id,
+        include_suppressed=include_suppressed,
+        limit=limit_value,
+    )
+    total_count = (
+        db.query(func.count(MarketingCampaignRecipient.id))
+        .filter(MarketingCampaignRecipient.campaign_id == campaign.id)
+        .scalar()
+        or 0
+    )
+    suppressed_count = (
+        db.query(func.count(MarketingCampaignRecipient.id))
+        .filter(
+            MarketingCampaignRecipient.campaign_id == campaign.id,
+            MarketingCampaignRecipient.suppressed.is_(True),
+        )
+        .scalar()
+        or 0
+    )
+    return ConsoleMarketingCampaignAudienceResponse(
+        campaign_id=campaign.id,
+        total_count=int(total_count),
+        eligible_count=max(int(total_count) - int(suppressed_count), 0),
+        suppressed_count=int(suppressed_count),
+        items=[_serialize_marketing_recipient(item) for item in items],
+    )
+
+
+@router.post(
+    "/admin/marketing/campaigns/{campaign_id}/request-approval",
+    response_model=ConsoleMarketingCampaignCreateResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def request_marketing_campaign_approval(
+    campaign_id: str,
+    request: Request,
+    payload: ConsoleMarketingCampaignLifecycleActionRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignCreateResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="request approval")
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
+
+    now = datetime.now(timezone.utc)
+    try:
+        mark_campaign_under_review(campaign, now=now)
+    except ValueError:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Campaign cannot be moved to in_review")
+    db.add(campaign)
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=campaign.branch_id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="marketing_campaign_review_requested",
+        entity_type="marketing_campaign",
+        entity_id=campaign.id,
+        payload={"reason": _normalize_optional_text(payload.reason)},
+    )
+    db.commit()
+    db.refresh(campaign)
+    return ConsoleMarketingCampaignCreateResponse(campaign=_serialize_marketing_campaign(campaign))
+
+
+@router.post(
+    "/admin/marketing/campaigns/{campaign_id}/approve",
+    response_model=ConsoleMarketingCampaignCreateResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def approve_marketing_campaign(
+    campaign_id: str,
+    request: Request,
+    payload: ConsoleMarketingCampaignLifecycleActionRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignCreateResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="approve")
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
+
+    now = datetime.now(timezone.utc)
+    try:
+        mark_campaign_approved(campaign, approved_by=context.agent.id, now=now)
+    except ValueError:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Campaign cannot be approved from current state")
+    db.add(campaign)
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=campaign.branch_id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="marketing_campaign_approved",
+        entity_type="marketing_campaign",
+        entity_id=campaign.id,
+        payload={"reason": _normalize_optional_text(payload.reason)},
+    )
+    db.commit()
+    db.refresh(campaign)
+    return ConsoleMarketingCampaignCreateResponse(campaign=_serialize_marketing_campaign(campaign))
+
+
+@router.get(
+    "/admin/marketing/campaigns/{campaign_id}/preflight",
+    response_model=ConsoleMarketingCampaignPreflightResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_marketing_campaign_preflight(
+    campaign_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignPreflightResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="view preflight")
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
+
+    snapshot = build_marketing_campaign_preflight(db, campaign=campaign)
+    db.commit()
+    outbox_health = snapshot.get("outbox_health") if isinstance(snapshot.get("outbox_health"), dict) else {}
+    return ConsoleMarketingCampaignPreflightResponse(
+        campaign_id=campaign.id,
+        generated_at=str(snapshot.get("generated_at") or datetime.now(timezone.utc).isoformat()),
+        preflight_valid=bool(snapshot.get("preflight_valid")),
+        blocked_reasons=[str(value) for value in snapshot.get("blocked_reasons", [])],
+        outbox_health_status=str(outbox_health.get("status") or "unknown"),
+        outbox_pending=int(outbox_health.get("pending") or 0),
+        outbox_failed_24h=int(outbox_health.get("failed_24h") or 0),
+        audience_total=int(snapshot.get("audience_total") or 0),
+        eligible_count=int(snapshot.get("eligible_count") or 0),
+        suppressed_count=int(snapshot.get("suppressed_count") or 0),
+    )
+
+
+@router.post(
+    "/admin/marketing/campaigns/{campaign_id}/pause",
+    response_model=ConsoleMarketingCampaignCreateResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def pause_marketing_campaign(
+    campaign_id: str,
+    request: Request,
+    payload: ConsoleMarketingCampaignLifecycleActionRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignCreateResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="pause")
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
+
+    try:
+        mark_campaign_paused(campaign)
+    except ValueError:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Campaign cannot be paused from current state")
+    db.add(campaign)
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=campaign.branch_id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="marketing_campaign_paused",
+        entity_type="marketing_campaign",
+        entity_id=campaign.id,
+        payload={"reason": _normalize_optional_text(payload.reason)},
+    )
+    db.commit()
+    db.refresh(campaign)
+    return ConsoleMarketingCampaignCreateResponse(campaign=_serialize_marketing_campaign(campaign))
+
+
+@router.post(
+    "/admin/marketing/campaigns/{campaign_id}/resume",
+    response_model=ConsoleMarketingCampaignCreateResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def resume_marketing_campaign(
+    campaign_id: str,
+    request: Request,
+    payload: ConsoleMarketingCampaignLifecycleActionRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignCreateResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="resume")
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
+
+    try:
+        mark_campaign_resume(campaign)
+    except ValueError:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Campaign cannot be resumed from current state")
+    db.add(campaign)
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=campaign.branch_id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="marketing_campaign_resumed",
+        entity_type="marketing_campaign",
+        entity_id=campaign.id,
+        payload={"reason": _normalize_optional_text(payload.reason)},
+    )
+    db.commit()
+    db.refresh(campaign)
+    return ConsoleMarketingCampaignCreateResponse(campaign=_serialize_marketing_campaign(campaign))
 
 
 @router.post(
@@ -13406,116 +13730,54 @@ async def execute_marketing_campaign(
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
 
     campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
-    if campaign.status == "paused":
-        raise ConsoleAPIError(409, "INVALID_STATE", "Campaign is paused")
-
-    branch = _resolve_marketing_branch(context, db, campaign.branch_id)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
     max_recipients = _normalize_marketing_max_recipients(payload.max_recipients)
-    audience_query = (
-        db.query(
-            Conversation.id.label("conversation_id"),
-            Conversation.user_id.label("user_id"),
-            User.remote_jid.label("recipient_jid"),
-        )
-        .join(User, User.id == Conversation.user_id)
-        .filter(
-            Conversation.client_id == context.client.id,
-            Conversation.branch_id == branch.id,
-            Conversation.channel == "whatsapp",
-            User.remote_jid.isnot(None),
-            func.length(func.trim(User.remote_jid)) > 0,
-        )
-        .order_by(Conversation.last_message_at.desc().nullslast(), Conversation.id.desc())
-    )
-    if max_recipients is not None:
-        audience_query = audience_query.limit(max_recipients)
-    audience_rows = audience_query.all()
 
-    existing_conversation_ids = {
-        row.conversation_id
-        for row in db.query(MarketingCampaignDelivery.conversation_id)
-        .filter(
-            MarketingCampaignDelivery.campaign_id == campaign.id,
-            MarketingCampaignDelivery.conversation_id.isnot(None),
-        )
-        .all()
-        if row.conversation_id
-    }
-
-    queued_count = 0
-    skipped_count = 0
     now = datetime.now(timezone.utc)
-    for row in audience_rows:
-        if row.conversation_id in existing_conversation_ids:
-            skipped_count += 1
-            continue
-
-        synthetic_inbound_id = f"marketing:{campaign.id}:{row.conversation_id}"
-        outbox_item = OutboxMessage(
-            client_id=context.client.id,
-            conversation_id=row.conversation_id,
-            branch_id=branch.id,
-            inbound_message_id=synthetic_inbound_id,
-            payload_json={"text": campaign.message_text},
-            meta={
-                "source": "marketing_campaign",
-                "campaign_id": str(campaign.id),
-                "campaign_name": campaign.name,
-                "audience_mode": campaign.audience_mode,
-            },
-            status="PENDING",
-            attempts=0,
-            next_attempt_at=None,
-            last_error=None,
-            created_at=now,
-            updated_at=now,
+    try:
+        result = run_marketing_campaign_execute(
+            db,
+            campaign=campaign,
+            message_text=campaign.message_text,
+            max_recipients=max_recipients,
+            now=now,
         )
-        db.add(outbox_item)
-        db.flush()
-
-        delivery = MarketingCampaignDelivery(
-            campaign_id=campaign.id,
-            client_id=context.client.id,
-            branch_id=branch.id,
-            conversation_id=row.conversation_id,
-            user_id=row.user_id,
-            recipient_jid=row.recipient_jid,
-            status="queued",
-            outbox_id=outbox_item.id,
-            error_reason=None,
-            created_at=now,
-            updated_at=now,
-        )
-        db.add(delivery)
-        queued_count += 1
-
-    campaign.status = "executed" if queued_count > 0 else "ready"
-    campaign.executed_at = now if queued_count > 0 else campaign.executed_at
-    campaign.updated_at = now
-    db.add(campaign)
-    db.commit()
+    except ValueError as exc:
+        if str(exc) == "preflight_failed":
+            snapshot = campaign.preflight_snapshot if isinstance(campaign.preflight_snapshot, dict) else {}
+            raise ConsoleAPIError(
+                409,
+                "GO_LIVE_GATE_REQUIRED",
+                "Campaign preflight failed",
+                details={
+                    "blocked_reasons": snapshot.get("blocked_reasons", []),
+                    "preflight_valid": bool(snapshot.get("preflight_valid")),
+                },
+            )
+        raise
 
     record_audit_event(
         db,
         client_id=context.client.id,
-        branch_id=branch.id,
+        branch_id=campaign.branch_id,
         actor_id=context.agent.id,
         actor_name=context.agent.name,
         event_type="marketing_campaign_executed",
         entity_type="marketing_campaign",
         entity_id=campaign.id,
         payload={
-            "queued_count": queued_count,
-            "skipped_count": skipped_count,
+            "queued_count": result["queued_count"],
+            "skipped_count": result["skipped_count"],
             "max_recipients": max_recipients,
         },
     )
+    db.commit()
 
     return ConsoleMarketingCampaignExecuteResponse(
         campaign_id=campaign.id,
-        queued_count=queued_count,
-        skipped_count=skipped_count,
-        status="queued" if queued_count > 0 else "skipped",
+        queued_count=result["queued_count"],
+        skipped_count=result["skipped_count"],
+        status="queued" if result["queued_count"] > 0 else "skipped",
     )
 
 
@@ -13604,53 +13866,27 @@ async def retry_failed_marketing_campaign_deliveries(
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
 
     campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
-    branch = _resolve_marketing_branch(context, db, campaign.branch_id)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
     retry_limit = _normalize_marketing_retry_limit(payload.limit)
-
-    failed_query = (
-        db.query(MarketingCampaignDelivery, OutboxMessage)
-        .join(OutboxMessage, OutboxMessage.id == MarketingCampaignDelivery.outbox_id)
-        .filter(
-            MarketingCampaignDelivery.campaign_id == campaign.id,
-            OutboxMessage.status == "FAILED",
-        )
+    result = retry_failed_marketing_deliveries(
+        db,
+        campaign=campaign,
+        limit=retry_limit,
     )
-    total_failed = failed_query.count()
-    rows = (
-        failed_query.order_by(
-            OutboxMessage.updated_at.desc().nullslast(),
-            OutboxMessage.id.desc(),
-        )
-        .limit(retry_limit)
-        .all()
-    )
-
-    now = datetime.now(timezone.utc)
-    retried_count = 0
-    for delivery, outbox_row in rows:
-        outbox_row.status = "PENDING"
-        outbox_row.next_attempt_at = None
-        outbox_row.last_error = None
-        outbox_row.updated_at = now
-        delivery.status = "queued"
-        delivery.error_reason = None
-        delivery.updated_at = now
-        retried_count += 1
-
-    skipped_count = max(total_failed - retried_count, 0)
 
     record_audit_event(
         db,
         client_id=context.client.id,
-        branch_id=branch.id,
+        branch_id=campaign.branch_id,
         actor_id=context.agent.id,
         actor_name=context.agent.name,
         event_type="marketing_campaign_retry_failed",
         entity_type="marketing_campaign",
         entity_id=campaign.id,
         payload={
-            "retried_count": retried_count,
-            "skipped_count": skipped_count,
+            "retried_count": result["retried_count"],
+            "skipped_count": result["skipped_count"],
+            "skipped_permanent": result["skipped_permanent"],
             "limit": retry_limit,
         },
     )
@@ -13658,8 +13894,9 @@ async def retry_failed_marketing_campaign_deliveries(
 
     return ConsoleMarketingCampaignRetryResponse(
         campaign_id=campaign.id,
-        retried_count=retried_count,
-        skipped_count=skipped_count,
+        retried_count=result["retried_count"],
+        skipped_count=result["skipped_count"],
+        skipped_permanent=result["skipped_permanent"],
     )
 
 
