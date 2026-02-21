@@ -573,12 +573,14 @@ def test_tool_registry_book_slot_conflict_returns_requested_time_alternatives():
             client_slug="demo_salon",
             service_query="Маникюр",
             message_text="Я не могу в 15:00, можно на 16:00?",
+            expected_reply_type="name",
         )
 
     assert result.handled is True
     assert result.ok is False
     assert result.error_code == "slot_unavailable"
     assert "На 16:00 свободного окна нет." in (result.response_text or "")
+    assert result.expected_reply_type == "name"
 
 
 def test_tool_registry_reschedule_not_found_echoes_requested_time():
@@ -799,12 +801,14 @@ def test_tool_registry_list_slots_reports_requested_time_unavailable_explicitly(
             client_slug="demo_salon",
             service_query="Стрижка",
             message_text="Можно на 18:30?",
+            expected_reply_type="name",
         )
 
     assert result.handled is True
     assert result.ok is True
     assert "На 18:30 свободного окна нет." in (result.response_text or "")
     assert "Доступны: 17:45, 18:00, 19:00." in (result.response_text or "")
+    assert result.expected_reply_type == "name"
 
 
 def test_tool_registry_list_slots_reports_requested_time_available_explicitly():
@@ -847,12 +851,14 @@ def test_tool_registry_list_slots_reports_requested_time_available_explicitly():
             client_slug="demo_salon",
             service_query="Стрижка",
             message_text="Можно на 17:45?",
+            expected_reply_type="name",
         )
 
     assert result.handled is True
     assert result.ok is True
     assert "Да, на 17:45 есть свободное окно." in (result.response_text or "")
     assert "Свободные слоты:" in (result.response_text or "")
+    assert result.expected_reply_type == "name"
 
 
 def test_tool_registry_list_slots_evening_request_returns_evening_windows():

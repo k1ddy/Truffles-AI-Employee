@@ -69,6 +69,7 @@
 - До тестов сверять код в рабочем дереве и контейнере (`decision.py` минимум).
 - При mismatch: обязательная пересборка/перезапуск тестового или runtime контейнера.
 - Для детерминированных прогонов предпочтителен fresh запуск через `scripts/test_api_container.sh`.
+- Hash mismatch `worktree vs runtime/test container` = `BLOCKED` для replay/evidence (не informational warning).
 
 4. `Validation order`:
 - Порядок неизменный: `local realism (LLM+tools+chaos)` -> `local deterministic` -> `CI deterministic smoke`.
@@ -83,6 +84,22 @@
 - Для каждого inbound с `llm_policy_core.payload.tool_action` обязателен audit `plan -> final`.
 - Любой post-LLM override допускается только по whitelist reason-code (см. раздел `Override whitelist (contract v1)`).
 - Override без reason-code или вне whitelist = `NO_GO` для релиза.
+
+7. `Quality budget policy (cost-aware, mandatory)`:
+- `L0` (cheap, always): static/deterministic checks (`py_compile`, `ruff`, targeted pytest for touched contracts).
+- `L1` (cheap-medium, always for core): replay on canonical blocking scenarios with `--judge-mode off --allow-judge-off --max-failures 5`, manual forensic by `responses.jsonl + trace_bundle.jsonl`.
+- `L2` (medium, integration cadence): replay on canonical blocking scenarios with `--judge-mode critical`, only if `L1` passed and no freshness violations.
+- `L3` (expensive, release only): full lock/replay with `--judge-mode all` once per release candidate.
+- `L1/L2/L3` runs are valid only with fixed scenarios (`--scenarios-file`) and `--reset-before-dialog`.
+
+8. `Judge-off evidence contract`:
+- `judge-mode off` runs are debug-only and must be marked `comparison_blocked=true` in acceptance discussion.
+- `judge-mode off` evidence cannot be used to declare release readiness or canonical baseline updates.
+
+9. `Escalation criteria L0 -> L1 -> L2 -> L3`:
+- Any changes in `decision.py`, `tool_registry_service.py`, `ai_service.py`, `pack_runtime_*` => at least `L1`.
+- Any behavior diff in blocking reasons, expected-reply flow, or tool contract outcomes => escalate to `L2`.
+- Release candidate, baseline update, or canary go/no-go => `L3`.
 
 ## Problem decomposition
 1. Semantic misroute:
@@ -114,6 +131,9 @@
 
 10. Release quality gate gap:
 - aggregate thresholds не блокируют critical reason-set (`expected_action_mismatch`, contract drift и др.).
+
+11. Quality budget gap:
+- нет формального cost-aware протокола для частоты дорогих `judge-mode all` прогонов.
 
 ## Required analysis (обязательно до/параллельно внедрению)
 1. Production error heatmap (7-14 days):
@@ -426,6 +446,10 @@
 11. Timeout purity:
 - `timeout_semantic_reroute_count` (target: `0`).
 
+12. Budget efficiency:
+- `llm_quality_run_cost_per_wave` (target: controlled and pre-approved by Brain/Top Architect).
+- `L3_runs_per_wave` (target: `1` for release candidate, unless explicit incident waiver).
+
 ## Execution plan (phased)
 1. Phase 0 (Day 0-1):
 - Baseline extraction + heatmap + top-100 forensic.
@@ -455,6 +479,7 @@
 - `ruff check` for touched runtime/tests.
 - `rg -n "demo_salon_knowledge" truffles-api/app/routers truffles-api/app/services | rg -v "pack_runtime_demo_adapter.py"` (должно быть пусто после Track F).
 - `rg -n "tool_decision_mismatch|expected_reply_type_mismatch|expected_action_mismatch|calendar_tool_contract_miss" /tmp/booking_quality/booking-replay-42/responses.jsonl`
+- `test -f /tmp/booking_quality/blocking_scenarios.json`
 - `PROJECT_NAME=truffles-api-test-firebreak PYTEST_ARGS='/app/tests/test_booking_info_interrupt_contract.py' scripts/test_api_container.sh`
 - `pytest -q truffles-api/tests/test_message_endpoint.py`
 - `pytest -q truffles-api/tests/test_booking_chaos_dialogs.py`
@@ -462,10 +487,19 @@
 - `pytest -q truffles-api/tests/test_demo_salon_eval.py`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode all --fail-on-thresholds --run-id booking-lock-42`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression --max-failures 20`
+- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/blocking_scenarios.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode off --allow-judge-off --max-failures 5 --run-id booking-blocking-nojudge-42`
+- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/blocking_scenarios.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode critical --fail-on-thresholds --max-failures 10 --run-id booking-blocking-critical-42`
 - `jq '.quality_status' /tmp/booking_quality/booking-replay-42/summary.json` (в dry-run обязателен `comparison_blocked=true`).
+
+## Canonical blocking scenarios (mandatory artifact)
+- Canonical path: `/tmp/booking_quality/blocking_scenarios.json`.
+- Source: lock/replay forensic turns containing `calendar_tool_contract_miss`, `expected_action_mismatch`, `expected_reply_type_mismatch`, `tool_decision_mismatch`, critical `judge_fail`.
+- Ownership: Brain/Top Architect approve updates; Hands cannot silently replace this file during bugfix waves.
+- Update policy: only when root-cause class changes or scenario invalidated by confirmed product decision.
 
 ## Evidence package (for each wave)
 - `summary.json`, `brief.md`, `responses.jsonl`, `trace_bundle.jsonl`
+- `blocking_scenarios.json` checksum and generation command
 - manual forensic artifacts (`manual_findings.md`, audit TSV)
 - top-failures taxonomy with owner-ready interpretation
 - explicit `plan-vs-final tool_action delta` table
@@ -517,3 +551,4 @@
 
 ## Acceptance
 - Программа принимается только при выполнении DoD по всем трекам и подтверждённом снижении инцидентности на сопоставимых прогонах и production heatmap.
+- Для acceptance обязательно: `L0 + L1 + L2`; `L3` обязателен только для release candidate / baseline update / canary go-no-go.

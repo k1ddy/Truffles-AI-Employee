@@ -370,6 +370,13 @@ def _expected_reply_prompt_from_hint(expected_reply_type: str | None) -> str | N
     return None
 
 
+def _normalize_expected_reply_hint(expected_reply_type: str | None) -> str | None:
+    normalized = str(expected_reply_type or "").strip().casefold()
+    if normalized in {"service_choice", "time", "name"}:
+        return normalized
+    return None
+
+
 def _map_tool_args_shape_error(error: str) -> tuple[str, str]:
     if error == "tool_args_invalid":
         return "tool_args_not_dict", "tool_args"
@@ -1341,6 +1348,7 @@ def execute_tool_action(
             error_code=None,
             decision_meta=decision_meta,
             trace=trace,
+            expected_reply_type=_normalize_expected_reply_hint(expected_reply_type),
         )
 
     if tool_action == "calendar.get_booking":
@@ -1557,6 +1565,7 @@ def execute_tool_action(
                 error_code="slot_unavailable",
                 decision_meta={"tool_action": tool_action, "tool_decision": "conflict"},
                 trace={"stage": "tool_registry", "decision": "conflict", "tool_action": tool_action},
+                expected_reply_type=_normalize_expected_reply_hint(expected_reply_type),
             )
         if error:
             from app.routers.webhook import _legacy as legacy
