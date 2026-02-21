@@ -17,7 +17,7 @@
   - `SPECS/INBOX_HUMAN_LOCK.md`
   - `STRUCTURE.md`
   - `STATE.md`
-  - `truffles-api/migrations/034_human_lock_v2.sql` (new)
+  - `truffles-api/migrations/035_human_lock_v2.sql` (new)
   - `truffles-api/app/models/conversation_human_lock.py`
   - `truffles-api/app/services/human_lock_service.py`
   - `truffles-api/app/routers/console.py`
@@ -58,7 +58,7 @@
   - Логи тестов + diff + указание новых/измененных файлов.
   - При изменении поведения core — запись в `STATE.md` с evidence.
 - Rollback:
-  - Откат миграции `034_human_lock_v2.sql` и revert commit.
+  - Откат миграции `035_human_lock_v2.sql` и revert commit.
 - No-go:
   - Любой lock без release.
   - Любой silent state в UI.
