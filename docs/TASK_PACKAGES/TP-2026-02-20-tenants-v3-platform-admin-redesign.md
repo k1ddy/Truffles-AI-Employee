@@ -120,6 +120,89 @@
 - Единый язык интерфейса (RU-first или EN-first, но без микса в одной зоне).
 - Операторские тексты без технического шума в default mode.
 
+## Scope State Contract (single source of truth)
+### Контуры состояния
+1. `Global context` (межстраничный контур)
+- Назначение: navigation scope между разделами (`Tenants`, `Company Workspace`, `Integrations`).
+- Хранилище: `console:company_id`, `console:client_id`, `console:branch_id`.
+- Изменяется только явными действиями типа `В контекст`.
+
+2. `Page filters` (контур текущей страницы `/tenants`)
+- Назначение: управлять выборками таблиц/карточек в рамках текущей страницы.
+- Хранилище: URL query (`company_id`, `client_id`, `branch_id`).
+- Источник для списков `companies/clients/branches/audit/snapshots`: только `page filters`.
+
+3. `Workspace mode`
+- Назначение: смена операционного сценария (`portfolio/onboarding/changes/decommission`).
+- Не должен менять `global context` и `page filters` автоматически.
+
+### Правила приоритета
+1. Для запросов данных в `/tenants` приоритет только у `page filters`.
+2. `Global context` не фильтрует списки скрыто.
+3. Действие `Применить контекст` копирует значения из `storage context` в `page filters` атомарно.
+4. `Reset filters` очищает только `page filters`, но не трогает `global context`.
+5. `Reset context` очищает только `global context`, но не трогает `page filters`.
+
+### Sync rules (обязательные)
+1. Кнопка `В контекст` в строке `client` должна писать `company+client` в `global context` и синхронно обновлять `page filters`.
+2. Кнопка `В контекст` в строке `branch` должна писать `branch` в `global context` и синхронно обновлять `page filters.branch_id`.
+3. `Применить контекст` читает источник из storage (`readConsoleContextScopeFromStorage`), а не из возможного stale `meData`.
+
+## Control Behavior Matrix
+| Контрол | Где | Действие | Меняет `global context` | Меняет `page filters` | Ожидаемый результат |
+|---|---|---|---|---|---|
+| `В контекст` (client row) | Clients list | Выбрать клиента как рабочий контур | Да | Да | Контекст и фильтры указывают на выбранного клиента |
+| `В контекст` (branch row) | Branches list | Выбрать филиал в текущем контуре | Да | Да | `branch_id` виден и в контексте, и в фильтрах |
+| `Применить контекст` | Filters panel | Скопировать storage context в page filters | Нет | Да | Списки страницы совпадают с context scope |
+| `Сбросить фильтры` | Filters panel | Очистить page filters | Нет | Да | Все списки без локального фильтра |
+| `Сбросить контекст` | Context panel | Очистить межстраничный контекст | Да | Нет | Context chips пустые, page filters сохраняются |
+| `Очистить branch/client` | Context panel | Частичный сброс контекста | Да | Нет | Сбрасывается только целевой уровень context |
+
+## Copy Glossary (RU-first)
+### Разрешённые бизнес-термины
+- `Рабочий контур`
+- `Фильтры страницы`
+- `Применить контекст`
+- `Сбросить фильтры`
+- `Сбросить контекст`
+- `Портфель`
+- `Онбординг`
+- `Изменения`
+- `Вывод из эксплуатации`
+
+### Запрещённые/нежелательные в default UI
+- `Header Context Lens (storage)`
+- `Page Filters (query state)`
+- `scope`, `context lens`, `storage`, `query state` в пользовательских подписях
+- Смешанный RU/EN label в одной панели без необходимости
+
+### Правило copy
+1. Бизнес-режим (`platform_admin` default) показывает только бизнес-словарь.
+2. Технические ID допустимы только в отдельном `Advanced` контуре.
+
+## Acceptance Scenarios (platform_admin)
+1. Scenario A: client scope
+- Открыть `/tenants`.
+- Выбрать клиента через `В контекст`.
+- Ожидание: chips контекста и `page filters` синхронизированы, список филиалов ограничен выбранным клиентом.
+
+2. Scenario B: branch scope and apply
+- Выбрать филиал через `В контекст`.
+- Нажать `Применить контекст`.
+- Ожидание: `page filters.branch_id` не теряется; фильтрация филиалов остаётся на выбранном branch.
+
+3. Scenario C: filter reset isolation
+- При активном context и фильтрах нажать `Сбросить фильтры`.
+- Ожидание: списки развёрнуты, chips контекста остаются.
+
+4. Scenario D: context reset isolation
+- При активном context и фильтрах нажать `Сбросить контекст`.
+- Ожидание: chips контекста очищены, `page filters` остаются прежними.
+
+5. Scenario E: language consistency
+- Проверить верхний блок Tenants.
+- Ожидание: нет смешения RU/EN и тех-жаргона в business-подписях.
+
 ## Scope
 ### Product/UX
 - Полный IA/UX редизайн `Tenants` под control tower.

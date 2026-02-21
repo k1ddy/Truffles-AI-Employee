@@ -14,7 +14,6 @@ type TenantsTopControlsProps = {
     contextCompanyId: string | null;
     contextClientId: string | null;
     contextBranchId: string | null;
-    hasContextLensFilters: boolean;
     onClearBranchContext: () => void;
     onClearClientContext: () => void;
     onClearContext: () => void;
@@ -56,7 +55,6 @@ export default function TenantsTopControls({
     contextCompanyId,
     contextClientId,
     contextBranchId,
-    hasContextLensFilters,
     onClearBranchContext,
     onClearClientContext,
     onClearContext,
@@ -82,71 +80,28 @@ export default function TenantsTopControls({
         <div className="flex flex-col gap-2 mb-6">
             <h1 className="text-2xl font-bold" data-testid="tenants-title">Тенанты</h1>
             <div className="text-xs text-muted-foreground">
-                Контекст: {contextCompanyName ?? "—"} / {contextClientName ?? "—"} / {contextBranchName ?? "—"}
+                Рабочий контур: {contextCompanyName ?? "—"} / {contextClientName ?? "—"} / {contextBranchName ?? "—"}
                 {isPlatformPreset ? (
                     <span>
-                        {" · IDs: "}
+                        {" · ID (advanced): "}
                         {contextCompanyId ?? "—"} / {contextClientId ?? "—"} / {contextBranchId ?? "—"}
                     </span>
                 ) : null}
             </div>
-            <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="tenants-context-lens">
+            <div className="rounded-lg border border-primary/30 bg-primary/[0.04] p-3" data-testid="tenants-page-filters">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Header Context Lens (storage)
-                </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="rounded-full border border-border/60 px-2 py-1">
-                        company: {contextCompanyName ?? "all"}
-                    </span>
-                    <span className="rounded-full border border-border/60 px-2 py-1">
-                        client: {contextClientName ?? "all"}
-                    </span>
-                    <span className="rounded-full border border-border/60 px-2 py-1">
-                        branch: {contextBranchName ?? "all"}
-                    </span>
-                    <button
-                        className="btn-ghost"
-                        onClick={onClearBranchContext}
-                        disabled={!contextBranchId}
-                        data-testid="tenants-context-clear-branch"
-                    >
-                        Очистить branch
-                    </button>
-                    <button
-                        className="btn-ghost"
-                        onClick={onClearClientContext}
-                        disabled={!contextClientId}
-                        data-testid="tenants-context-clear-client"
-                    >
-                        Очистить client
-                    </button>
-                    <button
-                        className="btn-ghost"
-                        onClick={onClearContext}
-                        disabled={!hasContextLensFilters}
-                        data-testid="tenants-context-clear-all"
-                    >
-                        Сбросить context
-                    </button>
-                </div>
-                <div className="mt-2 text-xs text-muted-foreground">
-                    Header context используется для кросс-страничной навигации и быстрых действий.
-                </div>
-            </div>
-            <div className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-page-filters">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Page Filters (явный query state)
+                    Шаг 1. Фильтры текущей страницы
                 </div>
                 <div className="grid gap-2 md:grid-cols-3">
                     <label className="text-xs text-muted-foreground">
-                        company
+                        Компания
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                             value={pageFilterCompanyId ?? ""}
                             onChange={(event) => onPageFilterCompanyChange(event.target.value || null)}
                             data-testid="tenants-page-filter-company"
                         >
-                            <option value="">all companies</option>
+                            <option value="">Все компании</option>
                             {pageFilterCompanyOptions.map((option) => (
                                 <option key={option.id} value={option.id}>
                                     {renderOptionLabel(option.label, option.id)}
@@ -155,14 +110,14 @@ export default function TenantsTopControls({
                         </select>
                     </label>
                     <label className="text-xs text-muted-foreground">
-                        client
+                        Клиент
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                             value={pageFilterClientId ?? ""}
                             onChange={(event) => onPageFilterClientChange(event.target.value || null)}
                             data-testid="tenants-page-filter-client"
                         >
-                            <option value="">all clients</option>
+                            <option value="">Все клиенты</option>
                             {pageFilterClientOptions.map((option) => (
                                 <option key={option.id} value={option.id}>
                                     {renderOptionLabel(option.label, option.id)}
@@ -171,14 +126,14 @@ export default function TenantsTopControls({
                         </select>
                     </label>
                     <label className="text-xs text-muted-foreground">
-                        branch
+                        Филиал
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                             value={pageFilterBranchId ?? ""}
                             onChange={(event) => onPageFilterBranchChange(event.target.value || null)}
                             data-testid="tenants-page-filter-branch"
                         >
-                            <option value="">all branches</option>
+                            <option value="">Все филиалы</option>
                             {pageFilterBranchOptions.map((option) => (
                                 <option key={option.id} value={option.id}>
                                     {renderOptionLabel(option.label, option.id)}
@@ -193,7 +148,7 @@ export default function TenantsTopControls({
                         onClick={onApplyContextToPageFilters}
                         data-testid="tenants-page-filter-apply-context"
                     >
-                        Взять из context
+                        Применить контур
                     </button>
                     <button
                         className="btn-ghost"
@@ -201,11 +156,51 @@ export default function TenantsTopControls({
                         disabled={!hasPageFilters}
                         data-testid="tenants-page-filter-clear-all"
                     >
-                        Сбросить page filters
+                        Сбросить фильтры
                     </button>
                 </div>
                 <div className="mt-2 text-xs text-muted-foreground">
-                    Списки компаний/клиентов/филиалов используют именно page filters и отражаются в URL.
+                    Эти фильтры применяются только к этой странице и сохраняются в URL.
+                </div>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="tenants-context-lens">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    Шаг 2. Рабочий контур между разделами
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-full border border-border/60 px-2 py-1">
+                        компания: {contextCompanyName ?? "все"}
+                    </span>
+                    <span className="rounded-full border border-border/60 px-2 py-1">
+                        клиент: {contextClientName ?? "все"}
+                    </span>
+                    <span className="rounded-full border border-border/60 px-2 py-1">
+                        филиал: {contextBranchName ?? "все"}
+                    </span>
+                    <button
+                        className="btn-ghost"
+                        onClick={onClearBranchContext}
+                        data-testid="tenants-context-clear-branch"
+                    >
+                        Очистить филиал
+                    </button>
+                    <button
+                        className="btn-ghost"
+                        onClick={onClearClientContext}
+                        data-testid="tenants-context-clear-client"
+                    >
+                        Очистить клиента
+                    </button>
+                    <button
+                        className="btn-ghost"
+                        onClick={onClearContext}
+                        data-testid="tenants-context-clear-all"
+                    >
+                        Сбросить контур
+                    </button>
+                </div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                    Контур нужен для переходов между разделами. Чтобы применить его к текущему списку, нажмите «Применить контур» в фильтрах страницы.
                 </div>
             </div>
             <div className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-workspace-modes">
@@ -237,7 +232,7 @@ export default function TenantsTopControls({
                         onClick={() => onWorkspaceModeChange("decommission")}
                         data-testid="tenants-mode-decommission"
                     >
-                        Decommission
+                        Вывод из эксплуатации
                     </button>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="tenants-view-preset">
@@ -247,7 +242,7 @@ export default function TenantsTopControls({
                         onClick={() => onViewPresetChange("operator")}
                         data-testid="tenants-view-preset-operator"
                     >
-                        Operator
+                        Оператор
                     </button>
                     <button
                         className={viewPreset === "platform" ? "btn-primary" : "btn-ghost"}
@@ -255,7 +250,7 @@ export default function TenantsTopControls({
                         disabled={!canSwitchViewPreset}
                         data-testid="tenants-view-preset-platform"
                     >
-                        Platform
+                        Платформа
                     </button>
                 </div>
             </div>

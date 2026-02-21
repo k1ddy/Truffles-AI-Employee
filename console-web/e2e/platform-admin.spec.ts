@@ -261,6 +261,40 @@ test.describe('Platform Admin Tenants', () => {
         await openTenants(page);
     });
 
+    async function clickFirstEnabledContextButton(container: import('@playwright/test').Locator) {
+        const contextButtons = container.getByRole('button', { name: 'В контекст' });
+        const count = await contextButtons.count();
+        for (let index = 0; index < count; index += 1) {
+            const candidate = contextButtons.nth(index);
+            if (!(await candidate.isVisible().catch(() => false))) {
+                continue;
+            }
+            if (await candidate.isDisabled().catch(() => true)) {
+                continue;
+            }
+            await candidate.click();
+            return true;
+        }
+        return false;
+    }
+
+    async function ensureFilterHasValue(select: import('@playwright/test').Locator) {
+        if (!(await select.isVisible().catch(() => false))) {
+            return false;
+        }
+        if (await select.inputValue()) {
+            return true;
+        }
+        const options = select.locator('option');
+        const optionCount = await options.count();
+        if (optionCount < 2) {
+            return false;
+        }
+        await select.selectOption({ index: 1 });
+        await expect(select).not.toHaveValue('');
+        return true;
+    }
+
     test('should render lifecycle modal flow on Tenants @smoke', async ({ page }) => {
         const clients = tenantsSection(page, 'Клиенты');
         await expect(clients).toBeVisible();
@@ -498,6 +532,80 @@ test.describe('Platform Admin Tenants', () => {
         }
 
         await expect(page.getByText(/booking_settings и working_hours нужны/i)).toBeVisible();
+    });
+
+    test('should keep branch page-filter after apply context (Scenario B)', async ({ page }) => {
+        const modes = page.getByTestId('tenants-workspace-modes');
+        if (await modes.isVisible().catch(() => false)) {
+            await page.getByTestId('tenants-mode-changes').click();
+        }
+
+        const branchesSection = page.getByTestId('tenants-change-management');
+        await expect(branchesSection).toBeVisible();
+
+        if (!(await clickFirstEnabledContextButton(branchesSection))) {
+            test.info().annotations.push({
+                type: 'context-skip',
+                description: 'No enabled branch context button in current scope.',
+            });
+            return;
+        }
+
+        const branchFilter = page.getByTestId('tenants-page-filter-branch');
+        await expect(branchFilter).toBeVisible();
+        await expect(branchFilter).not.toHaveValue('');
+        const branchValueBefore = await branchFilter.inputValue();
+
+        await page.getByTestId('tenants-page-filter-apply-context').click();
+        await expect(branchFilter).toHaveValue(branchValueBefore);
+    });
+
+    test('should reset only page filters and keep context chips (Scenario C)', async ({ page }) => {
+        const modes = page.getByTestId('tenants-workspace-modes');
+        if (await modes.isVisible().catch(() => false)) {
+            await page.getByTestId('tenants-mode-changes').click();
+        }
+
+        const branchesSection = page.getByTestId('tenants-change-management');
+        await expect(branchesSection).toBeVisible();
+
+        if (!(await clickFirstEnabledContextButton(branchesSection))) {
+            test.info().annotations.push({
+                type: 'context-skip',
+                description: 'No enabled branch context button in current scope.',
+            });
+            return;
+        }
+
+        const branchChip = page.locator('[data-testid="tenants-context-lens"] span').filter({ hasText: /^филиал:/ }).first();
+        await expect(branchChip).toBeVisible();
+        await expect(branchChip).not.toContainText('все');
+
+        await page.getByTestId('tenants-page-filter-clear-all').click();
+        await expect(page.getByTestId('tenants-page-filter-company')).toHaveValue('');
+        await expect(page.getByTestId('tenants-page-filter-client')).toHaveValue('');
+        await expect(page.getByTestId('tenants-page-filter-branch')).toHaveValue('');
+        await expect(branchChip).not.toContainText('все');
+    });
+
+    test('should reset only context and keep page filters (Scenario D)', async ({ page }) => {
+        const companyFilter = page.getByTestId('tenants-page-filter-company');
+        const hasCompanyFilter = await ensureFilterHasValue(companyFilter);
+        if (!hasCompanyFilter) {
+            test.info().annotations.push({
+                type: 'context-skip',
+                description: 'No selectable page filter options in current scope.',
+            });
+            return;
+        }
+        const companyFilterBeforeReset = await companyFilter.inputValue();
+
+        await page.getByTestId('tenants-context-clear-all').click();
+
+        const branchChip = page.locator('[data-testid="tenants-context-lens"] span').filter({ hasText: /^филиал:/ }).first();
+        await expect(branchChip).toBeVisible();
+        await expect(branchChip).toContainText('все');
+        await expect(companyFilter).toHaveValue(companyFilterBeforeReset);
     });
 
     test('should audit instance_id reveal and copy actions on Tenants @smoke', async ({ page }) => {
