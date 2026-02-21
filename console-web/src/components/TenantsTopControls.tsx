@@ -88,49 +88,9 @@ export default function TenantsTopControls({
                     </span>
                 ) : null}
             </div>
-            <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="tenants-context-lens">
+            <div className="rounded-lg border border-primary/30 bg-primary/[0.04] p-3" data-testid="tenants-page-filters">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Рабочий контур между разделами
-                </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="rounded-full border border-border/60 px-2 py-1">
-                        компания: {contextCompanyName ?? "все"}
-                    </span>
-                    <span className="rounded-full border border-border/60 px-2 py-1">
-                        клиент: {contextClientName ?? "все"}
-                    </span>
-                    <span className="rounded-full border border-border/60 px-2 py-1">
-                        филиал: {contextBranchName ?? "все"}
-                    </span>
-                    <button
-                        className="btn-ghost"
-                        onClick={onClearBranchContext}
-                        data-testid="tenants-context-clear-branch"
-                    >
-                        Очистить филиал
-                    </button>
-                    <button
-                        className="btn-ghost"
-                        onClick={onClearClientContext}
-                        data-testid="tenants-context-clear-client"
-                    >
-                        Очистить клиента
-                    </button>
-                    <button
-                        className="btn-ghost"
-                        onClick={onClearContext}
-                        data-testid="tenants-context-clear-all"
-                    >
-                        Сбросить контур
-                    </button>
-                </div>
-                <div className="mt-2 text-xs text-muted-foreground">
-                    Контур используется между разделами. Он не фильтрует список на этой странице, пока вы явно не примените его в фильтры страницы.
-                </div>
-            </div>
-            <div className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-page-filters">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Фильтры текущей страницы
+                    Шаг 1. Фильтры текущей страницы
                 </div>
                 <div className="grid gap-2 md:grid-cols-3">
                     <label className="text-xs text-muted-foreground">
@@ -201,6 +161,46 @@ export default function TenantsTopControls({
                 </div>
                 <div className="mt-2 text-xs text-muted-foreground">
                     Эти фильтры применяются только к этой странице и сохраняются в URL.
+                </div>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="tenants-context-lens">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    Шаг 2. Рабочий контур между разделами
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-full border border-border/60 px-2 py-1">
+                        компания: {contextCompanyName ?? "все"}
+                    </span>
+                    <span className="rounded-full border border-border/60 px-2 py-1">
+                        клиент: {contextClientName ?? "все"}
+                    </span>
+                    <span className="rounded-full border border-border/60 px-2 py-1">
+                        филиал: {contextBranchName ?? "все"}
+                    </span>
+                    <button
+                        className="btn-ghost"
+                        onClick={onClearBranchContext}
+                        data-testid="tenants-context-clear-branch"
+                    >
+                        Очистить филиал
+                    </button>
+                    <button
+                        className="btn-ghost"
+                        onClick={onClearClientContext}
+                        data-testid="tenants-context-clear-client"
+                    >
+                        Очистить клиента
+                    </button>
+                    <button
+                        className="btn-ghost"
+                        onClick={onClearContext}
+                        data-testid="tenants-context-clear-all"
+                    >
+                        Сбросить контур
+                    </button>
+                </div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                    Контур нужен для переходов между разделами. Чтобы применить его к текущему списку, нажмите «Применить контур» в фильтрах страницы.
                 </div>
             </div>
             <div className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-workspace-modes">

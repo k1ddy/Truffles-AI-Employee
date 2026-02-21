@@ -30,6 +30,7 @@ import {
     setConsoleCompanyContext,
 } from "@/lib/console-context-storage";
 import { useInlineErrorSummary } from "@/lib/use-inline-error-summary";
+import { useTenantsPageFilters } from "./use-tenants-page-filters";
 
 type CompanyEditorState = {
     id: string;
@@ -131,11 +132,6 @@ type FleetServiceFilter = "all" | "ok" | "degraded" | "attention";
 type FleetAttentionLevel = "high" | "medium" | "low";
 type TenantsWorkspaceMode = "portfolio" | "onboarding" | "changes" | "decommission";
 type TenantsViewPreset = "operator" | "platform";
-type TenantsPageFilters = {
-    companyId: string | null;
-    clientId: string | null;
-    branchId: string | null;
-};
 
 type ActionQueueIntent =
     | "set_context"
@@ -211,9 +207,6 @@ const LIFECYCLE_AUDIT_STORAGE_KEY = "tenants:client-lifecycle-audit:v2";
 const WEEKLY_SNAPSHOT_STORAGE_KEY = "tenants:operational-weekly-snapshots:v1";
 const MAX_LIFECYCLE_AUDIT_ENTRIES_PER_CLIENT = 20;
 const MAX_WEEKLY_SNAPSHOTS = 12;
-const TENANTS_FILTER_COMPANY_PARAM = "company_id";
-const TENANTS_FILTER_CLIENT_PARAM = "client_id";
-const TENANTS_FILTER_BRANCH_PARAM = "branch_id";
 
 const OPERATIONAL_KPI_RULES: OperationalKpiRule[] = [
     {
@@ -631,35 +624,6 @@ function toCsvCell(value: string | number): string {
     return raw;
 }
 
-function normalizeFilterValue(value: string | null | undefined): string | null {
-    const normalized = (value ?? "").trim();
-    return normalized.length > 0 ? normalized : null;
-}
-
-function hasTenantsFilterParams(searchParams: URLSearchParams): boolean {
-    return (
-        searchParams.has(TENANTS_FILTER_COMPANY_PARAM)
-        || searchParams.has(TENANTS_FILTER_CLIENT_PARAM)
-        || searchParams.has(TENANTS_FILTER_BRANCH_PARAM)
-    );
-}
-
-function readTenantsFiltersFromSearchParams(searchParams: URLSearchParams): TenantsPageFilters {
-    return {
-        companyId: normalizeFilterValue(searchParams.get(TENANTS_FILTER_COMPANY_PARAM)),
-        clientId: normalizeFilterValue(searchParams.get(TENANTS_FILTER_CLIENT_PARAM)),
-        branchId: normalizeFilterValue(searchParams.get(TENANTS_FILTER_BRANCH_PARAM)),
-    };
-}
-
-function writeTenantsFilterParam(params: URLSearchParams, key: string, value: string | null) {
-    if (value) {
-        params.set(key, value);
-        return;
-    }
-    params.delete(key);
-}
-
 function toFilterOptions(
     values: Array<{ id: string | null | undefined; label: string | null | undefined }>,
 ): TenantsFilterOption[] {
@@ -975,24 +939,26 @@ export default function TenantsPage() {
     const selectedClientId = meData?.client?.id ?? null;
     const selectedCompanyId = meData?.selected_company_id ?? meData?.client?.company_id ?? null;
     const selectedBranchId = meData?.selected_branch_id ?? null;
-    const [pageFilters, setPageFilters] = useState<TenantsPageFilters>({
-        companyId: null,
-        clientId: null,
-        branchId: null,
+    const {
+        pageFilterCompanyId,
+        pageFilterClientId,
+        pageFilterBranchId,
+        hasPageFilters,
+        setPageFilterCompany,
+        setPageFilterClient,
+        setPageFilterBranch,
+        applyScopeToPageFilters,
+        clearPageFilters,
+    } = useTenantsPageFilters({
+        searchParams,
+        router,
+        initialContext: {
+            companyId: selectedCompanyId,
+            clientId: selectedClientId,
+            branchId: selectedBranchId,
+        },
+        canInitialize: Boolean(meData),
     });
-    const [pageFiltersInitialized, setPageFiltersInitialized] = useState(false);
-    const pageFiltersFromSearchParams = useMemo(
-        () => readTenantsFiltersFromSearchParams(new URLSearchParams(searchParams.toString())),
-        [searchParams],
-    );
-    const hasExplicitPageFilters = useMemo(
-        () => hasTenantsFilterParams(new URLSearchParams(searchParams.toString())),
-        [searchParams],
-    );
-    const pageFilterCompanyId = pageFilters.companyId;
-    const pageFilterClientId = pageFilters.clientId;
-    const pageFilterBranchId = pageFilters.branchId;
-    const hasPageFilters = Boolean(pageFilterCompanyId || pageFilterClientId || pageFilterBranchId);
     const knownCompanies = useMemo(
         () => meData?.companies ?? [],
         [meData?.companies],
@@ -1020,54 +986,6 @@ export default function TenantsPage() {
     const companyQueryValue = companyQuery.trim() || undefined;
     const clientQueryValue = clientQuery.trim() || undefined;
     const branchQueryValue = branchQuery.trim() || undefined;
-
-    useEffect(() => {
-        if (hasExplicitPageFilters) {
-            setPageFilters(pageFiltersFromSearchParams);
-            setPageFiltersInitialized(true);
-            return;
-        }
-        if (pageFiltersInitialized || !meData) {
-            return;
-        }
-        setPageFilters({
-            companyId: selectedCompanyId,
-            clientId: selectedClientId,
-            branchId: selectedBranchId,
-        });
-        setPageFiltersInitialized(true);
-    }, [
-        hasExplicitPageFilters,
-        meData,
-        pageFiltersFromSearchParams,
-        pageFiltersInitialized,
-        selectedBranchId,
-        selectedClientId,
-        selectedCompanyId,
-    ]);
-
-    useEffect(() => {
-        if (!pageFiltersInitialized) {
-            return;
-        }
-        const nextParams = new URLSearchParams(searchParams.toString());
-        writeTenantsFilterParam(nextParams, TENANTS_FILTER_COMPANY_PARAM, pageFilterCompanyId);
-        writeTenantsFilterParam(nextParams, TENANTS_FILTER_CLIENT_PARAM, pageFilterClientId);
-        writeTenantsFilterParam(nextParams, TENANTS_FILTER_BRANCH_PARAM, pageFilterBranchId);
-        const nextQuery = nextParams.toString();
-        const currentQuery = searchParams.toString();
-        if (nextQuery === currentQuery) {
-            return;
-        }
-        router.replace(nextQuery ? `/tenants?${nextQuery}` : "/tenants", { scroll: false });
-    }, [
-        pageFilterBranchId,
-        pageFilterClientId,
-        pageFilterCompanyId,
-        pageFiltersInitialized,
-        router,
-        searchParams,
-    ]);
 
     useEffect(() => {
         setClientLifecycleAuditById(safeParseLifecycleAuditMap(readBrowserStorage(LIFECYCLE_AUDIT_STORAGE_KEY)));
@@ -1582,7 +1500,7 @@ export default function TenantsPage() {
     };
     const setClientContextAndPageFilters = (clientId?: string | null, companyId?: string | null) => {
         setClientContext(clientId, companyId);
-        setPageFilters({
+        applyScopeToPageFilters({
             companyId: companyId ?? null,
             clientId: clientId ?? null,
             branchId: null,
@@ -1590,45 +1508,11 @@ export default function TenantsPage() {
     };
     const setBranchContextAndPageFilters = (branchId?: string | null) => {
         setBranchContext(branchId);
-        setPageFilters((previous) => ({
-            ...previous,
-            branchId: branchId ?? null,
-        }));
-    };
-    const setPageFilterCompany = (companyId: string | null) => {
-        setPageFilters({
-            companyId,
-            clientId: null,
-            branchId: null,
-        });
-    };
-    const setPageFilterClient = (clientId: string | null) => {
-        setPageFilters((previous) => ({
-            ...previous,
-            clientId,
-            branchId: null,
-        }));
-    };
-    const setPageFilterBranch = (branchId: string | null) => {
-        setPageFilters((previous) => ({
-            ...previous,
-            branchId,
-        }));
+        setPageFilterBranch(branchId ?? null);
     };
     const applyContextToPageFilters = () => {
         const scope = readConsoleContextScopeFromStorage();
-        setPageFilters({
-            companyId: scope.companyId || null,
-            clientId: scope.clientId || null,
-            branchId: scope.branchId || null,
-        });
-    };
-    const clearPageFilters = () => {
-        setPageFilters({
-            companyId: null,
-            clientId: null,
-            branchId: null,
-        });
+        applyScopeToPageFilters(scope);
     };
 
     const handleQuickCreateCompany = async () => {

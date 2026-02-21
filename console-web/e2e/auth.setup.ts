@@ -34,6 +34,28 @@ async function gotoConsoleRoot(page: import('@playwright/test').Page) {
     await page.goto(resolvedBaseURL, { waitUntil: 'domcontentloaded' });
 }
 
+async function ensureAuthenticatedConsole(page: import('@playwright/test').Page) {
+    await gotoConsoleRoot(page);
+    const loginButton = page.getByTestId('login-button');
+    const logoutButton = page.getByTestId('logout-button');
+
+    await expect
+        .poll(
+            async () =>
+                (await loginButton.isVisible().catch(() => false))
+                || (await logoutButton.isVisible().catch(() => false)),
+            { timeout: 20000 }
+        )
+        .toBe(true);
+
+    const hasLogout = await logoutButton.isVisible().catch(() => false);
+    const hasLogin = await loginButton.isVisible().catch(() => false);
+    if (!hasLogout && hasLogin) {
+        await loginThroughKeycloak(page);
+        await gotoConsoleRoot(page);
+    }
+}
+
 async function startKeycloakLogin(page: import('@playwright/test').Page) {
     await page.goto(buildSignInUrl(baseURL), { waitUntil: 'domcontentloaded' });
     let providerForm = page.locator('form[action*="keycloak"]').first();
@@ -160,7 +182,7 @@ async function selectBranchIfNeeded(page: import('@playwright/test').Page) {
 
 test('setup auth @smoke', async ({ page }) => {
     await loginThroughKeycloak(page);
-    await expect(page.getByTestId('logout-button')).toBeVisible({ timeout: 20000 });
+    await ensureAuthenticatedConsole(page);
     await selectCompanyIfNeeded(page);
     await selectClientIfNeeded(page);
     await selectBranchIfNeeded(page);

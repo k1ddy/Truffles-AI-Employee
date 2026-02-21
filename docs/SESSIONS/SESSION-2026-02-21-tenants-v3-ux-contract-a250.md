@@ -12,12 +12,19 @@
   - Исправлен `apply context` в Tenants: источник теперь `readConsoleContextScopeFromStorage`, а не stale `meData`.
   - В верхних контролах Tenants убраны смешанные тех-термины и RU/EN-микс в key labels.
   - Убрано блокирующее поведение у context clear-кнопок в UI.
+  - Добавлена визуальная иерархия top-controls: `Шаг 1. Фильтры страницы` и `Шаг 2. Рабочий контур`.
+  - Начата декомпозиция `tenants/page.tsx`: логика page filters + URL sync вынесена в `use-tenants-page-filters.ts`.
+  - Добавлены e2e сценарии `Scenario B/C/D` в `platform-admin.spec.ts`.
+  - Укреплён `auth.setup.ts`: добавлен `ensureAuthenticatedConsole` без хрупкой привязки к единственному `logout-button` чекпойнту.
   - Прогнаны проверки: `corepack pnpm -C console-web lint`, `corepack pnpm -C console-web build`.
 - next:
-  - Привязать Playwright сценарии Tenants к новым acceptance шагам из TP.
-  - Разнести top-controls на два явных блока с визуальным приоритетом для page-filters.
+  - Дожать e2e-auth инфраструктуру (`.auth/console.json`/Keycloak доступность) и прогнать `platform-admin` suite полностью.
+  - Продолжить декомпозицию `tenants/page.tsx` (вынос секций portfolio/changes/onboarding в отдельные компоненты).
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
+  - console-web/src/app/tenants/use-tenants-page-filters.ts
   - console-web/src/components/TenantsTopControls.tsx
+  - console-web/e2e/auth.setup.ts
+  - console-web/e2e/platform-admin.spec.ts
 - last_updated: 2026-02-21
