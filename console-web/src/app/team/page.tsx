@@ -479,7 +479,7 @@ function UsersPanel({
                 oidc_subject: createAgentOidcSubject.trim() || undefined,
                 sso_username: createAgentSsoUsername.trim() || undefined,
                 sso_password: createAgentSsoPassword || undefined,
-                sso_temp_password: createAgentSsoUsername.trim() ? createAgentSsoTempPassword : undefined,
+                sso_temp_password: createAgentSsoUsername.trim() ? createAgentSsoTempPassword : null,
                 is_active: createAgentIsActive,
             };
             return (await adminApi.createAgent(payload)).data;

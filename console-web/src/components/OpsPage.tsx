@@ -778,7 +778,7 @@ export default function OpsPage() {
         return {
             job_type: jobType,
             mode,
-            params,
+            params: params as unknown as Record<string, never>,
         };
     };
 
@@ -797,7 +797,7 @@ export default function OpsPage() {
             const payload: OpsJobRunRequest = {
                 job_type: action.job_type,
                 mode: action.mode,
-                params: (action.params ?? undefined) as Record<string, unknown> | undefined,
+                params: (action.params ?? undefined) as unknown as Record<string, never> | undefined,
             };
             const response = await opsApi.runJob(payload);
             const job = response.data.job;
@@ -848,7 +848,7 @@ export default function OpsPage() {
             const payload: OpsJobRunRequest = {
                 job_type: "incident_state",
                 mode: "execute",
-                params: {
+                params: ({
                     incident_id: incident.id,
                     incident_state: targetState,
                     reason_code: incident.reason_code,
@@ -857,7 +857,7 @@ export default function OpsPage() {
                     note: targetState === "resolved" ? draft.note.trim() : undefined,
                     evidence_confirmed: targetState === "resolved" ? checklistDone : undefined,
                     evidence_summary: targetState === "resolved" ? evidenceSummary : undefined,
-                },
+                } as unknown as Record<string, never>),
             };
             const response = await opsApi.runJob(payload);
             const job = response.data.job;
