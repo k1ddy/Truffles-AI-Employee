@@ -128,10 +128,43 @@ const PREFLIGHT_REASON_HINTS: Record<string, string> = {
     runtime_health_critical: "Нестабильный runtime/outbox. Сначала устраните инциденты.",
     provider_billing_blocked: "Провайдер заблокирован по оплате. Отправка невозможна до оплаты.",
     campaign_not_approved: "Кампанию нужно подтвердить перед отправкой.",
-    audience_snapshot_missing: "Сначала выполните Preview аудитории.",
+    audience_snapshot_missing: "Сначала нажмите «Проверить аудиторию».",
     eligible_recipients_empty: "Нет получателей. Измените сегмент или параметры.",
     template_not_approved: "Template gate включен: нужен approved template.",
 };
+
+const SEGMENT_FIELD_LABEL_OVERRIDES: Record<string, string> = {
+    min_days_since_last_visit: "Минимум дней после последнего визита",
+    max_days_since_last_visit: "Максимум дней после последнего визита",
+    require_no_future_booking: "Исключать клиентов с уже запланированной записью",
+    no_show_window_days: "Период поиска no-show (дней)",
+    min_no_show_count: "Минимум no-show за период",
+    engagement_window_days: "Период интереса к услугам/ценам (дней)",
+};
+
+const SEGMENT_FIELD_HELP_OVERRIDES: Record<string, string> = {
+    min_days_since_last_visit: "Клиент попадет в аудиторию только если после визита прошло не меньше этого срока.",
+    max_days_since_last_visit: "Клиент попадет в аудиторию только если после визита прошло не больше этого срока.",
+    require_no_future_booking: "Если включено, клиенты с уже созданной будущей записью будут исключены из рассылки.",
+    no_show_window_days: "Смотрим no-show только в этом периоде.",
+    min_no_show_count: "Сколько no-show минимум нужно, чтобы клиент попал в сегмент.",
+    engagement_window_days: "За какой период искать сигналы интереса (вопросы по цене/услугам).",
+};
+
+const MARKETING_GLOSSARY_ITEMS = [
+    {
+        term: "Будущая запись",
+        description: "У клиента уже есть подтвержденный визит на дату позже текущего момента.",
+    },
+    {
+        term: "No-show",
+        description: "Клиент был записан, но не пришел на визит.",
+    },
+    {
+        term: "Исключен из рассылки",
+        description: "Клиент найден, но отправка запрещена правилами consent/suppression или настройками сегмента.",
+    },
+];
 
 function formatDateTime(value?: string | null): string {
     if (!value) {
@@ -290,6 +323,60 @@ function segmentLabel(definition: MarketingSegmentDefinition | undefined, code: 
     return code;
 }
 
+function segmentFieldLabel(field: MarketingSegmentEditableField): string {
+    return SEGMENT_FIELD_LABEL_OVERRIDES[field.key] ?? field.label;
+}
+
+function segmentFieldHelp(field: MarketingSegmentEditableField): string | null {
+    return SEGMENT_FIELD_HELP_OVERRIDES[field.key] ?? null;
+}
+
+function formatSegmentParamValue(value: unknown): string {
+    if (typeof value === "boolean") {
+        return value ? "Да" : "Нет";
+    }
+    return String(value ?? "-");
+}
+
+function buildOwnerSegmentSummary(definition: MarketingSegmentDefinition, params: SegmentParams): string {
+    const normalized = normalizeSegmentParamsByDefinition(definition, params);
+
+    if (definition.code === "reactivation_30_120") {
+        const from = Number(normalized.min_days_since_last_visit ?? 30);
+        const to = Number(normalized.max_days_since_last_visit ?? 120);
+        const withFuture = Boolean(normalized.require_no_future_booking);
+        return withFuture
+            ? `Напишем клиентам, у которых последний визит был ${from}-${to} дней назад, и у которых пока нет новой записи.`
+            : `Напишем клиентам, у которых последний визит был ${from}-${to} дней назад, даже если новая запись уже создана.`;
+    }
+
+    if (definition.code === "no_show_recovery_14d") {
+        const windowDays = Number(normalized.no_show_window_days ?? 14);
+        const minCount = Number(normalized.min_no_show_count ?? 1);
+        const withFuture = Boolean(normalized.require_no_future_booking);
+        return withFuture
+            ? `Напишем клиентам с no-show за последние ${windowDays} дней (минимум ${minCount}), только если у них нет будущей записи.`
+            : `Напишем клиентам с no-show за последние ${windowDays} дней (минимум ${minCount}), даже если у них уже есть будущая запись.`;
+    }
+
+    const windowDays = Number(normalized.engagement_window_days ?? 7);
+    const withFuture = Boolean(normalized.require_no_future_booking);
+    return withFuture
+        ? `Напишем клиентам, которые интересовались услугами или ценами за последние ${windowDays} дней и пока не записались.`
+        : `Напишем клиентам, которые интересовались услугами или ценами за последние ${windowDays} дней, даже если запись уже создана.`;
+}
+
+function segmentFieldLabelByKey(definition: MarketingSegmentDefinition | null, key: string): string {
+    if (!definition) {
+        return SEGMENT_FIELD_LABEL_OVERRIDES[key] ?? key;
+    }
+    const field = definition.editable_fields.find((item) => item.key === key);
+    if (!field) {
+        return SEGMENT_FIELD_LABEL_OVERRIDES[key] ?? key;
+    }
+    return segmentFieldLabel(field);
+}
+
 function renderSegmentParamField(
     field: MarketingSegmentEditableField,
     params: SegmentParams,
@@ -297,17 +384,24 @@ function renderSegmentParamField(
     disabled: boolean,
 ) {
     const key = field.key;
+    const label = segmentFieldLabel(field);
+    const help = segmentFieldHelp(field);
+
     if (field.type === "bool") {
         const checked = Boolean(params[key]);
         return (
-            <label key={key} className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm">
-                <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={(event) => onChange(key, event.target.checked)}
-                    disabled={disabled}
-                />
-                <span>{field.label}</span>
+            <label key={key} className="rounded-lg border border-border bg-card px-3 py-2 text-sm">
+                <div className="flex items-center gap-2">
+                    <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(event) => onChange(key, event.target.checked)}
+                        disabled={disabled}
+                    />
+                    <span className="font-medium">{label}</span>
+                    <span className="text-xs text-muted-foreground">{checked ? "Да" : "Нет"}</span>
+                </div>
+                {help ? <p className="mt-1 text-xs text-muted-foreground">{help}</p> : null}
             </label>
         );
     }
@@ -319,7 +413,7 @@ function renderSegmentParamField(
 
     return (
         <label key={key} className="text-sm">
-            <div className="mb-1 text-xs text-muted-foreground">{field.label}</div>
+            <div className="mb-1 text-xs text-muted-foreground">{label}</div>
             <input
                 type="number"
                 min={min}
@@ -330,6 +424,7 @@ function renderSegmentParamField(
                 onChange={(event) => onChange(key, parseBoundedInt(event.target.value, min, min, max))}
                 disabled={disabled}
             />
+            {help ? <p className="mt-1 text-xs text-muted-foreground">{help}</p> : null}
         </label>
     );
 }
@@ -590,8 +685,12 @@ export default function MarketingPage() {
     const selectedSegmentDef = selectedCampaign
         ? segmentDefinitionByCode.get(selectedCampaign.segment_code) ?? FALLBACK_SEGMENTS[0]
         : null;
-    const selectedSegmentSummary =
-        preflight?.segment_summary ?? selectedCampaign?.segment_summary ?? selectedSegmentDef?.summary ?? "";
+    const selectedSegmentParamsForSummary = selectedCampaign
+        ? (preflight?.segment_params ?? selectedCampaign.segment_params ?? {})
+        : {};
+    const selectedSegmentSummary = selectedSegmentDef
+        ? buildOwnerSegmentSummary(selectedSegmentDef, selectedSegmentParamsForSummary)
+        : "";
 
     const withReasonPayload = () => {
         const normalized = lifecycleReason.trim();
@@ -821,6 +920,34 @@ export default function MarketingPage() {
                 ) : null}
             </div>
 
+            <section className="rounded-xl border bg-card p-4">
+                <h2 className="text-base font-semibold">Как работать с вкладкой (2 минуты)</h2>
+                <ol className="mt-2 space-y-2 text-sm text-muted-foreground">
+                    <li>
+                        1. Создайте кампанию: выберите цель, настройте условия и напишите текст сообщения.
+                    </li>
+                    <li>
+                        2. Нажмите «Проверить аудиторию»: убедитесь, что список клиентов и причины отбора выглядят правильно.
+                    </li>
+                    <li>
+                        3. Переведите кампанию на ревью и подтвердите её.
+                    </li>
+                    <li>
+                        4. Нажмите «Проверить готовность», затем «Проверить и отправить».
+                    </li>
+                </ol>
+                <details className="mt-3 rounded-lg border bg-background p-3">
+                    <summary className="cursor-pointer text-sm font-medium">Пояснение терминов</summary>
+                    <div className="mt-2 space-y-2 text-xs text-muted-foreground">
+                        {MARKETING_GLOSSARY_ITEMS.map((item) => (
+                            <p key={item.term}>
+                                <span className="font-medium text-foreground">{item.term}:</span> {item.description}
+                            </p>
+                        ))}
+                    </div>
+                </details>
+            </section>
+
             <div className="rounded-xl border bg-card p-4">
                 <div className="grid gap-3 md:grid-cols-[180px,1fr] md:items-center">
                     <label className="text-sm font-medium text-foreground">Филиал</label>
@@ -871,7 +998,9 @@ export default function MarketingPage() {
 
                         <div className="rounded-lg border bg-background p-3">
                             <div className="text-sm font-medium">Как считается</div>
-                            <p className="mt-1 text-xs text-muted-foreground">{segmentDefinition.summary}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                                {buildOwnerSegmentSummary(segmentDefinition, segmentParams)}
+                            </p>
                             <p className="mt-1 text-xs text-muted-foreground">{segmentDefinition.description}</p>
                         </div>
 
@@ -941,7 +1070,7 @@ export default function MarketingPage() {
                                                 <p className="mt-1 text-xs text-muted-foreground">
                                                     {segmentLabel(definition, campaign.segment_code)}
                                                 </p>
-                                                <p className="mt-1 text-xs text-muted-foreground">preview: {campaign.preview_total}</p>
+                                                <p className="mt-1 text-xs text-muted-foreground">оценка аудитории: {campaign.preview_total}</p>
                                             </button>
                                         </li>
                                     );
@@ -988,12 +1117,12 @@ export default function MarketingPage() {
                             </div>
 
                             <div className="mt-5 rounded-lg border bg-background p-3">
-                                <h3 className="text-sm font-semibold">Как считается текущий фильтр</h3>
+                                <h3 className="text-sm font-semibold">Кто попадет в рассылку</h3>
                                 <p className="mt-1 text-sm text-muted-foreground">{selectedSegmentSummary || "Описание сегмента недоступно."}</p>
                                 <div className="mt-2 flex flex-wrap gap-2">
                                     {Object.entries(selectedCampaign.segment_params ?? {}).map(([key, value]) => (
                                         <span key={key} className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                                            {key}: {String(value)}
+                                            {segmentFieldLabelByKey(selectedSegmentDef, key)}: {formatSegmentParamValue(value)}
                                         </span>
                                     ))}
                                 </div>
@@ -1035,7 +1164,9 @@ export default function MarketingPage() {
                                 </div>
 
                                 <div className="rounded-lg border bg-card p-3">
-                                    <p className="text-xs text-muted-foreground">{editSegmentDefinition.summary}</p>
+                                    <p className="text-xs text-muted-foreground">
+                                        {buildOwnerSegmentSummary(editSegmentDefinition, normalizedEditParams)}
+                                    </p>
                                     <p className="mt-1 text-xs text-muted-foreground">{editSegmentDefinition.description}</p>
                                 </div>
 
@@ -1086,7 +1217,7 @@ export default function MarketingPage() {
 
                                 <div className="flex flex-wrap items-end gap-3 border-t pt-3">
                                     <label className="text-sm">
-                                        <div className="mb-1 text-xs text-muted-foreground">sample_limit</div>
+                                        <div className="mb-1 text-xs text-muted-foreground">Сколько примеров показать</div>
                                         <input
                                             type="number"
                                             min={1}
@@ -1102,7 +1233,7 @@ export default function MarketingPage() {
                                         onClick={previewCampaign}
                                         disabled={busyAction === "preview"}
                                     >
-                                        {busyAction === "preview" ? "Preview..." : "Preview аудитории"}
+                                        {busyAction === "preview" ? "Проверка..." : "Проверить аудиторию"}
                                     </button>
                                     <button
                                         type="button"
@@ -1140,7 +1271,7 @@ export default function MarketingPage() {
 
                                 <div className="flex flex-wrap items-end gap-3 border-t pt-3">
                                     <label className="text-sm">
-                                        <div className="mb-1 text-xs text-muted-foreground">max_recipients</div>
+                                        <div className="mb-1 text-xs text-muted-foreground">Лимит отправки за запуск</div>
                                         <input
                                             type="number"
                                             min={1}
@@ -1156,7 +1287,7 @@ export default function MarketingPage() {
                                         onClick={refreshPreflight}
                                         disabled={busyAction === "preflight"}
                                     >
-                                        {busyAction === "preflight" ? "..." : "Обновить preflight"}
+                                        {busyAction === "preflight" ? "..." : "Проверить готовность"}
                                     </button>
                                     <button
                                         type="button"
@@ -1178,7 +1309,7 @@ export default function MarketingPage() {
                             </div>
 
                             <div className="mt-6 border-t pt-4">
-                                <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">Preflight</h3>
+                                <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">Готовность к отправке</h3>
                                 {preflightLoading ? (
                                     <p className="mt-2 text-sm text-muted-foreground">Загрузка...</p>
                                 ) : preflightIsError ? (
@@ -1236,7 +1367,7 @@ export default function MarketingPage() {
                                         </div>
 
                                         <div className="mt-3 rounded-lg border bg-background p-3">
-                                            <div className="text-xs text-muted-foreground">Blocked reasons</div>
+                                            <div className="text-xs text-muted-foreground">Почему отправка может быть заблокирована</div>
                                             {preflight.blocked_reasons.length ? (
                                                 <ul className="mt-2 space-y-2">
                                                     {preflight.blocked_reasons.map((item) => (
@@ -1290,7 +1421,7 @@ export default function MarketingPage() {
                             </div>
 
                             <div className="mt-6 border-t pt-4">
-                                <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">Audience</h3>
+                                <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">Клиенты для рассылки</h3>
                                 <div className="mt-3 flex flex-wrap items-end gap-3">
                                     <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
                                         <input
@@ -1298,10 +1429,10 @@ export default function MarketingPage() {
                                             checked={includeSuppressed}
                                             onChange={(event) => setIncludeSuppressed(event.target.checked)}
                                         />
-                                        Показывать suppressed
+                                        Показывать исключенных клиентов
                                     </label>
                                     <label className="text-sm">
-                                        <div className="mb-1 text-xs text-muted-foreground">limit</div>
+                                        <div className="mb-1 text-xs text-muted-foreground">Сколько строк показать</div>
                                         <input
                                             type="number"
                                             min={1}
@@ -1316,7 +1447,7 @@ export default function MarketingPage() {
                                         className="h-10 rounded-lg border border-border bg-background px-4 text-sm font-medium"
                                         onClick={() => refetchAudience()}
                                     >
-                                        Обновить аудиторию
+                                        Обновить список
                                     </button>
                                     <div className="text-xs text-muted-foreground">
                                         total: {audienceData?.total_count ?? 0} | eligible: {audienceData?.eligible_count ?? 0} | suppressed: {audienceData?.suppressed_count ?? 0}
@@ -1344,7 +1475,7 @@ export default function MarketingPage() {
                                                     <th className="px-3 py-2 font-medium">Клиент</th>
                                                     <th className="px-3 py-2 font-medium">Почему в аудитории</th>
                                                     <th className="px-3 py-2 font-medium">Почему исключен</th>
-                                                    <th className="px-3 py-2 font-medium">Тех. коды</th>
+                                                    <th className="px-3 py-2 font-medium">Служебные коды (для поддержки)</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -1411,14 +1542,14 @@ export default function MarketingPage() {
                                                 candidates: {audienceFunnel.candidate_count}, matched: {audienceFunnel.matched_count}, suppressed: {audienceFunnel.suppressed_count}, eligible: {audienceFunnel.eligible_count}.
                                             </p>
                                         ) : (
-                                            <p className="mt-1 text-xs text-amber-700">Сначала запустите Preview аудитории.</p>
+                                            <p className="mt-1 text-xs text-amber-700">Сначала нажмите «Проверить аудиторию».</p>
                                         )}
                                     </div>
                                 )}
                             </div>
 
                             <div className="mt-6 border-t pt-4">
-                                <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">Diagnostics</h3>
+                                <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">Результаты отправки</h3>
                                 {diagnosticsLoading ? (
                                     <p className="mt-2 text-sm text-muted-foreground">Загрузка...</p>
                                 ) : diagnosticsIsError ? (
