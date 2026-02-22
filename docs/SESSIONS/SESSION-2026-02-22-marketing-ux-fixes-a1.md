@@ -1,0 +1,28 @@
+# SESSION 2026-02-22-marketing-ux-fixes-a1 — Session 2026-02-22-marketing-ux-fixes-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md
+- branch: feat/2026-02-22-marketing-ux-fixes-a1
+- worktree: /home/zhan/worktrees/2026-02-22-marketing-ux-fixes-a1
+- base_ref: origin/main
+- scope: Marketing UX/segment reliability hardening (items 1/2/3/4): segment signal fix, editable campaign before approve, preview funnel diagnostics, provider-billing execute gate.
+- done:
+  - Fixed segment `engaged_no_booking_7d` to rely on real service/pricing engagement signals from user message intent/metadata, not only `last_message_at`.
+  - Added campaign update endpoint `PATCH /console/v1/admin/marketing/campaigns/{campaign_id}` with guard `draft|in_review` only, audit event, and stale preview reset.
+  - Extended audience preview with funnel diagnostics (`candidate/matched/excluded/suppressed/eligible` + suppression reason histogram).
+  - Extended preflight with provider billing signal (`provider_billing_blocked`, count) and added hard block reason.
+  - Updated Marketing UI: campaign edit form, segment rule hints, preview funnel section, explicit empty-audience explanation, provider billing red banner + CTA, execute disabled when preflight is invalid.
+  - Synced API client types, OpenAPI contract entries, console audit docs, and tests.
+- next:
+  - Open PR and request review.
+- evidence:
+  - `python3 -m py_compile truffles-api/app/services/marketing/service.py truffles-api/app/routers/console.py truffles-api/app/schemas/console.py`
+  - `cd truffles-api && ruff check app/services/marketing/service.py app/routers/console.py app/schemas/console.py tests/test_marketing_service.py tests/test_console_marketing_campaigns.py`
+  - `pytest -q truffles-api/tests/test_marketing_service.py truffles-api/tests/test_console_marketing_campaigns.py -k "marketing"` (`20 passed`)
+  - `pytest -q truffles-api/tests/test_marketing_service.py truffles-api/tests/test_console_marketing_campaigns.py truffles-api/tests/test_webhook_marketing_reply_context.py truffles-api/tests/test_message_endpoint.py -k "marketing or campaign"` (`32 passed, 230 deselected`)
+  - `python3 truffles-api/scripts/generate_openapi.py --check`
+  - `npm --prefix console-web run lint -- --file src/app/marketing/page.tsx --file src/lib/api-client.ts`
+  - `npm --prefix console-web run build`
+  - `cd console-web && npx playwright test e2e/marketing.spec.ts --project=chromium --reporter=list --no-deps` (`1 passed, 1 skipped`)
+- last_updated: 2026-02-22

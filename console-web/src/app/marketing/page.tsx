@@ -11,6 +11,7 @@ import {
     authApi,
     canAccessConsole,
     parseApiError,
+    type MarketingAudienceFunnel,
     type MarketingCampaign,
     type MarketingCampaignDiagnosticsResponse,
     type MarketingCampaignPreflightResponse,
@@ -24,6 +25,11 @@ const SEGMENT_OPTIONS: Array<{ value: MarketingSegmentCode; label: string }> = [
     { value: "no_show_recovery_14d", label: "После no-show (14 дней)" },
     { value: "engaged_no_booking_7d", label: "Интерес без записи (7 дней)" },
 ];
+const SEGMENT_RULES: Record<MarketingSegmentCode, string> = {
+    reactivation_30_120: "Последний визит 30-120 дней назад и нет будущей записи.",
+    no_show_recovery_14d: "Есть no-show за 14 дней и нет будущей записи.",
+    engaged_no_booking_7d: "За 7 дней есть сигналы service/pricing в сообщениях и нет будущей записи.",
+};
 
 type MarketingDisplayStatus = MarketingCampaign["status"] | MarketingCampaign["status_v2"];
 
@@ -96,6 +102,7 @@ function parseBoundedInt(value: string, fallback: number, min: number, max: numb
 
 const PREFLIGHT_REASON_HINTS: Record<string, string> = {
     runtime_health_critical: "Runtime unhealthy: сначала стабилизируйте outbox/provider.",
+    provider_billing_blocked: "Провайдер заблокирован по оплате. Оплатите тариф и обновите preflight.",
     campaign_not_approved: "Кампанию нужно перевести в approved перед execute.",
     audience_snapshot_missing: "Сначала выполните Preview аудитории.",
     eligible_recipients_empty: "Нет eligible контактов: проверьте сегмент и suppression.",
@@ -106,11 +113,40 @@ function preflightReasonHint(reason: string): string {
     return PREFLIGHT_REASON_HINTS[reason] ?? "Требуется ручная проверка причины блокировки.";
 }
 
+function parseAudienceFunnel(value: unknown): MarketingAudienceFunnel | null {
+    if (!value || typeof value !== "object") {
+        return null;
+    }
+    const payload = value as Record<string, unknown>;
+    const reasonCountsValue = payload.suppression_reason_counts;
+    const reasonCounts: Record<string, number> = {};
+    if (reasonCountsValue && typeof reasonCountsValue === "object") {
+        for (const [key, raw] of Object.entries(reasonCountsValue as Record<string, unknown>)) {
+            if (!key.trim()) {
+                continue;
+            }
+            const parsed = Number(raw ?? 0);
+            reasonCounts[key] = Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
+        }
+    }
+    return {
+        candidate_count: Number(payload.candidate_count ?? 0) || 0,
+        matched_count: Number(payload.matched_count ?? 0) || 0,
+        segment_excluded_count: Number(payload.segment_excluded_count ?? 0) || 0,
+        eligible_count: Number(payload.eligible_count ?? 0) || 0,
+        suppressed_count: Number(payload.suppressed_count ?? 0) || 0,
+        suppression_reason_counts: reasonCounts,
+    };
+}
+
 export default function MarketingPage() {
     const { data: session } = useSession();
     const [name, setName] = useState("");
     const [messageText, setMessageText] = useState("");
     const [segmentCode, setSegmentCode] = useState<MarketingSegmentCode>("reactivation_30_120");
+    const [editName, setEditName] = useState("");
+    const [editMessageText, setEditMessageText] = useState("");
+    const [editSegmentCode, setEditSegmentCode] = useState<MarketingSegmentCode>("reactivation_30_120");
     const [sampleLimit, setSampleLimit] = useState(5);
     const [maxRecipients, setMaxRecipients] = useState(200);
     const [audienceLimit, setAudienceLimit] = useState(100);
@@ -119,6 +155,7 @@ export default function MarketingPage() {
     const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
     const [busyAction, setBusyAction] = useState<string | null>(null);
     const [executeModalOpen, setExecuteModalOpen] = useState(false);
+    const [lastPreviewFunnel, setLastPreviewFunnel] = useState<MarketingAudienceFunnel | null>(null);
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -188,7 +225,20 @@ export default function MarketingPage() {
 
     useEffect(() => {
         setExecuteModalOpen(false);
+        setLastPreviewFunnel(null);
     }, [selectedCampaignId]);
+
+    useEffect(() => {
+        if (!selectedCampaign) {
+            setEditName("");
+            setEditMessageText("");
+            setEditSegmentCode("reactivation_30_120");
+            return;
+        }
+        setEditName(selectedCampaign.name);
+        setEditMessageText(selectedCampaign.message_text);
+        setEditSegmentCode(selectedCampaign.segment_code);
+    }, [selectedCampaign]);
 
     const {
         data: diagnosticsData,
@@ -249,6 +299,7 @@ export default function MarketingPage() {
     }
 
     const selectedStatus = selectedCampaign ? resolveCampaignStatus(selectedCampaign) : null;
+    const canEditCampaign = selectedStatus ? ["draft", "in_review", "ready"].includes(selectedStatus) : false;
     const canRequestApproval = selectedStatus ? ["draft", "ready"].includes(selectedStatus) : false;
     const canApprove = selectedStatus ? ["in_review", "ready"].includes(selectedStatus) : false;
     const canPause = selectedStatus ? ["approved", "scheduled", "running", "executed"].includes(selectedStatus) : false;
@@ -265,7 +316,25 @@ export default function MarketingPage() {
     const failureClassRows = diagnostics
         ? Object.entries(diagnostics.failure_classes ?? {}).sort((a, b) => b[1] - a[1])
         : [];
-    const canConfirmExecute = Boolean(preflight?.preflight_valid);
+    const providerBillingBlocked = Boolean(preflight?.provider_billing_blocked);
+    const canConfirmExecute = Boolean(preflight?.preflight_valid) && !providerBillingBlocked;
+    const executeBlockedByPreflight = !canConfirmExecute;
+    const selectedSnapshotFunnel = parseAudienceFunnel(
+        preflight?.preview_stats ??
+            ((selectedCampaign?.preflight_snapshot as Record<string, unknown> | null)?.preview_stats ?? null),
+    );
+    const audienceFunnel = lastPreviewFunnel ?? selectedSnapshotFunnel;
+    const audienceFunnelReasonRows = audienceFunnel
+        ? Object.entries(audienceFunnel.suppression_reason_counts ?? {}).sort((a, b) => b[1] - a[1])
+        : [];
+    const campaignChanged = Boolean(
+        selectedCampaign &&
+            (
+                editName.trim() !== selectedCampaign.name ||
+                editMessageText.trim() !== selectedCampaign.message_text ||
+                editSegmentCode !== selectedCampaign.segment_code
+            ),
+    );
 
     const withReasonPayload = () => {
         const normalized = lifecycleReason.trim();
@@ -313,9 +382,45 @@ export default function MarketingPage() {
         }
         setBusyAction("preview");
         try {
-            await adminApi.previewMarketingCampaign(selectedCampaign.id, { sample_limit: sampleLimit });
+            const response = await adminApi.previewMarketingCampaign(selectedCampaign.id, { sample_limit: sampleLimit });
+            setLastPreviewFunnel(response.data.funnel ?? null);
             await Promise.all([refetchCampaigns(), refetchAudience(), refetchPreflight()]);
             toast.success("Preview и audience обновлены.");
+        } catch (error) {
+            const parsed = parseApiError(error);
+            toast.error(parsed.message);
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const updateCampaign = async () => {
+        if (!selectedCampaign) {
+            return;
+        }
+        if (!campaignChanged) {
+            toast.error("Нет изменений для сохранения.");
+            return;
+        }
+        if (!editName.trim()) {
+            toast.error("Название кампании не может быть пустым.");
+            return;
+        }
+        if (!editMessageText.trim()) {
+            toast.error("Текст сообщения не может быть пустым.");
+            return;
+        }
+        setBusyAction("update");
+        try {
+            await adminApi.updateMarketingCampaign(selectedCampaign.id, {
+                name: editName.trim(),
+                message_text: editMessageText.trim(),
+                segment_code: editSegmentCode,
+                reason: lifecycleReason.trim() || null,
+            });
+            setLastPreviewFunnel(null);
+            await Promise.all([refetchCampaigns(), refetchAudience(), refetchPreflight()]);
+            toast.success("Кампания обновлена. Выполните Preview для новой аудитории.");
         } catch (error) {
             const parsed = parseApiError(error);
             toast.error(parsed.message);
@@ -504,6 +609,7 @@ export default function MarketingPage() {
                                 </option>
                             ))}
                         </select>
+                        <p className="text-xs text-muted-foreground">{SEGMENT_RULES[segmentCode]}</p>
                         <textarea
                             className="min-h-[120px] w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                             placeholder="Текст WhatsApp сообщения"
@@ -603,7 +709,60 @@ export default function MarketingPage() {
                             </div>
 
                             <div className="mt-5 space-y-4 rounded-lg border bg-background p-3">
+                                <div>
+                                    <h3 className="text-sm font-semibold">Редактирование кампании (до approve)</h3>
+                                </div>
+                                <div className="grid gap-3 lg:grid-cols-2">
+                                    <label className="text-sm">
+                                        <div className="mb-1 text-xs text-muted-foreground">Название</div>
+                                        <input
+                                            className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm"
+                                            value={editName}
+                                            onChange={(event) => setEditName(event.target.value)}
+                                            disabled={!canEditCampaign}
+                                        />
+                                    </label>
+                                    <label className="text-sm">
+                                        <div className="mb-1 text-xs text-muted-foreground">Segment</div>
+                                        <select
+                                            className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm"
+                                            value={editSegmentCode}
+                                            onChange={(event) => setEditSegmentCode(event.target.value as MarketingSegmentCode)}
+                                            disabled={!canEditCampaign}
+                                        >
+                                            {SEGMENT_OPTIONS.map((option) => (
+                                                <option key={option.value} value={option.value}>
+                                                    {option.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </label>
+                                </div>
+                                <p className="text-xs text-muted-foreground">{SEGMENT_RULES[editSegmentCode]}</p>
                                 <label className="text-sm">
+                                    <div className="mb-1 text-xs text-muted-foreground">Текст сообщения</div>
+                                    <textarea
+                                        className="min-h-[90px] w-full rounded-lg border border-border bg-card px-3 py-2 text-sm"
+                                        value={editMessageText}
+                                        onChange={(event) => setEditMessageText(event.target.value)}
+                                        disabled={!canEditCampaign}
+                                    />
+                                </label>
+                                <div className="flex flex-wrap items-center gap-3">
+                                    <button
+                                        type="button"
+                                        className="h-10 rounded-lg border border-border bg-card px-4 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                                        onClick={updateCampaign}
+                                        disabled={!canEditCampaign || !campaignChanged || busyAction === "update"}
+                                    >
+                                        {busyAction === "update" ? "Сохранение..." : "Сохранить кампанию"}
+                                    </button>
+                                    {!canEditCampaign ? (
+                                        <span className="text-xs text-amber-700">Редактирование доступно только в draft/in_review.</span>
+                                    ) : null}
+                                </div>
+
+                                <label className="text-sm border-t pt-3">
                                     <div className="mb-1 text-xs text-muted-foreground">Причина (audit)</div>
                                     <input
                                         className="h-10 w-full rounded-lg border border-border bg-card px-3 text-sm"
@@ -691,7 +850,7 @@ export default function MarketingPage() {
                                         type="button"
                                         className="h-10 rounded-lg bg-foreground px-4 text-sm font-medium text-background disabled:cursor-not-allowed disabled:opacity-60"
                                         onClick={() => setExecuteModalOpen(true)}
-                                        disabled={busyAction === "execute" || !canExecute}
+                                        disabled={busyAction === "execute" || !canExecute || executeBlockedByPreflight}
                                     >
                                         {busyAction === "execute" ? "Execute..." : "Execute modal"}
                                     </button>
@@ -723,6 +882,20 @@ export default function MarketingPage() {
                                     </div>
                                 ) : preflight ? (
                                     <>
+                                        {providerBillingBlocked ? (
+                                            <div className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+                                                <div className="font-semibold">Provider billing blocked</div>
+                                                <p className="mt-1 text-xs text-red-700">
+                                                    Обнаружены ошибки оплаты провайдера ({preflight.provider_billing_blocked_count}). Авто-рассылка отключена до оплаты.
+                                                </p>
+                                                <a
+                                                    href="/integrations"
+                                                    className="mt-2 inline-flex h-8 items-center rounded border border-red-300 bg-white px-3 text-xs font-medium text-red-700"
+                                                >
+                                                    Открыть Integrations и проверить оплату
+                                                </a>
+                                            </div>
+                                        ) : null}
                                         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                                             <div className="rounded-lg border bg-background p-3">
                                                 <div className="text-xs text-muted-foreground">Статус</div>
@@ -770,6 +943,41 @@ export default function MarketingPage() {
                                                 <p className="mt-2 text-xs text-emerald-700">Блокировок нет.</p>
                                             )}
                                         </div>
+                                        {audienceFunnel ? (
+                                            <div className="mt-3 rounded-lg border bg-background p-3">
+                                                <div className="text-xs text-muted-foreground">Preview funnel</div>
+                                                <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                                                    <div className="rounded border bg-card p-2 text-xs">
+                                                        <div className="text-muted-foreground">Candidates</div>
+                                                        <div className="mt-1 font-semibold">{audienceFunnel.candidate_count}</div>
+                                                    </div>
+                                                    <div className="rounded border bg-card p-2 text-xs">
+                                                        <div className="text-muted-foreground">Matched</div>
+                                                        <div className="mt-1 font-semibold">{audienceFunnel.matched_count}</div>
+                                                    </div>
+                                                    <div className="rounded border bg-card p-2 text-xs">
+                                                        <div className="text-muted-foreground">Excluded by segment</div>
+                                                        <div className="mt-1 font-semibold">{audienceFunnel.segment_excluded_count}</div>
+                                                    </div>
+                                                    <div className="rounded border bg-card p-2 text-xs">
+                                                        <div className="text-muted-foreground">Suppressed</div>
+                                                        <div className="mt-1 font-semibold">{audienceFunnel.suppressed_count}</div>
+                                                    </div>
+                                                    <div className="rounded border bg-card p-2 text-xs">
+                                                        <div className="text-muted-foreground">Eligible</div>
+                                                        <div className="mt-1 font-semibold">{audienceFunnel.eligible_count}</div>
+                                                    </div>
+                                                </div>
+                                                {audienceFunnelReasonRows.length ? (
+                                                    <div className="mt-2 text-xs text-muted-foreground">
+                                                        suppression:{" "}
+                                                        {audienceFunnelReasonRows
+                                                            .map(([reason, count]) => `${formatReason(reason)} (${count})`)
+                                                            .join(", ")}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        ) : null}
                                     </>
                                 ) : (
                                     <p className="mt-2 text-sm text-muted-foreground">Preflight недоступен.</p>
@@ -877,7 +1085,17 @@ export default function MarketingPage() {
                                         </table>
                                     </div>
                                 ) : (
-                                    <p className="mt-2 text-sm text-muted-foreground">Audience пустой. Сначала запустите preview.</p>
+                                    <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                                        <p>Audience пустой.</p>
+                                        {audienceFunnel ? (
+                                            <p className="mt-1 text-xs text-amber-700">
+                                                candidates: {audienceFunnel.candidate_count}, matched: {audienceFunnel.matched_count}, suppressed:{" "}
+                                                {audienceFunnel.suppressed_count}, eligible: {audienceFunnel.eligible_count}.
+                                            </p>
+                                        ) : (
+                                            <p className="mt-1 text-xs text-amber-700">Сначала запустите Preview аудитории.</p>
+                                        )}
+                                    </div>
                                 )}
                             </div>
 
