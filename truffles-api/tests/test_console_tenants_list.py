@@ -746,6 +746,7 @@ def test_serialize_tenants_weekly_snapshot_record_maps_payload() -> None:
 
     assert record.week_key == "2026-W08"
     assert record.snapshot.kpi.blockedSignals == 1
+    assert record.snapshot_schema_version == "v1"
     assert record.actor_name == "Platform Admin"
 
 
@@ -767,6 +768,44 @@ def test_serialize_tenants_weekly_snapshot_record_falls_back_for_legacy_payload(
     assert record.week_key == "2026-W08"
     assert record.snapshot.kpi.blockedSignals == 0
     assert record.snapshot.workspaceMode == "portfolio"
+    assert record.snapshot_schema_version == "v1"
+
+
+def test_build_weekly_snapshot_schema_versions_groups_items() -> None:
+    now = datetime.now(timezone.utc)
+    snapshot_model = console_router.ConsoleTenantsWeeklySnapshotPayload.model_validate(
+        _sample_weekly_snapshot(now, blocked_signals=1),
+    )
+    items = [
+        console_router.ConsoleTenantsWeeklySnapshotRecord(
+            id=uuid4(),
+            created_at=now.isoformat(),
+            client_id=uuid4(),
+            week_key="2026-W08",
+            snapshot=snapshot_model,
+            snapshot_schema_version="v1",
+        ),
+        console_router.ConsoleTenantsWeeklySnapshotRecord(
+            id=uuid4(),
+            created_at=now.isoformat(),
+            client_id=uuid4(),
+            week_key="2026-W09",
+            snapshot=snapshot_model,
+            snapshot_schema_version="v2",
+        ),
+        console_router.ConsoleTenantsWeeklySnapshotRecord(
+            id=uuid4(),
+            created_at=now.isoformat(),
+            client_id=uuid4(),
+            week_key="2026-W10",
+            snapshot=snapshot_model,
+            snapshot_schema_version="v1",
+        ),
+    ]
+
+    versions = console_router._build_weekly_snapshot_schema_versions(items)
+
+    assert versions == {"v1": 2, "v2": 1}
 
 
 class _ClientQuery:
@@ -837,6 +876,7 @@ async def test_save_tenants_weekly_snapshot_updates_existing_week(monkeypatch) -
     assert response.item.id == event_id
     assert response.item.week_key == "2026-W08"
     assert response.item.snapshot.kpi.blockedSignals == 1
+    assert response.item.snapshot_schema_version == "v1"
     assert existing_snapshot.actor_name == "Platform Admin"
     assert existing_snapshot.snapshot_schema_version == "v1"
     db.commit.assert_called_once()

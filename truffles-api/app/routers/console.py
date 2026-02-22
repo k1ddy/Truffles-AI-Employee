@@ -1951,6 +1951,7 @@ def _serialize_tenants_weekly_snapshot_record(event: AuditEvent) -> ConsoleTenan
     payload = event.payload if isinstance(event.payload, dict) else {}
     week_key = payload.get("week_key")
     snapshot_payload = payload.get("snapshot")
+    snapshot_schema_version = payload.get("snapshot_schema_version")
     try:
         snapshot = ConsoleTenantsWeeklySnapshotPayload.model_validate(snapshot_payload)
     except ValidationError:
@@ -1983,6 +1984,7 @@ def _serialize_tenants_weekly_snapshot_record(event: AuditEvent) -> ConsoleTenan
         client_id=event.client_id,
         week_key=week_key if isinstance(week_key, str) else "",
         snapshot=snapshot,
+        snapshot_schema_version=snapshot_schema_version if isinstance(snapshot_schema_version, str) else "v1",
         actor_name=event.actor_name,
     )
 
@@ -2024,8 +2026,19 @@ def _serialize_tenants_weekly_snapshot_row(
         client_id=row.client_id,
         week_key=row.week_key,
         snapshot=snapshot,
+        snapshot_schema_version=(row.snapshot_schema_version or "v1").strip() or "v1",
         actor_name=row.actor_name,
     )
+
+
+def _build_weekly_snapshot_schema_versions(
+    items: list[ConsoleTenantsWeeklySnapshotRecord],
+) -> dict[str, int]:
+    versions: dict[str, int] = {}
+    for item in items:
+        version = (item.snapshot_schema_version or "").strip() or "unknown"
+        versions[version] = versions.get(version, 0) + 1
+    return versions
 
 
 def _is_tenants_weekly_snapshot_table_missing_error(exc: ProgrammingError) -> bool:
@@ -13449,10 +13462,13 @@ async def list_tenants_weekly_snapshots(
         has_more = len(rows) > limit
         items = rows[:limit]
         next_cursor = items[-1].updated_at.isoformat() if has_more and items else None
+        serialized_items = [_serialize_tenants_weekly_snapshot_row(item) for item in items]
         return ConsoleTenantsWeeklySnapshotListResponse(
-            items=[_serialize_tenants_weekly_snapshot_row(item) for item in items],
+            items=serialized_items,
             cursor=next_cursor,
             has_more=has_more,
+            storage_mode="table",
+            schema_versions=_build_weekly_snapshot_schema_versions(serialized_items),
         )
     except ProgrammingError as exc:
         if not _is_tenants_weekly_snapshot_table_missing_error(exc):
@@ -13483,11 +13499,14 @@ async def list_tenants_weekly_snapshots(
     has_more = len(candidates) > limit
     items = candidates[:limit] if has_more else candidates
     next_cursor = items[-1].created_at.isoformat() if has_more and items else None
+    serialized_items = [_serialize_tenants_weekly_snapshot_record(item) for item in items]
 
     return ConsoleTenantsWeeklySnapshotListResponse(
-        items=[_serialize_tenants_weekly_snapshot_record(item) for item in items],
+        items=serialized_items,
         cursor=next_cursor,
         has_more=has_more,
+        storage_mode="audit_fallback",
+        schema_versions=_build_weekly_snapshot_schema_versions(serialized_items),
     )
 
 
