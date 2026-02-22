@@ -23,7 +23,12 @@ import { useInlineErrorSummary } from "@/lib/use-inline-error-summary";
 type SessionData = ReturnType<typeof useSession>["data"];
 type ProvisioningBranch = components["schemas"]["Branch"];
 type ProvisioningAgent = components["schemas"]["Agent"];
-type CapabilitiesPayload = components["schemas"]["CapabilitiesPayload"];
+type RawCapabilitiesPayload = components["schemas"]["CapabilitiesPayload"];
+type CapabilitiesPayload = RawCapabilitiesPayload & {
+    channels: NonNullable<RawCapabilitiesPayload["channels"]>;
+    providers: NonNullable<RawCapabilitiesPayload["providers"]>;
+    features: NonNullable<RawCapabilitiesPayload["features"]>;
+};
 type CapabilitiesResponse = components["schemas"]["CapabilitiesResponse"];
 type OnboardingContractPayload = components["schemas"]["OnboardingContractPayload"];
 type OnboardingContractResponse = components["schemas"]["OnboardingContractResponse"];
@@ -646,7 +651,7 @@ function qualityStatusClass(value?: string): string {
     return "border-destructive/30 bg-destructive/10 text-destructive";
 }
 
-function normalizeCapabilities(payload?: CapabilitiesPayload | null): CapabilitiesPayload {
+function normalizeCapabilities(payload?: RawCapabilitiesPayload | null): CapabilitiesPayload {
     return {
         domain_slug: payload?.domain_slug ?? null,
         channels: {
@@ -691,7 +696,7 @@ function normalizeOnboardingContractPayload(
     };
 }
 
-function mergeCapabilities(base?: CapabilitiesPayload | null, override?: CapabilitiesPayload | null): CapabilitiesPayload {
+function mergeCapabilities(base?: RawCapabilitiesPayload | null, override?: RawCapabilitiesPayload | null): CapabilitiesPayload {
     const merged = normalizeCapabilities(base);
     const overridePayload = normalizeCapabilities(override);
 
@@ -2309,7 +2314,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         }
         createCompanyMutation.mutate({
             name,
-            billing_info: billingPayload,
+            billing_info: (billingPayload as Record<string, never> | undefined) ?? undefined,
         });
     };
 
@@ -2326,6 +2331,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
         createClientMutation.mutate({
             slug,
             company_id: companyId.trim(),
+            status: null,
         });
     };
 
@@ -2340,6 +2346,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 role: "owner",
                 name: branchBootstrap.ownerName.trim() || `${branchLabel} Owner`,
                 oidc_subject: branchBootstrap.ownerOidcSubject.trim() || undefined,
+                is_active: true,
             });
         }
         if (branchBootstrap.createAdmin) {
@@ -2347,6 +2354,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 role: "admin",
                 name: branchBootstrap.adminName.trim() || `${branchLabel} Admin`,
                 oidc_subject: branchBootstrap.adminOidcSubject.trim() || undefined,
+                is_active: true,
             });
         }
         if (branchBootstrap.createManager) {
@@ -2354,6 +2362,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
                 role: "manager",
                 name: branchBootstrap.managerName.trim() || `${branchLabel} Manager`,
                 oidc_subject: branchBootstrap.managerOidcSubject.trim() || undefined,
+                is_active: true,
             });
         }
         return accounts;
@@ -2378,7 +2387,7 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             timezone: branchForm.timezone.trim() || undefined,
             phone: branchForm.phone.trim() || undefined,
             is_active: false,
-            bootstrap_accounts: bootstrapAccounts.length > 0 ? bootstrapAccounts : undefined,
+            bootstrap_accounts: bootstrapAccounts,
         });
     };
 
@@ -2516,8 +2525,8 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             }));
         }
         patchBranchMutation.mutate({
-            working_hours: workingPayload,
-            booking_settings: bookingPayload,
+            working_hours: (workingPayload as Record<string, never> | undefined) ?? undefined,
+            booking_settings: (bookingPayload as Record<string, never> | undefined) ?? undefined,
         });
     };
 
@@ -2532,6 +2541,8 @@ function ProvisioningWizard({ session, accessSection = "settings" }: Provisionin
             role: roleValue,
             name: agentForm.name.trim() || undefined,
             oidc_subject: agentForm.oidcSubject.trim() || undefined,
+            is_active: true,
+            sso_temp_password: null,
         };
         if (roleValue === "manager") {
             const branchId = agentForm.branchId || branchData?.id;

@@ -587,7 +587,7 @@ export default function IntegrationsPage() {
             const response = await adminApi.listProviderLifecycle({
                 stale_after_minutes: staleAfterMinutes,
                 limit: INTEGRATIONS_PAGE_LIMIT,
-                only_problematic: true,
+                only_problematic: "true",
                 company_id: scopeCompanyId || undefined,
                 client_id: scopeClientId || undefined,
                 branch_id: scopeBranchId || undefined,
@@ -1123,7 +1123,7 @@ export default function IntegrationsPage() {
                 stale_after_minutes: staleAfterMinutes,
                 limit: INTEGRATIONS_PAGE_LIMIT,
                 cursor: todayCursor,
-                only_problematic: true,
+                only_problematic: "true",
                 company_id: scopeCompanyId || undefined,
                 client_id: scopeClientId || undefined,
                 branch_id: scopeBranchId || undefined,

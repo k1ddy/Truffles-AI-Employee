@@ -1628,6 +1628,7 @@ export default function TenantsPage() {
             const response = await adminApi.createClient({
                 slug,
                 company_id: companyId,
+                status: null,
             });
             const clientId = response.data.client?.id;
             if (!clientId) {
@@ -1691,6 +1692,7 @@ export default function TenantsPage() {
                 phone: phone || undefined,
                 instance_id: instanceId || undefined,
                 is_active: Boolean(phone && instanceId),
+                bootstrap_accounts: [],
             });
             const branchId = response.data.branch?.id;
             if (!branchId) {
@@ -1877,7 +1879,7 @@ export default function TenantsPage() {
             const response = await opsApi.runJob({
                 job_type: "metrics_snapshot",
                 mode,
-                params: { days: 7 },
+                params: ({ days: 7 } as unknown as Record<string, never>),
             });
             setLastMetricsSnapshotJob(response.data.job);
             toast.success(mode === "dry_run" ? "Snapshot dry-run выполнен" : "Snapshot execute выполнен");
@@ -1980,7 +1982,7 @@ export default function TenantsPage() {
             payload.name = name;
         }
         if (companyEditor.billingInfo.trim() !== companyEditor.originalBillingInfo.trim()) {
-            payload.billing_info = billing.value ?? {};
+            payload.billing_info = (billing.value ?? {}) as Record<string, never>;
         }
         if (Object.keys(payload).length === 0) {
             toast("Нет изменений");

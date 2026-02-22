@@ -6,8 +6,6 @@ import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { useSearchParams } from "next/navigation";
-import type { components } from "@/types/api.generated";
-
 import AccessDenied from "@/components/AccessDenied";
 import {
     adminApi,
@@ -16,6 +14,9 @@ import {
     confirmationsApi,
     onboardingApi,
     parseApiError,
+    type Branch,
+    type BranchIntegrationStatus,
+    type Client,
     type IncidentItem,
     type IntegrationBranchActionRequest,
     type ProviderOpsAction,
@@ -50,6 +51,22 @@ type WizardStep = {
     passed: boolean;
     detail: string;
     fix: string;
+};
+
+type CompanyOption = {
+    id: string;
+    name: string;
+};
+
+type ProviderLifecycleFact = {
+    sla_state?: string | null;
+    next_action?: string | null;
+    sla_deadline_at?: string | null;
+    blockers: string[];
+    provider_binding_owner?: string | null;
+    provider_binding_paid_until?: string | null;
+    instance_id?: string | null;
+    provider_binding_instance_id?: string | null;
 };
 
 function readWorkspaceRecommendedActionContext(): WorkspaceRecommendedActionContext | null {
@@ -349,7 +366,7 @@ export default function CompanyWorkspacePage() {
     const canWriteTenants = canAccessConsole(role, "tenants", "write");
     const canReadIntegrations = canAccessConsole(role, "integrations", "read");
     const canReadOps = canAccessConsole(role, "ops", "read");
-    const companyOptions = useMemo<components["schemas"]["Company"][]>(
+    const companyOptions = useMemo<CompanyOption[]>(
         () => meData?.companies ?? [],
         [meData?.companies],
     );
@@ -408,7 +425,7 @@ export default function CompanyWorkspacePage() {
         },
         enabled: !!session && canReadTenants,
     });
-    const clientOptions = useMemo<components["schemas"]["Client"][]>(
+    const clientOptions = useMemo<Client[]>(
         () => clientsData?.items ?? [],
         [clientsData?.items],
     );
@@ -425,7 +442,7 @@ export default function CompanyWorkspacePage() {
         },
         enabled: !!session && canReadTenants && !!scopeClientId,
     });
-    const branchOptions = useMemo<components["schemas"]["Branch"][]>(
+    const branchOptions = useMemo<Branch[]>(
         () => branchesData?.items ?? [],
         [branchesData?.items],
     );
@@ -470,7 +487,7 @@ export default function CompanyWorkspacePage() {
             const response = await adminApi.listProviderLifecycle({
                 stale_after_minutes: staleAfterMinutes,
                 limit: 1,
-                only_problematic: true,
+                only_problematic: "true",
                 company_id: scopeCompanyId || undefined,
                 client_id: scopeClientId || undefined,
                 branch_id: scopeBranchId || undefined,
@@ -538,16 +555,23 @@ export default function CompanyWorkspacePage() {
         [branchOptions, scopeBranchId],
     );
 
-    const selectedIntegration = useMemo<components["schemas"]["BranchIntegrationStatus"] | null>(() => {
-        const items: components["schemas"]["BranchIntegrationStatus"][] = integrationsData?.items ?? [];
+    const selectedIntegration = useMemo<BranchIntegrationStatus | null>(() => {
+        const items = (integrationsData?.items ?? []) as BranchIntegrationStatus[];
         if (!scopeBranchId) {
             return items[0] ?? null;
         }
         return items.find((item) => item.branch_id === scopeBranchId) ?? null;
     }, [integrationsData?.items, scopeBranchId]);
 
-    const lifecycleTodayFact = useMemo<components["schemas"]["ProviderLifecycleItem"] | null>(() => {
-        return providerLifecycleData?.items?.[0] ?? null;
+    const lifecycleTodayFact = useMemo<ProviderLifecycleFact | null>(() => {
+        const item = providerLifecycleData?.items?.[0];
+        if (!item) {
+            return null;
+        }
+        return {
+            ...item,
+            blockers: Array.isArray(item.blockers) ? item.blockers : [],
+        };
     }, [providerLifecycleData?.items]);
 
     const workspaceIncident = useMemo<IncidentItem | null>(() => {

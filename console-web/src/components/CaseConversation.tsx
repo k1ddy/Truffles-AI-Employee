@@ -333,7 +333,7 @@ export default function CaseConversation({
         reason: caseDetail.human_lock_reason ?? null,
         locked_by_name: caseDetail.human_lock_by ?? null,
     };
-    const effectiveLockStatus = humanLockStatus ?? fallbackLockStatus;
+    const effectiveLockStatus = (humanLockStatus ?? fallbackLockStatus) as typeof fallbackLockStatus;
     const lockRemainingSeconds =
         effectiveLockStatus?.remaining_seconds ??
         (effectiveLockStatus?.lock_until

@@ -153,12 +153,29 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
     },
 };
 
+const ConsoleRoleSet = new Set<ConsoleRole>([
+    "platform_admin",
+    "owner",
+    "admin",
+    "manager",
+    "support",
+    "specialist",
+    "viewer",
+]);
+
+export function isConsoleRole(role: string): role is ConsoleRole {
+    return ConsoleRoleSet.has(role as ConsoleRole);
+}
+
 export function canAccessConsole(
-    role: ConsoleRole | null | undefined,
+    role: string | null | undefined,
     section: ConsoleSection,
     action: ConsoleAction,
 ): boolean {
     if (!role) {
+        return false;
+    }
+    if (!isConsoleRole(role)) {
         return false;
     }
     return ConsoleRBAC[section][action].includes(role);
