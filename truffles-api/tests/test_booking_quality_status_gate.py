@@ -1,6 +1,7 @@
 import ast
 import hashlib
 import os
+import re
 from pathlib import Path
 
 
@@ -10,18 +11,27 @@ def _load_quality_helpers():
     tree = ast.parse(source, filename=str(script_path))
 
     wanted_assignments = {
+        "CHAOS_BOOKING_REPLY_TYPES",
         "LLM_QUALITY_THRESHOLDS",
         "LLM_QUALITY_THRESHOLD_DIRECTIONS",
         "LLM_QUALITY_REGRESSION_KEYS",
         "LLM_QUALITY_BLOCKING_REASONS",
+        "LLM_QUALITY_HQ1_CLASSES",
+        "LLM_QUALITY_HQ1_RESCHEDULE_MARKERS",
+        "LLM_QUALITY_HQ1_MASTER_MARKERS",
+        "LLM_QUALITY_HQ1_SERVICE_OVERVIEW_MARKERS",
+        "LLM_QUALITY_HQ1_HALLUCINATION_MARKERS",
         "LLM_POLICY_OVERRIDE_REASON_WHITELIST",
         "LLM_POLICY_OVERRIDE_KEYWORD_REASON_CODES",
         "LLM_QUALITY_REGEX_LEXICON_TOKENS",
         "LLM_QUALITY_REGEX_LEXICON_RESOLVER_PREFIXES",
         "LLM_QUALITY_REGEX_LEXICON_TEST_PREFIX",
+        "LLM_QUALITY_PROGRESS_TAGS_BY_REPLY_TYPE",
+        "LLM_QUALITY_PROGRESS_SKIP_TAGS",
     }
     wanted_functions = {
         "_llm_quality_normalize_tool_token",
+        "_llm_quality_effective_intent",
         "_llm_quality_is_timeout_degrade_reason",
         "_clean_webhook_secret",
         "_llm_quality_secret_fingerprint",
@@ -39,6 +49,11 @@ def _load_quality_helpers():
         "_llm_quality_collect_blocking_reasons",
         "_llm_quality_is_lexicon_regex_delta_file",
         "_llm_quality_build_lexicon_regex_delta_status",
+        "_llm_quality_hq1_normalize_text",
+        "_llm_quality_hq1_contains_any",
+        "_llm_quality_hq1_has_hallucination_signal",
+        "_llm_quality_collect_hq1_classes",
+        "_llm_quality_should_expect_booking_progress",
     }
 
     selected_nodes = []
@@ -51,7 +66,7 @@ def _load_quality_helpers():
             selected_nodes.append(node)
 
     module = ast.Module(body=selected_nodes, type_ignores=[])
-    namespace = {"hashlib": hashlib, "os": os}
+    namespace = {"hashlib": hashlib, "os": os, "re": re}
     exec(compile(module, str(script_path), "exec"), namespace, namespace)
     return namespace
 
@@ -281,3 +296,185 @@ def test_lexicon_regex_delta_gate_requires_resolver_and_tests():
         ],
     )
     assert valid["valid"] is True
+
+
+def test_hq1_classifier_detects_handoff_miss():
+    ns = _load_quality_helpers()
+    classify = ns["_llm_quality_collect_hq1_classes"]
+
+    record = {
+        "turn_text": "Я хочу изменить время записи.",
+        "turn_tags": ["reschedule", "booking"],
+        "conversation_state": "bot_active",
+        "decision_meta": {
+            "action": "reply",
+            "intent": "check_booking",
+            "tool_action": "calendar.reschedule",
+            "tool_decision": "missing_slot",
+        },
+        "turn_expectations": {"action": "handoff", "info_sections": []},
+        "evaluation": {"strict_reasons": ["expected_action_mismatch"]},
+        "judge": None,
+        "outbox_text": "Уточните, пожалуйста, новое время.",
+    }
+
+    assert classify(record) == ["handoff_miss"]
+
+
+def test_hq1_classifier_ignores_check_booking_confirmation_without_handoff_signal():
+    ns = _load_quality_helpers()
+    classify = ns["_llm_quality_collect_hq1_classes"]
+
+    record = {
+        "turn_text": "Подтвердите, пожалуйста, запись на стрижку.",
+        "turn_tags": ["check_booking"],
+        "conversation_state": "bot_active",
+        "decision_meta": {
+            "action": "reply",
+            "intent": "calendar.get_booking",
+            "tool_action": "calendar.get_booking",
+            "tool_decision": "not_found",
+        },
+        "turn_expectations": {"action": None, "info_sections": []},
+        "evaluation": {"strict_reasons": []},
+        "judge": None,
+        "outbox_text": "Не нашел активной записи, подскажите время и имя.",
+    }
+
+    assert "handoff_miss" not in classify(record)
+
+
+def test_booking_progress_expectation_ignores_book_slot_conflict():
+    ns = _load_quality_helpers()
+    should_expect_progress = ns["_llm_quality_should_expect_booking_progress"]
+
+    assert (
+        should_expect_progress(
+            "time",
+            ["time"],
+            {
+                "intent": "calendar.book_slot",
+                "tool_decision": "conflict",
+            },
+        )
+        is False
+    )
+    assert (
+        should_expect_progress(
+            "time",
+            ["time"],
+            {
+                "intent": "calendar.book_slot",
+                "tool_decision": "ok",
+            },
+        )
+        is True
+    )
+
+
+def test_hq1_classifier_detects_wrong_action_and_non_actionable_reply():
+    ns = _load_quality_helpers()
+    classify = ns["_llm_quality_collect_hq1_classes"]
+
+    wrong_action_record = {
+        "turn_text": "У вас есть мастера, которые работают с долгими стрижками?",
+        "turn_tags": ["master"],
+        "conversation_state": "bot_active",
+        "decision_meta": {
+            "action": "reply",
+            "intent": "catalog.location",
+            "tool_action": "catalog.location",
+            "tool_decision": "ok",
+        },
+        "turn_expectations": {"action": None, "info_sections": ["master", "specialist"]},
+        "evaluation": {"strict_reasons": ["expected_info_section_miss"]},
+        "judge": None,
+        "outbox_text": "Адрес и часы работы салона...",
+    }
+    classes = classify(wrong_action_record)
+    assert "wrong_action" in classes
+
+    non_actionable_record = {
+        "turn_text": "Какой у вас ассортимент услуг?",
+        "turn_tags": ["info"],
+        "conversation_state": "bot_active",
+        "decision_meta": {
+            "action": "reply",
+            "intent": "catalog.service_query",
+            "tool_action": "catalog.service_query",
+            "tool_decision": "contract_invalid",
+        },
+        "turn_expectations": {"action": None, "info_sections": []},
+        "evaluation": {"strict_reasons": ["judge_fail"]},
+        "judge": {"verdict": "fail", "reasons": ["non_actionable_reply"]},
+        "outbox_text": "Не удалось подтвердить действие автоматически. Уточните, пожалуйста, детали.",
+    }
+    classes = classify(non_actionable_record)
+    assert "non_actionable_reply" in classes
+
+
+def test_hq1_classifier_detects_booking_flow_break_and_hallucinated_fact():
+    ns = _load_quality_helpers()
+    classify = ns["_llm_quality_collect_hq1_classes"]
+
+    booking_flow_record = {
+        "turn_text": "Можно на 17:45?",
+        "turn_tags": ["booking", "time_alt"],
+        "conversation_state": "bot_active",
+        "decision_meta": {
+            "action": "reply",
+            "intent": "calendar.book_slot",
+            "tool_action": "calendar.book_slot",
+            "tool_decision": "conflict",
+        },
+        "turn_expectations": {"action": None, "info_sections": []},
+        "evaluation": {"strict_reasons": ["expected_reply_type_mismatch"]},
+        "judge": None,
+        "outbox_text": "На 17:45 свободного окна нет. Доступны: 12:00, 13:00, 17:00.",
+    }
+    classes = classify(booking_flow_record)
+    assert "booking_flow_break" in classes
+
+    hallucinated_record = {
+        "turn_text": "Сколько стоит маникюр?",
+        "turn_tags": ["price"],
+        "conversation_state": "bot_active",
+        "decision_meta": {
+            "action": "reply",
+            "intent": "price_query",
+            "tool_action": "catalog.service_query",
+            "tool_decision": "ok",
+        },
+        "turn_expectations": {"action": None, "info_sections": ["price"]},
+        "evaluation": {"strict_reasons": ["judge_fail"]},
+        "judge": {
+            "verdict": "fail",
+            "reasons": ["hallucination_fact"],
+            "summary": "Ответ содержит выдуманные факты.",
+        },
+        "outbox_text": "Маникюр стоит 99999 тенге и включает подарок.",
+    }
+    classes = classify(hallucinated_record)
+    assert "hallucinated_fact" in classes
+
+
+def test_collect_blocking_reasons_merges_hq1_counts():
+    ns = _load_quality_helpers()
+    collect = ns["_llm_quality_collect_blocking_reasons"]
+    result = collect(
+        {"expected_reply_type_mismatch": 1},
+        extra_counts={"handoff_miss": 2, "booking_flow_break": 1},
+    )
+    assert result["count"] == 4
+    assert result["reasons"]["handoff_miss"] == 2
+    assert result["reasons"]["booking_flow_break"] == 1
+
+
+def test_collect_blocking_reasons_includes_unobserved_turn():
+    ns = _load_quality_helpers()
+    collect = ns["_llm_quality_collect_blocking_reasons"]
+
+    result = collect({"unobserved_turn": 2}, extra_counts={})
+
+    assert result["count"] == 2
+    assert result["reasons"]["unobserved_turn"] == 2

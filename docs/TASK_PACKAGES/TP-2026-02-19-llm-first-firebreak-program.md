@@ -1,5 +1,7 @@
 # TP-2026-02-19-llm-first-firebreak-program
 
+> Update 2026-02-21: для текущей remediation wave использовать contract-first execution TP: `docs/TASK_PACKAGES/TP-2026-02-21-consultant-contract-first-remediation-a1.md` (supersedes operational plan этого документа для HQ1 closure).
+
 ## Название/цель
 Антикризисная программа стабилизации ядра консультанта в режиме "дом горит": быстро снизить долю неправильных ответов и ошибочных tool-вызовов, затем закрепить LLM-first архитектуру без semantic-хардкодов в deterministic слое.
 
@@ -338,6 +340,37 @@
 - `rewrite_reason_coverage == 100%`.
 - Любой regex/lexicon delta в core сопровождается resolver update + regression tests.
 
+### Wave HQ1 — Human quality firebreak (P0, immediate)
+1. Цель:
+- Остановить релиз при "плохих ответах консультанта", даже если структурные/контрактные метрики выглядят зелёными.
+
+2. Источники правды:
+- `/tmp/booking_quality/analysis-postfix-v7-strict-fails.tsv`
+- `/tmp/booking_quality/manual-strict-fails-v7.tsv`
+- `/tmp/booking_quality/booking-nojudge-manual-a120-r7-replay-nonreplay/manual_findings.md`
+- `/tmp/booking_quality/booking-blocking-nojudge-trackk-smoke-a1/summary.json`
+- `docs/evidence/2026-02-21-hq1-bad-turn-catalog.tsv`
+
+3. Blocking classes (release NO_GO):
+- `wrong_action`: выбран не тот продуктовый исход (FACT/COLLECT/HANDOFF) относительно смысла запроса.
+- `handoff_miss`: запрос на менеджера/перенос/изменение записи не приводит к `handoff` и `pending`.
+- `non_actionable_reply`: ответ уклончивый/бесполезный для следующего шага клиента.
+- `hallucinated_fact`: недоказанные/выдуманные факты в ответе.
+- `booking_flow_break`: ответ/действие ломает ожидаемую прогрессию записи.
+
+4. Изменения:
+- Ввести обязательный `bad-turn catalog` из ручного форензика и последних replay-run.
+- Ввести отдельный канонический сценарный файл `blocking_scenarios_human.json` для повторяемого replay.
+- Считать run `semantic_valid=false`, если обнаружен любой class из `Wave HQ1` blocking set.
+- Требовать ручной sign-off Brain/Top Architect по каталогу плохих turns перед GO.
+
+5. DoD:
+- `hq1_bad_turn_count == 0` на каноническом human-blocking сценарном наборе.
+- `expected_action_mismatch == 0` и `judge_fail == 0` на `blocking_scenarios_human.json`.
+- Для `reschedule/change booking` путь завершает в `handoff + pending` (без silent degrade).
+- Для `master/specialist` вопросов отсутствует route в `catalog.location` без explicit location/hours anchors.
+- Evidence-пакет содержит `summary.json`, `brief.md`, `responses.jsonl`, `trace_bundle.jsonl`, `bad-turn catalog`.
+
 ## Override whitelist (contract v1)
 Разрешённые deterministic override reason-codes:
 1. `safety_policy_block`:
@@ -480,6 +513,7 @@
 - `rg -n "demo_salon_knowledge" truffles-api/app/routers truffles-api/app/services | rg -v "pack_runtime_demo_adapter.py"` (должно быть пусто после Track F).
 - `rg -n "tool_decision_mismatch|expected_reply_type_mismatch|expected_action_mismatch|calendar_tool_contract_miss" /tmp/booking_quality/booking-replay-42/responses.jsonl`
 - `test -f /tmp/booking_quality/blocking_scenarios.json`
+- `test -f /tmp/booking_quality/blocking_scenarios_human.json`
 - `PROJECT_NAME=truffles-api-test-firebreak PYTEST_ARGS='/app/tests/test_booking_info_interrupt_contract.py' scripts/test_api_container.sh`
 - `pytest -q truffles-api/tests/test_message_endpoint.py`
 - `pytest -q truffles-api/tests/test_booking_chaos_dialogs.py`
@@ -489,18 +523,24 @@
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression --max-failures 20`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/blocking_scenarios.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode off --allow-judge-off --max-failures 5 --run-id booking-blocking-nojudge-42`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/blocking_scenarios.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode critical --fail-on-thresholds --max-failures 10 --run-id booking-blocking-critical-42`
+- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/blocking_scenarios_human.json --count 5 --tool-hooks auto --reset-before-dialog --judge-mode off --allow-judge-off --max-failures 5 --run-id booking-human-nojudge-42`
+- `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/blocking_scenarios_human.json --count 5 --tool-hooks auto --reset-before-dialog --judge-mode critical --fail-on-thresholds --max-failures 10 --run-id booking-human-critical-42`
 - `jq '.quality_status' /tmp/booking_quality/booking-replay-42/summary.json` (в dry-run обязателен `comparison_blocked=true`).
 
 ## Canonical blocking scenarios (mandatory artifact)
 - Canonical path: `/tmp/booking_quality/blocking_scenarios.json`.
 - Source: lock/replay forensic turns containing `calendar_tool_contract_miss`, `expected_action_mismatch`, `expected_reply_type_mismatch`, `tool_decision_mismatch`, critical `judge_fail`.
+- Human-quality canonical path: `/tmp/booking_quality/blocking_scenarios_human.json`.
+- Human source: `docs/evidence/2026-02-21-hq1-bad-turn-catalog.tsv` + manual forensic artifacts.
 - Ownership: Brain/Top Architect approve updates; Hands cannot silently replace this file during bugfix waves.
 - Update policy: only when root-cause class changes or scenario invalidated by confirmed product decision.
 
 ## Evidence package (for each wave)
 - `summary.json`, `brief.md`, `responses.jsonl`, `trace_bundle.jsonl`
 - `blocking_scenarios.json` checksum and generation command
+- `blocking_scenarios_human.json` checksum and generation command
 - manual forensic artifacts (`manual_findings.md`, audit TSV)
+- `bad-turn catalog` with class labels (`wrong_action`, `handoff_miss`, `non_actionable_reply`, `hallucinated_fact`, `booking_flow_break`)
 - top-failures taxonomy with owner-ready interpretation
 - explicit `plan-vs-final tool_action delta` table
 - run command and environment matrix
@@ -517,6 +557,7 @@
 - Рост `post_llm_semantic_rewrite_rate` выше порога.
 - Любой `blocking_reason` в release replay (`calendar_tool_contract_miss`, `expected_action_mismatch`, `tool_decision_mismatch`, critical `judge_fail`).
 - `expected_reply_type_mismatch` в blocking scenario set.
+- Любой `Wave HQ1` class (`wrong_action`, `handoff_miss`, `non_actionable_reply`, `hallucinated_fact`, `booking_flow_break`) в human-blocking replay.
 - Dry-run evidence, поданный как quality acceptance.
 4. Progressive rollout with kill-switches:
 - semantic arbitration mode

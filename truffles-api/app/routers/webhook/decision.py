@@ -20,7 +20,6 @@ from pydantic import ValidationError
 from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
-from app.adapters.chatflow import ChatFlowAdapter
 from app.contracts.decision import (
     DECISION_GRAPH_STAGES,
     DecisionOutcome,
@@ -57,7 +56,6 @@ from app.models import (
     OutboxMessage,
     User,
 )
-from app.ports.messaging import MessageOptions
 from app.routers.webhook.booking import (
     BOOKING_SLOT_ORDER,
     _apply_booking_slot,
@@ -286,6 +284,7 @@ from app.routers.webhook.trace import (
     _update_message_decision_metadata,
     _update_message_signal_snapshot,
 )
+from app.schemas.turn_outcome import TurnOutcome, TurnOutcomeObservability
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 from app.services.ai_service import (
     ACKNOWLEDGEMENT_RESPONSE,
@@ -312,6 +311,10 @@ from app.services.capabilities_runtime import build_runtime_capabilities, set_ru
 from app.services.chatflow_service import get_instance_id
 from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import get_telegram_credentials, send_telegram_notification
+from app.services.expected_reply_contract import (
+    resolve_services_overview_contract_update,
+    resolve_tool_expected_reply_contract,
+)
 from app.services.integration_guardrails_service import (
     REASON_INBOUND_WITHOUT_OUTBOUND,
     report_integration_incident,
@@ -350,7 +353,7 @@ from app.services.knowledge_validation import (
     evaluate_minimum_data_contract,
 )
 from app.services.message_service import generate_bot_response, save_message, select_handover_user_message
-from app.services.outbox_service import build_inbound_message_id, enqueue_outbox_message
+from app.services.outbox_service import build_inbound_message_id
 from app.services.pack_runtime_service import (
     PackDecision,
     _detect_promotion_intent,
@@ -390,6 +393,7 @@ from app.services.state_service import (
     transition_state,
 )
 from app.services.telegram_service import TelegramService
+from app.services.transport_adapter import TransportSendRequest, resolve_transport_adapter
 
 # Backward-compatible exports for tests and legacy imports.
 get_demo_salon_decision = get_pack_decision
@@ -4660,9 +4664,8 @@ def _has_explicit_location_or_hours_request(
                 for intent in raw_anchor_intents
                 if isinstance(intent, str) and intent.strip()
             }
-    if {"location", "hours", "parking"} & anchor_intents:
-        return True
     info_signals = info_meta.get("info_signals") if isinstance(info_meta, dict) else None
+    master_signal = bool(isinstance(info_signals, dict) and info_signals.get("master"))
     if isinstance(info_signals, dict):
         if info_signals.get("location_address_hint"):
             return True
@@ -4681,7 +4684,14 @@ def _has_explicit_location_or_hours_request(
         "до скольки",
         "во сколько",
     )
-    if any(marker in normalized for marker in explicit_markers):
+    has_explicit_marker = any(marker in normalized for marker in explicit_markers)
+    if has_explicit_marker:
+        return True
+    if {"location", "hours", "parking"} & anchor_intents:
+        # strict mode must not treat weak anchor matches as explicit location/hours
+        # when the same message is primarily about specialists/masters.
+        if strict and master_signal:
+            return False
         return True
 
     if strict:
@@ -6255,7 +6265,11 @@ async def _handle_webhook_payload(
     def _record_escalation_metric(trigger: str) -> None:
         record_escalation_count(payload.client_slug, trigger)
 
+    last_transport_status: str | None = None
+    last_transport_reason: str | None = None
+
     def _send_response(text: str) -> bool:
+        nonlocal last_transport_status, last_transport_reason
         send_start = time.monotonic()
         if conversation and is_simulation_context(conversation):
             logger.info(
@@ -6267,10 +6281,14 @@ async def _handle_webhook_payload(
                     }
                 },
             )
+            last_transport_status = "simulated"
+            last_transport_reason = None
             _log_timing("send_ms", (time.monotonic() - send_start) * 1000, {"send_ok": True})
             return True
         sent = False
         instance_id: str | None = None
+        transport_status: str | None = None
+        transport_reason: str | None = None
         with start_span("webhook.send", context=timing_context) as span:
             instance_id = get_instance_id(
                 db,
@@ -6278,77 +6296,58 @@ async def _handle_webhook_payload(
                 branch_id=conversation.branch_id if conversation else None,
                 remote_jid=remote_jid,
             )
-            if not instance_id:
+            use_outbox_send = _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False)
+            transport_adapter = resolve_transport_adapter()
+            transport_request = TransportSendRequest(
+                remote_jid=remote_jid,
+                text=text,
+                idempotency_key=outbound_idempotency_key,
+                instance_id=instance_id,
+                client_id=str(client.id),
+                client_slug=client.name,
+                conversation_id=str(conversation.id) if conversation else None,
+                branch_id=str(conversation.branch_id) if conversation and conversation.branch_id else None,
+                use_outbox_send=use_outbox_send and bool(conversation),
+                simulation=False,
+            )
+            transport_result = transport_adapter.send_text(
+                db=db,
+                request=transport_request,
+            )
+            sent = bool(transport_result.delivered)
+            transport_status = transport_result.status
+            transport_reason = transport_result.reason
+            last_transport_status = transport_status
+            last_transport_reason = transport_reason
+            if transport_status == "failed" and not instance_id:
                 logger.warning(f"No instance_id found for client {client.id}, jid={remote_jid}")
-                sent = False
-            else:
-                use_outbox_send = _is_env_enabled(os.environ.get("OUTBOX_WORKER_ENABLED"), default=False)
-                if use_outbox_send and conversation:
-                    outbox_payload = {
-                        "schema_version": "outbox.v1",
-                        "event_type": "whatsapp.send_text",
-                        "idempotency_key": outbound_idempotency_key,
-                        "client_id": str(client.id),
-                        "branch_id": str(conversation.branch_id) if conversation.branch_id else None,
-                        "tenant_context": {
-                            "client_id": str(client.id),
-                            "branch_id": str(conversation.branch_id) if conversation.branch_id else None,
-                            "client_slug": client.name,
-                            "instance_id": instance_id,
-                            "source": "system",
-                        },
-                        "conversation_id": str(conversation.id),
-                        "channel": "whatsapp",
-                        "created_at": datetime.now(timezone.utc).isoformat(),
-                        "payload": {
+            if transport_status == "duplicate" and conversation:
+                logger.info(
+                    "Outbox send skipped (duplicate)",
+                    extra={
+                        "context": {
+                            "conversation_id": str(conversation.id),
                             "remote_jid": remote_jid,
-                            "text": text,
-                            "instance_id": instance_id,
                             "idempotency_key": outbound_idempotency_key,
-                        },
-                    }
-                    enqueue_start = time.monotonic()
-                    with start_span("outbox.enqueue", context=timing_context) as enqueue_span:
-                        sent = enqueue_outbox_message(
-                            db,
-                            client_id=client.id,
-                            conversation_id=conversation.id,
-                            inbound_message_id=outbound_idempotency_key,
-                            payload_json=outbox_payload,
-                            branch_id=conversation.branch_id,
-                        )
-                    if enqueue_span is not None:
-                        enqueue_span.set_attribute("outbox.enqueued", bool(sent))
-                    _log_timing(
-                        "outbox_enqueue_ms",
-                        (time.monotonic() - enqueue_start) * 1000,
-                        {"outbox_enqueued": sent},
-                    )
-                    if not sent:
-                        logger.info(
-                            "Outbox send skipped (duplicate)",
-                            extra={
-                                "context": {
-                                    "conversation_id": str(conversation.id),
-                                    "remote_jid": remote_jid,
-                                    "idempotency_key": outbound_idempotency_key,
-                                }
-                            },
-                        )
-                        sent = True
-                else:
-                    adapter = ChatFlowAdapter()
-                    options = MessageOptions(
-                        instance_id=instance_id,
-                        idempotency_key=outbound_idempotency_key,
-                    )
-                    result = adapter.send_text(remote_jid, text, options)
-                    sent = result.is_ok()
-                    if not sent and skip_persist:
-                        # Preserve legacy behavior when raise_on_fail=True (skip_persist path).
-                        raise RuntimeError(f"ChatFlow delivery failed: {result.error}")
+                        }
+                    },
+                )
+            # Preserve legacy skip_persist behavior: fail-closed only after a real
+            # provider send attempt (instance_id resolved), not on missing instance.
+            if not sent and skip_persist and instance_id:
+                error_message = (
+                    transport_result.provider_error
+                    or transport_reason
+                    or transport_status
+                    or "send_failed"
+                )
+                raise RuntimeError(f"ChatFlow delivery failed: {error_message}")
         if span is not None:
             span.set_attribute("send.ok", bool(sent))
+            if transport_status:
+                span.set_attribute("send.status", transport_status)
+            if transport_reason:
+                span.set_attribute("send.reason", transport_reason)
         _log_timing("send_ms", (time.monotonic() - send_start) * 1000, {"send_ok": sent})
         if not sent and conversation and conversation.branch_id:
             branch = (
@@ -11503,6 +11502,7 @@ async def _handle_webhook_payload(
                 verifier_intent = "policy_verifier"
                 verifier_source = "llm_policy_core"
                 verifier_result_message: str | None = None
+                verifier_contract = None
                 if verifier_slot == "service":
                     verifier_prompt = MSG_BOOKING_ASK_SERVICE
                     verifier_action = "booking_prompt"
@@ -11519,8 +11519,54 @@ async def _handle_webhook_payload(
                     verifier_prompt = MSG_BOOKING_ASK_REFERENCE
                     verifier_action = "check_booking_prompt"
                     verifier_intent = "check_booking"
-                    if policy_tool_action == "calendar.reschedule":
-                        handover_message = message_text or "Клиент просит изменить время записи."
+                    booking_has_service = bool(
+                        isinstance(policy_slot_state_validated.get("service"), str)
+                        and policy_slot_state_validated.get("service").strip()
+                    ) or bool(
+                        isinstance(booking, dict)
+                        and isinstance(booking.get("service"), str)
+                        and booking.get("service").strip()
+                    )
+                    booking_has_datetime = bool(
+                        isinstance(policy_slot_state_validated.get("datetime"), str)
+                        and policy_slot_state_validated.get("datetime").strip()
+                    ) or bool(
+                        isinstance(booking, dict)
+                        and isinstance(booking.get("datetime"), str)
+                        and booking.get("datetime").strip()
+                    )
+                    booking_has_name = bool(
+                        isinstance(policy_slot_state_validated.get("name"), str)
+                        and policy_slot_state_validated.get("name").strip()
+                    ) or bool(
+                        isinstance(booking, dict)
+                        and isinstance(booking.get("name"), str)
+                        and booking.get("name").strip()
+                    )
+                    verifier_contract = resolve_tool_expected_reply_contract(
+                        tool_action=policy_tool_action,
+                        tool_decision="verifier_blocked",
+                        current_expected_reply_type=expected_reply_type,
+                        memory_expected_reply_type=memory_expected_reply_type,
+                        booking_has_service=booking_has_service,
+                        booking_has_datetime=booking_has_datetime,
+                        booking_has_name=booking_has_name,
+                        booking_active=bool(
+                            isinstance(booking, dict) and booking.get("active") is True
+                        ),
+                    )
+                    handoff_required = bool(
+                        verifier_contract
+                        and verifier_contract.requires_handoff
+                        and policy_tool_action in {"calendar.reschedule", "calendar.cancel"}
+                    )
+                    if handoff_required:
+                        if policy_tool_action == "calendar.cancel":
+                            handover_message = message_text or "Клиент просит отменить запись."
+                            handoff_reason = "cancel_missing_reference"
+                        else:
+                            handover_message = message_text or "Клиент просит изменить время записи."
+                            handoff_reason = "reschedule_missing_reference"
                         _, reused, telegram_sent = _reuse_active_handover(
                             db=db,
                             conversation=conversation,
@@ -11577,7 +11623,7 @@ async def _handle_webhook_payload(
                                 "decision": "booking_verification_handoff",
                                 "state": conversation.state,
                                 "tool_action": policy_tool_action,
-                                "reason": "reschedule_missing_reference",
+                                "reason": handoff_reason,
                             },
                         )
                     else:
@@ -11589,10 +11635,14 @@ async def _handle_webhook_payload(
                         normalized_message = (
                             normalize_for_matching(message_text) if isinstance(message_text, str) else ""
                         )
+                        verification_request = bool(
+                            isinstance(message_text, str)
+                            and _looks_like_booking_verification_request(message_text)
+                        )
                         availability_request = bool(
                             time_match
                             and normalized_message
-                            and not _looks_like_booking_verification_request(message_text)
+                            and not verification_request
                             and any(
                                 marker in normalized_message
                                 for marker in ("можно", "есть", "свобод", "доступ")
@@ -11604,6 +11654,18 @@ async def _handle_webhook_payload(
                             verifier_action = "booking_prompt"
                             verifier_intent = "booking"
                             verifier_slot = "datetime"
+                        elif verification_request:
+                            if time_match:
+                                requested_time = time_match.group(0).replace(".", ":")
+                                verifier_prompt = (
+                                    f"Проверю запись на {requested_time}. "
+                                    "Подскажите номер телефона, на который оформляли запись."
+                                )
+                            else:
+                                verifier_prompt = (
+                                    "Чтобы проверить запись, подскажите номер телефона, "
+                                    "на который оформляли запись."
+                                )
                 if verifier_slot in BOOKING_SLOT_ORDER:
                     context = _get_conversation_context(conversation)
                     booking_state = dict(booking) if isinstance(booking, dict) else {}
@@ -11623,6 +11685,21 @@ async def _handle_webhook_payload(
                             now=now,
                         )
                     _set_conversation_context(conversation, context)
+                elif (
+                    verifier_contract
+                    and verifier_contract.expected_reply_type
+                    and verifier_action != "escalate"
+                ):
+                    context = _get_conversation_context(conversation)
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=verifier_contract.expected_reply_type,
+                        reason=verifier_contract.reason or "policy_verifier_collect",
+                        now=now,
+                    )
+                    _set_conversation_context(conversation, context)
                 verifier_meta = {
                     "tool_action": policy_tool_action,
                     "tool_decision": "verifier_blocked",
@@ -11633,6 +11710,8 @@ async def _handle_webhook_payload(
                     "tool_verifier": "pre_execute",
                     "tool_verifier_slot": verifier_slot,
                 }
+                if verifier_contract and verifier_contract.reason:
+                    verifier_meta["expected_reply_contract_reason"] = verifier_contract.reason
                 if saved_message:
                     _update_message_decision_metadata(saved_message, verifier_meta)
                 _record_decision_trace(
@@ -11737,42 +11816,71 @@ async def _handle_webhook_payload(
                 )
                 verifier_post_error = state_guard_error or tool_contract_error
                 if verifier_post_error:
-                    tool_response_text = (
-                        "Не удалось подтвердить действие автоматически. "
-                        "Уточните, пожалуйста, детали, и я попробую еще раз."
-                    )
+                    verifier_recovery: str | None = None
+                    if (
+                        policy_tool_action == "catalog.service_query"
+                        and isinstance(message_text, str)
+                        and message_text.strip()
+                    ):
+                        try:
+                            from app.services.tool_registry_service import (
+                                _looks_like_services_overview_message,
+                            )
+                        except Exception:
+                            _looks_like_services_overview_message = None
+                        if (
+                            _looks_like_services_overview_message
+                            and _looks_like_services_overview_message(message_text)
+                        ):
+                            overview_reply = format_reply_from_truth(
+                                "services_overview",
+                                client_slug=payload.client_slug,
+                            )
+                            if isinstance(overview_reply, str) and overview_reply.strip():
+                                tool_response_text = overview_reply.strip()
+                                verifier_recovery = "services_overview"
+                    if verifier_recovery is None:
+                        tool_response_text = (
+                            "Не удалось подтвердить действие автоматически. "
+                            "Уточните, пожалуйста, детали, и я попробую еще раз."
+                        )
                     if isinstance(tool_result.decision_meta, dict):
-                        tool_result.decision_meta.update(
-                            {
-                                "tool_decision": "contract_invalid",
-                                "tool_contract": "post_condition",
-                                "tool_contract_error": verifier_post_error,
-                                "tool_verifier_post": "invalid",
-                                "tool_verifier_guard": (
-                                    "state_transition" if state_guard_error else "post_condition"
-                                ),
-                            }
-                        )
+                        decision_meta_updates = {
+                            "tool_decision": "contract_invalid",
+                            "tool_contract": "post_condition",
+                            "tool_contract_error": verifier_post_error,
+                            "tool_verifier_post": "fallback" if verifier_recovery else "invalid",
+                            "tool_verifier_guard": (
+                                "state_transition" if state_guard_error else "post_condition"
+                            ),
+                        }
+                        if verifier_recovery:
+                            decision_meta_updates["tool_recovery"] = verifier_recovery
+                            if verifier_recovery == "services_overview":
+                                decision_meta_updates["info_sections"] = ["services_overview"]
+                        tool_result.decision_meta.update(decision_meta_updates)
                     if isinstance(tool_result.trace, dict):
-                        tool_result.trace.update(
-                            {
-                                "decision": "contract_invalid",
-                                "tool_contract": "post_condition",
-                                "tool_contract_error": verifier_post_error,
-                                "tool_verifier_post": "invalid",
-                                "tool_verifier_guard": (
-                                    "state_transition" if state_guard_error else "post_condition"
-                                ),
-                            }
-                        )
+                        trace_updates = {
+                            "decision": "contract_invalid",
+                            "tool_contract": "post_condition",
+                            "tool_contract_error": verifier_post_error,
+                            "tool_verifier_post": "fallback" if verifier_recovery else "invalid",
+                            "tool_verifier_guard": (
+                                "state_transition" if state_guard_error else "post_condition"
+                            ),
+                        }
+                        if verifier_recovery:
+                            trace_updates["tool_recovery"] = verifier_recovery
+                        tool_result.trace.update(trace_updates)
                     _record_decision_trace(
                         conversation,
                         {
                             "stage": "policy_verifier",
-                            "decision": "invalid",
+                            "decision": "fallback" if verifier_recovery else "invalid",
                             "tool_action": policy_tool_action,
                             "tool_contract": "post_condition",
                             "tool_contract_error": verifier_post_error,
+                            "tool_recovery": verifier_recovery,
                             "tool_verifier_guard": (
                                 "state_transition" if state_guard_error else "post_condition"
                             ),
@@ -11914,6 +12022,61 @@ async def _handle_webhook_payload(
                 if merged_slots and "slots" not in trace_payload:
                     trace_payload["slots"] = merged_slots
                 _record_decision_trace(conversation, trace_payload)
+                tool_decision = (tool_result.decision_meta or {}).get("tool_decision")
+                booking_has_service = bool(
+                    isinstance(merged_slots.get("service"), str) and merged_slots.get("service").strip()
+                )
+                booking_has_datetime = bool(
+                    isinstance(merged_slots.get("datetime"), str) and merged_slots.get("datetime").strip()
+                )
+                booking_has_name = bool(
+                    isinstance(merged_slots.get("name"), str) and merged_slots.get("name").strip()
+                )
+                tool_expected_contract = resolve_tool_expected_reply_contract(
+                    tool_action=policy_tool_action,
+                    tool_decision=tool_decision,
+                    current_expected_reply_type=expected_reply_type,
+                    memory_expected_reply_type=memory_expected_reply_type,
+                    booking_has_service=booking_has_service,
+                    booking_has_datetime=booking_has_datetime,
+                    booking_has_name=booking_has_name,
+                    booking_active=bool(
+                        isinstance(booking_state, dict) and booking_state.get("active") is True
+                    ),
+                )
+                contract_followup_expected = (
+                    tool_expected_contract.expected_reply_type if tool_expected_contract else None
+                )
+                contract_followup_reason = tool_expected_contract.reason if tool_expected_contract else None
+                contract_requires_handoff = bool(
+                    tool_expected_contract and tool_expected_contract.requires_handoff
+                )
+                if saved_message and tool_expected_contract:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "expected_reply_contract_reason": tool_expected_contract.reason,
+                            "expected_reply_contract_handoff": contract_requires_handoff,
+                            "expected_reply_contract_clear": bool(
+                                tool_expected_contract.clear_expected_reply
+                            ),
+                        },
+                    )
+                if (
+                    tool_expected_contract
+                    and tool_expected_contract.clear_expected_reply
+                    and not contract_followup_expected
+                ):
+                    context = _get_conversation_context(conversation)
+                    context = _set_expected_reply_type(context, None)
+                    _set_conversation_context(conversation, context)
+                if (
+                    (policy_tool_action == "calendar.list_slots" and tool_decision in {"ok", "specialist_missing"})
+                    or (policy_tool_action == "calendar.book_slot" and tool_decision == "conflict")
+                ):
+                    # For booking slot outcomes we derive the next expected reply from booking state
+                    # instead of reusing tool-level hints that may be stale.
+                    tool_expected_reply_type = None
                 if tool_expected_reply_type:
                     context = _get_conversation_context(conversation)
                     context = _set_expected_reply_context(
@@ -11924,7 +12087,33 @@ async def _handle_webhook_payload(
                         reason="llm_policy_core_tool",
                         now=now,
                     )
-                booking_followup_expected = None
+                booking_followup_expected = contract_followup_expected
+                booking_followup_reason = contract_followup_reason
+                services_overview_followup = False
+                tool_recovery = str(
+                    (tool_result.decision_meta or {}).get("tool_recovery") or ""
+                ).strip().casefold()
+                services_overview_contract = None
+                if policy_tool_action == "catalog.service_query":
+                    services_overview_decision = (
+                        "services_overview"
+                        if tool_decision == "services_overview" or tool_recovery == "services_overview"
+                        else tool_decision
+                    )
+                    services_overview_contract = resolve_services_overview_contract_update(
+                        tool_action=policy_tool_action,
+                        tool_decision=services_overview_decision,
+                        current_expected_reply_type=expected_reply_type,
+                        memory_expected_reply_type=memory_expected_reply_type,
+                    )
+                if (
+                    services_overview_contract
+                    and not booking_wants_flow
+                    and not tool_expected_reply_type
+                ):
+                    booking_followup_expected = services_overview_contract.expected_reply_type
+                    booking_followup_reason = services_overview_contract.reason
+                    services_overview_followup = True
                 if booking_wants_flow or policy_tool_action.startswith("calendar."):
                     booking_for_followup = dict(booking_state) if isinstance(booking_state, dict) else {}
                     if booking_for_followup.get("active") is not True:
@@ -11945,18 +12134,23 @@ async def _handle_webhook_payload(
                         EXPECTED_REPLY_NAME,
                     }:
                         booking_followup_expected = derived_reply
+                        booking_followup_reason = "booking_interrupt"
                 if booking_followup_expected is None and expected_reply_type in {
                     EXPECTED_REPLY_SERVICE,
                     EXPECTED_REPLY_TIME,
                     EXPECTED_REPLY_NAME,
                 }:
                     booking_followup_expected = expected_reply_type
+                    booking_followup_reason = _get_expected_reply_reason(
+                        _get_conversation_context(conversation)
+                    )
                 elif booking_followup_expected is None and memory_expected_reply_type in {
                     EXPECTED_REPLY_SERVICE,
                     EXPECTED_REPLY_TIME,
                     EXPECTED_REPLY_NAME,
                 }:
                     booking_followup_expected = memory_expected_reply_type
+                    booking_followup_reason = "memory_expected_reply"
                 if (
                     policy_tool_action.startswith("calendar.")
                     and merged_slots.get("service")
@@ -11980,8 +12174,14 @@ async def _handle_webhook_payload(
                         EXPECTED_REPLY_NAME,
                     }:
                         booking_followup_expected = derived_reply
+                        booking_followup_reason = "booking_interrupt"
                 booking_interrupt_prompt = None
-                tool_decision = (tool_result.decision_meta or {}).get("tool_decision")
+                conflict_reprompt_datetime = bool(
+                    policy_tool_action == "calendar.book_slot" and tool_decision == "conflict"
+                )
+                if conflict_reprompt_datetime:
+                    booking_followup_expected = EXPECTED_REPLY_TIME
+                    booking_followup_reason = "calendar_book_slot_conflict"
                 if (
                     policy_tool_action == "calendar.book_slot"
                     and tool_decision == "provider_unavailable"
@@ -12012,6 +12212,10 @@ async def _handle_webhook_payload(
                             finalize_response=_finalize_bot_response,
                         )
                 booking_followup_allowed = bool(info_sections)
+                if not booking_followup_allowed and services_overview_followup:
+                    # `services_overview` can come without explicit info_sections in tool meta;
+                    # still preserve booking follow-up contract for canonical quality dialogs.
+                    booking_followup_allowed = True
                 if (
                     not booking_followup_allowed
                     and policy_tool_action == "calendar.list_slots"
@@ -12045,47 +12249,79 @@ async def _handle_webhook_payload(
                 ):
                     # Keep booking progression on time slot after a factual info answer.
                     booking_followup_expected = EXPECTED_REPLY_TIME
+                    booking_followup_reason = "catalog_service_booking_progress"
                 suppress_booking_lookup_followup = bool(
                     policy_tool_action == "calendar.get_booking"
                     and tool_decision in {"not_found", "time_mismatch", "contract_invalid"}
                 )
                 suppress_redundant_followup_prompt = bool(
                     (
-                        policy_tool_action == "calendar.list_slots"
-                        and tool_decision in {"ok", "specialist_missing"}
+                        (
+                            policy_tool_action == "calendar.list_slots"
+                            and tool_decision in {"ok", "specialist_missing"}
+                        )
+                        or conflict_reprompt_datetime
                     )
-                    or (
-                        policy_tool_action == "calendar.book_slot"
-                        and tool_decision == "conflict"
-                    )
+                    and isinstance(tool_response_text, str)
+                    and "?" in tool_response_text
                 )
                 if (
-                    (booking_wants_flow or policy_tool_action.startswith("calendar."))
+                    (
+                        booking_wants_flow
+                        or policy_tool_action.startswith("calendar.")
+                        or services_overview_followup
+                    )
                     and booking_followup_expected
                     in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
                     and booking_followup_allowed
                     and not tool_expected_reply_type
                     and not suppress_booking_lookup_followup
+                    and not conflict_reprompt_datetime
                 ):
-                    (
-                        booking_followup_expected,
-                        booking_interrupt_prompt,
-                    ) = _derive_booking_followup_prompt(
-                        expected_reply_type=booking_followup_expected,
-                        booking_state=booking_state if isinstance(booking_state, dict) else booking,
-                        merged_slots=merged_slots,
-                        client_slug=payload.client_slug,
-                    )
+                    if services_overview_followup and booking_followup_expected == EXPECTED_REPLY_SERVICE:
+                        booking_interrupt_prompt = _booking_prompt_for_expected_reply_type(
+                            booking_followup_expected
+                        )
+                    else:
+                        (
+                            booking_followup_expected,
+                            booking_interrupt_prompt,
+                        ) = _derive_booking_followup_prompt(
+                            expected_reply_type=booking_followup_expected,
+                            booking_state=booking_state if isinstance(booking_state, dict) else booking,
+                            merged_slots=merged_slots,
+                            client_slug=payload.client_slug,
+                        )
                     context = _get_conversation_context(conversation)
                     if booking_followup_expected:
+                        expected_reply_reason = booking_followup_reason or "booking_interrupt"
                         context = _set_expected_reply_context(
                             conversation=conversation,
                             saved_message=saved_message,
                             context=context,
                             expected_reply_type=booking_followup_expected,
-                            reason="booking_interrupt",
+                            reason=expected_reply_reason,
                             now=now,
                         )
+                    if suppress_redundant_followup_prompt:
+                        booking_interrupt_prompt = None
+                if (
+                    conflict_reprompt_datetime
+                    and booking_followup_allowed
+                    and not tool_expected_reply_type
+                    and not suppress_booking_lookup_followup
+                ):
+                    context = _get_conversation_context(conversation)
+                    _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=EXPECTED_REPLY_TIME,
+                        reason=booking_followup_reason or "booking_interrupt",
+                        now=now,
+                    )
+                    booking_followup_expected = EXPECTED_REPLY_TIME
+                    booking_interrupt_prompt = MSG_BOOKING_ASK_DATETIME
                     if suppress_redundant_followup_prompt:
                         booking_interrupt_prompt = None
                 active_handover_exists = get_active_handover(db, conversation.id) is not None
@@ -12106,9 +12342,14 @@ async def _handle_webhook_payload(
                 booking_verification_handoff = (
                     booking_verification_lookup_failed
                     or (
+                        contract_requires_handoff
+                        and policy_tool_action in {"calendar.reschedule", "calendar.cancel"}
+                    )
+                    or (
                         policy_tool_action == "calendar.reschedule"
-                        and tool_decision == "not_found"
-                        and explicit_manager_request_signal
+                        and tool_decision
+                        in {"missing_slot", "not_found", "contract_invalid", "verifier_blocked"}
+                        and _looks_like_booking_reschedule_request(message_text)
                     )
                     or (
                         booking_verification_text_signal
@@ -12131,7 +12372,12 @@ async def _handle_webhook_payload(
                     )
                 )
                 if booking_verification_handoff:
-                    handover_message = message_text or "Клиент просит подтвердить или проверить запись."
+                    if policy_tool_action == "calendar.cancel":
+                        handover_message = message_text or "Клиент просит отменить запись."
+                    elif policy_tool_action == "calendar.reschedule":
+                        handover_message = message_text or "Клиент просит изменить время записи."
+                    else:
+                        handover_message = message_text or "Клиент просит подтвердить или проверить запись."
                     _, reused, telegram_sent = _reuse_active_handover(
                         db=db,
                         conversation=conversation,
@@ -12182,6 +12428,8 @@ async def _handle_webhook_payload(
                             "decision": "booking_verification_handoff",
                             "state": conversation.state,
                             "tool_action": policy_tool_action,
+                            "tool_decision": tool_decision,
+                            "expected_reply_contract_reason": contract_followup_reason,
                         },
                     )
                     _record_message_decision_meta(
@@ -12283,11 +12531,72 @@ async def _handle_webhook_payload(
                             MSG_STYLE_REFERENCE_NEED_MEDIA,
                             bot_response,
                         )
+                context = _get_conversation_context(conversation)
+                if (
+                    services_overview_contract
+                    and conversation.state == ConversationState.BOT_ACTIVE.value
+                    and not _get_expected_reply_type(context)
+                ):
+                    context = _set_expected_reply_context(
+                        conversation=conversation,
+                        saved_message=saved_message,
+                        context=context,
+                        expected_reply_type=services_overview_contract.expected_reply_type,
+                        reason=services_overview_contract.reason,
+                        now=now,
+                    )
+                    if (
+                        not booking_interrupt_prompt
+                        and services_overview_contract.expected_reply_type == EXPECTED_REPLY_SERVICE
+                    ):
+                        booking_interrupt_prompt = _booking_prompt_for_expected_reply_type(
+                            EXPECTED_REPLY_SERVICE
+                        )
+                turn_outcome_expected_reply = _get_expected_reply_type(context)
+                turn_outcome_expected_reason = _get_expected_reply_reason(context)
+                if (
+                    services_overview_contract
+                    and turn_outcome_expected_reply == services_overview_contract.expected_reply_type
+                    and not turn_outcome_expected_reason
+                ):
+                    turn_outcome_expected_reason = services_overview_contract.reason
                 if booking_interrupt_prompt and _should_append_followup_prompt(
                     bot_response,
                     booking_interrupt_prompt,
                 ):
                     bot_response = _append_followup(bot_response, booking_interrupt_prompt)
+                tool_decision_token = (
+                    tool_decision.strip().casefold()
+                    if isinstance(tool_decision, str) and tool_decision.strip()
+                    else None
+                )
+                turn_outcome = TurnOutcome(
+                    action="reply",
+                    intent=policy_intent or policy_tool_action,
+                    source="tool_registry",
+                    tool_action=policy_tool_action,
+                    tool_decision=tool_decision_token,
+                    expected_reply_type=turn_outcome_expected_reply,
+                    expected_reply_reason=turn_outcome_expected_reason,
+                    followup_prompt=booking_interrupt_prompt,
+                    contract_status=(
+                        "degraded"
+                        if tool_decision_token in {"contract_invalid", "verifier_blocked"}
+                        else "ok"
+                    ),
+                    observability=TurnOutcomeObservability(
+                        reply_observed=False,
+                        transport_status="pending",
+                    ),
+                    meta={
+                        "services_overview_followup": services_overview_followup,
+                    },
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {"turn_outcome": turn_outcome.to_metadata()},
+                    )
                 _record_decision_trace(
                     conversation,
                     {
@@ -12296,6 +12605,7 @@ async def _handle_webhook_payload(
                         "state": conversation.state,
                         "tool_action": policy_tool_action,
                         "tool_decision": tool_decision,
+                        "turn_outcome": turn_outcome.to_metadata(),
                     },
                 )
                 _record_message_decision_meta(
@@ -12306,6 +12616,24 @@ async def _handle_webhook_payload(
                     fast_intent=False,
                 )
                 bot_response, sent = _send_and_save(bot_response)
+                transport_status_token = last_transport_status or ("sent" if sent else "failed")
+                transport_reason_token = last_transport_reason
+                if not sent and not transport_reason_token:
+                    transport_reason_token = "provider_send_failed"
+                turn_outcome = turn_outcome.model_copy(
+                    update={
+                        "observability": TurnOutcomeObservability(
+                            reply_observed=transport_status_token in {"sent", "simulated"},
+                            transport_status=transport_status_token,
+                            transport_reason=transport_reason_token,
+                        )
+                    }
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {"turn_outcome": turn_outcome.to_metadata()},
+                    )
                 result_message = (
                     "LLM policy core tool response sent"
                     if sent

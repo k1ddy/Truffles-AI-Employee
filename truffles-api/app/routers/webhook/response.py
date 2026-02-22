@@ -2238,8 +2238,8 @@ def _handle_ai_response_action(
             direct_info_intent = None
             preferred_info_order = (
                 "hours",
-                "location",
                 "parking",
+                "location",
                 "contact",
                 "master",
                 "promotions",

@@ -42,7 +42,9 @@ def _load_evaluate_turn():
     wanted_functions = {
         "_llm_quality_evaluate_turn",
         "_llm_quality_effective_intent",
+        "_llm_quality_has_general_consult_fallback",
         "_llm_quality_is_booking_confirmation_text",
+        "_llm_quality_is_unobserved_turn",
         "_llm_quality_normalize_tool_token",
         "_llm_quality_parse_slot_candidates",
         "_llm_quality_has_expected_followup_prompt",
@@ -50,6 +52,7 @@ def _load_evaluate_turn():
         "_llm_quality_outbox_delivery_state",
         "_llm_quality_resolve_outbox_status",
         "_llm_quality_normalize_outbox_status",
+        "_llm_quality_trace_missing_soft",
     }
     selected_nodes = []
     for node in tree.body:

@@ -521,7 +521,7 @@ def _validate_datetime_slot(
         return None
     from . import _legacy as legacy
 
-    extracted = legacy._extract_datetime(message_text)
+    extracted = legacy._extract_datetime(message_text, client_slug=client_slug)
     if extracted:
         return extracted
     match = BOOKING_HOUR_FALLBACK_PATTERN.search(message_text)
@@ -561,7 +561,9 @@ def _validate_name_slot(
     elif not allow_freeform:
         return None
     else:
-        if legacy._extract_service_hint(message_text, client_slug) or legacy._extract_datetime(message_text):
+        if legacy._extract_service_hint(message_text, client_slug) or legacy._extract_datetime(
+            message_text, client_slug=client_slug
+        ):
             return None
         candidate = message_text
     cleaned = _clean_name_candidate(candidate)
@@ -726,7 +728,7 @@ def _is_booking_related_message(
         return True
     if allow_service and legacy._extract_service_hint(message_text, client_slug):
         return True
-    if legacy._extract_datetime(message_text):
+    if legacy._extract_datetime(message_text, client_slug=client_slug):
         return True
     if allow_name and _validate_name_slot(message_text, allow_freeform=True, client_slug=client_slug):
         return True

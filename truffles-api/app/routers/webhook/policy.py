@@ -604,7 +604,11 @@ def _format_discounts_policy_reply(
         name = item.get("name")
         percent = item.get("discount_percent") or item.get("discount")
         if name and percent:
-            parts.append(f"{name}: {percent}%")
+            entry = f"{name}: {percent}%"
+            eligibility = item.get("eligibility")
+            if isinstance(eligibility, str) and eligibility.strip():
+                entry = f"{entry} ({eligibility.strip()})"
+            parts.append(entry)
     if parts:
         return "Официальные акции: " + "; ".join(parts) + "." + stacking_text
     rules = discounts.get("rules")
