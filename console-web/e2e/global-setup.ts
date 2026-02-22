@@ -30,7 +30,11 @@ async function waitForConsoleApp(page: import("@playwright/test").Page) {
     );
 }
 
-async function startKeycloakLogin(page: import("@playwright/test").Page, baseURL: string) {
+async function startKeycloakLogin(
+    page: import("@playwright/test").Page,
+    baseURL: string,
+    loginButtonTimeoutMs: number,
+) {
     await page.goto(baseURL, { waitUntil: "domcontentloaded" });
 
     const logoutButton = page.getByTestId("logout-button");
@@ -39,7 +43,7 @@ async function startKeycloakLogin(page: import("@playwright/test").Page, baseURL
     }
 
     const loginButton = page.getByTestId("login-button");
-    if (await loginButton.waitFor({ state: "visible", timeout: 10000 }).catch(() => false)) {
+    if (await loginButton.waitFor({ state: "visible", timeout: loginButtonTimeoutMs }).catch(() => false)) {
         await loginButton.click();
         return "started";
     }
@@ -103,10 +107,14 @@ export default async function globalSetup(config: FullConfig) {
         process.env.E2E_LOGIN_TRANSITION_TIMEOUT_MS ?? "60000",
         10,
     );
+    const loginButtonTimeoutMs = Number.parseInt(
+        process.env.E2E_LOGIN_BUTTON_TIMEOUT_MS ?? "30000",
+        10,
+    );
     const browser = await chromium.launch();
     const page = await browser.newPage();
 
-    const loginState = await startKeycloakLogin(page, baseURL);
+    const loginState = await startKeycloakLogin(page, baseURL, loginButtonTimeoutMs);
     const logoutButton = page.getByTestId("logout-button");
 
     if (loginState !== "logged-in") {
