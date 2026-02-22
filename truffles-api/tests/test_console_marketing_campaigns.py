@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -144,6 +145,8 @@ def test_serialize_marketing_campaign_includes_dates() -> None:
 
     serialized = console_router._serialize_marketing_campaign(campaign)
     assert serialized.name == "Spring Reactivation"
+    assert serialized.status == "approved"
+    assert serialized.status_v2 == "approved"
     assert serialized.segment_code == "reactivation_30_120"
     assert serialized.preview_total == 42
     assert serialized.last_preview_at is not None
@@ -197,3 +200,108 @@ def test_serialize_marketing_recipient_fallback_segment() -> None:
     serialized = console_router._serialize_marketing_recipient(recipient)
     assert serialized.segment_code == "reactivation_30_120"
     assert serialized.reason_codes == ["segment=legacy"]
+
+
+@pytest.mark.asyncio
+async def test_get_marketing_campaign_diagnostics_reports_failure_classes(monkeypatch) -> None:
+    now = datetime.now(timezone.utc)
+    campaign_id = uuid4()
+    branch_id = uuid4()
+    client_id = uuid4()
+    campaign = SimpleNamespace(
+        id=campaign_id,
+        branch_id=branch_id,
+        client_id=client_id,
+        status="running",
+        status_v2="running",
+    )
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=client_id),
+        agent=SimpleNamespace(id=uuid4(), name="Tester"),
+    )
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda *args, **kwargs: context)
+    monkeypatch.setattr(console_router, "_resolve_marketing_campaign", lambda *args, **kwargs: campaign)
+    monkeypatch.setattr(console_router, "_resolve_marketing_branch", lambda *args, **kwargs: SimpleNamespace(id=branch_id))
+    monkeypatch.setattr(
+        console_router,
+        "refresh_marketing_campaign_lifecycle",
+        lambda *args, **kwargs: {"queued": 0, "sent": 1, "failed": 2, "replied": 0},
+    )
+
+    failed_permanent = MarketingCampaignDelivery(
+        id=uuid4(),
+        campaign_id=campaign_id,
+        client_id=client_id,
+        branch_id=branch_id,
+        recipient_jid="77000000001@s.whatsapp.net",
+        status="queued",
+        outbox_id=uuid4(),
+        created_at=now,
+        updated_at=now,
+    )
+    failed_retryable = MarketingCampaignDelivery(
+        id=uuid4(),
+        campaign_id=campaign_id,
+        client_id=client_id,
+        branch_id=branch_id,
+        recipient_jid="77000000002@s.whatsapp.net",
+        status="queued",
+        outbox_id=uuid4(),
+        created_at=now,
+        updated_at=now,
+    )
+    sent_delivery = MarketingCampaignDelivery(
+        id=uuid4(),
+        campaign_id=campaign_id,
+        client_id=client_id,
+        branch_id=branch_id,
+        recipient_jid="77000000003@s.whatsapp.net",
+        status="queued",
+        outbox_id=uuid4(),
+        created_at=now,
+        updated_at=now,
+    )
+
+    rows = [
+        (
+            failed_permanent,
+            "FAILED",
+            "Outbound delivery failed: [CHATFLOW_BILLING_BLOCKED] plan renewal required",
+        ),
+        (
+            failed_retryable,
+            "FAILED",
+            "timeout contacting provider",
+        ),
+        (
+            sent_delivery,
+            "SENT",
+            None,
+        ),
+    ]
+    query = Mock()
+    query.outerjoin.return_value = query
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.all.return_value = rows
+    db = Mock()
+    db.query.return_value = query
+    db.commit = Mock()
+
+    response = await console_router.get_marketing_campaign_diagnostics(
+        campaign_id=str(campaign_id),
+        request=Mock(),
+        sample_limit=5,
+        db=db,
+    )
+
+    assert response.total_count == 3
+    assert response.failed_count == 2
+    assert response.failure_classes["provider_billing_blocked"] == 1
+    assert response.failure_classes["provider_unavailable"] == 1
+    assert response.retryable_failed_count == 1
+    assert response.permanent_failed_count == 1
+    assert len(response.sample_failed) == 2
+    db.commit.assert_called_once()

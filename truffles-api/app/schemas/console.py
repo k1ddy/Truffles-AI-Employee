@@ -342,6 +342,17 @@ ConsoleMarketingCampaignStatus = Literal[
     "cancelled",
     "failed",
 ]
+ConsoleMarketingCampaignStatusV2 = Literal[
+    "draft",
+    "in_review",
+    "approved",
+    "scheduled",
+    "running",
+    "paused",
+    "completed",
+    "cancelled",
+    "failed",
+]
 ConsoleMarketingAudienceMode = Literal["branch_active_conversations"]
 ConsoleMarketingDeliveryStatus = Literal["queued", "sent", "failed", "replied"]
 ConsoleMarketingSegmentCode = Literal[
@@ -358,6 +369,7 @@ class ConsoleMarketingCampaign(BaseModel):
     name: str
     message_text: str
     status: ConsoleMarketingCampaignStatus
+    status_v2: ConsoleMarketingCampaignStatusV2 = "draft"
     segment_code: ConsoleMarketingSegmentCode = "reactivation_30_120"
     audience_mode: ConsoleMarketingAudienceMode
     preview_total: int = 0
@@ -434,6 +446,9 @@ class ConsoleMarketingCampaignDiagnosticsResponse(BaseModel):
     failed_count: int
     replied_count: int
     total_count: int
+    failure_classes: dict[str, int] = {}
+    retryable_failed_count: int = 0
+    permanent_failed_count: int = 0
     sample_failed: list[ConsoleMarketingDeliverySample]
 
 
@@ -486,6 +501,9 @@ class ConsoleMarketingCampaignPreflightResponse(BaseModel):
     audience_total: int = 0
     eligible_count: int = 0
     suppressed_count: int = 0
+    template_gate_enabled: bool = False
+    template_state: Optional[str] = None
+    template_ok: bool = True
 
 
 class ConsoleMarketingCampaignLifecycleActionRequest(ConsoleRequestModel):

@@ -867,6 +867,16 @@ export type MarketingCampaignStatus =
     | "completed"
     | "cancelled"
     | "failed";
+export type MarketingCampaignStatusV2 =
+    | "draft"
+    | "in_review"
+    | "approved"
+    | "scheduled"
+    | "running"
+    | "paused"
+    | "completed"
+    | "cancelled"
+    | "failed";
 export type MarketingDeliveryStatus = "queued" | "sent" | "failed" | "replied";
 export type MarketingAudienceMode = "branch_active_conversations";
 export type MarketingSegmentCode = "reactivation_30_120" | "no_show_recovery_14d" | "engaged_no_booking_7d";
@@ -877,6 +887,7 @@ export type MarketingCampaign = {
     name: string;
     message_text: string;
     status: MarketingCampaignStatus;
+    status_v2: MarketingCampaignStatusV2;
     segment_code: MarketingSegmentCode;
     audience_mode: MarketingAudienceMode;
     preview_total: number;
@@ -935,6 +946,9 @@ export type MarketingCampaignDiagnosticsResponse = {
     failed_count: number;
     replied_count: number;
     total_count: number;
+    failure_classes: Record<string, number>;
+    retryable_failed_count: number;
+    permanent_failed_count: number;
     sample_failed: MarketingDeliverySample[];
 };
 export type MarketingCampaignRetryRequest = { confirm_retry: boolean; limit?: number | null };
@@ -975,6 +989,9 @@ export type MarketingCampaignPreflightResponse = {
     audience_total: number;
     eligible_count: number;
     suppressed_count: number;
+    template_gate_enabled: boolean;
+    template_state?: string | null;
+    template_ok: boolean;
 };
 export type TenantsOperationalSnapshotWorkspaceMode = "portfolio" | "onboarding" | "changes" | "decommission";
 export type TenantsOperationalSnapshotLifecycleMode = "active" | "archived" | "all";

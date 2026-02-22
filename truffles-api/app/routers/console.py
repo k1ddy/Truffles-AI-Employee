@@ -369,6 +369,9 @@ from app.services.marketing import (
     mark_campaign_resume,
     mark_campaign_under_review,
     materialize_marketing_campaign_audience,
+    normalize_marketing_status,
+    refresh_marketing_campaign_lifecycle,
+    resolve_marketing_campaign_status,
     retry_failed_marketing_deliveries,
     run_marketing_campaign_execute,
 )
@@ -411,6 +414,7 @@ from app.services.pack_compiler_service import (
     extract_compiled_artifacts,
     parse_compiled_at,
 )
+from app.services.provider_error_policy import classify_provider_error
 from app.services.reference_branch_selection import (
     ReferenceBranchSignal,
     select_reference_branch_ids,
@@ -2257,13 +2261,15 @@ def _require_marketing_access(context: ConsoleAuthContext, *, action: str) -> No
 
 def _serialize_marketing_campaign(campaign: MarketingCampaign) -> ConsoleMarketingCampaign:
     segment_code = campaign.segment_code if campaign.segment_code in MARKETING_SEGMENT_CODES else "reactivation_30_120"
+    status_value = resolve_marketing_campaign_status(campaign)
     return ConsoleMarketingCampaign(
         id=campaign.id,
         client_id=campaign.client_id,
         branch_id=campaign.branch_id,
         name=campaign.name,
         message_text=campaign.message_text,
-        status=campaign.status,
+        status=status_value,
+        status_v2=status_value,
         segment_code=segment_code,
         audience_mode=campaign.audience_mode,
         preview_total=int(campaign.preview_total or 0),
@@ -13633,13 +13639,22 @@ async def list_marketing_campaigns(
     status_value = _normalize_optional_text(status)
     if status_value and status_value not in MARKETING_STATUS_VALUES:
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
+    normalized_status = normalize_marketing_status(status_value) if status_value else None
 
     query = db.query(MarketingCampaign).filter(MarketingCampaign.client_id == context.client.id)
     if branch_uuid is not None:
         _resolve_marketing_branch(context, db, branch_uuid)
         query = query.filter(MarketingCampaign.branch_id == branch_uuid)
-    if status_value:
-        query = query.filter(MarketingCampaign.status == status_value)
+    if normalized_status:
+        query = query.filter(
+            or_(
+                MarketingCampaign.status_v2 == normalized_status,
+                and_(
+                    MarketingCampaign.status_v2.is_(None),
+                    MarketingCampaign.status.in_([status_value, normalized_status]),
+                ),
+            )
+        )
 
     campaigns = query.order_by(MarketingCampaign.created_at.desc(), MarketingCampaign.id.desc()).all()
     return ConsoleMarketingCampaignListResponse(
@@ -13679,6 +13694,7 @@ async def create_marketing_campaign(
         name=name,
         message_text=message_text,
         status=MARKETING_STATUS_DRAFT,
+        status_v2=MARKETING_STATUS_DRAFT,
         segment_code=segment_code,
         audience_mode=payload.audience_mode,
         audience_filter={},
@@ -13923,6 +13939,7 @@ async def get_marketing_campaign_preflight(
     campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
     _resolve_marketing_branch(context, db, campaign.branch_id)
 
+    refresh_marketing_campaign_lifecycle(db, campaign=campaign)
     snapshot = build_marketing_campaign_preflight(db, campaign=campaign)
     db.commit()
     outbox_health = snapshot.get("outbox_health") if isinstance(snapshot.get("outbox_health"), dict) else {}
@@ -13937,6 +13954,9 @@ async def get_marketing_campaign_preflight(
         audience_total=int(snapshot.get("audience_total") or 0),
         eligible_count=int(snapshot.get("eligible_count") or 0),
         suppressed_count=int(snapshot.get("suppressed_count") or 0),
+        template_gate_enabled=bool(snapshot.get("template_gate_enabled")),
+        template_state=snapshot.get("template_state"),
+        template_ok=bool(snapshot.get("template_ok", True)),
     )
 
 
@@ -14113,6 +14133,7 @@ async def get_marketing_campaign_diagnostics(
     campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
     _resolve_marketing_branch(context, db, campaign.branch_id)
     sample_limit_value = _normalize_marketing_sample_limit(sample_limit)
+    refresh_marketing_campaign_lifecycle(db, campaign=campaign)
 
     rows = (
         db.query(
@@ -14127,6 +14148,9 @@ async def get_marketing_campaign_diagnostics(
     )
 
     counts = {"queued": 0, "sent": 0, "failed": 0, "replied": 0}
+    failure_classes: dict[str, int] = {}
+    retryable_failed_count = 0
+    permanent_failed_count = 0
     sample_failed: list[ConsoleMarketingDeliverySample] = []
     for delivery, outbox_status, outbox_last_error in rows:
         status_value = _effective_marketing_delivery_status(
@@ -14134,16 +14158,27 @@ async def get_marketing_campaign_diagnostics(
             outbox_status=outbox_status,
         )
         counts[status_value] += 1
-        if status_value == "failed" and len(sample_failed) < sample_limit_value:
+        if status_value != "failed":
+            continue
+        failure_text = outbox_last_error or delivery.error_reason
+        classification = classify_provider_error(failure_text)
+        reason_code = classification.incident_reason_code
+        failure_classes[reason_code] = failure_classes.get(reason_code, 0) + 1
+        if classification.retryable:
+            retryable_failed_count += 1
+        else:
+            permanent_failed_count += 1
+        if len(sample_failed) < sample_limit_value:
             sample_failed.append(
                 _serialize_marketing_delivery_sample(
                     delivery,
                     status=status_value,
                     outbox_status=outbox_status,
-                    last_error=outbox_last_error or delivery.error_reason,
+                    last_error=failure_text,
                 )
             )
 
+    db.commit()
     return ConsoleMarketingCampaignDiagnosticsResponse(
         campaign_id=campaign.id,
         queued_count=counts["queued"],
@@ -14151,6 +14186,9 @@ async def get_marketing_campaign_diagnostics(
         failed_count=counts["failed"],
         replied_count=counts["replied"],
         total_count=sum(counts.values()),
+        failure_classes=failure_classes,
+        retryable_failed_count=retryable_failed_count,
+        permanent_failed_count=permanent_failed_count,
         sample_failed=sample_failed,
     )
 

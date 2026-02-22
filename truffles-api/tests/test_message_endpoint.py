@@ -847,6 +847,32 @@ def _build_query_side_effect(
     return _query
 
 
+def test_marketing_campaign_query_side_effect_routes_delivery_join():
+    class MarketingCampaignDelivery:
+        pass
+
+    class MarketingCampaign:
+        pass
+
+    marketing_query = Mock()
+    query_side_effect = _build_query_side_effect(marketing_query=marketing_query)
+
+    assert query_side_effect(MarketingCampaignDelivery, MarketingCampaign) is marketing_query
+
+
+def test_marketing_campaign_query_side_effect_does_not_route_other_joins():
+    class MarketingCampaign:
+        pass
+
+    class AnotherModel:
+        pass
+
+    marketing_query = Mock()
+    query_side_effect = _build_query_side_effect(marketing_query=marketing_query)
+
+    assert query_side_effect(AnotherModel, MarketingCampaign) is not marketing_query
+
+
 def _booking_signal_snapshot(messages: list[str], *, client_slug: str = "demo_salon") -> dict:
     message_text = messages[-1] if messages else None
     client_config = {"domain_router": DEMO_DOMAIN_ROUTER_CONFIG}
