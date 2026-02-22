@@ -3,16 +3,27 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 from uuid import uuid4
 
+import pytest
+
 from app.services.marketing import (
     MARKETING_STATUS_COMPLETED,
     MARKETING_STATUS_FAILED,
     MARKETING_STATUS_RUNNING,
     build_marketing_campaign_preflight,
+    build_marketing_segment_summary,
     derive_marketing_terminal_status,
+    describe_marketing_reason_code,
+    describe_marketing_suppression_reason,
+    get_marketing_segment_catalog,
+    normalize_marketing_segment_params,
     normalize_marketing_status,
     refresh_marketing_campaign_lifecycle,
 )
-from app.services.marketing.service import _message_has_service_or_pricing_signal
+from app.services.marketing.service import (
+    MARKETING_SEGMENT_ENGAGED_NO_BOOKING_7D,
+    MARKETING_SEGMENT_REACTIVATION_30_120,
+    _message_has_service_or_pricing_signal,
+)
 
 
 def _count_query(value: int) -> Mock:
@@ -122,6 +133,61 @@ def test_message_has_service_or_pricing_signal_detects_metadata() -> None:
     )
     assert detected is True
     assert signal == "meta:info_sections"
+
+
+def test_normalize_marketing_segment_params_reactivation_window() -> None:
+    params = normalize_marketing_segment_params(
+        MARKETING_SEGMENT_REACTIVATION_30_120,
+        {
+            "min_days_since_last_visit": 45,
+            "max_days_since_last_visit": 150,
+            "require_no_future_booking": False,
+        },
+        strict=True,
+    )
+
+    assert params["min_days_since_last_visit"] == 45
+    assert params["max_days_since_last_visit"] == 150
+    assert params["require_no_future_booking"] is False
+
+
+def test_normalize_marketing_segment_params_raises_on_invalid_window() -> None:
+    with pytest.raises(ValueError):
+        normalize_marketing_segment_params(
+            MARKETING_SEGMENT_REACTIVATION_30_120,
+            {
+                "min_days_since_last_visit": 200,
+                "max_days_since_last_visit": 100,
+            },
+            strict=True,
+        )
+
+
+def test_marketing_segment_catalog_contains_owner_labels() -> None:
+    catalog = get_marketing_segment_catalog()
+
+    assert len(catalog) >= 3
+    assert any(item["label"] == "Возврат клиентов" for item in catalog)
+
+
+def test_marketing_segment_summary_uses_effective_params() -> None:
+    summary = build_marketing_segment_summary(
+        MARKETING_SEGMENT_ENGAGED_NO_BOOKING_7D,
+        {
+            "engagement_window_days": 10,
+            "require_no_future_booking": True,
+        },
+    )
+
+    assert "10" in summary
+
+
+def test_marketing_reason_and_suppression_explainers_return_hints() -> None:
+    reason = describe_marketing_reason_code("no_show_window_count=2")
+    suppression = describe_marketing_suppression_reason("consent:opt_out")
+
+    assert "no-show" in reason.lower()
+    assert "opt-out" in suppression.lower()
 
 
 def test_refresh_marketing_campaign_lifecycle_marks_completed() -> None:

@@ -161,6 +161,7 @@ from app.schemas.console import (
     ConsoleMarketingCampaignRetryResponse,
     ConsoleMarketingCampaignUpdateRequest,
     ConsoleMarketingDeliverySample,
+    ConsoleMarketingSegmentCatalogResponse,
     ConsoleMembershipCreateRequest,
     ConsoleMembershipListResponse,
     ConsoleMembershipUpdateRequest,
@@ -366,14 +367,20 @@ from app.services.marketing import (
     MARKETING_STATUS_PAUSED,
     MARKETING_STATUS_VALUES,
     build_marketing_campaign_preflight,
+    build_marketing_segment_summary,
+    describe_marketing_reason_code,
+    describe_marketing_suppression_reason,
     fetch_marketing_audience_preview,
+    get_marketing_segment_catalog,
     mark_campaign_approved,
     mark_campaign_paused,
     mark_campaign_resume,
     mark_campaign_under_review,
     materialize_marketing_campaign_audience,
+    normalize_marketing_segment_params,
     normalize_marketing_status,
     refresh_marketing_campaign_lifecycle,
+    resolve_campaign_segment_params,
     resolve_marketing_campaign_status,
     retry_failed_marketing_deliveries,
     run_marketing_campaign_execute,
@@ -2343,6 +2350,21 @@ def _require_marketing_access(context: ConsoleAuthContext, *, action: str) -> No
 def _serialize_marketing_campaign(campaign: MarketingCampaign) -> ConsoleMarketingCampaign:
     segment_code = campaign.segment_code if campaign.segment_code in MARKETING_SEGMENT_CODES else "reactivation_30_120"
     status_value = resolve_marketing_campaign_status(campaign)
+    try:
+        segment_params = resolve_campaign_segment_params(
+            campaign,
+            segment_code=segment_code,
+            strict=False,
+        )
+    except Exception:
+        segment_params = normalize_marketing_segment_params(segment_code, None, strict=False)
+    audience_filter = campaign.audience_filter if isinstance(campaign.audience_filter, dict) else {}
+    segment_summary_raw = audience_filter.get("segment_summary")
+    segment_summary = (
+        segment_summary_raw.strip()
+        if isinstance(segment_summary_raw, str) and segment_summary_raw.strip()
+        else build_marketing_segment_summary(segment_code, segment_params)
+    )
     return ConsoleMarketingCampaign(
         id=campaign.id,
         client_id=campaign.client_id,
@@ -2352,6 +2374,8 @@ def _serialize_marketing_campaign(campaign: MarketingCampaign) -> ConsoleMarketi
         status=status_value,
         status_v2=status_value,
         segment_code=segment_code,
+        segment_params=segment_params,
+        segment_summary=segment_summary,
         audience_mode=campaign.audience_mode,
         preview_total=int(campaign.preview_total or 0),
         preflight_valid=bool(campaign.preflight_valid),
@@ -2457,6 +2481,38 @@ def _normalize_marketing_audience_limit(limit: Optional[int]) -> int:
     return limit
 
 
+def _normalize_marketing_segment_params_or_error(
+    *,
+    segment_code: str,
+    raw_params: Any,
+    field_name: str = "segment_params",
+) -> dict[str, Any]:
+    try:
+        return normalize_marketing_segment_params(
+            segment_code,
+            raw_params,
+            strict=True,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        message_by_code = {
+            "invalid_segment_params_keys": f"{field_name}: unsupported keys for selected segment",
+            "invalid_min_days_since_last_visit": "segment_params.min_days_since_last_visit must be between 1 and 3650",
+            "invalid_max_days_since_last_visit": "segment_params.max_days_since_last_visit must be between 1 and 3650",
+            "invalid_reactivation_window": "segment_params: min_days_since_last_visit must be <= max_days_since_last_visit",
+            "invalid_no_show_window_days": "segment_params.no_show_window_days must be between 1 and 365",
+            "invalid_min_no_show_count": "segment_params.min_no_show_count must be between 1 and 10",
+            "invalid_engagement_window_days": "segment_params.engagement_window_days must be between 1 and 90",
+        }
+        if code == "unsupported_segment":
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported segment_code") from exc
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            message_by_code.get(code, f"{field_name} contains invalid values"),
+        ) from exc
+
+
 def _resolve_marketing_campaign(
     context: ConsoleAuthContext,
     db: Session,
@@ -2526,8 +2582,18 @@ def _serialize_marketing_recipient(
         conversation_id=recipient.conversation_id,
         segment_code=segment_code,
         reason_codes=[str(value) for value in reason_codes],
+        reason_hints=[
+            hint
+            for hint in [describe_marketing_reason_code(str(value)) for value in reason_codes]
+            if hint
+        ],
         suppressed=bool(recipient.suppressed),
         suppression_reasons=[str(value) for value in suppression_reasons],
+        suppression_hints=[
+            hint
+            for hint in [describe_marketing_suppression_reason(str(value)) for value in suppression_reasons]
+            if hint
+        ],
         updated_at=recipient.updated_at.isoformat() if recipient.updated_at else None,
     )
 
@@ -13756,6 +13822,20 @@ async def audit_tenants_sensitive_access(
 
 
 @router.get(
+    "/admin/marketing/segments",
+    response_model=ConsoleMarketingSegmentCatalogResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_marketing_segments_catalog(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingSegmentCatalogResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="view")
+    return ConsoleMarketingSegmentCatalogResponse(items=get_marketing_segment_catalog())
+
+
+@router.get(
     "/admin/marketing/campaigns",
     response_model=ConsoleMarketingCampaignListResponse,
     responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
@@ -13816,6 +13896,11 @@ async def create_marketing_campaign(
     segment_code = _normalize_required_text(payload.segment_code, "segment_code")
     if segment_code not in MARKETING_SEGMENT_CODES:
         raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported segment_code")
+    segment_params = _normalize_marketing_segment_params_or_error(
+        segment_code=segment_code,
+        raw_params=payload.segment_params,
+    )
+    segment_summary = build_marketing_segment_summary(segment_code, segment_params)
     if len(name) > 120:
         raise ConsoleAPIError(400, "INVALID_PARAM", "name too long")
     if len(message_text) > 2000:
@@ -13832,7 +13917,10 @@ async def create_marketing_campaign(
         status_v2=MARKETING_STATUS_DRAFT,
         segment_code=segment_code,
         audience_mode=payload.audience_mode,
-        audience_filter={},
+        audience_filter={
+            "segment_params": segment_params,
+            "segment_summary": segment_summary,
+        },
         preview_total=0,
         preflight_snapshot={},
         preflight_valid=False,
@@ -13855,6 +13943,7 @@ async def create_marketing_campaign(
             "campaign_name": campaign.name,
             "audience_mode": campaign.audience_mode,
             "segment_code": campaign.segment_code,
+            "segment_params": segment_params,
         },
     )
     db.commit()
@@ -13907,6 +13996,29 @@ async def update_marketing_campaign(
             campaign.segment_code = normalized_segment
             changed_fields.append("segment_code")
 
+    current_segment_code = (
+        campaign.segment_code if campaign.segment_code in MARKETING_SEGMENT_CODES else "reactivation_30_120"
+    )
+    current_segment_params = resolve_campaign_segment_params(
+        campaign,
+        segment_code=current_segment_code,
+        strict=False,
+    )
+    next_segment_params = current_segment_params
+    if payload.segment_params is not None:
+        next_segment_params = _normalize_marketing_segment_params_or_error(
+            segment_code=current_segment_code,
+            raw_params=payload.segment_params,
+        )
+    elif payload.segment_code is not None:
+        next_segment_params = _normalize_marketing_segment_params_or_error(
+            segment_code=current_segment_code,
+            raw_params=None,
+        )
+
+    if next_segment_params != current_segment_params:
+        changed_fields.append("segment_params")
+
     if not changed_fields:
         raise ConsoleAPIError(400, "INVALID_PARAM", "No campaign fields changed")
 
@@ -13914,6 +14026,11 @@ async def update_marketing_campaign(
     db.query(MarketingCampaignRecipient).filter(MarketingCampaignRecipient.campaign_id == campaign.id).delete()
     audience_filter = campaign.audience_filter if isinstance(campaign.audience_filter, dict) else {}
     audience_filter.pop("preview_stats", None)
+    audience_filter["segment_params"] = next_segment_params
+    audience_filter["segment_summary"] = build_marketing_segment_summary(
+        current_segment_code,
+        next_segment_params,
+    )
     campaign.audience_filter = audience_filter
     campaign.preview_total = 0
     campaign.last_preview_at = None
@@ -14000,6 +14117,8 @@ async def preview_marketing_campaign(
         estimated_recipients=preview["estimated_recipients"],
         eligible_count=preview["eligible_count"],
         suppressed_count=preview["suppressed_count"],
+        segment_params=preview["segment_params"],
+        segment_summary=preview["segment_summary"],
         sample_conversation_ids=preview["sample_conversation_ids"],
         sample_recipient_jids=preview["sample_recipient_jids"],
         funnel=ConsoleMarketingAudienceFunnel(
@@ -14186,6 +14305,12 @@ async def get_marketing_campaign_preflight(
         audience_total=int(snapshot.get("audience_total") or 0),
         eligible_count=int(snapshot.get("eligible_count") or 0),
         suppressed_count=int(snapshot.get("suppressed_count") or 0),
+        segment_params=snapshot.get("segment_params") if isinstance(snapshot.get("segment_params"), dict) else {},
+        segment_summary=(
+            str(snapshot.get("segment_summary")).strip()
+            if isinstance(snapshot.get("segment_summary"), str)
+            else None
+        ),
         preview_stats=_serialize_marketing_audience_funnel(snapshot.get("preview_stats")),
         template_gate_enabled=bool(snapshot.get("template_gate_enabled")),
         template_state=snapshot.get("template_state"),
