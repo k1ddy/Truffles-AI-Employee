@@ -1,59 +1,12 @@
 {
-  "url": "https://console.truffles.kz/tenants",
-  "timestamp": "2026-02-20T11:02:43.349Z",
-  "violations_total": 3,
+  "url": "http://localhost:3100/tenants",
+  "timestamp": "2026-02-22T13:39:21.565Z",
+  "violations_total": 0,
   "impacts": {
     "minor": 0,
     "moderate": 0,
-    "serious": 1,
-    "critical": 2
+    "serious": 0,
+    "critical": 0
   },
-  "violations": [
-    {
-      "id": "color-contrast",
-      "impact": "serious",
-      "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
-      "help": "Elements must meet minimum color contrast ratio thresholds",
-      "nodes": 10,
-      "targets": [
-        "[\".py-1\\\\.5\"]",
-        "[\".underline\"]",
-        "[\"div[data-testid=\\\"tenants-workspace-guide\\\"] > .tracking-\\\\[0\\\\.2em\\\\].mb-2.uppercase\"]",
-        "[\"div[data-testid=\\\"tenants-workspace-guide\\\"] > .text-xs.text-muted-foreground:nth-child(2)\"]",
-        "[\".mt-2.text-xs.text-muted-foreground:nth-child(3)\"]",
-        "[\"div[data-testid=\\\"tenants-workspace-guide\\\"] > .mt-2.text-xs.text-muted-foreground:nth-child(4)\"]",
-        "[\".bg-muted\\\\/20.border-border\\\\/60.px-3:nth-child(1) > .text-\\\\[11px\\\\].text-muted-foreground\"]",
-        "[\".bg-muted\\\\/20.border-border\\\\/60.px-3:nth-child(2) > .text-\\\\[11px\\\\].text-muted-foreground\"]",
-        "[\".bg-muted\\\\/20.border-border\\\\/60.px-3:nth-child(3) > .text-\\\\[11px\\\\].text-muted-foreground\"]",
-        "[\".bg-muted\\\\/20.border-border\\\\/60.px-3:nth-child(4) > .text-\\\\[11px\\\\].text-muted-foreground\"]"
-      ]
-    },
-    {
-      "id": "label",
-      "impact": "critical",
-      "description": "Ensure every form element has a label",
-      "help": "Form elements must have labels",
-      "nodes": 3,
-      "targets": [
-        "[\".w-full[type=\\\"date\\\"][value=\\\"\\\"]:nth-child(3)\"]",
-        "[\".w-full[type=\\\"date\\\"][value=\\\"\\\"]:nth-child(5)\"]",
-        "[\".w-full[type=\\\"date\\\"][value=\\\"\\\"]:nth-child(6)\"]"
-      ]
-    },
-    {
-      "id": "select-name",
-      "impact": "critical",
-      "description": "Ensure select element has an accessible name",
-      "help": "Select element must have an accessible name",
-      "nodes": 6,
-      "targets": [
-        "[\".justify-end > select:nth-child(2)\"]",
-        "[\"select:nth-child(3)\"]",
-        "[\"select:nth-child(4)\"]",
-        "[\".md\\\\:grid-cols-2 > select\"]",
-        "[\".grid-cols-1.md\\\\:grid-cols-3.grid > select:nth-child(2)\"]",
-        "[\"select:nth-child(7)\"]"
-      ]
-    }
-  ]
+  "violations": []
 }

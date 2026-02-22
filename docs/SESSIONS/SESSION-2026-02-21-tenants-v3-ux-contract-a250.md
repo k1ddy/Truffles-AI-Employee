@@ -44,10 +44,18 @@
   - Wave5 усилен: `tenants-page-filters`/`tenants-context-lens` получили повышенный контраст helper/label текста; `tenants-a11y.spec.ts` ожидание открытия Tenants переведено на fail-closed ожидание финального состояния.
   - Прогнаны проверки: `corepack pnpm -C console-web lint`, `corepack pnpm -C console-web build` (green).
   - Запущен live fail-closed a11y gate (`A11Y_FAIL_ON_THRESHOLDS=1` на `https://console.truffles.kz`): `serious=1` для desktop/mobile (`color-contrast`), что зафиксировано как runtime GAP до деплоя ветки.
+  - Выполнен merge `origin/main` в рабочую ветку и разрешены конфликты контрактов (`api-client/openapi`) без потери Tenants-v3 изменений.
+  - Wave6 закрыт в deterministic lane: `platform-admin.spec.ts` переведён на deterministic auth/session mocks, убраны soft/skip-пути, сценарии A/B/C/D/E проходят `14/14` без `--no-deps`.
+  - `playwright.config.ts` обновлён под deterministic mode: setup dependency отключается при `E2E_DETERMINISTIC_AUTH=1`, webServer порт берётся из `PLAYWRIGHT_BASE_URL`, auth bypass включён только в e2e env.
+  - `tenants-a11y.spec.ts` переведён на deterministic mocks и жёсткий fail-closed доступ (`expect(tenantsAvailable).toBe(true)`); skip-path удалён.
+  - Wave5 a11y gate закрыт локально: устранён `color-contrast` (serious=1) в KPI карточках через статусные high-contrast labels в `TenantsOperationalKpiPanel`; fail-closed a11y lane теперь `critical=0`, `serious=0` (desktop/mobile).
+  - Обновлён текущий Task Package с фактическим статусом wave execution/checks/evidence; устаревший check `test_console_tenants_weekly_snapshots.py` удалён как несуществующий (weekly snapshot contract покрыт в `test_console_tenants_list.py`).
+  - Прогнаны проверки: `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`, `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 ... platform-admin.spec.ts` (`14 passed`), `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 A11Y_FAIL_ON_THRESHOLDS=1 ... tenants-a11y.spec.ts` (`2 passed`), `python3 truffles-api/scripts/generate_openapi.py --check`, `pytest -q truffles-api/tests/test_console_tenants_list.py` (`58 passed`), `pytest -q truffles-api/tests/test_console_fleet_attention.py` (`6 passed`), `scripts/session_check.sh`.
 - next:
+  - Запушить изменения в ветку и синхронизировать PR с новым evidence wave5/6.
+  - Перезапустить CI на PR и зафиксировать run URL в `STATE.md`.
+  - После deploy ветки повторить fail-closed a11y lane на `https://console.truffles.kz` для runtime закрытия Wave5.
   - Продолжить Wave4 декомпозицию `tenants/page.tsx` (следующий вынос: fleet attention + portfolio companies секции).
-  - После deploy ветки повторить fail-closed a11y lane на live и закрыть Wave5 gate (`critical=0`, `serious=0`) фактом.
-  - Продолжить ужесточение e2e: убрать remaining soft-pass/early-return ветки в smoke-наборе `platform-admin.spec.ts` через seeded lane или deterministic fixtures.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
@@ -60,6 +68,8 @@
   - console-web/e2e/tenants-a11y.spec.ts
   - console-web/e2e/auth.setup.ts
   - console-web/e2e/platform-admin.spec.ts
+  - console-web/playwright.config.ts
+  - console-web/src/components/ConsoleShell.tsx
   - truffles-api/app/schemas/console.py
   - truffles-api/app/routers/console.py
   - truffles-api/tests/test_console_tenants_list.py
@@ -69,4 +79,6 @@
   - truffles-api/app/models/tenants_weekly_snapshot.py
   - truffles-api/migrations/037_add_tenants_weekly_snapshots.sql
   - console-web/src/lib/api-client.ts
-- last_updated: 2026-02-22T08:54:23Z
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-desktop-axe.json
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-mobile-axe.json
+- last_updated: 2026-02-22T13:44:29Z

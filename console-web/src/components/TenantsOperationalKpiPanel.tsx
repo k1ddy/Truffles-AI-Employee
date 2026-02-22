@@ -113,6 +113,16 @@ function kpiStatusBadgeClass(status: OperationalKpiStatus) {
     return "bg-emerald-100 text-emerald-700";
 }
 
+function kpiLabelClass(status: OperationalKpiStatus) {
+    if (status === "critical") {
+        return "text-xs font-medium text-red-950";
+    }
+    if (status === "warn") {
+        return "text-xs font-medium text-amber-950";
+    }
+    return "text-xs font-medium text-emerald-950";
+}
+
 export default function TenantsOperationalKpiPanel({
     isRefreshing,
     onRefresh,
@@ -189,49 +199,49 @@ export default function TenantsOperationalKpiPanel({
             </div>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <div className={kpiCardClass(kpiStatuses.onboardingCoverage)} data-testid="tenants-kpi-onboarding-coverage">
-                    <div className="text-xs text-muted-foreground">Покрытие онбординга (прокси)</div>
+                    <div className={kpiLabelClass(kpiStatuses.onboardingCoverage)}>Покрытие онбординга (прокси)</div>
                     <div className="text-xl font-semibold">{operationalKpi.onboardingCoveragePct}%</div>
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(kpiStatuses.onboardingCoverage)}`}>
                         {kpiStatuses.onboardingCoverage}
                     </div>
                 </div>
                 <div className={kpiCardClass(kpiStatuses.goLiveReadiness)} data-testid="tenants-kpi-go-live-readiness">
-                    <div className="text-xs text-muted-foreground">Готовность к запуску (прокси)</div>
+                    <div className={kpiLabelClass(kpiStatuses.goLiveReadiness)}>Готовность к запуску (прокси)</div>
                     <div className="text-xl font-semibold">{operationalKpi.goLiveReadinessPct}%</div>
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(kpiStatuses.goLiveReadiness)}`}>
                         {kpiStatuses.goLiveReadiness}
                     </div>
                 </div>
                 <div className={kpiCardClass(kpiStatuses.serviceStability)} data-testid="tenants-kpi-service-stability">
-                    <div className="text-xs text-muted-foreground">Стабильность сервиса</div>
+                    <div className={kpiLabelClass(kpiStatuses.serviceStability)}>Стабильность сервиса</div>
                     <div className="text-xl font-semibold">{operationalKpi.serviceStabilityPct}%</div>
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(kpiStatuses.serviceStability)}`}>
                         {kpiStatuses.serviceStability}
                     </div>
                 </div>
                 <div className={kpiCardClass(kpiStatuses.decommissionShare)} data-testid="tenants-kpi-decommission-share">
-                    <div className="text-xs text-muted-foreground">Доля вывода из эксплуатации</div>
+                    <div className={kpiLabelClass(kpiStatuses.decommissionShare)}>Доля вывода из эксплуатации</div>
                     <div className="text-xl font-semibold">{operationalKpi.decommissionSharePct}%</div>
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(kpiStatuses.decommissionShare)}`}>
                         {kpiStatuses.decommissionShare}
                     </div>
                 </div>
                 <div className={kpiCardClass(kpiStatuses.changeFailure)} data-testid="tenants-kpi-change-failure">
-                    <div className="text-xs text-muted-foreground">Доля ошибок публикации (прокси)</div>
+                    <div className={kpiLabelClass(kpiStatuses.changeFailure)}>Доля ошибок публикации (прокси)</div>
                     <div className="text-xl font-semibold">{operationalKpi.changeFailurePct}%</div>
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(kpiStatuses.changeFailure)}`}>
                         {kpiStatuses.changeFailure}
                     </div>
                 </div>
                 <div className={kpiCardClass(kpiStatuses.rollbackShare)} data-testid="tenants-kpi-rollback-share">
-                    <div className="text-xs text-muted-foreground">Доля откатов (прокси)</div>
+                    <div className={kpiLabelClass(kpiStatuses.rollbackShare)}>Доля откатов (прокси)</div>
                     <div className="text-xl font-semibold">{operationalKpi.rollbackSharePct}%</div>
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(kpiStatuses.rollbackShare)}`}>
                         {kpiStatuses.rollbackShare}
                     </div>
                 </div>
                 <div className={kpiCardClass(kpiStatuses.blockedSignals)} data-testid="tenants-kpi-blocked-signals">
-                    <div className="text-xs text-muted-foreground">Блокирующие сигналы</div>
+                    <div className={kpiLabelClass(kpiStatuses.blockedSignals)}>Блокирующие сигналы</div>
                     <div className="text-xl font-semibold">{operationalKpi.blockedSignalsCount}</div>
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(kpiStatuses.blockedSignals)}`}>
                         {kpiStatuses.blockedSignals}

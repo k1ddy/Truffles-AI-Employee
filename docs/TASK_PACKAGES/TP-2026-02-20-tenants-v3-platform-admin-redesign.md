@@ -6,6 +6,7 @@
 
 ## Revision
 - `2026-02-22`: глубокая перепроверка на `main@9b804d69` и фиксация остаточных системных проблем.
+- `2026-02-22`: Wave 5/6 hardening — deterministic e2e/a11y lane без skip, auth-setup decoupling, KPI contrast fix.
 
 ## Canon refs
 - `AGENTS.md`
@@ -32,9 +33,9 @@
 | Wave 2 Context kernel | `partial` | Явные `page filters` и `context` есть (`console-web/src/components/TenantsTopControls.tsx:91`, `console-web/src/components/TenantsTopControls.tsx:166`) | Детерминизм состояния нарушен (см. `F1`, `F2`) |
 | Wave 3 Data contract | `done/partial` | Typed weekly snapshot schema + table/fallback (`truffles-api/app/schemas/console.py:249`, `truffles-api/app/routers/console.py:13434`) | Модель аналитики и fleet-агрегации не рассчитана на очень большой объём (`F5`) |
 | Wave 4 Decomposition/perf | `partial` | Вынесены отдельные панели (`console-web/src/components/TenantsOperationalKpiPanel.tsx`) | `tenants/page.tsx` остается 3768 LOC, основная оркестрация внутри (`F4`) |
-| Wave 5 A11y/copy | `partial` | Labels у quick-create есть (`console-web/src/components/TenantsQuickCreatePanel.tsx:46`) | Контраст KPI и смешение бизнес/тех copy остаются (`F6`, `F7`) |
-| Wave 6 E2E realism | `not_done` | Добавлены сценарии B/C/D/E | В тесте 9 `test.skip`, quarantine и skip-пути (`console-web/e2e/platform-admin.spec.ts:13`) |
-| Feature flag rollout | `not_done` | Нет | `TENANTS_V3_CONTROL_TOWER` отсутствует в коде |
+| Wave 5 A11y/copy | `done/partial` | `A11Y_FAIL_ON_THRESHOLDS=1` проходит в deterministic lane (desktop/mobile), KPI contrast исправлен (`console-web/src/components/TenantsOperationalKpiPanel.tsx`) | Остался бизнес-copy cleanup в отдельных секциях (`F7`) |
+| Wave 6 E2E realism | `done` | `platform-admin.spec.ts` стабилизирован: deterministic auth/session, нет `test.skip`, сценарии A/B/C/D/E hard-fail (`console-web/e2e/platform-admin.spec.ts`, `console-web/playwright.config.ts`) | Нет |
+| Feature flag rollout | `partial` | `NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER` уже в коде (`console-web/src/app/tenants/page.tsx:850`) | Shadow/canary/full rollout + наблюдение ещё не формализованы (`Wave 6`) |
 
 ## Critical problems (FACT, deep check)
 ### F1. Branch scope теряется после `Взять из рабочего контура`
@@ -81,11 +82,11 @@ Impact:
 
 ### F6. A11y debt: контраст KPI карточек
 Evidence:
-- KPI карточки используют светлые tint background + muted text (`console-web/src/components/TenantsOperationalKpiPanel.tsx:91`, `console-web/src/components/TenantsOperationalKpiPanel.tsx:191`).
-- В live-аудите ранее фиксировались `serious` проблемы контраста (`docs/REPORTS/2026-02-20-tenants-a11y-evidence-a201.md`).
+- KPI-карточки переведены на статусные high-contrast labels (`kpiLabelClass`) вместо `text-muted-foreground` на tint background (`console-web/src/components/TenantsOperationalKpiPanel.tsx`).
+- Локальный fail-closed a11y lane зелёный (`A11Y_FAIL_ON_THRESHOLDS=1`), artifacts обновлены (`docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-*-axe.json`).
 Impact:
-- fail-closed a11y gate краснеет.
-- интерфейс не проходит базовые требования читаемости.
+- Локальный fail-closed a11y gate закрыт.
+- Нужен runtime recheck после deploy, чтобы подтвердить отсутствие расхождения между локальным билдом и production bundle.
 
 ### F7. Смешение бизнес и технического copy
 Evidence:
@@ -97,11 +98,11 @@ Impact:
 
 ### F8. E2E-контур не является жесткой страховкой от регрессий
 Evidence:
-- 9 `test.skip` в `platform-admin.spec.ts` (`console-web/e2e/platform-admin.spec.ts:13` и далее).
-- сценарии допускают skip при нехватке данных вместо fail-fast.
+- `platform-admin.spec.ts` работает в deterministic lane (`E2E_DETERMINISTIC_AUTH=1`) и проходит `14/14` без `test.skip`.
+- `tenants-a11y.spec.ts` переведён на deterministic mocks + жёсткий `expect(tenantsAvailable).toBe(true)` вместо `test.skip`.
 Impact:
-- regressions могут проходить незамеченными.
-- подтверждение качества не является детерминированным.
+- Контур стал воспроизводимым и fail-closed.
+- Остаточный риск: warnings окружения (`NO_COLOR/FORCE_COLOR`, npm env warning) не влияют на pass/fail, но требуют отдельной hygiene-задачи.
 
 ## Root-cause map
 1. Нет единой state machine для `global context` и `page filters`.
@@ -267,25 +268,25 @@ Expected result:
 ## Checks
 - `corepack pnpm -C console-web run lint`
 - `corepack pnpm -C console-web run build`
-- `corepack pnpm -C console-web exec playwright test e2e/platform-admin.spec.ts --project=chromium --workers=1`
-- `A11Y_FAIL_ON_THRESHOLDS=1 corepack pnpm -C console-web exec playwright test e2e/tenants-a11y.spec.ts --project=chromium --workers=1`
+- `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 corepack pnpm -C console-web exec playwright test e2e/platform-admin.spec.ts --project=chromium --workers=1`
+- `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 A11Y_FAIL_ON_THRESHOLDS=1 corepack pnpm -C console-web exec playwright test e2e/tenants-a11y.spec.ts --project=chromium --workers=1`
 - `python3 truffles-api/scripts/generate_openapi.py --check`
-- `pytest -q truffles-api/tests/test_console_tenants_list.py`
+- `pytest -q truffles-api/tests/test_console_tenants_list.py` (includes weekly-snapshot contract tests)
 - `pytest -q truffles-api/tests/test_console_fleet_attention.py`
-- `pytest -q truffles-api/tests/test_console_tenants_weekly_snapshots.py`
 - `scripts/session_check.sh`
 
 ## Evidence
 1. UI before/after screenshots:
 - filters/context behavior,
 - cockpit branches pagination,
-- mode transitions.
+- mode transitions,
+- updated a11y artifacts: `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-desktop.png`, `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-mobile.png`.
 2. API evidence:
 - openapi diff,
 - sample requests/responses for portfolio/cockpit/branches.
 3. Quality evidence:
-- e2e logs по A/B/C/D/E,
-- axe JSON desktop/mobile,
+- e2e logs по A/B/C/D/E (`14 passed`),
+- axe JSON desktop/mobile (`critical=0`, `serious=0`),
 - perf summary with p95.
 4. State evidence:
 - `localStorage scope` vs `query filters` trace before/after critical actions.

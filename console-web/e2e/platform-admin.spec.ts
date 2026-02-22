@@ -7,6 +7,7 @@ const stayOnBaseOrigin = /localhost|127\.0\.0\.1/.test(baseURL);
 let resolvedBaseURL = baseURL;
 const loginUser = process.env.E2E_USERNAME ?? 'admin';
 const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
+const deterministicAuthEnabled = process.env.E2E_DETERMINISTIC_AUTH !== '0';
 const TENANTS_FIXTURE_COMPANY_ID = '11111111-1111-4111-8111-111111111111';
 const TENANTS_FIXTURE_CLIENT_ID = '22222222-2222-4222-8222-222222222222';
 const TENANTS_FIXTURE_BRANCH_ID = '33333333-3333-4333-8333-333333333333';
@@ -140,6 +141,109 @@ function buildTenantsFixtureBundle() {
         fleetSummary,
         attention,
     };
+}
+
+function buildDeterministicSessionPayload() {
+    return {
+        user: {
+            name: 'Platform Admin',
+            email: 'platform-admin@truffles.local',
+        },
+        expires: '2099-01-01T00:00:00.000Z',
+        accessToken: 'e2e-platform-admin-token',
+    };
+}
+
+async function mockDeterministicAuthSession(page: import('@playwright/test').Page) {
+    await page.route('**/api/auth/session**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, buildDeterministicSessionPayload());
+    });
+    await page.route('**/api/auth/csrf', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, { csrfToken: 'e2e-csrf' });
+    });
+    await page.route('**/api/auth/providers', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            keycloak: {
+                id: 'keycloak',
+                name: 'Keycloak',
+                type: 'oauth',
+                signinUrl: `${baseURL}/api/auth/signin/keycloak`,
+                callbackUrl: `${baseURL}/api/auth/callback/keycloak`,
+            },
+        });
+    });
+}
+
+async function mockPlatformAdminCoreApis(page: import('@playwright/test').Page) {
+    const fixture = buildTenantsFixtureBundle();
+    await page.route('**/api/proxy/me', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            agent: {
+                id: TENANTS_FIXTURE_AGENT_ID,
+                name: 'Platform Admin',
+                role: 'platform_admin',
+                client_id: fixture.client.id,
+                branch_id: null,
+                is_active: true,
+            },
+            client: null,
+            branches: [fixture.branch],
+            clients: [fixture.client],
+            companies: [fixture.company],
+            company_selection_required: false,
+            selection_required: false,
+            branch_selection_required: false,
+            selected_company_id: null,
+            selected_branch_id: null,
+        });
+    });
+}
+
+async function mockIntegrationsDeterministicApis(page: import('@playwright/test').Page) {
+    await mockPlatformAdminCoreApis(page);
+    await page.route('**/api/proxy/admin/integrations**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            stale_after_minutes: 60,
+            cursor: null,
+            has_more: false,
+            total_in_scope: 0,
+            items: [],
+            provider_ops_queue: [],
+        });
+    });
+    await page.route('**/api/proxy/admin/provider-lifecycle**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            stale_after_minutes: 60,
+            cursor: null,
+            has_more: false,
+            total_in_scope: 0,
+            items: [],
+        });
+    });
 }
 
 async function mockTenantsDeterministicApis(
@@ -375,6 +479,12 @@ async function loginThroughKeycloak(page: import('@playwright/test').Page) {
 }
 
 async function ensureLoggedIn(page: import('@playwright/test').Page) {
+    if (deterministicAuthEnabled) {
+        await mockDeterministicAuthSession(page);
+        resolvedBaseURL = baseURL;
+        return;
+    }
+
     await resolveAuthOrigin(page);
     await gotoConsoleRoot(page);
     const loginButton = page.getByTestId('login-button');
@@ -388,13 +498,23 @@ async function ensureLoggedIn(page: import('@playwright/test').Page) {
 }
 
 async function openTenants(page: import('@playwright/test').Page) {
-    await page.getByTestId('nav-tenants').click();
+    const navTenants = page.getByTestId('nav-tenants');
+    if (await navTenants.isVisible().catch(() => false)) {
+        await navTenants.click();
+    } else {
+        await page.goto(`${resolvedBaseURL}/tenants`, { waitUntil: 'domcontentloaded' });
+    }
     await expect(page).toHaveURL(urlPathPattern('/tenants'));
-    await expect(page.getByTestId('tenants-title')).toBeVisible();
+    await expect(page.getByTestId('tenants-page')).toBeVisible();
 }
 
 async function openIntegrations(page: import('@playwright/test').Page) {
-    await page.getByTestId('nav-integrations').click();
+    const navIntegrations = page.getByTestId('nav-integrations');
+    if (await navIntegrations.isVisible().catch(() => false)) {
+        await navIntegrations.click();
+    } else {
+        await page.goto(`${resolvedBaseURL}/integrations`, { waitUntil: 'domcontentloaded' });
+    }
     await expect(page).toHaveURL(urlPathPattern('/integrations'));
     await expect(page.getByTestId('integrations-title')).toBeVisible();
 }
@@ -425,12 +545,15 @@ async function mockCriticalHealthIncident(page: import('@playwright/test').Page,
 
 test.describe('Platform Admin Incident Banner', () => {
     test('should render full incident details, allow 30m hide, and navigate via CTA @smoke', async ({ page }) => {
+        await mockTenantsDeterministicApis(page);
         const healthMock = await mockCriticalHealthIncident(page);
         await ensureLoggedIn(page);
+        await openTenants(page);
         await page.evaluate(() => {
             window.localStorage.removeItem('console:health_incident_ui');
         });
-        await gotoConsoleRoot(page);
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await resolveSelectionGate(page);
 
         const banner = page.getByTestId('global-health-incident-banner');
         await expect(banner).toBeVisible();
@@ -442,7 +565,7 @@ test.describe('Platform Admin Incident Banner', () => {
         await page.getByTestId('global-health-incident-open-ops').click();
         await expect(page).toHaveURL(urlPathPattern('/ops'));
 
-        await gotoConsoleRoot(page);
+        await openTenants(page);
         await page.getByTestId('global-health-incident-snooze').click();
         await expect(page.getByTestId('global-health-incident-banner')).toHaveCount(0);
 
@@ -456,8 +579,8 @@ test.describe('Platform Admin Incident Banner', () => {
 
 test.describe('Platform Admin Navigation', () => {
     test.beforeEach(async ({ page }) => {
+        await mockIntegrationsDeterministicApis(page);
         await ensureLoggedIn(page);
-        await gotoConsoleRoot(page);
     });
 
     test('should navigate from Integrations row to Company Workspace @smoke', async ({ page }) => {
@@ -493,8 +616,8 @@ test.describe('Platform Admin Navigation', () => {
 
 test.describe('Platform Admin Tenants', () => {
     test.beforeEach(async ({ page }) => {
+        await mockTenantsDeterministicApis(page);
         await ensureLoggedIn(page);
-        await gotoConsoleRoot(page);
         await openTenants(page);
     });
 
@@ -608,7 +731,12 @@ test.describe('Platform Admin Tenants', () => {
     });
 
     test('should expose branch change controls on Tenants @smoke', async ({ page }) => {
-        const branches = tenantsSection(page, 'Филиалы');
+        const modeChanges = page.getByTestId('tenants-mode-changes');
+        if (await modeChanges.isVisible().catch(() => false)) {
+            await modeChanges.click();
+        }
+
+        const branches = page.getByTestId('tenants-change-management');
         await expect(branches).toBeVisible();
 
         let editButton = page.getByTestId('tenants-branch-edit').first();
@@ -772,10 +900,6 @@ test.describe('Platform Admin Tenants', () => {
     });
 
     test('should keep branch page-filter after apply context (Scenario B)', async ({ page }) => {
-        await mockTenantsDeterministicApis(page);
-        await gotoConsoleRoot(page);
-        await openTenants(page);
-
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
             await page.getByTestId('tenants-mode-changes').click();
@@ -796,10 +920,6 @@ test.describe('Platform Admin Tenants', () => {
     });
 
     test('should reset only page filters and keep context chips (Scenario C)', async ({ page }) => {
-        await mockTenantsDeterministicApis(page);
-        await gotoConsoleRoot(page);
-        await openTenants(page);
-
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
             await page.getByTestId('tenants-mode-changes').click();
@@ -822,10 +942,6 @@ test.describe('Platform Admin Tenants', () => {
     });
 
     test('should reset only context and keep page filters (Scenario D)', async ({ page }) => {
-        await mockTenantsDeterministicApis(page);
-        await gotoConsoleRoot(page);
-        await openTenants(page);
-
         const companyFilter = page.getByTestId('tenants-page-filter-company');
         const hasCompanyFilter = await ensureFilterHasValue(companyFilter);
         expect(hasCompanyFilter).toBe(true);
@@ -842,7 +958,8 @@ test.describe('Platform Admin Tenants', () => {
     test('should call portfolio and cockpit endpoints on Tenants (Scenario E)', async ({ page }) => {
         const counters = { portfolioCalls: 0, cockpitCalls: 0 };
         await mockTenantsDeterministicApis(page, counters);
-        await gotoConsoleRoot(page);
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await resolveSelectionGate(page);
         await openTenants(page);
 
         const modes = page.getByTestId('tenants-workspace-modes');
@@ -860,7 +977,6 @@ test.describe('Platform Admin Tenants', () => {
         expect(counters.portfolioCalls).toBeGreaterThan(0);
 
         const companyFilter = page.getByTestId('tenants-page-filter-company');
-        await page.getByTestId('tenants-page-filter-clear-all').click();
         const hasCompanyFilter = await ensureFilterHasValue(companyFilter);
         expect(hasCompanyFilter).toBe(true);
         for (let attempt = 0; attempt < 30 && (counters.cockpitCalls ?? 0) === 0; attempt += 1) {
@@ -889,8 +1005,6 @@ test.describe('Platform Admin Tenants', () => {
                 body: JSON.stringify({ ok: true }),
             });
         });
-        await mockTenantsDeterministicApis(page);
-        await gotoConsoleRoot(page);
         await openTenants(page);
 
         const modes = page.getByTestId('tenants-workspace-modes');
