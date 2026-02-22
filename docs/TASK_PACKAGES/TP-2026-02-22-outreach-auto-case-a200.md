@@ -52,12 +52,25 @@
 ## Plan
 1. Зафиксировать state machine auto-case: `no_case_sent -> case_created -> active|resolved`.
 2. Добавить deterministic case creation hook в `send_outreach_message` при `conversation_id=null`.
-3. Добавить dedupe key (`client_id + remote_jid + branch_id + time_bucket`) с безопасным upsert.
+3. Добавить dedupe key (`client_id + remote_jid + branch_id + time_bucket`) с безопасным upsert (через lock `conversations ... FOR UPDATE` + reuse в bucket).
 4. Привязать результат к Inbox list/detail (response возвращает `auto_case_id`/`conversation_id`).
 5. Добавить trace/meta stages: `outreach_auto_case_bootstrap` + outcome reason.
 6. Добавить unit tests (happy path, duplicate send, branch mismatch, fallback path).
 7. Добавить e2e smoke (UI отправка no-case -> кейс появился в Inbox).
 8. Обновить runbook по triage и rollback.
+
+## Execution Update (2026-02-22)
+- Реализован deterministic bootstrap no-case outreach: create/reuse conversation + active case с `trigger_value=console_outreach_no_case`.
+- Реализован dedupe в time-bucket: deterministic `outreach_dedupe_key`, lock `Conversation` (`FOR UPDATE`) и reuse существующего/недавнего case в bucket без дублирования.
+- Добавлен trace contract для расследования инцидентов:
+  - `decision_trace.stage=outreach_auto_case_bootstrap`
+  - `decision=case_created|case_reused`
+  - `reason=new_case_created|active_case_reused|dedupe_bucket_reused`
+  - `dedupe_key`, `bucket_started_at`, `bucket_minutes`.
+- Runbook `docs/runbooks/OUTBOX.md` расширен на no-case flow и triage сценарии:
+  - missing case link,
+  - duplicate cases in burst,
+  - orphan outreach (outbox sent but case not visible).
 
 ## DoD
 - `POST /console/v1/outreach/messages` с `conversation_id=null` создаёт (или переиспользует) операционный кейс.

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -1384,6 +1385,102 @@ def _normalize_outreach_destination(value: Optional[str]) -> str:
     return normalized
 
 
+def _resolve_outreach_auto_case_bucket_minutes() -> int:
+    raw_value = _normalize_optional_text(os.environ.get("OUTREACH_AUTO_CASE_BUCKET_MINUTES"))
+    if raw_value is None:
+        return _OUTREACH_AUTO_CASE_BUCKET_MINUTES_DEFAULT
+    try:
+        parsed = int(raw_value)
+    except ValueError:
+        return _OUTREACH_AUTO_CASE_BUCKET_MINUTES_DEFAULT
+    if parsed < _OUTREACH_AUTO_CASE_BUCKET_MINUTES_MIN:
+        return _OUTREACH_AUTO_CASE_BUCKET_MINUTES_MIN
+    if parsed > _OUTREACH_AUTO_CASE_BUCKET_MINUTES_MAX:
+        return _OUTREACH_AUTO_CASE_BUCKET_MINUTES_MAX
+    return parsed
+
+
+def _resolve_outreach_auto_case_bucket_start(*, now_utc: datetime, bucket_minutes: int) -> datetime:
+    bucket_seconds = max(60, bucket_minutes * 60)
+    bucket_epoch = int(now_utc.timestamp()) // bucket_seconds * bucket_seconds
+    return datetime.fromtimestamp(bucket_epoch, tz=timezone.utc)
+
+
+def _build_outreach_auto_case_dedupe_key(
+    *,
+    client_id: UUID,
+    branch_id: UUID,
+    remote_jid: str,
+    bucket_started_at: datetime,
+) -> str:
+    payload = (
+        f"{str(client_id)}:"
+        f"{str(branch_id)}:"
+        f"{remote_jid.strip().lower()}:"
+        f"{int(bucket_started_at.timestamp())}"
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+    return f"outreach-no-case:{digest}"
+
+
+def _record_outreach_auto_case_trace(
+    *,
+    conversation: Conversation,
+    case_id: UUID,
+    decision: str,
+    reason: str,
+    dedupe_key: str,
+    bucket_started_at: datetime,
+    bucket_minutes: int,
+) -> None:
+    raw_context = getattr(conversation, "context", None)
+    context = raw_context if isinstance(raw_context, dict) else {}
+    raw_trace = context.get("decision_trace")
+    if isinstance(raw_trace, list):
+        trace_list = [item for item in raw_trace if isinstance(item, dict)]
+    elif isinstance(raw_trace, dict):
+        trace_list = [raw_trace]
+    else:
+        trace_list = []
+    trace_list.append(
+        {
+            "stage": _OUTREACH_AUTO_CASE_TRACE_STAGE,
+            "decision": decision,
+            "reason": reason,
+            "case_id": str(case_id),
+            "dedupe_key": dedupe_key,
+            "bucket_started_at": bucket_started_at.isoformat(),
+            "bucket_minutes": bucket_minutes,
+            "source": "console_outreach",
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    if len(trace_list) > _OUTREACH_AUTO_CASE_TRACE_MAX:
+        trace_list = trace_list[-_OUTREACH_AUTO_CASE_TRACE_MAX :]
+    context["decision_trace"] = trace_list
+    conversation.context = context
+
+
+def _update_outreach_auto_case_meta(
+    case: Handover,
+    *,
+    reason: str,
+    dedupe_key: str,
+    bucket_started_at: datetime,
+    bucket_minutes: int,
+) -> None:
+    raw_meta = getattr(case, "meta", None)
+    meta = raw_meta if isinstance(raw_meta, dict) else {}
+    meta["origin"] = "console_outreach"
+    meta["auto_case"] = True
+    meta["outreach_bootstrap_reason"] = reason
+    meta["outreach_dedupe_key"] = dedupe_key
+    meta["outreach_dedupe_bucket_started_at"] = bucket_started_at.isoformat()
+    meta["outreach_dedupe_bucket_minutes"] = bucket_minutes
+    meta["outreach_bootstrap_at"] = datetime.now(timezone.utc).isoformat()
+    case.meta = meta
+
+
 def _resolve_console_conversation_or_404(
     db: Session,
     *,
@@ -1429,22 +1526,97 @@ def _bootstrap_outreach_conversation_case(
         channel="whatsapp",
         branch_id=branch_id,
     )
+    locked_conversation = (
+        db.query(Conversation)
+        .filter(
+            Conversation.id == conversation.id,
+            Conversation.client_id == context.client.id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if locked_conversation:
+        conversation = locked_conversation
     if conversation.branch_id is None:
         conversation.branch_id = branch_id
     conversation.last_message_at = now_utc
+    bucket_minutes = _resolve_outreach_auto_case_bucket_minutes()
+    bucket_started_at = _resolve_outreach_auto_case_bucket_start(
+        now_utc=now_utc,
+        bucket_minutes=bucket_minutes,
+    )
+    dedupe_key = _build_outreach_auto_case_dedupe_key(
+        client_id=context.client.id,
+        branch_id=branch_id,
+        remote_jid=remote_jid,
+        bucket_started_at=bucket_started_at,
+    )
 
     existing_case = (
         db.query(Handover)
         .filter(
             Handover.client_id == context.client.id,
             Handover.conversation_id == conversation.id,
-            Handover.status.in_(["pending", "active"]),
+            Handover.status.in_(list(_OUTREACH_AUTO_CASE_ACTIVE_STATUSES)),
         )
         .order_by(Handover.created_at.desc())
         .first()
     )
     if existing_case:
+        _update_outreach_auto_case_meta(
+            existing_case,
+            reason="active_case_reused",
+            dedupe_key=dedupe_key,
+            bucket_started_at=bucket_started_at,
+            bucket_minutes=bucket_minutes,
+        )
+        _record_outreach_auto_case_trace(
+            conversation=conversation,
+            case_id=existing_case.id,
+            decision="case_reused",
+            reason="active_case_reused",
+            dedupe_key=dedupe_key,
+            bucket_started_at=bucket_started_at,
+            bucket_minutes=bucket_minutes,
+        )
         return conversation, existing_case, False
+
+    dedupe_case = (
+        db.query(Handover)
+        .filter(
+            Handover.client_id == context.client.id,
+            Handover.conversation_id == conversation.id,
+            Handover.trigger_type == "manual",
+            Handover.trigger_value == _OUTREACH_AUTO_CASE_TRIGGER_VALUE,
+            Handover.created_at >= bucket_started_at,
+        )
+        .order_by(Handover.created_at.desc())
+        .first()
+    )
+    if dedupe_case:
+        if dedupe_case.status not in _OUTREACH_AUTO_CASE_ACTIVE_STATUSES:
+            dedupe_case.status = "active"
+            dedupe_case.resolved_at = None
+            dedupe_case.resolution_type = None
+            dedupe_case.resolution_notes = None
+            dedupe_case.first_response_at = dedupe_case.first_response_at or now_utc
+        _update_outreach_auto_case_meta(
+            dedupe_case,
+            reason="dedupe_bucket_reused",
+            dedupe_key=dedupe_key,
+            bucket_started_at=bucket_started_at,
+            bucket_minutes=bucket_minutes,
+        )
+        _record_outreach_auto_case_trace(
+            conversation=conversation,
+            case_id=dedupe_case.id,
+            decision="case_reused",
+            reason="dedupe_bucket_reused",
+            dedupe_key=dedupe_key,
+            bucket_started_at=bucket_started_at,
+            bucket_minutes=bucket_minutes,
+        )
+        return conversation, dedupe_case, False
 
     agent_id = str(getattr(context.agent, "id", "")) if getattr(context.agent, "id", None) else None
     agent_name = _normalize_optional_text(getattr(context.agent, "name", None))
@@ -1452,7 +1624,7 @@ def _bootstrap_outreach_conversation_case(
         conversation_id=conversation.id,
         client_id=context.client.id,
         trigger_type="manual",
-        trigger_value="console_outreach_no_case",
+        trigger_value=_OUTREACH_AUTO_CASE_TRIGGER_VALUE,
         context_summary=f"Manual outreach without existing case ({remote_jid})",
         messages=[],
         meta={
@@ -1460,6 +1632,11 @@ def _bootstrap_outreach_conversation_case(
             "auto_case": True,
             "destination": remote_jid,
             "branch_id": str(branch_id),
+            "outreach_bootstrap_reason": "new_case_created",
+            "outreach_dedupe_key": dedupe_key,
+            "outreach_dedupe_bucket_started_at": bucket_started_at.isoformat(),
+            "outreach_dedupe_bucket_minutes": bucket_minutes,
+            "outreach_bootstrap_at": now_utc.isoformat(),
         },
         status="active",
         manager_id=agent_id,
@@ -1473,7 +1650,18 @@ def _bootstrap_outreach_conversation_case(
         channel="whatsapp",
         channel_ref=remote_jid,
     )
+    if auto_case.id is None:
+        auto_case.id = uuid4()
     db.add(auto_case)
+    _record_outreach_auto_case_trace(
+        conversation=conversation,
+        case_id=auto_case.id,
+        decision="case_created",
+        reason="new_case_created",
+        dedupe_key=dedupe_key,
+        bucket_started_at=bucket_started_at,
+        bucket_minutes=bucket_minutes,
+    )
     return conversation, auto_case, True
 
 
@@ -1949,6 +2137,13 @@ _OUTBOX_ARCHIVED_REASON_PREFIX = "archived_pending:"
 _OUTBOX_CALENDAR_SYNC_REASON_PREFIX = "calendar_sync_failed:"
 _OUTBOX_SYSTEM_EVENT_TYPES = {"calendar.sync_inbound", "calendar.sync_outbound"}
 _DEFAULT_RUNTIME_REDIS_URL = "redis://truffles_redis_1:6379/0"
+_OUTREACH_AUTO_CASE_BUCKET_MINUTES_DEFAULT = 30
+_OUTREACH_AUTO_CASE_BUCKET_MINUTES_MIN = 1
+_OUTREACH_AUTO_CASE_BUCKET_MINUTES_MAX = 240
+_OUTREACH_AUTO_CASE_TRACE_MAX = 100
+_OUTREACH_AUTO_CASE_TRACE_STAGE = "outreach_auto_case_bootstrap"
+_OUTREACH_AUTO_CASE_TRIGGER_VALUE = "console_outreach_no_case"
+_OUTREACH_AUTO_CASE_ACTIVE_STATUSES = {"pending", "active"}
 _TENANTS_WEEKLY_SNAPSHOT_EVENT_TYPE = "tenants_weekly_snapshot_saved"
 _TENANTS_WEEKLY_SNAPSHOT_ENTITY_TYPE = "tenant_snapshot"
 _TENANTS_WEEKLY_SNAPSHOT_TABLE_NAME = "tenants_weekly_snapshots"

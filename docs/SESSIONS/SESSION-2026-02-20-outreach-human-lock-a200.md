@@ -23,9 +23,12 @@
   - Implemented human-lock trace persistence hardening in webhook guard (`decision_meta.human_lock_trace` + fallback trace append) and updated regression test (`test_message_endpoint`).
   - Implemented no-case outreach auto-case bootstrap in console API (`conversation_id=null` now creates/reuses conversation + active case and returns `conversation_id/case_id/case_created`).
   - Updated Inbox standalone outreach UX to auto-open returned case and adjusted smoke stub payload.
+  - Completed TP follow-up `docs/TASK_PACKAGES/TP-2026-02-22-outreach-auto-case-a200.md`: added deterministic time-bucket dedupe (`outreach_dedupe_key`) with conversation row lock (`FOR UPDATE`), reuse-in-bucket semantics, and explicit trace stage `outreach_auto_case_bootstrap` (`case_created|case_reused` + reason + dedupe metadata).
+  - Extended runbook with no-case live-check and incident triage (`missing case`, `duplicate case`, `orphan outreach`) in `docs/runbooks/OUTBOX.md`.
+  - Validated changes with deterministic test pack: `pytest -q truffles-api/tests/test_console_outreach.py truffles-api/tests/test_console_cases_helpers.py truffles-api/tests/test_webhook_trace.py` (`32 passed`).
 - next:
   - Run fresh staging/runtime live-check to confirm DB trace evidence (`human_lock_silent`) after guard hardening and attach new trace-bundle artifacts.
-  - Open/merge delivery PR for this implementation wave and update STATE with CI + runtime evidence.
+  - Open/merge delivery PR for no-case dedupe/trace/runbook wave and update STATE with CI evidence.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-outreach-human-lock-a200.md
   - docs/TASK_PACKAGES/TP-2026-02-22-outreach-auto-case-a200.md

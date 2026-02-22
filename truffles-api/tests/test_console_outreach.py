@@ -20,6 +20,9 @@ class _FakeQuery:
     def filter(self, *_args, **_kwargs):
         return self
 
+    def with_for_update(self):
+        return self
+
     def order_by(self, *_args, **_kwargs):
         return self
 
@@ -97,9 +100,14 @@ def test_bootstrap_outreach_conversation_case_creates_active_case(monkeypatch):
     assert auto_case.trigger_value == "console_outreach_no_case"
     assert auto_case.channel == "whatsapp"
     assert auto_case.channel_ref == "77771234567@s.whatsapp.net"
+    assert auto_case.meta["outreach_bootstrap_reason"] == "new_case_created"
+    assert auto_case.meta["outreach_dedupe_key"].startswith("outreach-no-case:")
     assert user.phone == "77771234567"
     assert user.last_active_at is not None
     assert conversation.last_message_at is not None
+    trace = conversation.context["decision_trace"]
+    assert trace[-1]["stage"] == "outreach_auto_case_bootstrap"
+    assert trace[-1]["decision"] == "case_created"
 
 
 def test_bootstrap_outreach_conversation_case_reuses_existing_case(monkeypatch):
@@ -138,6 +146,10 @@ def test_bootstrap_outreach_conversation_case_reuses_existing_case(monkeypatch):
     assert auto_case is existing_case
     assert created is False
     assert len(db._added) == 0
+    assert auto_case.meta["outreach_bootstrap_reason"] == "active_case_reused"
+    trace = conversation.context["decision_trace"]
+    assert trace[-1]["stage"] == "outreach_auto_case_bootstrap"
+    assert trace[-1]["reason"] == "active_case_reused"
 
 
 @pytest.mark.asyncio
