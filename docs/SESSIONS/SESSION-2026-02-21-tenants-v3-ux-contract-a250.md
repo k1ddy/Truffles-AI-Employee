@@ -32,10 +32,13 @@
   - Frontend Tenants подключён к `GET /admin/tenants/portfolio` и `GET /admin/tenants/company-cockpit` как приоритетным read-моделям для clients/branches/fleet attention.
   - Обновлены `console-web/src/lib/api-client.ts` типы/методы для `tenants/portfolio` и `tenants/company-cockpit`.
   - Прогнаны проверки: `ruff check ...`, `pytest -q truffles-api/tests/test_console_tenants_list.py` (`55 passed`), `corepack pnpm -C console-web lint`, `corepack pnpm -C console-web build`, `python3 truffles-api/scripts/generate_openapi.py --check`.
+  - Ужесточён e2e контур Tenants для platform_admin: добавлен `Scenario E` (контрактные вызовы `portfolio/cockpit`) и убраны хрупкие текстовые ожидания перед runtime-skip в `Scenario B/C/D` + audit-сценарии.
+  - Добавлен quality-мета контракт weekly snapshots: list response теперь отдаёт `storage_mode` (`table|audit_fallback`) и `schema_versions`; record response содержит `snapshot_schema_version`.
+  - Обновлены unit-тесты weekly snapshots и helper-агрегация версий (`56 passed`).
 - next:
-  - Завершить Wave3: ввести explicit миграционный отчёт/backfill verification и закрыть контракт `snapshot_schema_version` с метрикой качества данных.
+  - Завершить Wave3: оформить explicit миграционный отчёт/backfill verification в docs (`before/after` SQL evidence + quality thresholds) и зафиксировать в `STATE.md`.
   - Продолжить Wave4 декомпозицию `tenants/page.tsx` (вынос секций portfolio/changes/onboarding в отдельные компоненты).
-  - Добавить e2e сценарии для нового server-contract path (`portfolio/cockpit`) и убрать оставшиеся soft-pass ветки.
+  - Продолжить ужесточение e2e: убрать remaining soft-pass/early-return ветки в smoke-наборе `platform-admin.spec.ts` через seeded lane или deterministic fixtures.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
@@ -46,7 +49,10 @@
   - truffles-api/app/schemas/console.py
   - truffles-api/app/routers/console.py
   - truffles-api/tests/test_console_tenants_list.py
+  - truffles-api/app/schemas/console.py
+  - truffles-api/app/routers/console.py
+  - truffles-api/tests/test_console_tenants_list.py
   - truffles-api/app/models/tenants_weekly_snapshot.py
   - truffles-api/migrations/037_add_tenants_weekly_snapshots.sql
   - console-web/src/lib/api-client.ts
-- last_updated: 2026-02-21T07:30:00Z
+- last_updated: 2026-02-22T03:20:07Z
