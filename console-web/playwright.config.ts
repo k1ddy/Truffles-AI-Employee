@@ -6,6 +6,7 @@ const runWebServer = process.env.PLAYWRIGHT_WEB_SERVER !== '0';
 const useStorageState = process.env.E2E_USE_STORAGE_STATE === '1';
 const deterministicAuthEnabled = process.env.E2E_DETERMINISTIC_AUTH !== '0';
 const storageStatePath = useStorageState ? 'e2e/.auth/state.json' : '.auth/console.json';
+// Deterministic auth lane stubs session/cookies and should not depend on Keycloak setup project.
 const needsSetupProject = !useStorageState && !deterministicAuthEnabled;
 
 const projects: NonNullable<ReturnType<typeof defineConfig>['projects']> = [];
