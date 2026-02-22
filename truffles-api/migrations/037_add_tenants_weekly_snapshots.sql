@@ -23,6 +23,7 @@ DECLARE
     order_id_expr TEXT := 'audit.created_at';
 BEGIN
     -- Backfill must work across legacy and current audit_events schemas.
+    -- Some runtimes still use actor_agent_id/event_id physical column names.
     IF EXISTS (
         SELECT 1
         FROM information_schema.columns
