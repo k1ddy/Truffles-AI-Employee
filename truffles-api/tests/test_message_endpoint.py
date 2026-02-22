@@ -1349,6 +1349,22 @@ def test_human_lock_silent_keeps_context_and_allows_resume_after_release():
         and entry.get("reason") == "human_lock"
         for entry in decision_trace
     )
+    locked_user_message = next(
+        (
+            msg
+            for msg in saved_messages
+            if getattr(msg, "role", None) == "user"
+            and msg.content == "я хочу маникюр завтра"
+        ),
+        None,
+    )
+    assert locked_user_message is not None
+    locked_meta = (locked_user_message.message_metadata or {}).get("decision_meta") or {}
+    lock_trace_meta = locked_meta.get("human_lock_trace") or {}
+    assert lock_trace_meta.get("stage") == "routing"
+    assert lock_trace_meta.get("decision") == "human_lock_silent"
+    assert lock_trace_meta.get("reason") == "human_lock"
+    assert lock_trace_meta.get("persisted") is True
 
     user_texts = [
         msg.content

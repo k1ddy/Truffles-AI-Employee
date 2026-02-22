@@ -7,10 +7,60 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.models import Conversation, Message, User
-from app.routers.webhook.trace import _record_message_decision_meta, _update_message_decision_metadata
+from app.routers.webhook.trace import (
+    _record_message_decision_meta,
+    _retain_decision_trace,
+    _update_message_decision_metadata,
+)
 from app.schemas.webhook import WebhookResponse
 from app.services.ai_service import normalize_for_matching
 from app.services.human_lock_service import get_active_human_lock, normalize_remote_jid
+
+DECISION_TRACE_KEY = "decision_trace"
+
+
+def _is_human_lock_trace_entry(item: dict, *, lock_until: str | None = None) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if item.get("stage") != "routing":
+        return False
+    if item.get("decision") != "human_lock_silent":
+        return False
+    if item.get("reason") != "human_lock":
+        return False
+    if lock_until and item.get("lock_until") not in {None, lock_until}:
+        return False
+    return True
+
+
+def _ensure_human_lock_trace_persisted(
+    *,
+    conversation: Conversation,
+    trace_payload: dict,
+) -> bool:
+    from . import _legacy as legacy
+
+    context = legacy._get_conversation_context(conversation)
+    existing_trace = context.get(DECISION_TRACE_KEY)
+    if isinstance(existing_trace, list):
+        trace_list = [item for item in existing_trace if isinstance(item, dict)]
+    elif isinstance(existing_trace, dict):
+        trace_list = [existing_trace]
+    else:
+        trace_list = []
+
+    if any(
+        _is_human_lock_trace_entry(item, lock_until=trace_payload.get("lock_until"))
+        for item in trace_list
+    ):
+        return True
+
+    fallback_trace = dict(trace_payload)
+    fallback_trace["recorded_at"] = datetime.now(timezone.utc).isoformat()
+    trace_list.append(fallback_trace)
+    context[DECISION_TRACE_KEY] = _retain_decision_trace(trace_list)
+    legacy._set_conversation_context(conversation, context)
+    return True
 
 
 def _get_intent_queue(context: dict) -> list[str]:
@@ -396,16 +446,18 @@ def _handle_reengage_and_mute_gate(
             lock_until = human_lock.lock_until
             if lock_until and lock_until.tzinfo is None:
                 lock_until = lock_until.replace(tzinfo=timezone.utc)
-            legacy._record_decision_trace(
-                conversation,
-                {
-                    "stage": "routing",
-                    "decision": "human_lock_silent",
-                    "reason": "human_lock",
-                    "state": conversation.state,
-                    "remote_jid": normalized_remote_jid,
-                    "lock_until": lock_until.isoformat() if lock_until else None,
-                },
+            trace_payload = {
+                "stage": "routing",
+                "decision": "human_lock_silent",
+                "reason": "human_lock",
+                "state": conversation.state,
+                "remote_jid": normalized_remote_jid,
+                "lock_until": lock_until.isoformat() if lock_until else None,
+            }
+            legacy._record_decision_trace(conversation, trace_payload)
+            trace_persisted = _ensure_human_lock_trace_persisted(
+                conversation=conversation,
+                trace_payload=trace_payload,
             )
             if saved_message is not None:
                 _record_message_decision_meta(
@@ -424,7 +476,14 @@ def _handle_reengage_and_mute_gate(
                             "source": getattr(human_lock, "source", None),
                             "reason": getattr(human_lock, "reason", None),
                             "locked_by": getattr(human_lock, "locked_by_name", None),
-                        }
+                        },
+                        "human_lock_trace": {
+                            "stage": trace_payload["stage"],
+                            "decision": trace_payload["decision"],
+                            "reason": trace_payload["reason"],
+                            "lock_until": trace_payload["lock_until"],
+                            "persisted": bool(trace_persisted),
+                        },
                     },
                 )
             db.commit()

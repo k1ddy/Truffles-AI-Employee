@@ -511,6 +511,9 @@ export type OutreachMessageResponse = {
     success: boolean;
     delivery_status: OutreachDeliveryStatus;
     remote_jid?: string | null;
+    conversation_id?: string | null;
+    case_id?: string | null;
+    case_created?: boolean | null;
     outbox_enqueued?: boolean | null;
     lock_until?: string | null;
     message?: Message | null;
@@ -889,6 +892,8 @@ export type MarketingCampaign = {
     status: MarketingCampaignStatus;
     status_v2: MarketingCampaignStatusV2;
     segment_code: MarketingSegmentCode;
+    segment_params: Record<string, unknown>;
+    segment_summary?: string | null;
     audience_mode: MarketingAudienceMode;
     preview_total: number;
     preflight_valid: boolean;
@@ -909,6 +914,7 @@ export type MarketingCampaignCreateRequest = {
     name: string;
     message_text: string;
     segment_code?: MarketingSegmentCode;
+    segment_params?: Record<string, unknown> | null;
     audience_mode?: MarketingAudienceMode;
 };
 export type MarketingCampaignCreateResponse = { campaign: MarketingCampaign };
@@ -916,6 +922,7 @@ export type MarketingCampaignUpdateRequest = {
     name?: string;
     message_text?: string;
     segment_code?: MarketingSegmentCode;
+    segment_params?: Record<string, unknown> | null;
     reason?: string | null;
 };
 export type MarketingCampaignPreviewRequest = { sample_limit?: number };
@@ -934,9 +941,31 @@ export type MarketingCampaignPreviewResponse = {
     estimated_recipients: number;
     eligible_count: number;
     suppressed_count: number;
+    segment_params: Record<string, unknown>;
+    segment_summary?: string | null;
     sample_conversation_ids: string[];
     sample_recipient_jids: string[];
     funnel: MarketingAudienceFunnel;
+};
+export type MarketingSegmentEditableField = {
+    key: string;
+    label: string;
+    type: "int" | "bool";
+    min?: number | null;
+    max?: number | null;
+    step?: number | null;
+};
+export type MarketingSegmentDefinition = {
+    code: MarketingSegmentCode;
+    label: string;
+    short_label: string;
+    description: string;
+    defaults: Record<string, unknown>;
+    summary: string;
+    editable_fields: MarketingSegmentEditableField[];
+};
+export type MarketingSegmentCatalogResponse = {
+    items: MarketingSegmentDefinition[];
 };
 export type MarketingCampaignExecuteRequest = { confirm_send: boolean; max_recipients?: number | null };
 export type MarketingCampaignExecuteResponse = {
@@ -989,8 +1018,10 @@ export type MarketingCampaignRecipient = {
     conversation_id?: string | null;
     segment_code: MarketingSegmentCode;
     reason_codes: string[];
+    reason_hints: string[];
     suppressed: boolean;
     suppression_reasons: string[];
+    suppression_hints: string[];
     updated_at?: string | null;
 };
 export type MarketingCampaignPreflightResponse = {
@@ -1006,6 +1037,8 @@ export type MarketingCampaignPreflightResponse = {
     audience_total: number;
     eligible_count: number;
     suppressed_count: number;
+    segment_params: Record<string, unknown>;
+    segment_summary?: string | null;
     preview_stats?: MarketingAudienceFunnel | null;
     template_gate_enabled: boolean;
     template_state?: string | null;
@@ -1325,6 +1358,8 @@ export const adminApi = {
         apiClient.get<components["schemas"]["ConsoleIntegrationsListResponse"]>("/admin/integrations", { params }),
     listProviderLifecycle: (params?: ListProviderLifecycleParams) =>
         apiClient.get<components["schemas"]["ConsoleProviderLifecycleListResponse"]>("/admin/provider-lifecycle", { params }),
+    getMarketingSegmentsCatalog: () =>
+        apiClient.get<MarketingSegmentCatalogResponse>("/admin/marketing/segments"),
     listMarketingCampaigns: (params?: ListMarketingCampaignsParams) =>
         apiClient.get<MarketingCampaignListResponse>("/admin/marketing/campaigns", { params }),
     createMarketingCampaign: (data: MarketingCampaignCreateRequest) =>

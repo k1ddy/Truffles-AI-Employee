@@ -116,6 +116,305 @@ _TRANSITIONS: dict[str, set[str]] = {
     },
 }
 
+_SEGMENT_DEFAULTS_REACTIVATION = {
+    "min_days_since_last_visit": 30,
+    "max_days_since_last_visit": 120,
+    "require_no_future_booking": True,
+}
+_SEGMENT_DEFAULTS_NO_SHOW = {
+    "no_show_window_days": 14,
+    "min_no_show_count": 1,
+    "require_no_future_booking": True,
+}
+_SEGMENT_DEFAULTS_ENGAGED = {
+    "engagement_window_days": 7,
+    "require_no_future_booking": True,
+}
+
+MARKETING_SEGMENT_PARAM_DEFAULTS: dict[str, dict[str, Any]] = {
+    MARKETING_SEGMENT_REACTIVATION_30_120: dict(_SEGMENT_DEFAULTS_REACTIVATION),
+    MARKETING_SEGMENT_NO_SHOW_RECOVERY_14D: dict(_SEGMENT_DEFAULTS_NO_SHOW),
+    MARKETING_SEGMENT_ENGAGED_NO_BOOKING_7D: dict(_SEGMENT_DEFAULTS_ENGAGED),
+}
+
+
+def _to_int(value: Any, default_value: int) -> int:
+    if value is None:
+        return default_value
+    if isinstance(value, bool):
+        return default_value
+    try:
+        return int(value)
+    except Exception:
+        return default_value
+
+
+def _to_bool(value: Any, default_value: bool) -> bool:
+    if value is None:
+        return default_value
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default_value
+
+
+def _resolve_segment_params_container(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    return {}
+
+
+def normalize_marketing_segment_params(
+    segment_code: str,
+    raw_params: Any,
+    *,
+    strict: bool = True,
+) -> dict[str, Any]:
+    if segment_code not in MARKETING_SEGMENT_CODES:
+        raise ValueError("unsupported_segment")
+
+    raw_map = _resolve_segment_params_container(raw_params)
+    defaults = MARKETING_SEGMENT_PARAM_DEFAULTS.get(segment_code, {})
+
+    if segment_code == MARKETING_SEGMENT_REACTIVATION_30_120:
+        allowed_keys = {"min_days_since_last_visit", "max_days_since_last_visit", "require_no_future_booking"}
+        if strict:
+            unknown_keys = sorted(set(raw_map.keys()) - allowed_keys)
+            if unknown_keys:
+                raise ValueError("invalid_segment_params_keys")
+        min_days = _to_int(raw_map.get("min_days_since_last_visit"), int(defaults["min_days_since_last_visit"]))
+        max_days = _to_int(raw_map.get("max_days_since_last_visit"), int(defaults["max_days_since_last_visit"]))
+        require_no_future = _to_bool(raw_map.get("require_no_future_booking"), bool(defaults["require_no_future_booking"]))
+        if min_days < 1 or min_days > 3650:
+            raise ValueError("invalid_min_days_since_last_visit")
+        if max_days < 1 or max_days > 3650:
+            raise ValueError("invalid_max_days_since_last_visit")
+        if min_days > max_days:
+            raise ValueError("invalid_reactivation_window")
+        return {
+            "min_days_since_last_visit": min_days,
+            "max_days_since_last_visit": max_days,
+            "require_no_future_booking": require_no_future,
+        }
+
+    if segment_code == MARKETING_SEGMENT_NO_SHOW_RECOVERY_14D:
+        allowed_keys = {"no_show_window_days", "min_no_show_count", "require_no_future_booking"}
+        if strict:
+            unknown_keys = sorted(set(raw_map.keys()) - allowed_keys)
+            if unknown_keys:
+                raise ValueError("invalid_segment_params_keys")
+        no_show_window_days = _to_int(raw_map.get("no_show_window_days"), int(defaults["no_show_window_days"]))
+        min_no_show_count = _to_int(raw_map.get("min_no_show_count"), int(defaults["min_no_show_count"]))
+        require_no_future = _to_bool(raw_map.get("require_no_future_booking"), bool(defaults["require_no_future_booking"]))
+        if no_show_window_days < 1 or no_show_window_days > 365:
+            raise ValueError("invalid_no_show_window_days")
+        if min_no_show_count < 1 or min_no_show_count > 10:
+            raise ValueError("invalid_min_no_show_count")
+        return {
+            "no_show_window_days": no_show_window_days,
+            "min_no_show_count": min_no_show_count,
+            "require_no_future_booking": require_no_future,
+        }
+
+    if segment_code == MARKETING_SEGMENT_ENGAGED_NO_BOOKING_7D:
+        allowed_keys = {"engagement_window_days", "require_no_future_booking"}
+        if strict:
+            unknown_keys = sorted(set(raw_map.keys()) - allowed_keys)
+            if unknown_keys:
+                raise ValueError("invalid_segment_params_keys")
+        engagement_window_days = _to_int(raw_map.get("engagement_window_days"), int(defaults["engagement_window_days"]))
+        require_no_future = _to_bool(raw_map.get("require_no_future_booking"), bool(defaults["require_no_future_booking"]))
+        if engagement_window_days < 1 or engagement_window_days > 90:
+            raise ValueError("invalid_engagement_window_days")
+        return {
+            "engagement_window_days": engagement_window_days,
+            "require_no_future_booking": require_no_future,
+        }
+
+    return dict(defaults)
+
+
+def build_marketing_segment_summary(segment_code: str, segment_params: Any) -> str:
+    params = normalize_marketing_segment_params(segment_code, segment_params, strict=False)
+    if segment_code == MARKETING_SEGMENT_REACTIVATION_30_120:
+        return (
+            "Клиенты без будущей записи, у которых последний визит был "
+            f"{params['min_days_since_last_visit']}-{params['max_days_since_last_visit']} дней назад."
+        )
+    if segment_code == MARKETING_SEGMENT_NO_SHOW_RECOVERY_14D:
+        return (
+            "Клиенты с no-show за последние "
+            f"{params['no_show_window_days']} дней (минимум {params['min_no_show_count']}), без будущей записи."
+        )
+    if segment_code == MARKETING_SEGMENT_ENGAGED_NO_BOOKING_7D:
+        return (
+            "Клиенты с интересом к услугам/ценам за последние "
+            f"{params['engagement_window_days']} дней, без будущей записи."
+        )
+    return "Сегмент аудитории"
+
+
+def resolve_campaign_segment_params(
+    campaign: MarketingCampaign,
+    *,
+    segment_code: str,
+    override_params: Any = None,
+    strict: bool = False,
+) -> dict[str, Any]:
+    if override_params is not None:
+        return normalize_marketing_segment_params(segment_code, override_params, strict=strict)
+    audience_filter = campaign.audience_filter if isinstance(campaign.audience_filter, dict) else {}
+    raw_segment_params = audience_filter.get("segment_params")
+    return normalize_marketing_segment_params(segment_code, raw_segment_params, strict=strict)
+
+
+def get_marketing_segment_catalog() -> list[dict[str, Any]]:
+    return [
+        {
+            "code": MARKETING_SEGMENT_REACTIVATION_30_120,
+            "label": "Возврат клиентов",
+            "short_label": "Возврат",
+            "description": "Вернуть клиентов, которые давно не были и пока не записались снова.",
+            "defaults": dict(_SEGMENT_DEFAULTS_REACTIVATION),
+            "summary": build_marketing_segment_summary(
+                MARKETING_SEGMENT_REACTIVATION_30_120,
+                _SEGMENT_DEFAULTS_REACTIVATION,
+            ),
+            "editable_fields": [
+                {
+                    "key": "min_days_since_last_visit",
+                    "label": "От, дней после визита",
+                    "type": "int",
+                    "min": 1,
+                    "max": 3650,
+                    "step": 1,
+                },
+                {
+                    "key": "max_days_since_last_visit",
+                    "label": "До, дней после визита",
+                    "type": "int",
+                    "min": 1,
+                    "max": 3650,
+                    "step": 1,
+                },
+                {
+                    "key": "require_no_future_booking",
+                    "label": "Только без будущей записи",
+                    "type": "bool",
+                },
+            ],
+        },
+        {
+            "code": MARKETING_SEGMENT_NO_SHOW_RECOVERY_14D,
+            "label": "После no-show",
+            "short_label": "No-show",
+            "description": "Догнать клиентов, которые не пришли, и вернуть их в расписание.",
+            "defaults": dict(_SEGMENT_DEFAULTS_NO_SHOW),
+            "summary": build_marketing_segment_summary(
+                MARKETING_SEGMENT_NO_SHOW_RECOVERY_14D,
+                _SEGMENT_DEFAULTS_NO_SHOW,
+            ),
+            "editable_fields": [
+                {
+                    "key": "no_show_window_days",
+                    "label": "Период поиска no-show, дней",
+                    "type": "int",
+                    "min": 1,
+                    "max": 365,
+                    "step": 1,
+                },
+                {
+                    "key": "min_no_show_count",
+                    "label": "Минимум no-show за период",
+                    "type": "int",
+                    "min": 1,
+                    "max": 10,
+                    "step": 1,
+                },
+                {
+                    "key": "require_no_future_booking",
+                    "label": "Только без будущей записи",
+                    "type": "bool",
+                },
+            ],
+        },
+        {
+            "code": MARKETING_SEGMENT_ENGAGED_NO_BOOKING_7D,
+            "label": "Интерес без записи",
+            "short_label": "Интерес",
+            "description": "Клиенты, которые задавали вопросы по услугам/ценам, но не записались.",
+            "defaults": dict(_SEGMENT_DEFAULTS_ENGAGED),
+            "summary": build_marketing_segment_summary(
+                MARKETING_SEGMENT_ENGAGED_NO_BOOKING_7D,
+                _SEGMENT_DEFAULTS_ENGAGED,
+            ),
+            "editable_fields": [
+                {
+                    "key": "engagement_window_days",
+                    "label": "Период интереса, дней",
+                    "type": "int",
+                    "min": 1,
+                    "max": 90,
+                    "step": 1,
+                },
+                {
+                    "key": "require_no_future_booking",
+                    "label": "Только без будущей записи",
+                    "type": "bool",
+                },
+            ],
+        },
+    ]
+
+
+def describe_marketing_reason_code(reason_code: str) -> str:
+    value = (reason_code or "").strip()
+    if not value:
+        return ""
+    if value.startswith("segment="):
+        segment = value.split("=", 1)[1].strip()
+        return {
+            MARKETING_SEGMENT_REACTIVATION_30_120: "Подходит под сегмент возврата клиентов.",
+            MARKETING_SEGMENT_NO_SHOW_RECOVERY_14D: "Подходит под сегмент после no-show.",
+            MARKETING_SEGMENT_ENGAGED_NO_BOOKING_7D: "Подходит под сегмент интереса без записи.",
+        }.get(segment, "Подходит под выбранный сегмент.")
+    if value.startswith("last_visit_days="):
+        return f"Последний визит: {value.split('=', 1)[1].strip()} дней назад."
+    if value.startswith("no_show_count=") or value.startswith("no_show_window_count="):
+        return f"Количество no-show за период: {value.split('=', 1)[1].strip()}."
+    if value.startswith("engagement_days="):
+        return f"Последний интерес к услугам/ценам: {value.split('=', 1)[1].strip()} дней назад."
+    if value.startswith("engagement_signal="):
+        signal = value.split("=", 1)[1].strip()
+        return f"Обнаружен сигнал интереса ({signal})."
+    if value == "no_future_booking=true":
+        return "Нет будущей записи."
+    return value.replace("_", " ")
+
+
+def describe_marketing_suppression_reason(reason_code: str) -> str:
+    value = (reason_code or "").strip()
+    if not value:
+        return ""
+    if value == "consent:opt_out":
+        return "Клиент запретил маркетинговые сообщения (opt-out)."
+    if value.startswith("suppression:"):
+        reason = value.split(":", 1)[1].strip().replace("_", " ")
+        return f"Контакт в списке исключений: {reason}."
+    if value == "state:human_lock_active":
+        return "Диалог на ручной обработке менеджером."
+    if value.startswith("frequency_cap:"):
+        period = value.split(":", 1)[1].strip()
+        return f"Ограничение частоты рассылки: не чаще 1 раза за {period}."
+    if value == "provider:permanent_failure_history":
+        return "Ранее были постоянные ошибки доставки по контакту."
+    return value.replace("_", " ")
+
 
 def _env_flag(name: str, *, default: bool = False) -> bool:
     raw = (os.environ.get(name) or "").strip().lower()
@@ -222,11 +521,12 @@ def _load_recent_service_pricing_engagement(
     client_id: UUID,
     conversation_ids: set[UUID],
     now: datetime,
+    lookback_days: int,
 ) -> dict[UUID, dict[str, Any]]:
     if not conversation_ids:
         return {}
 
-    cutoff = now - timedelta(days=MARKETING_PREVIEW_ENGAGEMENT_LOOKBACK_DAYS)
+    cutoff = now - timedelta(days=max(lookback_days, 1))
     rows = (
         db.query(
             Message.conversation_id,
@@ -308,12 +608,13 @@ def _load_appointment_stats(
     branch_id: UUID,
     user_ids: set[UUID],
     now: datetime,
+    no_show_window_days: int = 14,
 ) -> dict[UUID, dict[str, Any]]:
     if not user_ids:
         return {}
 
     stats: dict[UUID, dict[str, Any]] = {
-        user_id: {"last_visit_at": None, "future_count": 0, "no_show_14d_count": 0}
+        user_id: {"last_visit_at": None, "future_count": 0, "no_show_window_count": 0}
         for user_id in user_ids
     }
     base_query = db.query(Appointment).filter(
@@ -360,7 +661,7 @@ def _load_appointment_stats(
         if row.user_id in stats:
             stats[row.user_id]["future_count"] = int(row.future_count or 0)
 
-    no_show_cutoff = now - timedelta(days=14)
+    no_show_cutoff = now - timedelta(days=max(int(no_show_window_days), 1))
     no_show_rows = (
         db.query(
             Appointment.user_id,
@@ -378,7 +679,7 @@ def _load_appointment_stats(
     )
     for row in no_show_rows:
         if row.user_id in stats:
-            stats[row.user_id]["no_show_14d_count"] = int(row.no_show_count or 0)
+            stats[row.user_id]["no_show_window_count"] = int(row.no_show_count or 0)
 
     return stats
 
@@ -386,61 +687,79 @@ def _load_appointment_stats(
 def _matches_segment(
     *,
     segment_code: str,
+    segment_params: dict[str, Any],
     stats: dict[str, Any],
     engagement: Optional[dict[str, Any]],
     now: datetime,
 ) -> tuple[bool, list[str]]:
     last_visit_at = stats.get("last_visit_at")
     future_count = int(stats.get("future_count") or 0)
-    no_show_14d_count = int(stats.get("no_show_14d_count") or 0)
+    no_show_window_count = int(stats.get("no_show_window_count") or 0)
     days_since_last_visit = _days_since(last_visit_at, now=now)
     reason_codes: list[str] = []
 
     if segment_code == MARKETING_SEGMENT_REACTIVATION_30_120:
+        min_days_since_last_visit = int(segment_params.get("min_days_since_last_visit") or 30)
+        max_days_since_last_visit = int(segment_params.get("max_days_since_last_visit") or 120)
+        require_no_future_booking = bool(segment_params.get("require_no_future_booking", True))
         if days_since_last_visit is None:
             return False, []
-        if days_since_last_visit < 30 or days_since_last_visit > 120:
+        if days_since_last_visit < min_days_since_last_visit or days_since_last_visit > max_days_since_last_visit:
             return False, []
-        if future_count > 0:
+        if require_no_future_booking and future_count > 0:
             return False, []
         reason_codes.extend(
             [
                 "segment=reactivation_30_120",
                 f"last_visit_days={days_since_last_visit}",
-                "no_future_booking=true",
+                f"window_days={min_days_since_last_visit}-{max_days_since_last_visit}",
             ]
         )
+        if require_no_future_booking:
+            reason_codes.append("no_future_booking=true")
         return True, reason_codes
 
     if segment_code == MARKETING_SEGMENT_NO_SHOW_RECOVERY_14D:
-        if no_show_14d_count <= 0:
+        min_no_show_count = int(segment_params.get("min_no_show_count") or 1)
+        no_show_window_days = int(segment_params.get("no_show_window_days") or 14)
+        require_no_future_booking = bool(segment_params.get("require_no_future_booking", True))
+        if no_show_window_count < min_no_show_count:
             return False, []
-        if future_count > 0:
+        if require_no_future_booking and future_count > 0:
             return False, []
         reason_codes.extend(
             [
                 "segment=no_show_recovery_14d",
-                f"no_show_14d_count={no_show_14d_count}",
-                "no_future_booking=true",
+                f"no_show_window_count={no_show_window_count}",
+                f"no_show_window_days={no_show_window_days}",
+                f"min_no_show_count={min_no_show_count}",
             ]
         )
+        if require_no_future_booking:
+            reason_codes.append("no_future_booking=true")
         return True, reason_codes
 
     if segment_code == MARKETING_SEGMENT_ENGAGED_NO_BOOKING_7D:
+        engagement_window_days = int(segment_params.get("engagement_window_days") or MARKETING_PREVIEW_ENGAGEMENT_LOOKBACK_DAYS)
+        require_no_future_booking = bool(segment_params.get("require_no_future_booking", True))
         if not engagement or not bool(engagement.get("engaged")):
             return False, []
-        if future_count > 0:
+        if require_no_future_booking and future_count > 0:
             return False, []
         last_engaged_at = engagement.get("last_engaged_at")
         days_since_message = _days_since(last_engaged_at, now=now)
+        if days_since_message is None or days_since_message > engagement_window_days:
+            return False, []
         signal = str(engagement.get("signal") or "unknown")
         reason_codes.extend(
             [
                 "segment=engaged_no_booking_7d",
                 f"engagement_signal={signal}",
-                "no_future_booking=true",
+                f"engagement_window_days={engagement_window_days}",
             ]
         )
+        if require_no_future_booking:
+            reason_codes.append("no_future_booking=true")
         if days_since_message is not None:
             reason_codes.append(f"engagement_days={days_since_message}")
         return True, reason_codes
@@ -738,10 +1057,18 @@ def materialize_marketing_campaign_audience(
     segment_code: str,
     sample_limit: int,
     now: Optional[datetime] = None,
+    segment_params: Any = None,
 ) -> dict[str, Any]:
     now = now or datetime.now(timezone.utc)
     if segment_code not in MARKETING_SEGMENT_CODES:
         raise ValueError("unsupported_segment")
+    effective_segment_params = resolve_campaign_segment_params(
+        campaign,
+        segment_code=segment_code,
+        override_params=segment_params,
+        strict=False,
+    )
+    segment_summary = build_marketing_segment_summary(segment_code, effective_segment_params)
 
     candidates = _load_candidate_conversations(
         db,
@@ -749,28 +1076,35 @@ def materialize_marketing_campaign_audience(
         branch_id=campaign.branch_id,
     )
     user_ids = {candidate["user_id"] for candidate in candidates if candidate.get("user_id")}
+    no_show_window_days = int(effective_segment_params.get("no_show_window_days") or 14)
     stats_by_user = _load_appointment_stats(
         db,
         client_id=campaign.client_id,
         branch_id=campaign.branch_id,
         user_ids=user_ids,
         now=now,
+        no_show_window_days=no_show_window_days,
     )
     conversation_ids = {candidate["conversation_id"] for candidate in candidates if candidate.get("conversation_id")}
+    engagement_window_days = int(
+        effective_segment_params.get("engagement_window_days") or MARKETING_PREVIEW_ENGAGEMENT_LOOKBACK_DAYS
+    )
     engagement_by_conversation = _load_recent_service_pricing_engagement(
         db,
         client_id=campaign.client_id,
         conversation_ids=conversation_ids,
         now=now,
+        lookback_days=engagement_window_days,
     )
 
     selected: list[dict[str, Any]] = []
     for candidate in candidates:
         user_id = candidate.get("user_id")
-        stats = stats_by_user.get(user_id, {"last_visit_at": None, "future_count": 0, "no_show_14d_count": 0})
+        stats = stats_by_user.get(user_id, {"last_visit_at": None, "future_count": 0, "no_show_window_count": 0})
         engagement = engagement_by_conversation.get(candidate.get("conversation_id"))
         matches, reason_codes = _matches_segment(
             segment_code=segment_code,
+            segment_params=effective_segment_params,
             stats=stats,
             engagement=engagement,
             now=now,
@@ -875,6 +1209,8 @@ def materialize_marketing_campaign_audience(
     audience_filter = campaign.audience_filter if isinstance(campaign.audience_filter, dict) else {}
     campaign.audience_filter = {
         **audience_filter,
+        "segment_params": effective_segment_params,
+        "segment_summary": segment_summary,
         "preview_stats": preview_stats,
     }
     campaign.updated_at = now
@@ -897,6 +1233,8 @@ def materialize_marketing_campaign_audience(
         "eligible_count": max(len(selected) - suppressed_count, 0),
         "suppressed_count": suppressed_count,
         "suppression_reason_counts": suppression_reason_counts,
+        "segment_params": effective_segment_params,
+        "segment_summary": segment_summary,
         "sample_conversation_ids": [
             row.conversation_id
             for row in preview_rows
@@ -940,6 +1278,8 @@ def build_marketing_campaign_preflight(
     now = now or datetime.now(timezone.utc)
     previous_snapshot = campaign.preflight_snapshot if isinstance(campaign.preflight_snapshot, dict) else {}
     audience_filter = campaign.audience_filter if isinstance(campaign.audience_filter, dict) else {}
+    segment_params = audience_filter.get("segment_params")
+    segment_summary = audience_filter.get("segment_summary")
     preview_stats = (
         previous_snapshot.get("preview_stats")
         if isinstance(previous_snapshot.get("preview_stats"), dict)
@@ -1014,6 +1354,15 @@ def build_marketing_campaign_preflight(
         "blocked_reasons": blocked_reasons,
         "preflight_valid": preflight_valid,
     }
+    if isinstance(segment_params, dict):
+        snapshot["segment_params"] = resolve_campaign_segment_params(
+            campaign,
+            segment_code=campaign.segment_code or MARKETING_SEGMENT_REACTIVATION_30_120,
+            override_params=segment_params,
+            strict=False,
+        )
+    if isinstance(segment_summary, str) and segment_summary.strip():
+        snapshot["segment_summary"] = segment_summary.strip()
     if isinstance(preview_stats, dict):
         snapshot["preview_stats"] = preview_stats
     campaign.preflight_snapshot = snapshot

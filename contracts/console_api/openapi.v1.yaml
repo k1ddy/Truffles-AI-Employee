@@ -2779,6 +2779,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/marketing/segments:
+    get:
+      tags:
+      - console
+      summary: Get Marketing Segments Catalog
+      operationId: get_marketing_segments_catalog_console_v1_admin_marketing_segments_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleMarketingSegmentCatalogResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
   /console/v1/admin/marketing/campaigns:
     get:
       tags:
@@ -9261,6 +9286,15 @@ components:
           - engaged_no_booking_7d
           title: Segment Code
           default: reactivation_30_120
+        segment_params:
+          type: object
+          title: Segment Params
+          default: {}
+        segment_summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Segment Summary
         audience_mode:
           const: branch_active_conversations
           title: Audience Mode
@@ -9381,6 +9415,11 @@ components:
           - engaged_no_booking_7d
           title: Segment Code
           default: reactivation_30_120
+        segment_params:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Segment Params
         audience_mode:
           const: branch_active_conversations
           title: Audience Mode
@@ -9560,6 +9599,15 @@ components:
           type: integer
           title: Suppressed Count
           default: 0
+        segment_params:
+          type: object
+          title: Segment Params
+          default: {}
+        segment_summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Segment Summary
         preview_stats:
           anyOf:
           - $ref: '#/components/schemas/ConsoleMarketingAudienceFunnel'
@@ -9619,6 +9667,15 @@ components:
           type: integer
           title: Suppressed Count
           default: 0
+        segment_params:
+          type: object
+          title: Segment Params
+          default: {}
+        segment_summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Segment Summary
         sample_conversation_ids:
           items:
             type: string
@@ -9680,6 +9737,12 @@ components:
           type: array
           title: Reason Codes
           default: []
+        reason_hints:
+          items:
+            type: string
+          type: array
+          title: Reason Hints
+          default: []
         suppressed:
           type: boolean
           title: Suppressed
@@ -9689,6 +9752,12 @@ components:
             type: string
           type: array
           title: Suppression Reasons
+          default: []
+        suppression_hints:
+          items:
+            type: string
+          type: array
+          title: Suppression Hints
           default: []
         updated_at:
           anyOf:
@@ -9761,6 +9830,11 @@ components:
             - engaged_no_booking_7d
           - type: 'null'
           title: Segment Code
+        segment_params:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Segment Params
         reason:
           anyOf:
           - type: string
@@ -9814,6 +9888,91 @@ components:
       - delivery_id
       - status
       title: ConsoleMarketingDeliverySample
+    ConsoleMarketingSegmentCatalogResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleMarketingSegmentDefinition'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: ConsoleMarketingSegmentCatalogResponse
+    ConsoleMarketingSegmentDefinition:
+      properties:
+        code:
+          type: string
+          enum:
+          - reactivation_30_120
+          - no_show_recovery_14d
+          - engaged_no_booking_7d
+          title: Code
+        label:
+          type: string
+          title: Label
+        short_label:
+          type: string
+          title: Short Label
+        description:
+          type: string
+          title: Description
+        defaults:
+          type: object
+          title: Defaults
+          default: {}
+        summary:
+          type: string
+          title: Summary
+        editable_fields:
+          items:
+            $ref: '#/components/schemas/ConsoleMarketingSegmentEditableField'
+          type: array
+          title: Editable Fields
+          default: []
+      type: object
+      required:
+      - code
+      - label
+      - short_label
+      - description
+      - summary
+      title: ConsoleMarketingSegmentDefinition
+    ConsoleMarketingSegmentEditableField:
+      properties:
+        key:
+          type: string
+          title: Key
+        label:
+          type: string
+          title: Label
+        type:
+          type: string
+          enum:
+          - int
+          - bool
+          title: Type
+        min:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Min
+        max:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max
+        step:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Step
+      type: object
+      required:
+      - key
+      - label
+      - type
+      title: ConsoleMarketingSegmentEditableField
     ConsoleMeResponse:
       properties:
         agent:
