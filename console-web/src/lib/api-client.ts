@@ -153,12 +153,29 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
     },
 };
 
+const ConsoleRoleSet = new Set<ConsoleRole>([
+    "platform_admin",
+    "owner",
+    "admin",
+    "manager",
+    "support",
+    "specialist",
+    "viewer",
+]);
+
+export function isConsoleRole(role: string): role is ConsoleRole {
+    return ConsoleRoleSet.has(role as ConsoleRole);
+}
+
 export function canAccessConsole(
-    role: ConsoleRole | null | undefined,
+    role: string | null | undefined,
     section: ConsoleSection,
     action: ConsoleAction,
 ): boolean {
     if (!role) {
+        return false;
+    }
+    if (!isConsoleRole(role)) {
         return false;
     }
     return ConsoleRBAC[section][action].includes(role);
@@ -1039,6 +1056,39 @@ export type CreateTenantsWeeklySnapshotRequest = {
 export type CreateTenantsWeeklySnapshotResponse = {
     item: TenantsWeeklySnapshotRecord;
 };
+export type GetTenantsPortfolioParams = {
+    cursor?: string;
+    limit?: number;
+    q?: string;
+    company_id?: string;
+    lifecycle?: "active" | "archived" | "all";
+    attention_limit?: number;
+    stale_after_minutes?: number;
+    include_low?: "true" | "false";
+};
+export type TenantsPortfolioResponse = {
+    generated_at: string;
+    clients: components["schemas"]["ClientListResponse"];
+    fleet_attention: components["schemas"]["FleetAttentionResponse"];
+};
+export type GetTenantsCompanyCockpitParams = {
+    company_id: string;
+    client_id?: string;
+    lifecycle?: "active" | "archived" | "all";
+    client_limit?: number;
+    branch_limit?: number;
+    client_cursor?: string;
+    branch_cursor?: string;
+    client_q?: string;
+    branch_q?: string;
+};
+export type TenantsCompanyCockpitResponse = {
+    generated_at: string;
+    company_id: string;
+    selected_client_id?: string | null;
+    clients: components["schemas"]["ClientListResponse"];
+    branches: components["schemas"]["BranchListResponse"];
+};
 export type AuditTenantsSensitiveAccessRequest = {
     branch_id: string;
     field: "instance_id";
@@ -1239,6 +1289,10 @@ export const adminApi = {
         apiClient.get<components["schemas"]["ClientListResponse"]>("/admin/clients", { params }),
     listBranches: (params?: ListBranchesParams) =>
         apiClient.get<components["schemas"]["BranchListResponse"]>("/admin/branches", { params }),
+    getTenantsPortfolio: (params?: GetTenantsPortfolioParams) =>
+        apiClient.get<TenantsPortfolioResponse>("/admin/tenants/portfolio", { params }),
+    getTenantsCompanyCockpit: (params: GetTenantsCompanyCockpitParams) =>
+        apiClient.get<TenantsCompanyCockpitResponse>("/admin/tenants/company-cockpit", { params }),
     listTenantsWeeklySnapshots: (params: ListTenantsWeeklySnapshotsParams) =>
         apiClient.get<TenantsWeeklySnapshotListResponse>("/admin/tenants/weekly-snapshots", { params }),
     saveTenantsWeeklySnapshot: (data: CreateTenantsWeeklySnapshotRequest) =>

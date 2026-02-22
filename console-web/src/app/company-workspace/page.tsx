@@ -6,7 +6,6 @@ import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { useSearchParams } from "next/navigation";
-
 import AccessDenied from "@/components/AccessDenied";
 import {
     adminApi,
@@ -15,6 +14,9 @@ import {
     confirmationsApi,
     onboardingApi,
     parseApiError,
+    type Branch,
+    type BranchIntegrationStatus,
+    type Client,
     type IncidentItem,
     type IntegrationBranchActionRequest,
     type ProviderOpsAction,
@@ -51,33 +53,12 @@ type WizardStep = {
     fix: string;
 };
 
-type WorkspaceCompanyOption = { id: string; name?: string | null };
-type WorkspaceClientOption = { id: string; name?: string | null; slug?: string | null };
-type WorkspaceBranchOption = {
+type CompanyOption = {
     id: string;
-    name?: string | null;
-    slug?: string | null;
-    phone?: string | null;
-    instance_id?: string | null;
+    name: string;
 };
-type WorkspaceIntegrationItem = {
-    branch_id: string;
-    branch_slug?: string | null;
-    branch_name?: string | null;
-    client_slug?: string | null;
-    status?: "ok" | "warn" | "error";
-    webhook_url?: string | null;
-    webhook_url_valid?: boolean | null;
-    instance_id?: string | null;
-    provider_binding_owner?: string | null;
-    provider_binding_paid_until?: string | null;
-    provider_binding_next_renewal_at?: string | null;
-    provider_binding_webhook_status?: string | null;
-    provider_binding_instance_id?: string | null;
-    last_inbound_at?: string | null;
-    [key: string]: string | number | boolean | null | undefined;
-};
-type WorkspaceProviderLifecycleItem = {
+
+type ProviderLifecycleFact = {
     sla_state?: string | null;
     next_action?: string | null;
     sla_deadline_at?: string | null;
@@ -86,7 +67,6 @@ type WorkspaceProviderLifecycleItem = {
     provider_binding_paid_until?: string | null;
     instance_id?: string | null;
     provider_binding_instance_id?: string | null;
-    [key: string]: string | string[] | number | boolean | null | undefined;
 };
 
 function readWorkspaceRecommendedActionContext(): WorkspaceRecommendedActionContext | null {
@@ -386,7 +366,7 @@ export default function CompanyWorkspacePage() {
     const canWriteTenants = canAccessConsole(role, "tenants", "write");
     const canReadIntegrations = canAccessConsole(role, "integrations", "read");
     const canReadOps = canAccessConsole(role, "ops", "read");
-    const companyOptions = useMemo<WorkspaceCompanyOption[]>(
+    const companyOptions = useMemo<CompanyOption[]>(
         () => meData?.companies ?? [],
         [meData?.companies],
     );
@@ -445,7 +425,7 @@ export default function CompanyWorkspacePage() {
         },
         enabled: !!session && canReadTenants,
     });
-    const clientOptions = useMemo<WorkspaceClientOption[]>(
+    const clientOptions = useMemo<Client[]>(
         () => clientsData?.items ?? [],
         [clientsData?.items],
     );
@@ -462,7 +442,7 @@ export default function CompanyWorkspacePage() {
         },
         enabled: !!session && canReadTenants && !!scopeClientId,
     });
-    const branchOptions = useMemo<WorkspaceBranchOption[]>(
+    const branchOptions = useMemo<Branch[]>(
         () => branchesData?.items ?? [],
         [branchesData?.items],
     );
@@ -507,7 +487,7 @@ export default function CompanyWorkspacePage() {
             const response = await adminApi.listProviderLifecycle({
                 stale_after_minutes: staleAfterMinutes,
                 limit: 1,
-                only_problematic: true,
+                only_problematic: "true",
                 company_id: scopeCompanyId || undefined,
                 client_id: scopeClientId || undefined,
                 branch_id: scopeBranchId || undefined,
@@ -575,17 +555,23 @@ export default function CompanyWorkspacePage() {
         [branchOptions, scopeBranchId],
     );
 
-    const selectedIntegration = useMemo<WorkspaceIntegrationItem | null>(() => {
-        const items: WorkspaceIntegrationItem[] = integrationsData?.items ?? [];
+    const selectedIntegration = useMemo<BranchIntegrationStatus | null>(() => {
+        const items = (integrationsData?.items ?? []) as BranchIntegrationStatus[];
         if (!scopeBranchId) {
             return items[0] ?? null;
         }
         return items.find((item) => item.branch_id === scopeBranchId) ?? null;
     }, [integrationsData?.items, scopeBranchId]);
 
-    const lifecycleTodayFact = useMemo<WorkspaceProviderLifecycleItem | null>(() => {
-        const items: WorkspaceProviderLifecycleItem[] = providerLifecycleData?.items ?? [];
-        return items[0] ?? null;
+    const lifecycleTodayFact = useMemo<ProviderLifecycleFact | null>(() => {
+        const item = providerLifecycleData?.items?.[0];
+        if (!item) {
+            return null;
+        }
+        return {
+            ...item,
+            blockers: Array.isArray(item.blockers) ? item.blockers : [],
+        };
     }, [providerLifecycleData?.items]);
 
     const workspaceIncident = useMemo<IncidentItem | null>(() => {

@@ -1,7 +1,7 @@
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 from app.schemas.capabilities import CapabilitiesPayload
 from app.schemas.onboarding_contract import (
@@ -295,6 +295,7 @@ class ConsoleTenantsWeeklySnapshotRecord(BaseModel):
     client_id: UUID
     week_key: str
     snapshot: ConsoleTenantsWeeklySnapshotPayload
+    snapshot_schema_version: str = "v1"
     actor_name: Optional[str] = None
 
 
@@ -302,6 +303,8 @@ class ConsoleTenantsWeeklySnapshotListResponse(BaseModel):
     items: list[ConsoleTenantsWeeklySnapshotRecord]
     cursor: Optional[str] = None
     has_more: bool
+    storage_mode: Literal["table", "audit_fallback"] = "table"
+    schema_versions: dict[str, int] = Field(default_factory=dict)
 
 
 class ConsoleTenantsWeeklySnapshotCreateRequest(ConsoleRequestModel):

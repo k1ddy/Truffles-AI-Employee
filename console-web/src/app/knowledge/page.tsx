@@ -1216,13 +1216,14 @@ function KnowledgeStudio({ session }: { session: SessionData }) {
             if (!reason) {
                 throw new Error("Укажите причину изменения");
             }
+            const workingHoursPatch = (parsedBranchWorkingHours.value ?? {}) as Record<string, never>;
 
             const draftResponse = await adminApi.draftBranchChange({
                 branch_id: selectedBranchContext.id,
                 reason,
                 patch: {
                     knowledge_tag: branchKnowledgeTagDraft.trim() || null,
-                    working_hours: parsedBranchWorkingHours.value ?? {},
+                    working_hours: workingHoursPatch,
                 },
             });
             const draftChange = draftResponse.data.change;

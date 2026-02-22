@@ -204,7 +204,6 @@ type TenantsOperationalSnapshot = {
 };
 
 const LIFECYCLE_AUDIT_STORAGE_KEY = "tenants:client-lifecycle-audit:v2";
-const WEEKLY_SNAPSHOT_STORAGE_KEY = "tenants:operational-weekly-snapshots:v1";
 const MAX_LIFECYCLE_AUDIT_ENTRIES_PER_CLIENT = 20;
 const MAX_WEEKLY_SNAPSHOTS = 12;
 
@@ -419,16 +418,19 @@ function formatOptionalPercent(value: number | null | undefined): string {
     return `${Number(value.toFixed(1))}%`;
 }
 
-function toWeekKey(dateValue: string): string {
+function toIsoWeekKey(dateValue: string): string {
     const parsed = new Date(dateValue);
     if (Number.isNaN(parsed.getTime())) {
         return "invalid-week";
     }
-    const yearStart = new Date(Date.UTC(parsed.getUTCFullYear(), 0, 1));
-    const current = new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
-    const dayOfYear = Math.floor((current.getTime() - yearStart.getTime()) / 86400000) + 1;
-    const week = Math.ceil(dayOfYear / 7);
-    return `${parsed.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+    const target = new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+    const weekday = target.getUTCDay() || 7;
+    target.setUTCDate(target.getUTCDate() + 4 - weekday);
+
+    const isoYear = target.getUTCFullYear();
+    const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+    const week = Math.ceil((((target.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    return `${isoYear}-W${String(week).padStart(2, "0")}`;
 }
 
 function lifecycleStateFromStatus(status: string | undefined): string {
@@ -487,21 +489,6 @@ function safeParseLifecycleAuditMap(rawValue: string | null): ClientLifecycleAud
         return result;
     } catch {
         return {};
-    }
-}
-
-function safeParseWeeklySnapshots(rawValue: string | null): TenantsOperationalSnapshot[] {
-    if (!rawValue) {
-        return [];
-    }
-    try {
-        const parsed = JSON.parse(rawValue) as TenantsOperationalSnapshot[];
-        if (!Array.isArray(parsed)) {
-            return [];
-        }
-        return parsed.filter((item) => item && typeof item === "object").slice(0, MAX_WEEKLY_SNAPSHOTS);
-    } catch {
-        return [];
     }
 }
 
@@ -989,7 +976,6 @@ export default function TenantsPage() {
 
     useEffect(() => {
         setClientLifecycleAuditById(safeParseLifecycleAuditMap(readBrowserStorage(LIFECYCLE_AUDIT_STORAGE_KEY)));
-        setWeeklySnapshots(safeParseWeeklySnapshots(readBrowserStorage(WEEKLY_SNAPSHOT_STORAGE_KEY)));
     }, []);
 
     useEffect(() => {
@@ -998,13 +984,6 @@ export default function TenantsPage() {
             JSON.stringify(clientLifecycleAuditById),
         );
     }, [clientLifecycleAuditById]);
-
-    useEffect(() => {
-        writeBrowserStorage(
-            WEEKLY_SNAPSHOT_STORAGE_KEY,
-            JSON.stringify(weeklySnapshots.slice(0, MAX_WEEKLY_SNAPSHOTS)),
-        );
-    }, [weeklySnapshots]);
 
     const companiesQuery = useInfiniteQuery<
         components["schemas"]["CompanyListResponse"],
@@ -1027,6 +1006,58 @@ export default function TenantsPage() {
         getNextPageParam: (lastPage) =>
             lastPage.has_more ? lastPage.cursor ?? undefined : undefined,
         enabled: tenantsEnabled,
+    });
+    const tenantsPortfolioQuery = useQuery({
+        queryKey: [
+            "tenants-portfolio",
+            clientQueryValue,
+            pageFilterCompanyId,
+            tenantLifecycle,
+            fleetLifecycleFilter,
+            fleetPaymentFilter,
+            fleetServiceFilter,
+        ],
+        queryFn: async () => {
+            const response = await adminApi.getTenantsPortfolio({
+                limit: 20,
+                q: clientQueryValue,
+                company_id: pageFilterCompanyId ?? undefined,
+                lifecycle: tenantLifecycle,
+                attention_limit: 12,
+                stale_after_minutes: 60,
+                include_low: "false",
+            });
+            return response.data;
+        },
+        enabled: tenantsEnabled,
+        staleTime: 30000,
+    });
+    const tenantsCompanyCockpitQuery = useQuery({
+        queryKey: [
+            "tenants-company-cockpit",
+            pageFilterCompanyId,
+            pageFilterClientId,
+            clientQueryValue,
+            branchQueryValue,
+            tenantLifecycle,
+        ],
+        queryFn: async () => {
+            if (!pageFilterCompanyId) {
+                return null;
+            }
+            const response = await adminApi.getTenantsCompanyCockpit({
+                company_id: pageFilterCompanyId,
+                client_id: pageFilterClientId ?? undefined,
+                lifecycle: tenantLifecycle,
+                client_limit: 20,
+                branch_limit: 20,
+                client_q: clientQueryValue,
+                branch_q: branchQueryValue,
+            });
+            return response.data;
+        },
+        enabled: tenantsEnabled && !!pageFilterCompanyId,
+        staleTime: 30000,
     });
 
     const clientsQuery = useInfiniteQuery<
@@ -1109,7 +1140,7 @@ export default function TenantsPage() {
             });
             return response.data;
         },
-        enabled: tenantsEnabled && tenantLifecycle === "active",
+        enabled: tenantsEnabled && tenantLifecycle === "active" && tenantsPortfolioQuery.isError,
     });
     const branchChangesQuery = useQuery({
         queryKey: ["tenants-branch-changes", branchEditor?.id],
@@ -1169,7 +1200,11 @@ export default function TenantsPage() {
         staleTime: 30000,
     });
     useEffect(() => {
-        if (!pageFilterClientId || !weeklySnapshotsServerQuery.data) {
+        if (!pageFilterClientId) {
+            setWeeklySnapshots([]);
+            return;
+        }
+        if (!weeklySnapshotsServerQuery.data) {
             return;
         }
         setWeeklySnapshots(weeklySnapshotsServerQuery.data);
@@ -1179,13 +1214,27 @@ export default function TenantsPage() {
         () => companiesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
         [companiesQuery.data],
     );
-    const clients = useMemo(
-        () => clientsQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
-        [clientsQuery.data],
-    );
+    const clients = useMemo(() => {
+        const cockpitItems = tenantsCompanyCockpitQuery.data?.clients.items ?? [];
+        if (pageFilterCompanyId && (cockpitItems.length > 0 || tenantsCompanyCockpitQuery.isSuccess)) {
+            return cockpitItems;
+        }
+        const portfolioItems = tenantsPortfolioQuery.data?.clients.items ?? [];
+        if (portfolioItems.length > 0 || tenantsPortfolioQuery.isSuccess) {
+            return portfolioItems;
+        }
+        return clientsQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [];
+    }, [
+        clientsQuery.data,
+        pageFilterCompanyId,
+        tenantsCompanyCockpitQuery.data?.clients.items,
+        tenantsCompanyCockpitQuery.isSuccess,
+        tenantsPortfolioQuery.data?.clients.items,
+        tenantsPortfolioQuery.isSuccess,
+    ]);
     const clientsSummary = useMemo(
-        () => clientsQuery.data?.pages[0]?.summary ?? null,
-        [clientsQuery.data],
+        () => tenantsPortfolioQuery.data?.clients.summary ?? clientsQuery.data?.pages[0]?.summary ?? null,
+        [clientsQuery.data, tenantsPortfolioQuery.data?.clients.summary],
     );
     const onboardingThroughput = useMemo(
         () => clientsSummary?.onboarding_throughput ?? null,
@@ -1193,14 +1242,19 @@ export default function TenantsPage() {
     );
     const branches = useMemo(
         () => {
-            const items = branchesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [];
+            const cockpitItems = tenantsCompanyCockpitQuery.data?.branches.items ?? null;
+            const items = cockpitItems ?? (branchesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? []);
             if (!pageFilterBranchId) {
                 return items;
             }
             return items.filter((branch) => branch.id === pageFilterBranchId);
         },
-        [branchesQuery.data, pageFilterBranchId],
+        [branchesQuery.data, pageFilterBranchId, tenantsCompanyCockpitQuery.data?.branches.items],
     );
+    const clientsUsingServerContract = pageFilterCompanyId
+        ? tenantsCompanyCockpitQuery.isSuccess
+        : tenantsPortfolioQuery.isSuccess;
+    const branchesUsingServerContract = tenantsCompanyCockpitQuery.isSuccess;
     const selectedCompanyName = useMemo(() => {
         if (!selectedCompanyId) {
             return null;
@@ -1265,7 +1319,7 @@ export default function TenantsPage() {
         [clients, meData?.client?.id, meData?.client?.name, selectedClientId, selectedClientName],
     );
     const pageFilterBranchOptions = useMemo(() => {
-        const branchItems = (branchesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? []).map((branch) => ({
+        const branchItems = branches.map((branch) => ({
             id: branch.id,
             label: branch.name ?? branch.slug ?? branch.id ?? "",
         }));
@@ -1280,7 +1334,7 @@ export default function TenantsPage() {
                 label: selectedBranchNameFromContext ?? selectedBranchId ?? "",
             },
         ]);
-    }, [knownBranches, branchesQuery.data, selectedBranchId, selectedBranchNameFromContext]);
+    }, [branches, knownBranches, selectedBranchId, selectedBranchNameFromContext]);
     const activeErrorScope = useMemo(
         () => resolveErrorScopeFromWorkspace(workspaceMode),
         [workspaceMode],
@@ -1326,9 +1380,19 @@ export default function TenantsPage() {
             .filter((item) => item.length > 0);
     }, [previewChange]);
     const fleetAttention = useMemo(
-        () => fleetAttentionQuery.data ?? null,
-        [fleetAttentionQuery.data],
+        () => tenantsPortfolioQuery.data?.fleet_attention ?? fleetAttentionQuery.data ?? null,
+        [fleetAttentionQuery.data, tenantsPortfolioQuery.data?.fleet_attention],
     );
+    const fleetAttentionLoading = tenantsPortfolioQuery.isLoading || fleetAttentionQuery.isLoading;
+    const fleetAttentionErrored = !fleetAttention && (tenantsPortfolioQuery.isError || fleetAttentionQuery.isError);
+    const clientsLoading = tenantsPortfolioQuery.isLoading || clientsQuery.isLoading || tenantsCompanyCockpitQuery.isLoading;
+    const clientsErrored = clients.length === 0 && (
+        tenantsPortfolioQuery.isError
+        || clientsQuery.isError
+        || tenantsCompanyCockpitQuery.isError
+    );
+    const branchesLoading = branchesQuery.isLoading || tenantsCompanyCockpitQuery.isLoading;
+    const branchesErrored = branches.length === 0 && (branchesQuery.isError || tenantsCompanyCockpitQuery.isError);
     const recentBranchChangesForKpi = useMemo(
         () => recentBranchChangesKpiQuery.data?.items ?? [],
         [recentBranchChangesKpiQuery.data],
@@ -1564,6 +1628,7 @@ export default function TenantsPage() {
             const response = await adminApi.createClient({
                 slug,
                 company_id: companyId,
+                status: null,
             });
             const clientId = response.data.client?.id;
             if (!clientId) {
@@ -1627,6 +1692,7 @@ export default function TenantsPage() {
                 phone: phone || undefined,
                 instance_id: instanceId || undefined,
                 is_active: Boolean(phone && instanceId),
+                bootstrap_accounts: [],
             });
             const branchId = response.data.branch?.id;
             if (!branchId) {
@@ -1760,7 +1826,7 @@ export default function TenantsPage() {
             return;
         }
         const now = new Date().toISOString();
-        const weekKey = toWeekKey(now);
+        const weekKey = toIsoWeekKey(now);
         const localSnapshot: TenantsOperationalSnapshot = {
             id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
                 ? crypto.randomUUID()
@@ -1783,14 +1849,13 @@ export default function TenantsPage() {
             });
             const mappedSnapshot = mapWeeklySnapshotRecordToViewModel(response.data.item);
             applySnapshot(mappedSnapshot ?? localSnapshot);
-            queryClient.invalidateQueries({
-                queryKey: ["tenants-weekly-snapshots", pageFilterClientId],
-            });
+                queryClient.invalidateQueries({
+                    queryKey: ["tenants-weekly-snapshots", pageFilterClientId],
+                });
             toast.success(`Weekly snapshot сохранён (${weekKey})`);
         } catch (error) {
             reportError(error, { scope: "portfolio" });
-            applySnapshot(localSnapshot);
-            toast.success(`Weekly snapshot сохранён локально (${weekKey})`);
+            toast.error(`Не удалось сохранить weekly snapshot (${weekKey})`);
         }
     };
 
@@ -1814,7 +1879,7 @@ export default function TenantsPage() {
             const response = await opsApi.runJob({
                 job_type: "metrics_snapshot",
                 mode,
-                params: { days: 7 },
+                params: ({ days: 7 } as unknown as Record<string, never>),
             });
             setLastMetricsSnapshotJob(response.data.job);
             toast.success(mode === "dry_run" ? "Snapshot dry-run выполнен" : "Snapshot execute выполнен");
@@ -1917,7 +1982,7 @@ export default function TenantsPage() {
             payload.name = name;
         }
         if (companyEditor.billingInfo.trim() !== companyEditor.originalBillingInfo.trim()) {
-            payload.billing_info = billing.value ?? {};
+            payload.billing_info = (billing.value ?? {}) as Record<string, never>;
         }
         if (Object.keys(payload).length === 0) {
             toast("Нет изменений");
@@ -2555,8 +2620,18 @@ export default function TenantsPage() {
                 ) : null}
                 <TenantsActionQueuePanel
                     items={actionQueue}
-                    refreshing={fleetAttentionQuery.isFetching || recentBranchChangesKpiQuery.isFetching || clientsQuery.isFetching}
+                    refreshing={
+                        tenantsPortfolioQuery.isFetching
+                        || tenantsCompanyCockpitQuery.isFetching
+                        || fleetAttentionQuery.isFetching
+                        || recentBranchChangesKpiQuery.isFetching
+                        || clientsQuery.isFetching
+                    }
                     onRefresh={() => {
+                        tenantsPortfolioQuery.refetch();
+                        if (pageFilterCompanyId) {
+                            tenantsCompanyCockpitQuery.refetch();
+                        }
                         fleetAttentionQuery.refetch();
                         recentBranchChangesKpiQuery.refetch();
                         clientsQuery.refetch();
@@ -2601,6 +2676,10 @@ export default function TenantsPage() {
                                 <button
                                     className="btn-ghost"
                                     onClick={() => {
+                                        tenantsPortfolioQuery.refetch();
+                                        if (pageFilterCompanyId) {
+                                            tenantsCompanyCockpitQuery.refetch();
+                                        }
                                         fleetAttentionQuery.refetch();
                                         recentBranchChangesKpiQuery.refetch();
                                         selectedClientAuditQuery.refetch();
@@ -2608,9 +2687,14 @@ export default function TenantsPage() {
                                             weeklySnapshotsServerQuery.refetch();
                                         }
                                     }}
-                                    disabled={fleetAttentionQuery.isFetching || recentBranchChangesKpiQuery.isFetching}
+                                    disabled={
+                                        tenantsPortfolioQuery.isFetching
+                                        || tenantsCompanyCockpitQuery.isFetching
+                                        || fleetAttentionQuery.isFetching
+                                        || recentBranchChangesKpiQuery.isFetching
+                                    }
                                 >
-                                    {fleetAttentionQuery.isFetching || recentBranchChangesKpiQuery.isFetching ? "Обновление..." : "Обновить KPI"}
+                                    {tenantsPortfolioQuery.isFetching || recentBranchChangesKpiQuery.isFetching ? "Обновление..." : "Обновить KPI"}
                                 </button>
                                 <button
                                     className="btn-ghost"
@@ -2861,10 +2945,13 @@ export default function TenantsPage() {
                             </div>
                             <button
                                 className="btn-ghost"
-                                onClick={() => fleetAttentionQuery.refetch()}
-                                disabled={fleetAttentionQuery.isFetching}
+                                onClick={() => {
+                                    tenantsPortfolioQuery.refetch();
+                                    fleetAttentionQuery.refetch();
+                                }}
+                                disabled={tenantsPortfolioQuery.isFetching || fleetAttentionQuery.isFetching}
                             >
-                                {fleetAttentionQuery.isFetching ? "Обновление..." : "Обновить"}
+                                {tenantsPortfolioQuery.isFetching || fleetAttentionQuery.isFetching ? "Обновление..." : "Обновить"}
                             </button>
                         </div>
 
@@ -2877,9 +2964,9 @@ export default function TenantsPage() {
                         ) : null}
 
                         <div className="space-y-3">
-                            {fleetAttentionQuery.isLoading ? (
+                            {fleetAttentionLoading ? (
                                 <div className="text-sm text-muted-foreground">Загрузка панели рисков...</div>
-                            ) : fleetAttentionQuery.isError ? (
+                            ) : fleetAttentionErrored ? (
                                 <div className="text-sm text-muted-foreground">Не удалось загрузить панель рисков.</div>
                             ) : !fleetAttention?.items?.length ? (
                                 <div className="text-sm text-muted-foreground">Клиенты со средним/высоким риском не найдены.</div>
@@ -3125,7 +3212,7 @@ export default function TenantsPage() {
                                 {decommissionFocused ? "Клиенты (Decommission)" : "Клиенты"}
                             </h2>
                             <p className="text-sm text-muted-foreground">
-                                {clientsQuery.isLoading ? "—" : `${clients.length} всего`}
+                                {clientsLoading ? "—" : `${clients.length} всего`}
                             </p>
                             {decommissionFocused ? (
                                 <div className="mt-1 text-xs text-muted-foreground">
@@ -3191,9 +3278,9 @@ export default function TenantsPage() {
                         </div>
                     </div>
                     <div className="space-y-3">
-                        {clientsQuery.isLoading ? (
+                        {clientsLoading ? (
                             <div className="text-sm text-muted-foreground">Загрузка клиентов...</div>
-                        ) : clientsQuery.isError ? (
+                        ) : clientsErrored ? (
                             <div className="text-sm text-muted-foreground">Не удалось загрузить клиентов.</div>
                         ) : clients.length === 0 ? (
                             <div className="text-sm text-muted-foreground">Клиенты не найдены.</div>
@@ -3443,7 +3530,7 @@ export default function TenantsPage() {
                             })
                         )}
                     </div>
-                    {clientsQuery.hasNextPage ? (
+                    {!clientsUsingServerContract && clientsQuery.hasNextPage ? (
                         <div className="flex justify-center pt-3">
                             <button
                                 className="btn-ghost"
@@ -3463,7 +3550,7 @@ export default function TenantsPage() {
                         <div>
                             <h2 className="text-lg font-semibold">Филиалы</h2>
                             <p className="text-sm text-muted-foreground">
-                                {branchesQuery.isLoading ? "—" : `${branches.length} всего`}
+                                {branchesLoading ? "—" : `${branches.length} всего`}
                             </p>
                             {pageFilterClientId ? (
                                 <div className="mt-1 text-xs text-muted-foreground">
@@ -3479,9 +3566,9 @@ export default function TenantsPage() {
                         />
                     </div>
                     <div className="space-y-3">
-                        {branchesQuery.isLoading ? (
+                        {branchesLoading ? (
                             <div className="text-sm text-muted-foreground">Загрузка филиалов...</div>
-                        ) : branchesQuery.isError ? (
+                        ) : branchesErrored ? (
                             <div className="text-sm text-muted-foreground">Не удалось загрузить филиалы.</div>
                         ) : branches.length === 0 ? (
                             <div className="text-sm text-muted-foreground">Филиалы не найдены.</div>
@@ -3834,7 +3921,7 @@ export default function TenantsPage() {
                             })
                         )}
                     </div>
-                    {branchesQuery.hasNextPage ? (
+                    {!branchesUsingServerContract && branchesQuery.hasNextPage ? (
                         <div className="flex justify-center pt-3">
                             <button
                                 className="btn-ghost"
