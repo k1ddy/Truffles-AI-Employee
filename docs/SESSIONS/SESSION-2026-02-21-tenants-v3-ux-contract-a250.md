@@ -51,9 +51,11 @@
   - Wave5 a11y gate закрыт локально: устранён `color-contrast` (serious=1) в KPI карточках через статусные high-contrast labels в `TenantsOperationalKpiPanel`; fail-closed a11y lane теперь `critical=0`, `serious=0` (desktop/mobile).
   - Обновлён текущий Task Package с фактическим статусом wave execution/checks/evidence; устаревший check `test_console_tenants_weekly_snapshots.py` удалён как несуществующий (weekly snapshot contract покрыт в `test_console_tenants_list.py`).
   - Прогнаны проверки: `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`, `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 ... platform-admin.spec.ts` (`14 passed`), `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 A11Y_FAIL_ON_THRESHOLDS=1 ... tenants-a11y.spec.ts` (`2 passed`), `python3 truffles-api/scripts/generate_openapi.py --check`, `pytest -q truffles-api/tests/test_console_tenants_list.py` (`58 passed`), `pytest -q truffles-api/tests/test_console_fleet_attention.py` (`6 passed`), `scripts/session_check.sh`.
+  - PR обновлён: `https://github.com/k1ddy/Truffles-AI-Employee/pull/799`; после merge с `origin/main` конфликт `docs/SESSION_INDEX.md` закрыт через `bash scripts/session_index_rebuild.sh`.
+  - CI stop-the-line зафиксирован: run `https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22278409035`, job `console-e2e-live` (`64444293270`) failed на step `Playwright login smoke (live)`; команда `npm run test:e2e:smoke -- e2e/login.spec.ts`; ошибка `Keycloak sign-in not reachable (status 404)` в `console-web/e2e/global-setup.ts:67`.
 - next:
-  - Запушить изменения в ветку и синхронизировать PR с новым evidence wave5/6.
-  - Перезапустить CI на PR и зафиксировать run URL в `STATE.md`.
+  - Дождаться финала run `22278409035` (core-eval в прогрессе) и при необходимости перезапустить CI после проверки доступности live Keycloak signin.
+  - Решить policy для `console-e2e-live`: оставить fail-closed как runtime gate или перевести в controlled-optional при 404 sign-in на внешнем стенде.
   - После deploy ветки повторить fail-closed a11y lane на `https://console.truffles.kz` для runtime закрытия Wave5.
   - Продолжить Wave4 декомпозицию `tenants/page.tsx` (следующий вынос: fleet attention + portfolio companies секции).
 - evidence:
@@ -70,6 +72,7 @@
   - console-web/e2e/platform-admin.spec.ts
   - console-web/playwright.config.ts
   - console-web/src/components/ConsoleShell.tsx
+  - STATE.md
   - truffles-api/app/schemas/console.py
   - truffles-api/app/routers/console.py
   - truffles-api/tests/test_console_tenants_list.py
@@ -81,4 +84,5 @@
   - console-web/src/lib/api-client.ts
   - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-desktop-axe.json
   - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-mobile-axe.json
-- last_updated: 2026-02-22T13:44:29Z
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22278409035
+- last_updated: 2026-02-22T13:57:20Z

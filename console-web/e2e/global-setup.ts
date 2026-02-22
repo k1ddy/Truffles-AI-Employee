@@ -7,6 +7,10 @@ function buildSignInUrl(baseUrl: string, basePath: string) {
     return `${baseUrl}${basePath}/signin?callbackUrl=${encodeURIComponent(baseUrl)}`;
 }
 
+function buildProviderSignInUrl(baseUrl: string, basePath: string) {
+    return `${baseUrl}${basePath}/signin/keycloak?callbackUrl=${encodeURIComponent(baseUrl)}`;
+}
+
 async function resolveNextAuthBase(page: import("@playwright/test").Page, fallbackBaseURL: string) {
     const nextAuth = await page
         .waitForFunction(() => {
@@ -45,26 +49,39 @@ async function startKeycloakLogin(page: import("@playwright/test").Page, baseURL
     }
 
     const { baseUrl: authBaseUrl, basePath: authBasePath } = await resolveNextAuthBase(page, baseURL);
-    const signInUrl = buildSignInUrl(authBaseUrl, authBasePath);
-    const signInResponse = await page.goto(signInUrl, { waitUntil: "domcontentloaded" });
-    const providerForm = page.locator('form[action*="keycloak"]').first();
-    const providerButton = page.getByRole("button", { name: /sign in with keycloak/i });
+    const signInCandidates = [
+        buildSignInUrl(authBaseUrl, authBasePath),
+        buildProviderSignInUrl(authBaseUrl, authBasePath),
+    ];
+    let lastStatus: number | "unknown" = "unknown";
 
-    if (await providerButton.isVisible().catch(() => false)) {
-        await providerButton.click();
-        return "started";
+    for (const signInUrl of signInCandidates) {
+        const signInResponse = await page.goto(signInUrl, { waitUntil: "domcontentloaded" });
+        lastStatus = signInResponse?.status() ?? "unknown";
+
+        if (keycloakHostPattern.test(page.url())) {
+            return "started";
+        }
+
+        const providerForm = page.locator('form[action*="keycloak"]').first();
+        const providerButton = page.getByRole("button", { name: /sign in with keycloak/i });
+
+        if (await providerButton.isVisible().catch(() => false)) {
+            await providerButton.click();
+            return "started";
+        }
+
+        if (await providerForm.isVisible().catch(() => false)) {
+            await providerForm.waitFor({ state: "visible", timeout: 15000 });
+            const submitButton = providerForm
+                .locator('button[type="submit"], input[type="submit"]')
+                .first();
+            await submitButton.click();
+            return "started";
+        }
     }
 
-    if (await providerForm.isVisible().catch(() => false)) {
-        await providerForm.waitFor({ state: "visible", timeout: 15000 });
-        const submitButton = providerForm
-            .locator('button[type="submit"], input[type="submit"]')
-            .first();
-        await submitButton.click();
-        return "started";
-    }
-
-    throw new Error(`Keycloak sign-in not reachable (status ${signInResponse?.status() ?? "unknown"})`);
+    throw new Error(`Keycloak sign-in not reachable (status ${lastStatus})`);
 }
 
 export default async function globalSetup(config: FullConfig) {
