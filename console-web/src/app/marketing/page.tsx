@@ -25,6 +25,8 @@ const SEGMENT_OPTIONS: Array<{ value: MarketingSegmentCode; label: string }> = [
     { value: "engaged_no_booking_7d", label: "Интерес без записи (7 дней)" },
 ];
 
+type MarketingDisplayStatus = MarketingCampaign["status"] | MarketingCampaign["status_v2"];
+
 function formatDateTime(value?: string | null): string {
     if (!value) {
         return "-";
@@ -36,11 +38,11 @@ function formatDateTime(value?: string | null): string {
     return parsed.toLocaleString("ru-RU");
 }
 
-function campaignStatusLabel(status: MarketingCampaign["status"]): string {
-    const labels: Record<MarketingCampaign["status"], string> = {
+function campaignStatusLabel(status: MarketingDisplayStatus): string {
+    const labels: Record<MarketingDisplayStatus, string> = {
         draft: "Черновик",
-        ready: "Готова",
-        executed: "Отправлена",
+        ready: "Legacy: ready",
+        executed: "Legacy: executed",
         paused: "На паузе",
         in_review: "На ревью",
         approved: "Подтверждена",
@@ -53,7 +55,7 @@ function campaignStatusLabel(status: MarketingCampaign["status"]): string {
     return labels[status] ?? status;
 }
 
-function campaignStatusClass(status: MarketingCampaign["status"]): string {
+function campaignStatusClass(status: MarketingDisplayStatus): string {
     if (status === "completed" || status === "executed") {
         return "bg-emerald-100 text-emerald-700";
     }
@@ -72,6 +74,10 @@ function campaignStatusClass(status: MarketingCampaign["status"]): string {
     return "bg-muted text-muted-foreground";
 }
 
+function resolveCampaignStatus(campaign: MarketingCampaign): MarketingDisplayStatus {
+    return campaign.status_v2 || campaign.status;
+}
+
 function segmentLabel(segment: MarketingSegmentCode): string {
     return SEGMENT_OPTIONS.find((item) => item.value === segment)?.label ?? segment;
 }
@@ -88,6 +94,18 @@ function parseBoundedInt(value: string, fallback: number, min: number, max: numb
     return Math.min(max, Math.max(min, Math.trunc(parsed)));
 }
 
+const PREFLIGHT_REASON_HINTS: Record<string, string> = {
+    runtime_health_critical: "Runtime unhealthy: сначала стабилизируйте outbox/provider.",
+    campaign_not_approved: "Кампанию нужно перевести в approved перед execute.",
+    audience_snapshot_missing: "Сначала выполните Preview аудитории.",
+    eligible_recipients_empty: "Нет eligible контактов: проверьте сегмент и suppression.",
+    template_not_approved: "Template gate активен: template_state должен быть approved.",
+};
+
+function preflightReasonHint(reason: string): string {
+    return PREFLIGHT_REASON_HINTS[reason] ?? "Требуется ручная проверка причины блокировки.";
+}
+
 export default function MarketingPage() {
     const { data: session } = useSession();
     const [name, setName] = useState("");
@@ -100,6 +118,7 @@ export default function MarketingPage() {
     const [lifecycleReason, setLifecycleReason] = useState("");
     const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
     const [busyAction, setBusyAction] = useState<string | null>(null);
+    const [executeModalOpen, setExecuteModalOpen] = useState(false);
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -137,6 +156,8 @@ export default function MarketingPage() {
     const {
         data: campaignsData,
         isLoading: campaignsLoading,
+        isError: campaignsIsError,
+        error: campaignsError,
         refetch: refetchCampaigns,
     } = useQuery({
         queryKey: ["marketing-campaigns", selectedBranchId],
@@ -165,9 +186,15 @@ export default function MarketingPage() {
         [campaigns, selectedCampaignId],
     );
 
+    useEffect(() => {
+        setExecuteModalOpen(false);
+    }, [selectedCampaignId]);
+
     const {
         data: diagnosticsData,
         isLoading: diagnosticsLoading,
+        isError: diagnosticsIsError,
+        error: diagnosticsError,
         refetch: refetchDiagnostics,
     } = useQuery({
         queryKey: ["marketing-diagnostics", selectedCampaignId, sampleLimit],
@@ -183,6 +210,8 @@ export default function MarketingPage() {
     const {
         data: preflightData,
         isLoading: preflightLoading,
+        isError: preflightIsError,
+        error: preflightError,
         refetch: refetchPreflight,
     } = useQuery({
         queryKey: ["marketing-preflight", selectedCampaignId],
@@ -196,6 +225,8 @@ export default function MarketingPage() {
     const {
         data: audienceData,
         isLoading: audienceLoading,
+        isError: audienceIsError,
+        error: audienceError,
         refetch: refetchAudience,
     } = useQuery({
         queryKey: ["marketing-audience", selectedCampaignId, includeSuppressed, audienceLimit],
@@ -217,7 +248,7 @@ export default function MarketingPage() {
         return <AccessDenied message="Нужна роль owner/admin/platform_admin для управления кампаниями." />;
     }
 
-    const selectedStatus = selectedCampaign?.status;
+    const selectedStatus = selectedCampaign ? resolveCampaignStatus(selectedCampaign) : null;
     const canRequestApproval = selectedStatus ? ["draft", "ready"].includes(selectedStatus) : false;
     const canApprove = selectedStatus ? ["in_review", "ready"].includes(selectedStatus) : false;
     const canPause = selectedStatus ? ["approved", "scheduled", "running", "executed"].includes(selectedStatus) : false;
@@ -227,6 +258,14 @@ export default function MarketingPage() {
     const diagnostics: MarketingCampaignDiagnosticsResponse | null = diagnosticsData ?? null;
     const preflight: MarketingCampaignPreflightResponse | null = preflightData ?? null;
     const audienceRows: MarketingCampaignRecipient[] = audienceData?.items ?? [];
+    const campaignsErrorMessage = campaignsIsError ? parseApiError(campaignsError).message : null;
+    const diagnosticsErrorMessage = diagnosticsIsError ? parseApiError(diagnosticsError).message : null;
+    const preflightErrorMessage = preflightIsError ? parseApiError(preflightError).message : null;
+    const audienceErrorMessage = audienceIsError ? parseApiError(audienceError).message : null;
+    const failureClassRows = diagnostics
+        ? Object.entries(diagnostics.failure_classes ?? {}).sort((a, b) => b[1] - a[1])
+        : [];
+    const canConfirmExecute = Boolean(preflight?.preflight_valid);
 
     const withReasonPayload = () => {
         const normalized = lifecycleReason.trim();
@@ -373,10 +412,6 @@ export default function MarketingPage() {
         if (!selectedCampaign) {
             return;
         }
-        const confirmed = window.confirm("Запустить отправку этой кампании?");
-        if (!confirmed) {
-            return;
-        }
         setBusyAction("execute");
         try {
             const response = await adminApi.executeMarketingCampaign(selectedCampaign.id, {
@@ -384,6 +419,7 @@ export default function MarketingPage() {
                 max_recipients: maxRecipients,
             });
             await Promise.all([refetchCampaigns(), refetchDiagnostics(), refetchPreflight()]);
+            setExecuteModalOpen(false);
             toast.success(`Поставлено в очередь: ${response.data.queued_count}`);
         } catch (error) {
             const parsed = parseApiError(error);
@@ -488,10 +524,22 @@ export default function MarketingPage() {
                         <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">Список</h3>
                         {campaignsLoading ? (
                             <p className="mt-2 text-sm text-muted-foreground">Загрузка...</p>
+                        ) : campaignsIsError ? (
+                            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                <p>Ошибка загрузки кампаний: {campaignsErrorMessage}</p>
+                                <button
+                                    type="button"
+                                    className="mt-2 h-9 rounded-lg border border-red-300 px-3 text-xs font-medium"
+                                    onClick={() => refetchCampaigns()}
+                                >
+                                    Повторить
+                                </button>
+                            </div>
                         ) : campaigns.length ? (
                             <ul className="mt-3 space-y-2">
                                 {campaigns.map((campaign) => {
                                     const active = campaign.id === selectedCampaignId;
+                                    const statusValue = resolveCampaignStatus(campaign);
                                     return (
                                         <li key={campaign.id}>
                                             <button
@@ -503,8 +551,8 @@ export default function MarketingPage() {
                                             >
                                                 <div className="flex items-center justify-between gap-2">
                                                     <span className="truncate text-sm font-medium">{campaign.name}</span>
-                                                    <span className={`rounded-full px-2 py-0.5 text-xs ${campaignStatusClass(campaign.status)}`}>
-                                                        {campaignStatusLabel(campaign.status)}
+                                                    <span className={`rounded-full px-2 py-0.5 text-xs ${campaignStatusClass(statusValue)}`}>
+                                                        {campaignStatusLabel(statusValue)}
                                                     </span>
                                                 </div>
                                                 <p className="mt-1 text-xs text-muted-foreground">{segmentLabel(campaign.segment_code)}</p>
@@ -530,8 +578,8 @@ export default function MarketingPage() {
                                     <h2 className="text-lg font-semibold">{selectedCampaign.name}</h2>
                                     <p className="mt-1 text-sm text-muted-foreground">{selectedCampaign.message_text}</p>
                                 </div>
-                                <span className={`rounded-full px-3 py-1 text-xs ${campaignStatusClass(selectedCampaign.status)}`}>
-                                    {campaignStatusLabel(selectedCampaign.status)}
+                                <span className={`rounded-full px-3 py-1 text-xs ${campaignStatusClass(selectedStatus ?? "draft")}`}>
+                                    {campaignStatusLabel(selectedStatus ?? "draft")}
                                 </span>
                             </div>
 
@@ -642,10 +690,10 @@ export default function MarketingPage() {
                                     <button
                                         type="button"
                                         className="h-10 rounded-lg bg-foreground px-4 text-sm font-medium text-background disabled:cursor-not-allowed disabled:opacity-60"
-                                        onClick={executeCampaign}
-                                        disabled={busyAction === "execute" || !canExecute || !preflight?.preflight_valid}
+                                        onClick={() => setExecuteModalOpen(true)}
+                                        disabled={busyAction === "execute" || !canExecute}
                                     >
-                                        {busyAction === "execute" ? "Execute..." : "Confirm & Execute"}
+                                        {busyAction === "execute" ? "Execute..." : "Execute modal"}
                                     </button>
                                     <button
                                         type="button"
@@ -662,6 +710,17 @@ export default function MarketingPage() {
                                 <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">Preflight</h3>
                                 {preflightLoading ? (
                                     <p className="mt-2 text-sm text-muted-foreground">Загрузка...</p>
+                                ) : preflightIsError ? (
+                                    <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                        <p>Ошибка preflight: {preflightErrorMessage}</p>
+                                        <button
+                                            type="button"
+                                            className="mt-2 h-9 rounded-lg border border-red-300 px-3 text-xs font-medium"
+                                            onClick={() => refetchPreflight()}
+                                        >
+                                            Повторить
+                                        </button>
+                                    </div>
                                 ) : preflight ? (
                                     <>
                                         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -689,15 +748,24 @@ export default function MarketingPage() {
                                             </div>
                                         </div>
                                         <div className="mt-3 rounded-lg border bg-background p-3">
+                                            <div className="text-xs text-muted-foreground">Template gate</div>
+                                            <div className="mt-1 text-sm font-medium">
+                                                {preflight.template_gate_enabled
+                                                    ? (preflight.template_ok ? "OK" : `blocked (${preflight.template_state ?? "unknown"})`)
+                                                    : "disabled"}
+                                            </div>
+                                        </div>
+                                        <div className="mt-3 rounded-lg border bg-background p-3">
                                             <div className="text-xs text-muted-foreground">Blocked reasons</div>
                                             {preflight.blocked_reasons.length ? (
-                                                <div className="mt-2 flex flex-wrap gap-2">
+                                                <ul className="mt-2 space-y-2">
                                                     {preflight.blocked_reasons.map((item) => (
-                                                        <span key={item} className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">
-                                                            {formatReason(item)}
-                                                        </span>
+                                                        <li key={item} className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                                                            <div className="font-medium">{formatReason(item)}</div>
+                                                            <div className="mt-1 text-red-600">{preflightReasonHint(item)}</div>
+                                                        </li>
                                                     ))}
-                                                </div>
+                                                </ul>
                                             ) : (
                                                 <p className="mt-2 text-xs text-emerald-700">Блокировок нет.</p>
                                             )}
@@ -744,6 +812,17 @@ export default function MarketingPage() {
 
                                 {audienceLoading ? (
                                     <p className="mt-2 text-sm text-muted-foreground">Загрузка...</p>
+                                ) : audienceIsError ? (
+                                    <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                        <p>Ошибка audience: {audienceErrorMessage}</p>
+                                        <button
+                                            type="button"
+                                            className="mt-2 h-9 rounded-lg border border-red-300 px-3 text-xs font-medium"
+                                            onClick={() => refetchAudience()}
+                                        >
+                                            Повторить
+                                        </button>
+                                    </div>
                                 ) : audienceRows.length ? (
                                     <div className="mt-3 overflow-x-auto rounded-lg border bg-background">
                                         <table className="min-w-full text-xs">
@@ -806,6 +885,17 @@ export default function MarketingPage() {
                                 <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">Diagnostics</h3>
                                 {diagnosticsLoading ? (
                                     <p className="mt-2 text-sm text-muted-foreground">Загрузка...</p>
+                                ) : diagnosticsIsError ? (
+                                    <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                        <p>Ошибка diagnostics: {diagnosticsErrorMessage}</p>
+                                        <button
+                                            type="button"
+                                            className="mt-2 h-9 rounded-lg border border-red-300 px-3 text-xs font-medium"
+                                            onClick={() => refetchDiagnostics()}
+                                        >
+                                            Повторить
+                                        </button>
+                                    </div>
                                 ) : diagnostics ? (
                                     <>
                                         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -829,6 +919,31 @@ export default function MarketingPage() {
                                                 <div className="text-xs text-muted-foreground">Replied</div>
                                                 <div className="mt-1 text-lg font-semibold">{diagnostics.replied_count}</div>
                                             </div>
+                                        </div>
+                                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                            <div className="rounded-lg border bg-background p-3">
+                                                <div className="text-xs text-muted-foreground">Retryable failed</div>
+                                                <div className="mt-1 text-lg font-semibold">{diagnostics.retryable_failed_count}</div>
+                                            </div>
+                                            <div className="rounded-lg border bg-background p-3">
+                                                <div className="text-xs text-muted-foreground">Permanent failed</div>
+                                                <div className="mt-1 text-lg font-semibold text-red-700">{diagnostics.permanent_failed_count}</div>
+                                            </div>
+                                        </div>
+                                        <div className="mt-3 rounded-lg border bg-background p-3">
+                                            <div className="text-sm font-medium">Failure classes</div>
+                                            {failureClassRows.length ? (
+                                                <ul className="mt-2 space-y-1 text-xs">
+                                                    {failureClassRows.map(([reason, count]) => (
+                                                        <li key={reason} className="flex items-center justify-between">
+                                                            <span className="text-muted-foreground">{formatReason(reason)}</span>
+                                                            <span className="font-semibold">{count}</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            ) : (
+                                                <p className="mt-2 text-xs text-muted-foreground">Нет failure classes.</p>
+                                            )}
                                         </div>
 
                                         <div className="mt-4 rounded-lg border bg-background p-3">
@@ -859,6 +974,76 @@ export default function MarketingPage() {
                     )}
                 </section>
             </div>
+
+            {executeModalOpen && selectedCampaign ? (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+                    <div className="w-full max-w-2xl rounded-xl border bg-card p-5 shadow-xl">
+                        <div className="flex items-center justify-between gap-2">
+                            <h3 className="text-lg font-semibold">Execute Campaign</h3>
+                            <button
+                                type="button"
+                                className="h-8 rounded border border-border px-2 text-xs"
+                                onClick={() => setExecuteModalOpen(false)}
+                            >
+                                Закрыть
+                            </button>
+                        </div>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                            {selectedCampaign.name}
+                        </p>
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                            <div className="rounded-lg border bg-background p-3">
+                                <div className="text-xs text-muted-foreground">Eligible</div>
+                                <div className="mt-1 text-lg font-semibold">{preflight?.eligible_count ?? 0}</div>
+                            </div>
+                            <div className="rounded-lg border bg-background p-3">
+                                <div className="text-xs text-muted-foreground">Suppressed</div>
+                                <div className="mt-1 text-lg font-semibold">{preflight?.suppressed_count ?? 0}</div>
+                            </div>
+                            <div className="rounded-lg border bg-background p-3">
+                                <div className="text-xs text-muted-foreground">Max recipients</div>
+                                <div className="mt-1 text-lg font-semibold">{maxRecipients}</div>
+                            </div>
+                            <div className="rounded-lg border bg-background p-3">
+                                <div className="text-xs text-muted-foreground">Outbox risk</div>
+                                <div className="mt-1 text-sm font-semibold">{preflight?.outbox_health_status ?? "unknown"}</div>
+                            </div>
+                        </div>
+                        <div className="mt-3 rounded-lg border bg-background p-3">
+                            <div className="text-xs text-muted-foreground">Blocked reasons</div>
+                            {preflight?.blocked_reasons?.length ? (
+                                <ul className="mt-2 space-y-2 text-xs">
+                                    {preflight.blocked_reasons.map((item) => (
+                                        <li key={item} className="rounded border border-red-200 bg-red-50 p-2 text-red-700">
+                                            <div className="font-medium">{formatReason(item)}</div>
+                                            <div className="mt-1 text-red-600">{preflightReasonHint(item)}</div>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <p className="mt-2 text-xs text-emerald-700">Блокировок нет.</p>
+                            )}
+                        </div>
+                        <div className="mt-4 flex justify-end gap-2">
+                            <button
+                                type="button"
+                                className="h-10 rounded-lg border border-border px-4 text-sm"
+                                onClick={() => setExecuteModalOpen(false)}
+                            >
+                                Отмена
+                            </button>
+                            <button
+                                type="button"
+                                className="h-10 rounded-lg bg-foreground px-4 text-sm font-medium text-background disabled:cursor-not-allowed disabled:opacity-60"
+                                onClick={executeCampaign}
+                                disabled={busyAction === "execute" || !canConfirmExecute}
+                            >
+                                {busyAction === "execute" ? "Execute..." : "Confirm Execute"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 }

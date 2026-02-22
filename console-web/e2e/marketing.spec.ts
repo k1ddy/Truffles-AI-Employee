@@ -7,6 +7,7 @@ const stayOnBaseOrigin = /localhost|127\.0\.0\.1/.test(baseURL);
 let resolvedBaseURL = baseURL;
 const loginUser = process.env.E2E_USERNAME ?? 'admin';
 const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
+const runMutations = process.env.E2E_ALLOW_MUTATIONS === '1';
 
 function buildSignInUrl(origin: string, callbackOrigin = origin) {
     return `${origin}/api/auth/signin?callbackUrl=${encodeURIComponent(callbackOrigin)}`;
@@ -162,5 +163,51 @@ test.describe('Marketing Page', () => {
         await expect(page.getByText('Preflight')).toBeVisible();
         await expect(page.getByText('Audience')).toBeVisible();
         await expect(page.getByText('Diagnostics')).toBeVisible();
+    });
+});
+
+test.describe('Marketing lifecycle @mutating', () => {
+    test.skip(!runMutations, 'Mutating tests are disabled');
+
+    test.beforeEach(async ({ page }) => {
+        await ensureLoggedIn(page);
+        await gotoConsoleRoot(page);
+    });
+
+    test('should create campaign and open execute modal @mutating', async ({ page }) => {
+        const marketingNav = page.getByTestId('nav-marketing');
+        if (!(await marketingNav.isVisible().catch(() => false))) {
+            return;
+        }
+
+        await marketingNav.click();
+        await expect(page).toHaveURL(urlPathPattern('/marketing'));
+
+        const campaignName = `E2E MK ${Date.now()}`;
+        await page.getByPlaceholder('Название').fill(campaignName);
+        await page
+            .getByPlaceholder('Текст WhatsApp сообщения')
+            .fill('Напоминаем о визите. Ответьте, если хотите подобрать удобное время.');
+        await page.getByRole('button', { name: 'Создать кампанию' }).click();
+
+        const campaignButton = page.getByRole('button', { name: new RegExp(campaignName) }).first();
+        await expect(campaignButton).toBeVisible({ timeout: 15000 });
+        await campaignButton.click();
+
+        await page.getByRole('button', { name: 'Preview аудитории' }).click();
+        await page.getByRole('button', { name: 'На ревью' }).click();
+
+        const approveButton = page.getByRole('button', { name: 'Approve' });
+        await expect(approveButton).toBeEnabled({ timeout: 10000 });
+        await approveButton.click();
+
+        await page.getByRole('button', { name: 'Refresh preflight' }).click();
+        const executeModalButton = page.getByRole('button', { name: 'Execute modal' });
+        await expect(executeModalButton).toBeVisible();
+        await executeModalButton.click();
+
+        await expect(page.getByRole('heading', { name: 'Execute Campaign' })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Confirm Execute' })).toBeVisible();
+        await page.getByRole('button', { name: 'Закрыть' }).click();
     });
 });
