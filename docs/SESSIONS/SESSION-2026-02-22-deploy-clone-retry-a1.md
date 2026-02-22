@@ -1,0 +1,25 @@
+# SESSION 2026-02-22-deploy-clone-retry-a1 — Session 2026-02-22-deploy-clone-retry-a1
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-22-deploy-clone-retry-a1.md
+- branch: feat/2026-02-22-deploy-clone-retry-a1
+- worktree: /home/zhan/worktrees/2026-02-22-deploy-clone-retry-a1
+- base_ref: origin/main
+- scope: CI deploy hardening for transient VPS->GitHub clone failures (retry + HTTP/1.1 fallback) without changing deploy parity/safety gates.
+- done:
+  - Captured root-cause from red run `22274706720`: `deploy` failed in step `Deploy to VPS` on `git clone` with `RPC failed; curl 92 HTTP/2 stream ...`, `fatal: early EOF`.
+  - Added deploy clone hardening in `.github/workflows/ci.yml`: up to 3 clone attempts, fallback `git -c http.version=HTTP/1.1 clone`, explicit failure after retries exhausted.
+  - Kept existing deploy gate/parity checks unchanged (`EXPECTED_GIT_COMMIT`, API/console commit parity).
+  - Validated workflow YAML parse locally.
+- next:
+  - Push branch and open PR.
+  - Watch CI and confirm `deploy` stability on next main run.
+- evidence:
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22274706720
+  - failed job: deploy (64435297904), failed step: Deploy to VPS
+  - failed lines: `RPC failed; curl 92 HTTP/2 stream 5 was not closed cleanly: CANCEL`, `fatal: early EOF`, `fatal: fetch-pack: invalid index-pack output`
+  - python3 YAML check output: `YAML_PARSE_OK`
+  - git diff: `.github/workflows/ci.yml` (deploy clone retry/fallback block)
+  - docs/TASK_PACKAGES/TP-2026-02-22-deploy-clone-retry-a1.md
+- last_updated: 2026-02-22

@@ -916,14 +916,38 @@ jobs:
               echo "ERROR: cannot resolve remote.origin.url in ${REPO_ROOT}" >&2
               exit 1
             fi
-            DEPLOY_SOURCE_ROOT="$(mktemp -d /tmp/truffles-main-deploy-XXXXXX)"
+            DEPLOY_SOURCE_PARENT="$(mktemp -d /tmp/truffles-main-deploy-XXXXXX)"
+            DEPLOY_SOURCE_ROOT="${DEPLOY_SOURCE_PARENT}/repo"
             cleanup_deploy_source() {
-              if [ -n "${DEPLOY_SOURCE_ROOT:-}" ] && [ -d "${DEPLOY_SOURCE_ROOT}" ]; then
-                rm -rf "${DEPLOY_SOURCE_ROOT}"
+              if [ -n "${DEPLOY_SOURCE_PARENT:-}" ] && [ -d "${DEPLOY_SOURCE_PARENT}" ]; then
+                rm -rf "${DEPLOY_SOURCE_PARENT}"
               fi
             }
             trap cleanup_deploy_source EXIT
-            git clone --quiet --branch main --single-branch "${DEPLOY_ORIGIN_URL}" "${DEPLOY_SOURCE_ROOT}"
+            clone_attempt=1
+            clone_max_attempts=3
+            clone_ok=0
+            while [ "${clone_attempt}" -le "${clone_max_attempts}" ]; do
+              rm -rf "${DEPLOY_SOURCE_ROOT}"
+              if git clone --quiet --branch main --single-branch "${DEPLOY_ORIGIN_URL}" "${DEPLOY_SOURCE_ROOT}"; then
+                clone_ok=1
+                break
+              fi
+              echo "WARN: deploy clone attempt ${clone_attempt}/${clone_max_attempts} failed via default transport" >&2
+              rm -rf "${DEPLOY_SOURCE_ROOT}"
+              if git -c http.version=HTTP/1.1 clone --quiet --branch main --single-branch "${DEPLOY_ORIGIN_URL}" "${DEPLOY_SOURCE_ROOT}"; then
+                clone_ok=1
+                echo "INFO: deploy clone recovered via HTTP/1.1 on attempt ${clone_attempt}" >&2
+                break
+              fi
+              echo "WARN: deploy clone attempt ${clone_attempt}/${clone_max_attempts} failed via HTTP/1.1 fallback" >&2
+              clone_attempt=$((clone_attempt + 1))
+              sleep 2
+            done
+            if [ "${clone_ok}" -ne 1 ]; then
+              echo "ERROR: failed to clone deploy source from origin/main after ${clone_max_attempts} attempts" >&2
+              exit 1
+            fi
             git -C "${DEPLOY_SOURCE_ROOT}" checkout -f main
             git -C "${DEPLOY_SOURCE_ROOT}" reset --hard origin/main
             git -C "${DEPLOY_SOURCE_ROOT}" clean -fd

@@ -329,3 +329,4 @@
 | 2026-01-27-console-ux-selection | done | feat/console-ux-selection | /home/zhan/worktrees/console-ux-selection | docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md | 2026-01-28 |
 | 2026-01-27-admin-login-verify-a2 | done | feat/2026-01-27-admin-login-verify-a2 | /home/zhan/worktrees/2026-01-27-admin-login-verify-a2 | docs/TASK_PACKAGES/TP-2026-01-27-admin-login-verify.md | 2026-01-27 |
 | 2026-02-22-marketing-ux-fixes-a1 | done | feat/2026-02-22-marketing-ux-fixes-a1 | /home/zhan/worktrees/2026-02-22-marketing-ux-fixes-a1 | docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md | 2026-02-22 |
+| 2026-02-22-deploy-clone-retry-a1 | active | feat/2026-02-22-deploy-clone-retry-a1 | /home/zhan/worktrees/2026-02-22-deploy-clone-retry-a1 | docs/TASK_PACKAGES/TP-2026-02-22-deploy-clone-retry-a1.md | 2026-02-22 |
