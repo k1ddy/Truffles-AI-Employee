@@ -120,13 +120,17 @@ DECISION_STAGE_ORDER_SNAPSHOT = [
 ]
 
 
+def _is_human_lock_trace(payload: dict[str, Any]) -> bool:
+    return payload.get("stage") == "routing" and (
+        payload.get("decision") == "human_lock_silent" or payload.get("reason") == "human_lock"
+    )
+
+
 def _is_critical_trace(payload: dict[str, Any]) -> bool:
     stage = payload.get("stage")
     if stage in DECISION_TRACE_CRITICAL_STAGES:
         return True
-    if stage == "routing" and (
-        payload.get("decision") == "human_lock_silent" or payload.get("reason") == "human_lock"
-    ):
+    if _is_human_lock_trace(payload):
         return True
     if stage == "question_contract" and payload.get("decision") in {"matched", "missed"}:
         return True
@@ -148,6 +152,10 @@ def _retain_decision_trace(trace_list: list[dict[str, Any]]) -> list[dict[str, A
                 if trace_list[idx].get("stage") == stage:
                     pinned_indices.append(idx)
                     break
+    for idx in range(len(trace_list) - 1, -1, -1):
+        if _is_human_lock_trace(trace_list[idx]):
+            pinned_indices.append(idx)
+            break
     pinned_set = set(pinned_indices)
     if len(pinned_indices) >= DECISION_TRACE_MAX:
         logger.warning(

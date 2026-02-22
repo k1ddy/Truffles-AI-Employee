@@ -1011,7 +1011,7 @@ ConsoleOutreachDeliveryStatus = Literal["queued", "delivered", "failed"]
 class ConsoleOutreachMessageRequest(ConsoleRequestModel):
     destination: StrictStr
     content: StrictStr
-    conversation_id: UUID
+    conversation_id: Optional[UUID] = None
     branch_id: Optional[UUID] = None
     pause_bot_minutes: Optional[int] = 30
     pause_reason: Optional[StrictStr] = None

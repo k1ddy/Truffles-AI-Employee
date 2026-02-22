@@ -166,6 +166,7 @@
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-02-22-outreach-auto-case-a200.md`
 - `docs/TASK_PACKAGES/TP-2026-02-16-owner-admin-wave10-subscription-truth-a88.md`
 - `docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave7-fact-os-a1.md`
 - `docs/TASK_PACKAGES/TP-2026-02-05-llm-quality-runner.md`
