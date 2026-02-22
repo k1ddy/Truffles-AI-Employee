@@ -4,9 +4,9 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
-| 2026-02-21-marketing-p1p3-a1 | active | feat/2026-02-21-marketing-p1p3-a1 | /home/zhan/worktrees/2026-02-21-marketing-p1p3-a1 | docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md | 2026-02-21 |
-| 2026-02-21-tenants-v3-ux-contract-a250 | active | feat/2026-02-21-tenants-v3-ux-contract-a250 | /home/zhan/worktrees/2026-02-21-tenants-v3-ux-contract-a250 | docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md | 2026-02-22T03:20:07Z |
+| 2026-02-21-tenants-v3-ux-contract-a250 | active | feat/2026-02-21-tenants-v3-ux-contract-a250 | /home/zhan/worktrees/2026-02-21-tenants-v3-ux-contract-a250 | docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md | 2026-02-22T08:54:23Z |
 | 2026-02-21-marketing-pro-v1-a300 | done | feat/2026-02-21-marketing-pro-v1-a300 | /home/zhan/worktrees/2026-02-21-marketing-pro-v1-a300 | docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md | 2026-02-21 |
+| 2026-02-21-marketing-p1p3-a1 | active | feat/2026-02-21-marketing-p1p3-a1 | /home/zhan/worktrees/2026-02-21-marketing-p1p3-a1 | docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md | 2026-02-21 |
 | 2026-02-21-inbox-pause-bot-a1 | active | feat/2026-02-21-inbox-human-lock-v2-a1 | /home/zhan/worktrees/2026-02-21-inbox-pause-bot-a1 | docs/TASK_PACKAGES/TP-2026-02-21-inbox-human-lock-v2-a1.md | 2026-02-21 |
 | 2026-02-21-deploy-console-type-compat-a1 | active | fix/2026-02-21-company-schema-type-a1 | /home/zhan/worktrees/fix-2026-02-21-company-schema-type-a1 | docs/TASK_PACKAGES/TP-2026-02-21-deploy-console-type-compat-a1.md | 2026-02-22 |
 | 2026-02-20-wave5-owner-admin-acceptance-lane-a500 | done | feat/2026-02-20-wave5-owner-admin-acceptance-lane-a500 | /home/zhan/worktrees/2026-02-20-wave5-owner-admin-acceptance-lane-a500 | docs/TASK_PACKAGES/TP-2026-02-18-wave5-owner-admin-acceptance-lane-a88.md | 2026-02-20 |

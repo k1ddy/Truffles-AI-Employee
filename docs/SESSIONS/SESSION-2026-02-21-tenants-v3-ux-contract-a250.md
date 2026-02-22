@@ -35,15 +35,29 @@
   - Ужесточён e2e контур Tenants для platform_admin: добавлен `Scenario E` (контрактные вызовы `portfolio/cockpit`) и убраны хрупкие текстовые ожидания перед runtime-skip в `Scenario B/C/D` + audit-сценарии.
   - Добавлен quality-мета контракт weekly snapshots: list response теперь отдаёт `storage_mode` (`table|audit_fallback`) и `schema_versions`; record response содержит `snapshot_schema_version`.
   - Обновлены unit-тесты weekly snapshots и helper-агрегация версий (`56 passed`).
+  - Wave3 закрыт по evidence: добавлен explicit backfill verification report с SQL-срезом runtime DB и quality thresholds (`missing/invalid/non_object = 0` в текущем срезе).
+  - Wave4 продолжен: блок quick-create вынесен из монолита `tenants/page.tsx` в отдельный компонент `TenantsQuickCreatePanel`.
+  - Wave5 усилен: top-controls + KPI/snapshots/decommission/client-audit copy очищены от части RU/EN+tech mix; quick-create поля филиала получили явные label/id/testid (a11y hardening).
+  - Закрыт регресс по видимости ошибок quick-create: `reportProvisioningError` теперь пишет scope по активной workspace-зоне (вместо жёсткого `onboarding`), чтобы `tenants-error-summary` показывался в текущем рабочем режиме.
+  - Выполнена синхронизация ветки после merge в origin (`git merge origin/feat/2026-02-21-tenants-v3-ux-contract-a250`) и re-apply локального WIP без конфликтов.
+  - Wave4 продолжен: секция `Операционные KPI` выделена из `tenants/page.tsx` в новый компонент `TenantsOperationalKpiPanel`.
+  - Wave5 усилен: `tenants-page-filters`/`tenants-context-lens` получили повышенный контраст helper/label текста; `tenants-a11y.spec.ts` ожидание открытия Tenants переведено на fail-closed ожидание финального состояния.
+  - Прогнаны проверки: `corepack pnpm -C console-web lint`, `corepack pnpm -C console-web build` (green).
+  - Запущен live fail-closed a11y gate (`A11Y_FAIL_ON_THRESHOLDS=1` на `https://console.truffles.kz`): `serious=1` для desktop/mobile (`color-contrast`), что зафиксировано как runtime GAP до деплоя ветки.
 - next:
-  - Завершить Wave3: оформить explicit миграционный отчёт/backfill verification в docs (`before/after` SQL evidence + quality thresholds) и зафиксировать в `STATE.md`.
-  - Продолжить Wave4 декомпозицию `tenants/page.tsx` (вынос секций portfolio/changes/onboarding в отдельные компоненты).
+  - Продолжить Wave4 декомпозицию `tenants/page.tsx` (следующий вынос: fleet attention + portfolio companies секции).
+  - После deploy ветки повторить fail-closed a11y lane на live и закрыть Wave5 gate (`critical=0`, `serious=0`) фактом.
   - Продолжить ужесточение e2e: убрать remaining soft-pass/early-return ветки в smoke-наборе `platform-admin.spec.ts` через seeded lane или deterministic fixtures.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
+  - console-web/src/components/TenantsQuickCreatePanel.tsx
   - console-web/src/app/tenants/use-tenants-page-filters.ts
   - console-web/src/components/TenantsTopControls.tsx
+  - console-web/src/components/TenantsOperationalKpiPanel.tsx
+  - docs/REPORTS/2026-02-20-tenants-v3-redesign-plan.md
+  - /tmp/tenants_weekly_snapshots_backfill_verify_20260222.txt
+  - console-web/e2e/tenants-a11y.spec.ts
   - console-web/e2e/auth.setup.ts
   - console-web/e2e/platform-admin.spec.ts
   - truffles-api/app/schemas/console.py
@@ -55,4 +69,4 @@
   - truffles-api/app/models/tenants_weekly_snapshot.py
   - truffles-api/migrations/037_add_tenants_weekly_snapshots.sql
   - console-web/src/lib/api-client.ts
-- last_updated: 2026-02-22T03:20:07Z
+- last_updated: 2026-02-22T08:54:23Z
