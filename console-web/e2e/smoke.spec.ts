@@ -890,6 +890,63 @@ test.describe('Inbox Features', () => {
             .or(page.getByTestId('case-view'));
         await expect(caseVisible.first()).toBeVisible({ timeout: 10000 });
     });
+
+    test('should send standalone outreach payload without conversation_id @smoke', async ({ page }) => {
+        const standalonePanel = page.getByTestId('inbox-standalone-outreach');
+        if (!(await standalonePanel.isVisible().catch(() => false))) {
+            test.skip(true, 'Outreach write controls are unavailable for this role/context');
+        }
+
+        let capturedPayload: Record<string, unknown> | null = null;
+        await page.route('**/api/proxy/outreach/messages', async (route) => {
+            try {
+                capturedPayload = JSON.parse(route.request().postData() || '{}') as Record<string, unknown>;
+            } catch {
+                capturedPayload = {};
+            }
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    success: true,
+                    delivery_status: 'queued',
+                    remote_jid: '77771234567@s.whatsapp.net',
+                    outbox_enqueued: true,
+                    lock_until: null,
+                    message: null,
+                    error_code: null,
+                }),
+            });
+        });
+
+        await page.getByTestId('inbox-standalone-outreach-toggle').click();
+
+        const standaloneBranch = page.getByTestId('inbox-standalone-outreach-branch');
+        if (await standaloneBranch.isVisible().catch(() => false)) {
+            const selected = await selectOptionIfNeeded(standaloneBranch);
+            if (!selected) {
+                test.skip(true, 'Standalone outreach branch selection is unavailable');
+            }
+        }
+
+        await page.getByTestId('inbox-standalone-outreach-destination').fill('+7 777 123 45 67');
+        await page.getByTestId('inbox-standalone-outreach-message').fill('E2E standalone outreach');
+
+        const sendResponsePromise = page.waitForResponse(
+            (response) => matchesPath(response.url(), ['/console/v1/outreach/messages', '/api/proxy/outreach/messages']),
+            { timeout: 10000 },
+        );
+        await page.getByTestId('inbox-standalone-outreach-send').click();
+        const sendResponse = await sendResponsePromise;
+        expect(sendResponse.ok()).toBeTruthy();
+
+        await expect
+            .poll(() => capturedPayload, { timeout: 5000 })
+            .not.toBeNull();
+        expect(capturedPayload?.conversation_id ?? undefined).toBeNull();
+        expect(capturedPayload?.destination).toBe('+7 777 123 45 67');
+        expect(capturedPayload?.content).toBe('E2E standalone outreach');
+    });
 });
 
 // =========================================

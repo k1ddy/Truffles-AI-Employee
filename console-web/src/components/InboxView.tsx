@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import CaseList from "@/components/CaseList";
 import CaseConversation from "@/components/CaseConversation";
@@ -10,12 +10,13 @@ import CaseDetailsPanel from "@/components/CaseDetailsPanel";
 import { InboxMacroChips } from "@/components/InboxMacros";
 import AccessDenied from "@/components/AccessDenied";
 import { useCaseData } from "@/hooks/useCaseData";
-import { authApi, canAccessConsole } from "@/lib/api-client";
+import { authApi, canAccessConsole, outreachApi } from "@/lib/api-client";
 import {
     buildInboxWorkspaceScope,
     readInboxSelectedCase,
     writeInboxSelectedCase,
 } from "@/lib/inbox-workspace";
+import toast from "react-hot-toast";
 
 interface InboxViewProps {
     initialCaseId?: string | null;
@@ -25,12 +26,19 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const router = useRouter();
     const pathname = usePathname();
     const { data: session } = useSession();
+    const queryClient = useQueryClient();
     const [selectedCaseId, setSelectedCaseId] = useState(initialCaseId ?? "");
     const [draft, setDraft] = useState("");
     const [detailsOpen, setDetailsOpen] = useState(false);
     const [visibleCaseIds, setVisibleCaseIds] = useState<string[]>([]);
     const [selectionHydrated, setSelectionHydrated] = useState(Boolean(initialCaseId));
     const restoredScopeRef = useRef<string | null>(null);
+    const [standaloneOutreachOpen, setStandaloneOutreachOpen] = useState(false);
+    const [standaloneOutreachDestination, setStandaloneOutreachDestination] = useState("");
+    const [standaloneOutreachContent, setStandaloneOutreachContent] = useState("");
+    const [standaloneOutreachBranchId, setStandaloneOutreachBranchId] = useState("");
+    const [standalonePauseEnabled, setStandalonePauseEnabled] = useState(true);
+    const [standalonePauseMinutes, setStandalonePauseMinutes] = useState(30);
 
     const { data: meData } = useQuery({
         queryKey: ["console-me"],
@@ -46,10 +54,14 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
     const canWriteInbox = canAccessConsole(role, "inbox", "write");
     const canReadOutreach = canAccessConsole(role, "outreach", "read");
     const canWriteOutreach = canAccessConsole(role, "outreach", "write");
-    const branches = (meData?.branches ?? []) as { id?: string; name?: string }[];
+    const branches = useMemo(
+        () => (meData?.branches ?? []) as { id?: string; name?: string }[],
+        [meData?.branches],
+    );
     const selectedBranchId = meData?.selected_branch_id ?? "";
     const isPrivileged = role === "owner" || role === "admin" || role === "platform_admin";
     const showBranchFilter = isPrivileged && branches.length > 1 && !selectedBranchId;
+    const showStandaloneBranchSelect = !selectedBranchId && branches.length > 1;
     const workspaceScope = useMemo(
         () =>
             buildInboxWorkspaceScope({
@@ -101,6 +113,15 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
         setDraft("");
         setDetailsOpen(false);
     }, [selectedCaseId]);
+
+    useEffect(() => {
+        if (selectedBranchId) {
+            setStandaloneOutreachBranchId(selectedBranchId);
+            return;
+        }
+        const defaultBranch = branches.find((branch) => branch.id)?.id ?? "";
+        setStandaloneOutreachBranchId((prev) => prev || defaultBranch);
+    }, [branches, selectedBranchId]);
 
     useEffect(() => {
         if (!workspaceScope) {
@@ -192,6 +213,46 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
         setDetailsOpen((prev) => !prev);
     };
 
+    const standaloneOutreachMutation = useMutation({
+        mutationFn: async () => {
+            const response = await outreachApi.sendMessage({
+                destination: standaloneOutreachDestination.trim(),
+                content: standaloneOutreachContent.trim(),
+                conversation_id: null,
+                branch_id: selectedBranchId || standaloneOutreachBranchId || null,
+                pause_bot_minutes: standalonePauseEnabled ? standalonePauseMinutes : 0,
+                pause_reason: standalonePauseEnabled ? "manual_pause" : null,
+            });
+            return response.data;
+        },
+        onSuccess: (response) => {
+            if (!response.success) {
+                const suffix = response.error_code ? ` (${response.error_code})` : "";
+                toast.error(`Не удалось отправить сообщение${suffix}`);
+                return;
+            }
+            if (response.delivery_status === "queued") {
+                toast.success("Сообщение поставлено в очередь");
+            } else {
+                toast.success("Сообщение отправлено");
+            }
+            setStandaloneOutreachContent("");
+            queryClient.invalidateQueries({ queryKey: ["cases"] });
+        },
+        onError: (error: unknown) => {
+            const code = (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
+            if (code === "INTEGRATION_UNAVAILABLE") {
+                toast.error("Интеграция WhatsApp не настроена для выбранного филиала");
+                return;
+            }
+            if (code === "BRANCH_SELECTION_REQUIRED") {
+                toast.error("Выберите филиал для отправки");
+                return;
+            }
+            toast.error("Не удалось отправить сообщение");
+        },
+    });
+
     const renderEmptyPane = (title: string, subtitle: string) => (
         <div className="card-surface p-6 text-center text-sm text-muted-foreground">
             <p className="font-semibold text-foreground mb-2">{title}</p>
@@ -241,6 +302,126 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                     Очередь слева, чат по центру, детали по кнопке. Фильтры и последняя заявка сохраняются на 24 часа.
                 </p>
             </div>
+
+            {canWriteOutreach && (
+                <section className="card-surface p-4" data-testid="inbox-standalone-outreach">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <p className="text-sm font-semibold">Сообщение без заявки</p>
+                            <p className="text-xs text-muted-foreground">
+                                Используйте, когда нужно написать клиенту до появления чата в очереди.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setStandaloneOutreachOpen((prev) => !prev)}
+                            className="rounded border border-border/60 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                            data-testid="inbox-standalone-outreach-toggle"
+                        >
+                            {standaloneOutreachOpen ? "Свернуть" : "Открыть"}
+                        </button>
+                    </div>
+
+                    {standaloneOutreachOpen && (
+                        <div className="mt-3 grid gap-3">
+                            {showStandaloneBranchSelect && (
+                                <label className="space-y-1">
+                                    <span className="text-xs text-muted-foreground">Филиал</span>
+                                    <select
+                                        value={standaloneOutreachBranchId}
+                                        onChange={(event) => setStandaloneOutreachBranchId(event.target.value)}
+                                        className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                                        data-testid="inbox-standalone-outreach-branch"
+                                    >
+                                        <option value="">Выберите филиал</option>
+                                        {branches
+                                            .filter((branch) => Boolean(branch.id))
+                                            .map((branch) => (
+                                                <option key={branch.id} value={branch.id}>
+                                                    {branch.name || branch.id}
+                                                </option>
+                                            ))}
+                                    </select>
+                                </label>
+                            )}
+
+                            <label className="space-y-1">
+                                <span className="text-xs text-muted-foreground">WhatsApp номер или JID</span>
+                                <input
+                                    type="text"
+                                    value={standaloneOutreachDestination}
+                                    onChange={(event) => setStandaloneOutreachDestination(event.target.value)}
+                                    className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                                    placeholder="+7 777 123 45 67"
+                                    data-testid="inbox-standalone-outreach-destination"
+                                />
+                            </label>
+
+                            <label className="space-y-1">
+                                <span className="text-xs text-muted-foreground">Сообщение</span>
+                                <textarea
+                                    value={standaloneOutreachContent}
+                                    onChange={(event) => setStandaloneOutreachContent(event.target.value)}
+                                    rows={3}
+                                    className="w-full resize-y rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                                    placeholder="Например: Мы на связи, можем продолжить общение здесь"
+                                    data-testid="inbox-standalone-outreach-message"
+                                />
+                            </label>
+
+                            <div className="grid gap-2 md:grid-cols-[auto_140px_1fr] md:items-center">
+                                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                                    <input
+                                        type="checkbox"
+                                        checked={standalonePauseEnabled}
+                                        onChange={(event) => setStandalonePauseEnabled(event.target.checked)}
+                                        className="h-4 w-4 rounded border-border/60 text-primary focus:ring-primary/40"
+                                        data-testid="inbox-standalone-outreach-pause-enabled"
+                                    />
+                                    Пауза бота после отправки
+                                </label>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    max={1440}
+                                    value={standalonePauseMinutes}
+                                    onChange={(event) => {
+                                        const next = Number(event.target.value);
+                                        const normalized = Number.isFinite(next)
+                                            ? Math.min(Math.max(next, 0), 1440)
+                                            : 0;
+                                        setStandalonePauseMinutes(normalized);
+                                    }}
+                                    disabled={!standalonePauseEnabled}
+                                    className="w-full rounded border border-border/60 bg-background px-3 py-2 text-sm"
+                                    data-testid="inbox-standalone-outreach-pause-minutes"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const destination = standaloneOutreachDestination.trim();
+                                        const message = standaloneOutreachContent.trim();
+                                        if (!destination || !message) {
+                                            toast.error("Заполните номер и текст сообщения");
+                                            return;
+                                        }
+                                        if (showStandaloneBranchSelect && !standaloneOutreachBranchId) {
+                                            toast.error("Выберите филиал");
+                                            return;
+                                        }
+                                        standaloneOutreachMutation.mutate();
+                                    }}
+                                    disabled={standaloneOutreachMutation.isPending}
+                                    className="rounded bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                                    data-testid="inbox-standalone-outreach-send"
+                                >
+                                    {standaloneOutreachMutation.isPending ? "Отправка..." : "Отправить"}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </section>
+            )}
 
             <div
                 className={`grid flex-1 min-h-0 grid-cols-1 gap-4 ${gridClass}`}

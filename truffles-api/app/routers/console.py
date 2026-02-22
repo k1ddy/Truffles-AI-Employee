@@ -7668,18 +7668,24 @@ async def send_outreach_message(
         HUMAN_LOCK_SCOPE_CONVERSATION if _is_human_lock_v2_enabled() else HUMAN_LOCK_SCOPE_REMOTE
     )
 
-    if not body.conversation_id:
-        raise ConsoleAPIError(400, "CONVERSATION_REQUIRED", "conversation_id is required for outreach")
-
-    conversation: Conversation | None = _resolve_console_conversation_or_404(
-        db,
-        client_id=context.client.id,
-        conversation_id=body.conversation_id,
-    )
-    branch_id = conversation.branch_id
+    conversation: Conversation | None = None
+    branch_id = body.branch_id
+    if body.conversation_id:
+        conversation = _resolve_console_conversation_or_404(
+            db,
+            client_id=context.client.id,
+            conversation_id=body.conversation_id,
+        )
+        if conversation.branch_id and branch_id and branch_id != conversation.branch_id:
+            raise ConsoleAPIError(
+                400,
+                "INVALID_PARAM",
+                "branch_id must match conversation branch",
+            )
+        branch_id = conversation.branch_id or branch_id
     if branch_id is not None:
         _require_branch_access(context, branch_id, message="Access to this branch denied")
-    elif conversation is None:
+    else:
         branch_id = _resolve_branch_from_context(context).id
 
     instance_id = get_instance_id(

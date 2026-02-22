@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -119,6 +119,103 @@ async def test_send_outreach_message_enqueues_outbox_and_sets_pause(monkeypatch)
     assert captured["payload_json"]["payload"]["text"] == "Здравствуйте"
     assert captured["payload_json"]["tenant_context"]["source"] == "system"
     assert captured["payload_json"]["tenant_context"]["origin_source"] == "console_outreach"
+
+
+@pytest.mark.asyncio
+async def test_send_outreach_message_without_branch_uses_context_branch(monkeypatch):
+    client_id = uuid4()
+    branch_id = uuid4()
+    context = SimpleNamespace(
+        role="manager",
+        client=SimpleNamespace(id=client_id, name="demo"),
+        agent=SimpleNamespace(id=uuid4(), name="Agent"),
+        branches=[SimpleNamespace(id=branch_id)],
+        effective_branch_id=branch_id,
+    )
+    db = _FakeDb()
+    captured = {"instance_branch_id": None}
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_require_branch_access", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "_resolve_branch_from_context",
+        lambda _context: SimpleNamespace(id=branch_id),
+    )
+    monkeypatch.setattr(console_router, "_is_env_enabled", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(console_router, "start_idempotency", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "enqueue_outbox_message", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        console_router,
+        "upsert_human_lock",
+        lambda *_args, **_kwargs: SimpleNamespace(lock_until=datetime.now(timezone.utc) + timedelta(minutes=30)),
+    )
+
+    def _fake_get_instance_id(_db, _client_id, *, branch_id: UUID, remote_jid: str):
+        captured["instance_branch_id"] = branch_id
+        return "instance-1"
+
+    monkeypatch.setattr(console_router, "get_instance_id", _fake_get_instance_id)
+
+    response = await console_router.send_outreach_message(
+        body=ConsoleOutreachMessageRequest(
+            destination="+7 (777) 123-45-67",
+            content="Здравствуйте",
+            pause_bot_minutes=30,
+        ),
+        request=Mock(headers={"Idempotency-Key": "idem"}),
+        db=db,
+    )
+
+    assert response.success is True
+    assert captured["instance_branch_id"] == branch_id
+
+
+@pytest.mark.asyncio
+async def test_send_outreach_message_rejects_branch_mismatch(monkeypatch):
+    client_id = uuid4()
+    conversation_branch_id = uuid4()
+    request_branch_id = uuid4()
+    conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id=client_id,
+        branch_id=conversation_branch_id,
+        user_id=uuid4(),
+    )
+    context = SimpleNamespace(
+        role="manager",
+        client=SimpleNamespace(id=client_id, name="demo"),
+        agent=SimpleNamespace(id=uuid4(), name="Agent"),
+        branches=[SimpleNamespace(id=conversation_branch_id), SimpleNamespace(id=request_branch_id)],
+        effective_branch_id=None,
+    )
+    db = _FakeDb()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "_resolve_console_conversation_or_404",
+        lambda *_args, **_kwargs: conversation,
+    )
+
+    with pytest.raises(console_router.ConsoleAPIError) as exc_info:
+        await console_router.send_outreach_message(
+            body=ConsoleOutreachMessageRequest(
+                destination="+7 (777) 123-45-67",
+                content="Здравствуйте",
+                conversation_id=conversation.id,
+                branch_id=request_branch_id,
+                pause_bot_minutes=30,
+            ),
+            request=Mock(headers={"Idempotency-Key": "idem"}),
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+    assert "branch_id must match conversation branch" in exc_info.value.message
 
 
 @pytest.mark.asyncio
