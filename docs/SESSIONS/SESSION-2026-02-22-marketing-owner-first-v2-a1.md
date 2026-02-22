@@ -1,0 +1,30 @@
+# SESSION 2026-02-22-marketing-owner-first-v2-a1 — Session 2026-02-22-marketing-owner-first-v2-a1
+
+- status: done
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-22-marketing-owner-first-v2-a1.md
+- branch: feat/2026-02-22-marketing-owner-first-v2-a1
+- worktree: /home/zhan/worktrees/2026-02-22-marketing-owner-first-v2-a1
+- base_ref: origin/main
+- scope: Marketing owner-first v2 (segment catalog + editable params + explainers + UX rewrite)
+- done:
+  - Added backend segment catalog endpoint `GET /console/v1/admin/marketing/segments`.
+  - Wired strict `segment_params` validation and persistence into create/update/preview/preflight.
+  - Added audience explainers (`reason_hints`, `suppression_hints`) and preflight/preview segment summary payload.
+  - Synced OpenAPI, API client types, and rebuilt marketing page in owner-first flow.
+  - Updated backend/router tests and marketing e2e text selectors.
+  - Updated marketing audit doc and `STATE.md` with FACT/GAP evidence.
+- next:
+  - Open PR from `feat/2026-02-22-marketing-owner-first-v2-a1`.
+  - Run live Playwright after auth storage bootstrap is available.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-22-marketing-owner-first-v2-a1.md
+  - python3 -m py_compile truffles-api/app/services/marketing/service.py truffles-api/app/routers/console.py truffles-api/app/schemas/console.py
+  - ruff check truffles-api/app/services/marketing/service.py truffles-api/app/routers/console.py truffles-api/app/schemas/console.py truffles-api/tests/test_marketing_service.py truffles-api/tests/test_console_marketing_campaigns.py
+  - pytest -q truffles-api/tests/test_marketing_service.py truffles-api/tests/test_console_marketing_campaigns.py -k "marketing"
+  - python3 truffles-api/scripts/generate_openapi.py --check
+  - npm --prefix console-web run lint -- --file src/app/marketing/page.tsx --file src/lib/api-client.ts
+  - npm --prefix console-web run build
+  - cd console-web && npx playwright test e2e/marketing.spec.ts --project=chromium --reporter=list --no-deps (blocked: missing `.auth/console.json`)
+  - cd console-web && npx playwright test e2e/auth.setup.ts --project=setup --reporter=list --no-deps (blocked: setup timeout waiting authenticated UI)
+- last_updated: 2026-02-22

@@ -24,6 +24,7 @@ def test_marketing_routes_registered_in_openapi() -> None:
     app.include_router(console_router.router)
     paths = app.openapi()["paths"]
 
+    assert "/console/v1/admin/marketing/segments" in paths
     assert "/console/v1/admin/marketing/campaigns" in paths
     assert "/console/v1/admin/marketing/campaigns/{campaign_id}" in paths
     assert "/console/v1/admin/marketing/campaigns/{campaign_id}/preview" in paths
@@ -137,7 +138,14 @@ def test_serialize_marketing_campaign_includes_dates() -> None:
         status="ready",
         segment_code=None,
         audience_mode="branch_active_conversations",
-        audience_filter={},
+        audience_filter={
+            "segment_params": {
+                "min_days_since_last_visit": 40,
+                "max_days_since_last_visit": 150,
+                "require_no_future_booking": True,
+            },
+            "segment_summary": "Клиенты без будущей записи, последний визит 40-150 дней назад.",
+        },
         preview_total=42,
         last_preview_at=now,
         executed_at=None,
@@ -150,6 +158,8 @@ def test_serialize_marketing_campaign_includes_dates() -> None:
     assert serialized.status == "approved"
     assert serialized.status_v2 == "approved"
     assert serialized.segment_code == "reactivation_30_120"
+    assert serialized.segment_params["min_days_since_last_visit"] == 40
+    assert serialized.segment_summary is not None
     assert serialized.preview_total == 42
     assert serialized.last_preview_at is not None
     assert serialized.created_at is not None
@@ -202,6 +212,8 @@ def test_serialize_marketing_recipient_fallback_segment() -> None:
     serialized = console_router._serialize_marketing_recipient(recipient)
     assert serialized.segment_code == "reactivation_30_120"
     assert serialized.reason_codes == ["segment=legacy"]
+    assert serialized.reason_hints
+    assert serialized.suppression_hints == []
 
 
 @pytest.mark.asyncio
