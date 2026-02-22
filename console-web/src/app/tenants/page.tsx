@@ -9,6 +9,7 @@ import type { components } from "@/types/api.generated";
 import AccessDenied from "@/components/AccessDenied";
 import ProvisioningWizard from "@/components/ProvisioningWizard";
 import TenantsActionQueuePanel, { type TenantsActionQueueItem } from "@/components/TenantsActionQueuePanel";
+import TenantsQuickCreatePanel from "@/components/TenantsQuickCreatePanel";
 import TenantsScopedErrorSummary from "@/components/TenantsScopedErrorSummary";
 import TenantsSensitiveIdCell, { type TenantsSensitiveAction } from "@/components/TenantsSensitiveIdCell";
 import TenantsTopControls, { type TenantsFilterOption } from "@/components/TenantsTopControls";
@@ -210,27 +211,27 @@ const MAX_WEEKLY_SNAPSHOTS = 12;
 const OPERATIONAL_KPI_RULES: OperationalKpiRule[] = [
     {
         id: "onboardingCoverage",
-        label: "Onboarding coverage",
+        label: "Покрытие онбординга",
         unit: "percent",
         direction: "higher_better",
         warn: 60,
         critical: 40,
         action: "onboarding",
-        actionLabel: "Открыть Onboarding",
+        actionLabel: "Открыть онбординг",
     },
     {
         id: "goLiveReadiness",
-        label: "Go-live readiness",
+        label: "Готовность к запуску",
         unit: "percent",
         direction: "higher_better",
         warn: 70,
         critical: 50,
         action: "onboarding",
-        actionLabel: "Проверить Go-live",
+        actionLabel: "Проверить запуск",
     },
     {
         id: "serviceStability",
-        label: "Service stability",
+        label: "Стабильность сервиса",
         unit: "percent",
         direction: "higher_better",
         warn: 95,
@@ -240,37 +241,37 @@ const OPERATIONAL_KPI_RULES: OperationalKpiRule[] = [
     },
     {
         id: "decommissionShare",
-        label: "Decommission share",
+        label: "Доля вывода из эксплуатации",
         unit: "percent",
         direction: "lower_better",
         warn: 30,
         critical: 45,
         action: "decommission",
-        actionLabel: "Открыть Decommission",
+        actionLabel: "Открыть вывод из эксплуатации",
     },
     {
         id: "changeFailure",
-        label: "Publish failure rate",
+        label: "Доля ошибок публикации",
         unit: "percent",
         direction: "lower_better",
         warn: 10,
         critical: 20,
         action: "changes",
-        actionLabel: "Открыть Change Mgmt",
+        actionLabel: "Открыть изменения",
     },
     {
         id: "rollbackShare",
-        label: "Rollback share",
+        label: "Доля откатов",
         unit: "percent",
         direction: "lower_better",
         warn: 15,
         critical: 30,
         action: "changes",
-        actionLabel: "Проверить rollback",
+        actionLabel: "Проверить откаты",
     },
     {
         id: "blockedSignals",
-        label: "Blocked signals",
+        label: "Блокирующие сигналы",
         unit: "count",
         direction: "lower_better",
         warn: 1,
@@ -867,7 +868,7 @@ export default function TenantsPage() {
             includeProvisioningGuidance: true,
             operation,
             endpoint,
-            scope: "onboarding",
+            scope: resolveErrorScopeFromWorkspace(workspaceMode),
         });
     const [clientQuery, setClientQuery] = useState("");
     const [branchQuery, setBranchQuery] = useState("");
@@ -1822,7 +1823,7 @@ export default function TenantsPage() {
 
     const saveWeeklySnapshot = async () => {
         if (!pageFilterClientId) {
-            reportValidationError("Сначала выберите клиента в page filters", "VALIDATION_ERROR", "portfolio");
+            reportValidationError("Сначала выберите клиента в фильтрах страницы", "VALIDATION_ERROR", "portfolio");
             return;
         }
         const now = new Date().toISOString();
@@ -1852,10 +1853,10 @@ export default function TenantsPage() {
                 queryClient.invalidateQueries({
                     queryKey: ["tenants-weekly-snapshots", pageFilterClientId],
                 });
-            toast.success(`Weekly snapshot сохранён (${weekKey})`);
+            toast.success(`Недельный снимок сохранён (${weekKey})`);
         } catch (error) {
             reportError(error, { scope: "portfolio" });
-            toast.error(`Не удалось сохранить weekly snapshot (${weekKey})`);
+            toast.error(`Не удалось сохранить недельный снимок (${weekKey})`);
         }
     };
 
@@ -1871,7 +1872,7 @@ export default function TenantsPage() {
 
     const runMetricsSnapshotHook = async (mode: "dry_run" | "execute") => {
         if (!pageFilterClientId) {
-            reportValidationError("Сначала выберите клиента в page filters");
+            reportValidationError("Сначала выберите клиента в фильтрах страницы");
             return;
         }
         setRunningMetricsSnapshotMode(mode);
@@ -1882,7 +1883,7 @@ export default function TenantsPage() {
                 params: ({ days: 7 } as unknown as Record<string, never>),
             });
             setLastMetricsSnapshotJob(response.data.job);
-            toast.success(mode === "dry_run" ? "Snapshot dry-run выполнен" : "Snapshot execute выполнен");
+            toast.success(mode === "dry_run" ? "Пробный снимок метрик выполнен" : "Снимок метрик выполнен");
         } catch (error) {
             reportError(error, { scope: resolveErrorScopeFromWorkspace(workspaceMode) });
         } finally {
@@ -2497,126 +2498,17 @@ export default function TenantsPage() {
                     onClearAll={() => clearErrors()}
                 />
                 {canWriteTenants ? (
-                    <section className="rounded-lg border border-border/60 bg-card p-4" data-testid="tenants-quick-create">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                                <h2 className="text-sm font-semibold">Quick Create Wizard</h2>
-                                <p className="text-xs text-muted-foreground">
-                                    Быстрый поток: {"company -> client -> branch"} с автоматическим установлением контекста.
-                                </p>
-                            </div>
-                            <button
-                                className="btn-ghost"
-                                onClick={() => router.push("/company-workspace")}
-                            >
-                                Company Workspace
-                            </button>
-                        </div>
-                        <div className="mt-3 grid gap-3 md:grid-cols-3">
-                            <div className="rounded-lg border border-border/60 bg-background p-3">
-                                <div className="text-xs font-semibold">1. Компания</div>
-                                <label className="mt-2 block text-xs text-muted-foreground">
-                                    name
-                                    <input
-                                        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                        value={quickCreateForm.companyName}
-                                        onChange={(event) =>
-                                            setQuickCreateForm((prev) => ({ ...prev, companyName: event.target.value }))
-                                        }
-                                        placeholder="Beauty Group"
-                                    />
-                                </label>
-                                <button
-                                    className="btn-primary mt-3"
-                                    onClick={() => void handleQuickCreateCompany()}
-                                    disabled={quickCreateRunning !== null}
-                                >
-                                    {quickCreateRunning === "company" ? "Создание..." : "Создать компанию"}
-                                </button>
-                                <div className="mt-2 text-[11px] text-muted-foreground">
-                                    company_id: <span className="font-mono">{quickCreateCompanyId || "—"}</span>
-                                </div>
-                            </div>
-
-                            <div className="rounded-lg border border-border/60 bg-background p-3">
-                                <div className="text-xs font-semibold">2. Клиент</div>
-                                <label className="mt-2 block text-xs text-muted-foreground">
-                                    slug
-                                    <input
-                                        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                        value={quickCreateForm.clientSlug}
-                                        onChange={(event) =>
-                                            setQuickCreateForm((prev) => ({ ...prev, clientSlug: event.target.value.toLowerCase() }))
-                                        }
-                                        placeholder="beauty_group_almaty"
-                                    />
-                                </label>
-                                <button
-                                    className="btn-primary mt-3"
-                                    onClick={() => void handleQuickCreateClient()}
-                                    disabled={quickCreateRunning !== null}
-                                >
-                                    {quickCreateRunning === "client" ? "Создание..." : "Создать клиента"}
-                                </button>
-                                <div className="mt-2 text-[11px] text-muted-foreground">
-                                    client_id: <span className="font-mono">{quickCreateClientId || "—"}</span>
-                                </div>
-                            </div>
-
-                            <div className="rounded-lg border border-border/60 bg-background p-3">
-                                <div className="text-xs font-semibold">3. Филиал</div>
-                                <div className="mt-2 grid gap-2">
-                                    <input
-                                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                        value={quickCreateForm.branchName}
-                                        onChange={(event) =>
-                                            setQuickCreateForm((prev) => ({ ...prev, branchName: event.target.value }))
-                                        }
-                                        placeholder="Branch name"
-                                    />
-                                    <input
-                                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                        value={quickCreateForm.branchSlug}
-                                        onChange={(event) =>
-                                            setQuickCreateForm((prev) => ({ ...prev, branchSlug: event.target.value.toLowerCase() }))
-                                        }
-                                        placeholder="branch_slug"
-                                    />
-                                    <input
-                                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                        value={quickCreateForm.branchTimezone}
-                                        onChange={(event) =>
-                                            setQuickCreateForm((prev) => ({ ...prev, branchTimezone: event.target.value }))
-                                        }
-                                        placeholder="Asia/Almaty"
-                                    />
-                                    <input
-                                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                        value={quickCreateForm.branchPhone}
-                                        onChange={(event) =>
-                                            setQuickCreateForm((prev) => ({ ...prev, branchPhone: event.target.value }))
-                                        }
-                                        placeholder="+77000000000"
-                                    />
-                                    <input
-                                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                        value={quickCreateForm.branchInstanceId}
-                                        onChange={(event) =>
-                                            setQuickCreateForm((prev) => ({ ...prev, branchInstanceId: event.target.value }))
-                                        }
-                                        placeholder="instance-xxxxxxxx"
-                                    />
-                                </div>
-                                <button
-                                    className="btn-primary mt-3"
-                                    onClick={() => void handleQuickCreateBranch()}
-                                    disabled={quickCreateRunning !== null}
-                                >
-                                    {quickCreateRunning === "branch" ? "Создание..." : "Создать филиал"}
-                                </button>
-                            </div>
-                        </div>
-                    </section>
+                    <TenantsQuickCreatePanel
+                        form={quickCreateForm}
+                        running={quickCreateRunning}
+                        companyId={quickCreateCompanyId}
+                        clientId={quickCreateClientId}
+                        onChange={(patch) => setQuickCreateForm((prev) => ({ ...prev, ...patch }))}
+                        onCreateCompany={() => void handleQuickCreateCompany()}
+                        onCreateClient={() => void handleQuickCreateClient()}
+                        onCreateBranch={() => void handleQuickCreateBranch()}
+                        onOpenWorkspace={() => router.push("/company-workspace")}
+                    />
                 ) : null}
                 <TenantsActionQueuePanel
                     items={actionQueue}
@@ -2715,60 +2607,62 @@ export default function TenantsPage() {
                                     onClick={saveWeeklySnapshot}
                                     data-testid="tenants-kpi-save-weekly-snapshot"
                                     disabled={!pageFilterClientId}
-                                    title={pageFilterClientId ? undefined : "Выберите клиента в page filters"}
+                                    title={pageFilterClientId ? undefined : "Выберите клиента в фильтрах страницы"}
                                 >
-                                    Weekly snapshot
+                                    Недельный снимок
                                 </button>
                             </div>
                         </div>
                         <div className="mb-3 text-xs text-muted-foreground">
-                            окно расчета branch-change: {operationalKpi.sourceWindow} · published: {operationalKpi.publishedChanges} · publish_failed: {operationalKpi.publishFailedChanges} · rolled_back: {operationalKpi.rolledBackChanges} · critical KPI: {criticalKpiCount} · warn KPI: {warnKpiCount}
+                            окно расчета изменений: {operationalKpi.sourceWindow} · опубликовано: {operationalKpi.publishedChanges} ·
+                            ошибок публикации: {operationalKpi.publishFailedChanges} · откатов: {operationalKpi.rolledBackChanges} ·
+                            критичных KPI: {criticalKpiCount} · предупреждений: {warnKpiCount}
                         </div>
                         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                             <div className={kpiCardClass(operationalKpiById.get("onboardingCoverage")?.status ?? "ok")} data-testid="tenants-kpi-onboarding-coverage">
-                                <div className="text-xs text-muted-foreground">Onboarding coverage (proxy)</div>
+                                <div className="text-xs text-muted-foreground">Покрытие онбординга (прокси)</div>
                                 <div className="text-xl font-semibold">{operationalKpi.onboardingCoveragePct}%</div>
                                 <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("onboardingCoverage")?.status ?? "ok")}`}>
                                     {operationalKpiById.get("onboardingCoverage")?.status ?? "ok"}
                                 </div>
                             </div>
                             <div className={kpiCardClass(operationalKpiById.get("goLiveReadiness")?.status ?? "ok")} data-testid="tenants-kpi-go-live-readiness">
-                                <div className="text-xs text-muted-foreground">Go-live readiness (proxy)</div>
+                                <div className="text-xs text-muted-foreground">Готовность к запуску (прокси)</div>
                                 <div className="text-xl font-semibold">{operationalKpi.goLiveReadinessPct}%</div>
                                 <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("goLiveReadiness")?.status ?? "ok")}`}>
                                     {operationalKpiById.get("goLiveReadiness")?.status ?? "ok"}
                                 </div>
                             </div>
                             <div className={kpiCardClass(operationalKpiById.get("serviceStability")?.status ?? "ok")} data-testid="tenants-kpi-service-stability">
-                                <div className="text-xs text-muted-foreground">Service stability</div>
+                                <div className="text-xs text-muted-foreground">Стабильность сервиса</div>
                                 <div className="text-xl font-semibold">{operationalKpi.serviceStabilityPct}%</div>
                                 <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("serviceStability")?.status ?? "ok")}`}>
                                     {operationalKpiById.get("serviceStability")?.status ?? "ok"}
                                 </div>
                             </div>
                             <div className={kpiCardClass(operationalKpiById.get("decommissionShare")?.status ?? "ok")} data-testid="tenants-kpi-decommission-share">
-                                <div className="text-xs text-muted-foreground">Decommission share</div>
+                                <div className="text-xs text-muted-foreground">Доля вывода из эксплуатации</div>
                                 <div className="text-xl font-semibold">{operationalKpi.decommissionSharePct}%</div>
                                 <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("decommissionShare")?.status ?? "ok")}`}>
                                     {operationalKpiById.get("decommissionShare")?.status ?? "ok"}
                                 </div>
                             </div>
                             <div className={kpiCardClass(operationalKpiById.get("changeFailure")?.status ?? "ok")} data-testid="tenants-kpi-change-failure">
-                                <div className="text-xs text-muted-foreground">Publish failure rate (proxy)</div>
+                                <div className="text-xs text-muted-foreground">Доля ошибок публикации (прокси)</div>
                                 <div className="text-xl font-semibold">{operationalKpi.changeFailurePct}%</div>
                                 <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("changeFailure")?.status ?? "ok")}`}>
                                     {operationalKpiById.get("changeFailure")?.status ?? "ok"}
                                 </div>
                             </div>
                             <div className={kpiCardClass(operationalKpiById.get("rollbackShare")?.status ?? "ok")} data-testid="tenants-kpi-rollback-share">
-                                <div className="text-xs text-muted-foreground">Rollback share (proxy)</div>
+                                <div className="text-xs text-muted-foreground">Доля откатов (прокси)</div>
                                 <div className="text-xl font-semibold">{operationalKpi.rollbackSharePct}%</div>
                                 <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("rollbackShare")?.status ?? "ok")}`}>
                                     {operationalKpiById.get("rollbackShare")?.status ?? "ok"}
                                 </div>
                             </div>
                             <div className={kpiCardClass(operationalKpiById.get("blockedSignals")?.status ?? "ok")} data-testid="tenants-kpi-blocked-signals">
-                                <div className="text-xs text-muted-foreground">Blocked signals</div>
+                                <div className="text-xs text-muted-foreground">Блокирующие сигналы</div>
                                 <div className="text-xl font-semibold">{operationalKpi.blockedSignalsCount}</div>
                                 <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("blockedSignals")?.status ?? "ok")}`}>
                                     {operationalKpiById.get("blockedSignals")?.status ?? "ok"}
@@ -2889,19 +2783,19 @@ export default function TenantsPage() {
 
                             <div className="rounded-lg border border-border/60 bg-background p-3" data-testid="tenants-kpi-weekly-snapshots">
                                 <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                                    Weekly snapshots
+                                    Недельные снимки
                                 </div>
                                 {!pageFilterClientId ? (
                                     <div className="text-xs text-muted-foreground">
-                                        Выберите клиента в page filters, чтобы загрузить weekly snapshots.
+                                        Выберите клиента в фильтрах страницы, чтобы загрузить снимки.
                                     </div>
                                 ) : weeklySnapshotsServerQuery.isFetching ? (
                                     <div className="text-xs text-muted-foreground">
-                                        Загрузка weekly snapshots...
+                                        Загрузка недельных снимков...
                                     </div>
                                 ) : weeklySnapshots.length === 0 ? (
                                     <div className="text-xs text-muted-foreground">
-                                        Снимков пока нет. Сохраните первый weekly snapshot.
+                                        Снимков пока нет. Сохраните первый недельный снимок.
                                     </div>
                                 ) : (
                                     <div className="space-y-2">
@@ -2916,10 +2810,10 @@ export default function TenantsPage() {
                                                         {item.weekKey} · {formatDateTimeLabel(item.createdAt)}
                                                     </div>
                                                     <div className="text-muted-foreground">
-                                                        change_failure: {item.report.kpi.changeFailure}% {previous ? `(Δ ${delta >= 0 ? "+" : ""}${delta}%)` : ""}
+                                                        ошибки публикации: {item.report.kpi.changeFailure}% {previous ? `(Δ ${delta >= 0 ? "+" : ""}${delta}%)` : ""}
                                                     </div>
                                                     <div className="text-muted-foreground">
-                                                        blocked_signals: {item.report.kpi.blockedSignals} · service_stability: {item.report.kpi.serviceStability}%
+                                                        блокирующие сигналы: {item.report.kpi.blockedSignals} · стабильность сервиса: {item.report.kpi.serviceStability}%
                                                     </div>
                                                 </div>
                                             );
@@ -2940,7 +2834,7 @@ export default function TenantsPage() {
                                     Операционные риски по активным клиентам (топ по score)
                                 </p>
                                 <p className="text-xs text-muted-foreground">
-                                    scope: reference branches (шум тестовых веток исключен)
+                                    охват: reference branches (шум тестовых веток исключен)
                                 </p>
                             </div>
                             <button
@@ -2997,7 +2891,7 @@ export default function TenantsPage() {
                                             филиалы активные {item.active_branches}/{item.total_branches} · неактуальные {item.stale_branches} · интеграционных ошибок {item.integration_error_branches} · outbox_failed_24h {item.outbox_failed_24h} · ожидают передачи {item.pending_handovers}
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
-                                            reference scope: {item.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(item.reference_branch_reason)}
+                                            reference-охват: {item.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(item.reference_branch_reason)}
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
                                             причины: {item.reasons?.join(", ") || "—"}
@@ -3172,7 +3066,7 @@ export default function TenantsPage() {
                 <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-decommission-center">
                     <div className="flex items-center justify-between gap-4 mb-3">
                         <div>
-                            <h2 className="text-lg font-semibold">Decommission</h2>
+                            <h2 className="text-lg font-semibold">Вывод из эксплуатации</h2>
                             <p className="text-sm text-muted-foreground">
                                 Архивация и восстановление клиентов с прозрачным подтверждением.
                             </p>
@@ -3199,7 +3093,7 @@ export default function TenantsPage() {
                         </div>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                        Для decommission используйте действия `Архивировать/Восстановить` в карточке клиента ниже.
+                        Для вывода из эксплуатации используйте действия `Архивировать/Восстановить` в карточке клиента ниже.
                     </div>
                 </section>
                 ) : null}
@@ -3209,7 +3103,7 @@ export default function TenantsPage() {
                     <div className="flex items-center justify-between gap-4 mb-4">
                         <div>
                             <h2 className="text-lg font-semibold">
-                                {decommissionFocused ? "Клиенты (Decommission)" : "Клиенты"}
+                                {decommissionFocused ? "Клиенты (вывод из эксплуатации)" : "Клиенты"}
                             </h2>
                             <p className="text-sm text-muted-foreground">
                                 {clientsLoading ? "—" : `${clients.length} всего`}
@@ -3226,7 +3120,7 @@ export default function TenantsPage() {
                             ) : null}
                             {pageFilterCompanyId ? (
                                 <div className="mt-1 text-xs text-muted-foreground">
-                                    page filter company_id: {pageFilterCompanyId}
+                                    фильтр по компании (ID): {pageFilterCompanyId}
                                 </div>
                             ) : null}
                         </div>
@@ -3326,22 +3220,22 @@ export default function TenantsPage() {
                                                 <div className="text-xs text-muted-foreground">статус: {client.status}</div>
                                             ) : null}
                                             <div className="text-xs text-muted-foreground">
-                                                lifecycle: {formatStateLabel(client.lifecycle_state, FLEET_LIFECYCLE_LABELS)} · payment: {formatStateLabel(client.payment_status, FLEET_PAYMENT_LABELS)} · service: {formatStateLabel(client.service_state, FLEET_SERVICE_LABELS)}
+                                                жизненный цикл: {formatStateLabel(client.lifecycle_state, FLEET_LIFECYCLE_LABELS)} · оплата: {formatStateLabel(client.payment_status, FLEET_PAYMENT_LABELS)} · сервис: {formatStateLabel(client.service_state, FLEET_SERVICE_LABELS)}
                                             </div>
                                             <div className="text-xs text-muted-foreground">
-                                                owner: {client.owner_name ?? "—"} · next: {client.next_action ?? "—"}
+                                                владелец: {client.owner_name ?? "—"} · следующее действие: {client.next_action ?? "—"}
                                             </div>
                                             <div className="text-xs text-muted-foreground">
                                                 филиалы: активные {client.active_branches ?? 0}/{client.total_branches ?? 0} · деградация {client.degraded_branches ?? 0} · готовы к запуску {client.go_live_ready_branches ?? 0}
                                             </div>
                                             <div className="text-xs text-muted-foreground">
-                                                reference scope: {client.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(client.reference_branch_reason)}
+                                                reference-охват: {client.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(client.reference_branch_reason)}
                                             </div>
                                             {lifecycleAuditHistory.length > 0 || clientIdKey === pageFilterClientId ? (
                                                 <div className="mt-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs" data-testid="tenants-client-lifecycle-audit">
                                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                                         <div className="font-medium">
-                                                            Lifecycle timeline (session + API)
+                                                            История статуса (сессия + API)
                                                         </div>
                                                         <div className="flex items-center gap-1">
                                                             <button
@@ -3353,7 +3247,7 @@ export default function TenantsPage() {
                                                                     setClientLifecycleAuditFilterById((prev) => ({ ...prev, [clientIdKey]: "all" }));
                                                                 }}
                                                             >
-                                                                all
+                                                                все
                                                             </button>
                                                             <button
                                                                 className={lifecycleAuditFilter === "success" ? "btn-primary" : "btn-ghost"}
@@ -3364,7 +3258,7 @@ export default function TenantsPage() {
                                                                     setClientLifecycleAuditFilterById((prev) => ({ ...prev, [clientIdKey]: "success" }));
                                                                 }}
                                                             >
-                                                                success
+                                                                успех
                                                             </button>
                                                             <button
                                                                 className={lifecycleAuditFilter === "error" ? "btn-primary" : "btn-ghost"}
@@ -3375,7 +3269,7 @@ export default function TenantsPage() {
                                                                     setClientLifecycleAuditFilterById((prev) => ({ ...prev, [clientIdKey]: "error" }));
                                                                 }}
                                                             >
-                                                                error
+                                                                ошибка
                                                             </button>
                                                             {clientIdKey === pageFilterClientId ? (
                                                                 <button
@@ -3384,13 +3278,13 @@ export default function TenantsPage() {
                                                                     disabled={selectedClientAuditQuery.isFetching}
                                                                     data-testid="tenants-client-lifecycle-audit-refresh"
                                                                 >
-                                                                    {selectedClientAuditQuery.isFetching ? "Обновление..." : "Обновить API"}
+                                                                    {selectedClientAuditQuery.isFetching ? "Обновление..." : "Обновить данные API"}
                                                                 </button>
                                                             ) : null}
                                                         </div>
                                                     </div>
                                                     <div className="mt-1 text-muted-foreground">
-                                                        источник: session cache + API audit{clientIdKey === pageFilterClientId ? "" : " (API audit доступен в текущем page filter client)"}
+                                                        источник: кеш сессии + API-аудит{clientIdKey === pageFilterClientId ? "" : " (API-аудит доступен при текущем фильтре клиента)"}
                                                     </div>
                                                     <div className="mt-1 space-y-2" data-testid="tenants-client-lifecycle-audit-history">
                                                         {filteredLifecycleAuditHistory.length === 0 ? (

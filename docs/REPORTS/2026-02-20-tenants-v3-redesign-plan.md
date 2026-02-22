@@ -99,3 +99,49 @@
 ## Output artifact
 - Полный план редизайна и реализации оформлен в:
   - `docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md`
+
+## Wave 3 completion: backfill verification (2026-02-22, UTC)
+1. Snapshot storage backfill quality check executed against runtime DB `chatbot`.
+- DB/container: `truffles_postgres_1` (`psql -U n8n -d chatbot`)
+- Raw evidence: `/tmp/tenants_weekly_snapshots_backfill_verify_20260222.txt`
+
+2. Verification thresholds (fail-closed contract).
+- `missing_from_table = 0`
+- `invalid_regex = 0`
+- `snapshot_non_object = 0`
+- `table_distinct_client_week = table_rows` (no duplicates per `(client_id, week_key)`)
+- `schema_versions` explicitly observable from table/API contract
+
+3. Captured result (current runtime slice).
+- `audit_candidates = 0`
+- `audit_valid_week_key_rows = 0`
+- `audit_distinct_client_week = 0`
+- `table_rows = 0`
+- `table_distinct_client_week = 0`
+- `missing_from_table = 0`
+- `extra_in_table = 0`
+- `invalid_regex = 0`
+- `snapshot_non_object = 0`
+- `snapshot_schema_version distribution = empty` (no rows yet)
+
+4. Interpretation.
+- Backfill is idempotent and contract-safe for current runtime state (no historical weekly snapshot rows to migrate).
+- Runtime quality gates for snapshot storage are satisfied with explicit evidence.
+
+## Wave 4 progress: UI decomposition
+1. `Quick Create` block extracted from monolith `tenants/page.tsx` into dedicated component.
+- New component: `console-web/src/components/TenantsQuickCreatePanel.tsx`
+- Parent integration kept behavior-compatible via handler props and existing API flow.
+
+2. Decomposition impact.
+- `tenants/page.tsx` reduced by removal of inline quick-create rendering block.
+- UI logic is now split into reusable, testable component boundary.
+
+## Wave 5 progress: copy + a11y hardening
+1. Business copy cleanup in top controls and tenants workspace.
+- Reduced RU/EN + tech mix in key labels and helper text (`Context/Filters/KPI/Decommission/Snapshots` blocks).
+- Context/apply semantics clarified in user language.
+
+2. Quick-create accessibility hardening.
+- Added explicit labels for all branch inputs (previously placeholder-only).
+- Added stable input IDs and `data-testid` hooks for deterministic UI/e2e assertions.

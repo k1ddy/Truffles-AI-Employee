@@ -83,14 +83,14 @@ export default function TenantsTopControls({
                 Рабочий контур: {contextCompanyName ?? "—"} / {contextClientName ?? "—"} / {contextBranchName ?? "—"}
                 {isPlatformPreset ? (
                     <span>
-                        {" · ID (advanced): "}
+                        {" · ID (для диагностики): "}
                         {contextCompanyId ?? "—"} / {contextClientId ?? "—"} / {contextBranchId ?? "—"}
                     </span>
                 ) : null}
             </div>
             <div className="rounded-lg border border-primary/30 bg-primary/[0.04] p-3" data-testid="tenants-page-filters">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Шаг 1. Фильтры текущей страницы
+                    Шаг 1. Фильтры страницы
                 </div>
                 <div className="grid gap-2 md:grid-cols-3">
                     <label className="text-xs text-muted-foreground">
@@ -148,7 +148,7 @@ export default function TenantsTopControls({
                         onClick={onApplyContextToPageFilters}
                         data-testid="tenants-page-filter-apply-context"
                     >
-                        Применить контур
+                        Взять из рабочего контура
                     </button>
                     <button
                         className="btn-ghost"
@@ -165,7 +165,7 @@ export default function TenantsTopControls({
             </div>
             <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="tenants-context-lens">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Шаг 2. Рабочий контур между разделами
+                    Шаг 2. Рабочий контур
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-xs">
                     <span className="rounded-full border border-border/60 px-2 py-1">
@@ -200,11 +200,11 @@ export default function TenantsTopControls({
                     </button>
                 </div>
                 <div className="mt-2 text-xs text-muted-foreground">
-                    Контур нужен для переходов между разделами. Чтобы применить его к текущему списку, нажмите «Применить контур» в фильтрах страницы.
+                    Контур используется при переходах между разделами. Для списка на этой странице используйте кнопку «Взять из рабочего контура».
                 </div>
             </div>
             <div className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-workspace-modes">
-                <div className="text-xs text-muted-foreground mb-2">Рабочая зона Tenants:</div>
+                <div className="text-xs text-muted-foreground mb-2">Рабочая зона:</div>
                 <div className="flex flex-wrap items-center gap-2">
                     <button
                         className={workspaceMode === "portfolio" ? "btn-primary" : "btn-ghost"}
@@ -256,18 +256,19 @@ export default function TenantsTopControls({
             </div>
             <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="tenants-workspace-guide">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-foreground/80">
-                    Операционный guide
+                    Операционный ориентир
                 </div>
                 <div className="text-xs text-foreground/80">
-                    Портфель: риск-панель и состав клиентов. Онбординг: запуск нового филиала. Изменения:
-                    controlled change + draft/validate/publish. Decommission: архив/восстановление с подтверждением.
+                    Портфель: риски и состав клиентов. Онбординг: запуск нового филиала.
+                    Изменения: согласованное изменение и публикация. Вывод из эксплуатации: архив и восстановление.
                 </div>
                 <div className="mt-2 text-xs text-foreground/80">
-                    Перед Go-Live проверьте: `instance_id`, `phone`, `timezone`, `telegram_chat_id`, `knowledge_tag`,
-                    `payment_status`, активный reference pack.
+                    Перед запуском проверьте: `instance_id`, телефон, часовой пояс, `telegram_chat_id`,
+                    `knowledge_tag`, статус оплаты и активный reference pack.
                 </div>
                 <div className="mt-2 text-xs text-foreground/80">
-                    Порядок работы: `Action Queue`, затем page filters, затем профильная зона, затем подтверждение результата через trace/audit.
+                    Порядок работы: очередь действий, затем фильтры страницы, затем профильная зона,
+                    после чего проверка результата по журналу действий.
                 </div>
             </div>
         </div>

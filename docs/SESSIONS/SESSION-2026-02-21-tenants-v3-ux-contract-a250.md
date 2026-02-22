@@ -35,15 +35,22 @@
   - Ужесточён e2e контур Tenants для platform_admin: добавлен `Scenario E` (контрактные вызовы `portfolio/cockpit`) и убраны хрупкие текстовые ожидания перед runtime-skip в `Scenario B/C/D` + audit-сценарии.
   - Добавлен quality-мета контракт weekly snapshots: list response теперь отдаёт `storage_mode` (`table|audit_fallback`) и `schema_versions`; record response содержит `snapshot_schema_version`.
   - Обновлены unit-тесты weekly snapshots и helper-агрегация версий (`56 passed`).
+  - Wave3 закрыт по evidence: добавлен explicit backfill verification report с SQL-срезом runtime DB и quality thresholds (`missing/invalid/non_object = 0` в текущем срезе).
+  - Wave4 продолжен: блок quick-create вынесен из монолита `tenants/page.tsx` в отдельный компонент `TenantsQuickCreatePanel`.
+  - Wave5 усилен: top-controls + KPI/snapshots/decommission/client-audit copy очищены от части RU/EN+tech mix; quick-create поля филиала получили явные label/id/testid (a11y hardening).
+  - Закрыт регресс по видимости ошибок quick-create: `reportProvisioningError` теперь пишет scope по активной workspace-зоне (вместо жёсткого `onboarding`), чтобы `tenants-error-summary` показывался в текущем рабочем режиме.
 - next:
-  - Завершить Wave3: оформить explicit миграционный отчёт/backfill verification в docs (`before/after` SQL evidence + quality thresholds) и зафиксировать в `STATE.md`.
-  - Продолжить Wave4 декомпозицию `tenants/page.tsx` (вынос секций portfolio/changes/onboarding в отдельные компоненты).
+  - Продолжить Wave4 декомпозицию `tenants/page.tsx` (вынос секций `portfolio/changes/onboarding` в отдельные компоненты с сохранением контрактов e2e).
+  - Завершить Wave5: прогнать и зафиксировать fail-closed a11y lane для Tenants (`critical=0`, `serious=0`) на desktop/mobile.
   - Продолжить ужесточение e2e: убрать remaining soft-pass/early-return ветки в smoke-наборе `platform-admin.spec.ts` через seeded lane или deterministic fixtures.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
+  - console-web/src/components/TenantsQuickCreatePanel.tsx
   - console-web/src/app/tenants/use-tenants-page-filters.ts
   - console-web/src/components/TenantsTopControls.tsx
+  - docs/REPORTS/2026-02-20-tenants-v3-redesign-plan.md
+  - /tmp/tenants_weekly_snapshots_backfill_verify_20260222.txt
   - console-web/e2e/auth.setup.ts
   - console-web/e2e/platform-admin.spec.ts
   - truffles-api/app/schemas/console.py
@@ -55,4 +62,4 @@
   - truffles-api/app/models/tenants_weekly_snapshot.py
   - truffles-api/migrations/037_add_tenants_weekly_snapshots.sql
   - console-web/src/lib/api-client.ts
-- last_updated: 2026-02-22T03:20:07Z
+- last_updated: 2026-02-22T07:21:10Z
