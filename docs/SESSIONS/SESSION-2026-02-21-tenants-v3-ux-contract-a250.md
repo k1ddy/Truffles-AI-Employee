@@ -1,0 +1,58 @@
+# SESSION 2026-02-21-tenants-v3-ux-contract-a250 — Session 2026-02-21-tenants-v3-ux-contract-a250
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
+- branch: feat/2026-02-21-tenants-v3-ux-contract-a250
+- worktree: /home/zhan/worktrees/2026-02-21-tenants-v3-ux-contract-a250
+- base_ref: origin/main
+- scope: Контракт состояния Tenants + Wave3 snapshot hardening + частичное переключение Tenants на server contract (`portfolio/cockpit`)
+- done:
+  - Дополнен действующий TP контрактами состояния, матрицей поведения, глоссарием и acceptance сценариями.
+  - Исправлен `apply context` в Tenants: источник теперь `readConsoleContextScopeFromStorage`, а не stale `meData`.
+  - В верхних контролах Tenants убраны смешанные тех-термины и RU/EN-микс в key labels.
+  - Убрано блокирующее поведение у context clear-кнопок в UI.
+  - Добавлена визуальная иерархия top-controls: `Шаг 1. Фильтры страницы` и `Шаг 2. Рабочий контур`.
+  - Начата декомпозиция `tenants/page.tsx`: логика page filters + URL sync вынесена в `use-tenants-page-filters.ts`.
+  - Добавлены e2e сценарии `Scenario B/C/D` в `platform-admin.spec.ts`.
+  - Укреплён `auth.setup.ts`: добавлен `ensureAuthenticatedConsole` без хрупкой привязки к единственному `logout-button` чекпойнту.
+  - Добавлен recovery в `auth.setup.ts` для `ChunkLoadError` (retry + reload), стабилизирован setup-run.
+  - Выполнен runtime e2e прогон `Scenario B/C/D` на `https://console.truffles.kz` под platform_admin storage state: 3/3 passed.
+  - Продолжена декомпозиция Tenants: выделен hook `use-tenants-page-filters.ts` и очищен `page.tsx` от URL/filter sync деталей.
+  - Добавлен backend foundation по ТЗ: новые endpoint wrappers
+    - `GET /console/v1/admin/tenants/portfolio`
+    - `GET /console/v1/admin/tenants/company-cockpit`
+  - Добавлены schema models и unit tests для новых wrappers/хелпера query-request адаптации.
+  - Прогнаны проверки: `corepack pnpm -C console-web lint`, `corepack pnpm -C console-web build`.
+  - Wave3 snapshot storage переведён на typed server-backed модель: добавлены `TenantsWeeklySnapshot` model и миграция `037_add_tenants_weekly_snapshots.sql` с backfill из `audit_events`.
+  - `save/list weekly snapshots` в `console.py` переключены на таблицу `tenants_weekly_snapshots`; чтение из audit оставлено как read-only fallback при отсутствии миграции.
+  - Добавлена fail-closed семантика для save при неготовой БД: `503 TENANTS_WEEKLY_SNAPSHOT_STORAGE_UNAVAILABLE` вместо локального pseudo-success.
+  - Обновлён ISO week contract: backend week-key normalizer валидирует ISO неделю через `datetime.fromisocalendar`.
+  - Frontend Tenants: убран local-storage fallback для weekly snapshots и сообщение \"сохранено локально\"; сохранение теперь строго server-backed.
+  - Frontend Tenants подключён к `GET /admin/tenants/portfolio` и `GET /admin/tenants/company-cockpit` как приоритетным read-моделям для clients/branches/fleet attention.
+  - Обновлены `console-web/src/lib/api-client.ts` типы/методы для `tenants/portfolio` и `tenants/company-cockpit`.
+  - Прогнаны проверки: `ruff check ...`, `pytest -q truffles-api/tests/test_console_tenants_list.py` (`55 passed`), `corepack pnpm -C console-web lint`, `corepack pnpm -C console-web build`, `python3 truffles-api/scripts/generate_openapi.py --check`.
+  - Ужесточён e2e контур Tenants для platform_admin: добавлен `Scenario E` (контрактные вызовы `portfolio/cockpit`) и убраны хрупкие текстовые ожидания перед runtime-skip в `Scenario B/C/D` + audit-сценарии.
+  - Добавлен quality-мета контракт weekly snapshots: list response теперь отдаёт `storage_mode` (`table|audit_fallback`) и `schema_versions`; record response содержит `snapshot_schema_version`.
+  - Обновлены unit-тесты weekly snapshots и helper-агрегация версий (`56 passed`).
+- next:
+  - Завершить Wave3: оформить explicit миграционный отчёт/backfill verification в docs (`before/after` SQL evidence + quality thresholds) и зафиксировать в `STATE.md`.
+  - Продолжить Wave4 декомпозицию `tenants/page.tsx` (вынос секций portfolio/changes/onboarding в отдельные компоненты).
+  - Продолжить ужесточение e2e: убрать remaining soft-pass/early-return ветки в smoke-наборе `platform-admin.spec.ts` через seeded lane или deterministic fixtures.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
+  - console-web/src/app/tenants/page.tsx
+  - console-web/src/app/tenants/use-tenants-page-filters.ts
+  - console-web/src/components/TenantsTopControls.tsx
+  - console-web/e2e/auth.setup.ts
+  - console-web/e2e/platform-admin.spec.ts
+  - truffles-api/app/schemas/console.py
+  - truffles-api/app/routers/console.py
+  - truffles-api/tests/test_console_tenants_list.py
+  - truffles-api/app/schemas/console.py
+  - truffles-api/app/routers/console.py
+  - truffles-api/tests/test_console_tenants_list.py
+  - truffles-api/app/models/tenants_weekly_snapshot.py
+  - truffles-api/migrations/037_add_tenants_weekly_snapshots.sql
+  - console-web/src/lib/api-client.ts
+- last_updated: 2026-02-22T03:20:07Z

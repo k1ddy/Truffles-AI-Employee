@@ -4,23 +4,15 @@
  */
 
 export interface paths {
-    "/me": {
+    "/console/v1/me": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get current agent context
-         * @description Returns authenticated agent info, active client, accessible branches, and client list
-         */
-        get: operations["getMe"];
+        /** Get Me */
+        get: operations["get_me_console_v1_me_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -29,23 +21,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/agents": {
+    "/console/v1/agents": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * List agents with identities
-         * @description Returns agents and linked identities (e.g., telegram)
-         */
-        get: operations["listAgents"];
+        /** List Agents */
+        get: operations["list_agents_console_v1_agents_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -54,171 +38,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/agents/{agent_id}/telegram/link": {
+    "/console/v1/agents/{agent_id}/telegram/link": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path: {
-                /** @example f0b1a4c7-8f33-4f92-9b1f-9fe0f3d3e7b1 */
-                agent_id: components["parameters"]["agent_id"];
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate Telegram linking token
-         * @description Returns a short token and deep-link for Telegram account linking.
-         */
-        post: operations["linkAgentTelegram"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cases": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List cases (Inbox)
-         * @description Cursor-paginated list of handover cases with filters
-         */
-        get: operations["listCases"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cases/{case_id}": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Get case details */
-        get: operations["getCase"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cases/{case_id}/take": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         get?: never;
         put?: never;
-        /**
-         * Take ownership of a case
-         * @description Assigns case to current agent. Returns 409 if already taken.
-         *     Idempotent via Idempotency-Key header.
-         */
-        post: operations["takeCase"];
+        /** Link Agent Telegram */
+        post: operations["link_agent_telegram_console_v1_agents__agent_id__telegram_link_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/cases/{case_id}/resolve": {
+    "/console/v1/cases": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
-        /**
-         * Resolve and close a case
-         * @description Marks case as resolved. Must be assigned to current agent or owner/admin.
-         */
-        post: operations["resolveCase"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cases/{case_id}/return": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Return case to bot
-         * @description Returns case to bot and closes the handover.
-         */
-        post: operations["returnCase"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/cases/{case_id}/messages": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Get messages for a case */
-        get: operations["getCaseMessages"];
+        /** List Cases */
+        get: operations["list_cases_console_v1_cases_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -227,341 +72,233 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/conversations/{conversation_id}/messages": {
+    "/console/v1/cases/{case_id}/take": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Take Case */
+        post: operations["take_case_console_v1_cases__case_id__take_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/cases/{case_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve Case */
+        post: operations["resolve_case_console_v1_cases__case_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/cases/{case_id}/return": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Return Case */
+        post: operations["return_case_console_v1_cases__case_id__return_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/cases/{case_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Case Messages */
+        get: operations["get_case_messages_console_v1_cases__case_id__messages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/inbox/macros": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Inbox Macros */
+        get: operations["list_inbox_macros_console_v1_inbox_macros_get"];
+        put?: never;
+        /** Create Inbox Macro */
+        post: operations["create_inbox_macro_console_v1_inbox_macros_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/inbox/macros/{macro_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Inbox Macro */
+        patch: operations["update_inbox_macro_console_v1_inbox_macros__macro_id__patch"];
+        trace?: never;
+    };
+    "/console/v1/cases/{case_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Case
+         * @description Get single case details by ID.
+         */
+        get: operations["get_case_console_v1_cases__case_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/conversations/{conversation_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
             path?: never;
             cookie?: never;
         };
         get?: never;
         put?: never;
         /**
-         * Send message from manager to customer
-         * @description Sends via outbox → WhatsApp. Case must be active and assigned.
-         *     Idempotent via Idempotency-Key header.
+         * Send Manager Message
+         * @description Send a message from the manager to the customer via WhatsApp.
          */
-        post: operations["sendManagerMessage"];
+        post: operations["send_manager_message_console_v1_conversations__conversation_id__messages_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/conversations/{conversation_id}/messages/media": {
+    "/console/v1/outreach/messages": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         get?: never;
         put?: never;
         /**
-         * Send media from manager to customer
-         * @description Uploads a media file and sends it to WhatsApp via outbox (or direct send when outbox is disabled).
-         *     Allowed types: photo, audio, document. Video is forbidden.
+         * Send Outreach Message
+         * @description Send manual outreach message by phone/JID with optional per-client bot pause.
          */
-        post: operations["sendManagerMedia"];
+        post: operations["send_outreach_message_console_v1_outreach_messages_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/inbox/macros": {
+    "/console/v1/conversations/{conversation_id}/human-lock": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List inbox macros */
-        get: operations["listInboxMacros"];
+        /** Get Conversation Human Lock Status */
+        get: operations["get_conversation_human_lock_status_console_v1_conversations__conversation_id__human_lock_get"];
         put?: never;
-        /** Create inbox macro */
-        post: operations["createInboxMacro"];
-        delete?: never;
+        post?: never;
+        /** Release Conversation Human Lock */
+        delete: operations["release_conversation_human_lock_console_v1_conversations__conversation_id__human_lock_delete"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/inbox/macros/{macro_id}": {
+    "/console/v1/conversations/{conversation_id}/human-lock/pause": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path: {
-                macro_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Update inbox macro */
-        patch: operations["updateInboxMacro"];
-        trace?: never;
-    };
-    "/health": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** System health check */
-        get: operations["getHealth"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/metrics/daily": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Daily case metrics */
-        get: operations["getMetricsDaily"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/business/summary": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Owner/Admin business summary */
-        get: operations["getBusinessSummary"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/business/incidents": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Owner/Admin incident feed for current scope */
-        get: operations["listBusinessIncidents"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/business/data-trust": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Owner/Admin data trust summary */
-        get: operations["getBusinessDataTrust"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/business/team-performance": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Owner/Admin team performance summary */
-        get: operations["getBusinessTeamPerformance"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/subscription/summary": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Owner/Admin subscription summary */
-        get: operations["getSubscriptionSummary"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/business/operations/owner-mode/preview": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         get?: never;
         put?: never;
-        /** Preview owner operation mode before apply */
-        post: operations["previewOwnerModeOperation"];
+        /** Pause Conversation Human Lock */
+        post: operations["pause_conversation_human_lock_console_v1_conversations__conversation_id__human_lock_pause_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/business/operations/owner-mode/apply": {
+    "/console/v1/conversations/{conversation_id}/messages/media": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         get?: never;
         put?: never;
-        /** Apply owner operation mode */
-        post: operations["applyOwnerModeOperation"];
+        /**
+         * Send Manager Media
+         * @description Send a media message from the manager to the customer via WhatsApp.
+         */
+        post: operations["send_manager_media_console_v1_conversations__conversation_id__messages_media_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/business/operations/owner-mode/rollback": {
+    "/console/v1/business/summary": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
-        /** Rollback owner mode operation */
-        post: operations["rollbackOwnerModeOperation"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/business/operations/{operation_id}/impact": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path: {
-                operation_id: string;
-            };
-            cookie?: never;
-        };
-        /** Get impact for a previously applied owner mode operation */
-        get: operations["getOwnerModeOperationImpact"];
+        /** Get Business Summary */
+        get: operations["get_business_summary_console_v1_business_summary_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -570,20 +307,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/telegram/health": {
+    "/console/v1/business/incidents": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Telegram connector health */
-        get: operations["getTelegramHealth"];
+        /** List Business Incidents */
+        get: operations["list_business_incidents_console_v1_business_incidents_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -592,108 +324,117 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/telegram/verify": {
+    "/console/v1/subscription/summary": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Subscription Summary */
+        get: operations["get_subscription_summary_console_v1_subscription_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/business/data-trust": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Business Data Trust */
+        get: operations["get_business_data_trust_console_v1_business_data_trust_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/business/team-performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Business Team Performance */
+        get: operations["get_business_team_performance_console_v1_business_team_performance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/business/operations/owner-mode/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
             path?: never;
             cookie?: never;
         };
         get?: never;
         put?: never;
-        /** Send verification message to Telegram */
-        post: operations["verifyTelegramConnector"];
+        /** Preview Owner Mode Operation */
+        post: operations["preview_owner_mode_operation_console_v1_business_operations_owner_mode_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/telegram/test": {
+    "/console/v1/business/operations/owner-mode/apply": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         get?: never;
         put?: never;
-        /** Send test message to Telegram */
-        post: operations["sendTelegramTest"];
+        /** Apply Owner Mode Operation */
+        post: operations["apply_owner_mode_operation_console_v1_business_operations_owner_mode_apply_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/ops/outbox": {
+    "/console/v1/business/operations/owner-mode/rollback": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Outbox queue (pending/processing/failed) */
-        get: operations["listOutbox"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/ops/outbox/retry": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         get?: never;
         put?: never;
-        /** Retry failed outbox messages */
-        post: operations["retryOutbox"];
+        /** Rollback Owner Mode Operation */
+        post: operations["rollback_owner_mode_operation_console_v1_business_operations_owner_mode_rollback_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/ops/jobs/catalog": {
+    "/console/v1/business/operations/{operation_id}/impact": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get ops jobs catalog */
-        get: operations["getOpsJobsCatalog"];
+        /** Get Owner Mode Operation Impact */
+        get: operations["get_owner_mode_operation_impact_console_v1_business_operations__operation_id__impact_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -702,20 +443,18 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/ops/jobs": {
+    "/console/v1/health": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List ops job history */
-        get: operations["listOpsJobs"];
+        /**
+         * Get Health
+         * @description Get system health status.
+         */
+        get: operations["get_health_console_v1_health_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -724,20 +463,18 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/ops/jobs/{job_id}": {
+    "/console/v1/ops/outbox": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get ops job details */
-        get: operations["getOpsJob"];
+        /**
+         * List Outbox
+         * @description List outbox queue entries for ops.
+         */
+        get: operations["list_outbox_console_v1_ops_outbox_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -746,337 +483,190 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/ops/jobs/run": {
+    "/console/v1/ops/outbox/retry": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         get?: never;
         put?: never;
-        /** Run ops job (dry-run or execute) */
-        post: operations["runOpsJob"];
+        /**
+         * Retry Outbox
+         * @description Retry failed outbox messages.
+         */
+        post: operations["retry_outbox_console_v1_ops_outbox_retry_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/settings": {
+    "/console/v1/ops/reminders": {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get client settings */
-        get: operations["getSettings"];
+        /**
+         * List Reminders
+         * @description List reminder jobs with diagnostics and linked outbox state.
+         */
+        get: operations["list_reminders_console_v1_ops_reminders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/ops/reminders/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Reminders
+         * @description Retry reminder jobs in FAILED/PENDING state.
+         */
+        post: operations["retry_reminders_console_v1_ops_reminders_retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/ops/jobs/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ops Jobs Catalog */
+        get: operations["get_ops_jobs_catalog_console_v1_ops_jobs_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/ops/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Ops Jobs */
+        get: operations["list_ops_jobs_console_v1_ops_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/ops/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ops Job */
+        get: operations["get_ops_job_console_v1_ops_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/ops/jobs/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Ops Job */
+        post: operations["run_ops_job_console_v1_ops_jobs_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Audit Events
+         * @description List audit events for the current client.
+         */
+        get: operations["list_audit_events_console_v1_audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Settings
+         * @description Get settings info: branches, agents, and bot config for the current client.
+         */
+        get: operations["get_settings_console_v1_settings_get"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
         /**
-         * Update client settings
-         * @description Owner/admin only
+         * Update Settings
+         * @description Update client settings (owner/admin only).
          */
-        patch: operations["updateSettings"];
+        patch: operations["update_settings_console_v1_settings_patch"];
         trace?: never;
     };
-    "/onboarding/status": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Get onboarding status */
-        get: operations["getOnboardingStatus"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/onboarding/scorecard": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Get onboarding scorecard */
-        get: operations["getOnboardingScorecard"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/onboarding/advance": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Advance onboarding step */
-        post: operations["advanceOnboarding"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/confirmations": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Request confirmation for destructive actions */
-        post: operations["createConfirmation"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/calendar/specialists": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** List specialists */
-        get: operations["listCalendarSpecialists"];
-        put?: never;
-        /** Create specialist */
-        post: operations["createCalendarSpecialist"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/calendar/specialists/{specialist_id}": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path: {
-                specialist_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Update specialist */
-        patch: operations["updateCalendarSpecialist"];
-        trace?: never;
-    };
-    "/calendar/specialists/{specialist_id}/enable": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path: {
-                specialist_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Enable specialist */
-        post: operations["enableCalendarSpecialist"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/calendar/specialists/{specialist_id}/disable": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path: {
-                specialist_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Disable specialist */
-        post: operations["disableCalendarSpecialist"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/calendar/slots": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Get specialist slots */
-        get: operations["getCalendarSlots"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/calendar/bookings": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** List bookings */
-        get: operations["listCalendarBookings"];
-        put?: never;
-        /** Create booking */
-        post: operations["createCalendarBooking"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/calendar/bookings/{booking_id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path: {
-                booking_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Cancel booking */
-        post: operations["cancelCalendarBooking"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/calendar/google/connect": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Start Google Calendar OAuth */
-        get: operations["startCalendarGoogleConnect"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/calendar/google/callback": {
+    "/console/v1/metrics/daily": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Handle Google Calendar OAuth callback */
-        get: operations["handleCalendarGoogleCallback"];
+        /**
+         * Get Metrics Daily
+         * @description Get daily metrics for cases.
+         */
+        get: operations["get_metrics_daily_console_v1_metrics_daily_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1085,249 +675,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/calendar/google/status": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Google Calendar connection status */
-        get: operations["getCalendarGoogleStatus"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/knowledge/current": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Get current published knowledge */
-        get: operations["getKnowledgeCurrent"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/knowledge/validate": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Validate knowledge draft */
-        post: operations["validateKnowledge"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/knowledge/publish": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Publish knowledge draft */
-        post: operations["publishKnowledge"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/knowledge/history": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** List knowledge versions */
-        get: operations["listKnowledgeHistory"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/knowledge/rollback": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Rollback to previous knowledge version */
-        post: operations["rollbackKnowledge"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/learning/candidates": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** List learning candidates */
-        get: operations["listLearningCandidates"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/learning/candidates/{candidate_id}/approve": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path: {
-                candidate_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Approve learning candidate */
-        post: operations["approveLearningCandidate"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/learning/candidates/{candidate_id}/reject": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path: {
-                candidate_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reject learning candidate */
-        post: operations["rejectLearningCandidate"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/audit": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** List audit events */
-        get: operations["listAuditEvents"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/companies": {
+    "/console/v1/telegram/health": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List companies */
-        get: operations["listAdminCompanies"];
+        /** Get Telegram Health */
+        get: operations["get_telegram_health_console_v1_telegram_health_get"];
         put?: never;
-        /** Create company */
-        post: operations["createAdminCompany"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/admin/companies/{company_id}": {
+    "/console/v1/telegram/verify": {
         parameters: {
             query?: never;
             header?: never;
@@ -1336,33 +701,496 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Update company */
-        patch: operations["updateAdminCompany"];
-        trace?: never;
-    };
-    "/admin/clients": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List clients */
-        get: operations["listAdminClients"];
-        put?: never;
-        /** Create client */
-        post: operations["createAdminClient"];
+        /** Verify Telegram Connector */
+        post: operations["verify_telegram_connector_console_v1_telegram_verify_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/admin/clients/{client_id}": {
+    "/console/v1/telegram/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send Telegram Test */
+        post: operations["send_telegram_test_console_v1_telegram_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/onboarding/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Onboarding Status */
+        get: operations["get_onboarding_status_console_v1_onboarding_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/onboarding/scorecard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Onboarding Scorecard */
+        get: operations["get_onboarding_scorecard_console_v1_onboarding_scorecard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/onboarding/advance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Advance Onboarding */
+        post: operations["advance_onboarding_console_v1_onboarding_advance_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/confirmations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Console Confirmation */
+        post: operations["create_console_confirmation_console_v1_confirmations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/knowledge/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Knowledge Current */
+        get: operations["get_knowledge_current_console_v1_knowledge_current_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/knowledge/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate Knowledge */
+        post: operations["validate_knowledge_console_v1_knowledge_validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/knowledge/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Knowledge */
+        post: operations["publish_knowledge_console_v1_knowledge_publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/knowledge/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Knowledge History */
+        get: operations["list_knowledge_history_console_v1_knowledge_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/knowledge/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback Knowledge */
+        post: operations["rollback_knowledge_console_v1_knowledge_rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/learning/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Learning Candidates */
+        get: operations["list_learning_candidates_console_v1_learning_candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/learning/candidates/{candidate_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Learning Candidate */
+        post: operations["approve_learning_candidate_console_v1_learning_candidates__candidate_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/learning/candidates/{candidate_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Learning Candidate */
+        post: operations["reject_learning_candidate_console_v1_learning_candidates__candidate_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/companies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Companies */
+        get: operations["list_companies_console_v1_admin_companies_get"];
+        put?: never;
+        /** Create Company */
+        post: operations["create_company_console_v1_admin_companies_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Clients */
+        get: operations["list_clients_console_v1_admin_clients_get"];
+        put?: never;
+        /** Create Client */
+        post: operations["create_client_console_v1_admin_clients_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/branches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Branches */
+        get: operations["list_branches_console_v1_admin_branches_get"];
+        put?: never;
+        /** Create Branch */
+        post: operations["create_branch_console_v1_admin_branches_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/tenants/weekly-snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Tenants Weekly Snapshots */
+        get: operations["list_tenants_weekly_snapshots_console_v1_admin_tenants_weekly_snapshots_get"];
+        put?: never;
+        /** Save Tenants Weekly Snapshot */
+        post: operations["save_tenants_weekly_snapshot_console_v1_admin_tenants_weekly_snapshots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/tenants/sensitive-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Audit Tenants Sensitive Access */
+        post: operations["audit_tenants_sensitive_access_console_v1_admin_tenants_sensitive_access_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/marketing/campaigns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Marketing Campaigns */
+        get: operations["list_marketing_campaigns_console_v1_admin_marketing_campaigns_get"];
+        put?: never;
+        /** Create Marketing Campaign */
+        post: operations["create_marketing_campaign_console_v1_admin_marketing_campaigns_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/marketing/campaigns/{campaign_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Marketing Campaign */
+        post: operations["preview_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/marketing/campaigns/{campaign_id}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Execute Marketing Campaign */
+        post: operations["execute_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__execute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/marketing/campaigns/{campaign_id}/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Marketing Campaign Diagnostics */
+        get: operations["get_marketing_campaign_diagnostics_console_v1_admin_marketing_campaigns__campaign_id__diagnostics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/marketing/campaigns/{campaign_id}/retry-failed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Failed Marketing Campaign Deliveries */
+        post: operations["retry_failed_marketing_campaign_deliveries_console_v1_admin_marketing_campaigns__campaign_id__retry_failed_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/provider-lifecycle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Provider Lifecycle */
+        get: operations["list_provider_lifecycle_console_v1_admin_provider_lifecycle_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/integrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Integrations */
+        get: operations["list_integrations_console_v1_admin_integrations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/integrations/{branch_id}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Integration Reconcile For Branch */
+        post: operations["run_integration_reconcile_for_branch_console_v1_admin_integrations__branch_id__reconcile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/fleet/attention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Fleet Attention */
+        get: operations["list_fleet_attention_console_v1_admin_fleet_attention_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/incidents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Admin Incidents */
+        get: operations["list_admin_incidents_console_v1_admin_incidents_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/companies/{company_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1375,63 +1203,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Update client */
-        patch: operations["updateAdminClient"];
+        /** Update Company */
+        patch: operations["update_company_console_v1_admin_companies__company_id__patch"];
         trace?: never;
     };
-    "/admin/clients/{client_id}/archive": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Archive client */
-        post: operations["archiveAdminClient"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/clients/{client_id}/restore": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Restore client */
-        post: operations["restoreAdminClient"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/branches": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List branches */
-        get: operations["listAdminBranches"];
-        put?: never;
-        /** Create branch */
-        post: operations["createAdminBranch"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/branches/{branch_id}": {
+    "/console/v1/admin/clients/{client_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1444,11 +1220,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Update branch */
-        patch: operations["patchAdminBranch"];
+        /** Update Client */
+        patch: operations["update_client_console_v1_admin_clients__client_id__patch"];
         trace?: never;
     };
-    "/admin/branches/{branch_id}/go-live/approve": {
+    "/console/v1/admin/clients/{client_id}/archive": {
         parameters: {
             query?: never;
             header?: never;
@@ -1457,15 +1233,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Approve branch go-live */
-        post: operations["approveAdminBranchGoLive"];
+        /** Archive Client */
+        post: operations["archive_client_console_v1_admin_clients__client_id__archive_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/admin/branches/{branch_id}/go-live/reject": {
+    "/console/v1/admin/clients/{client_id}/restore": {
         parameters: {
             query?: never;
             header?: never;
@@ -1474,254 +1250,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Reject branch go-live */
-        post: operations["rejectAdminBranchGoLive"];
+        /** Restore Client */
+        post: operations["restore_client_console_v1_admin_clients__client_id__restore_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/admin/branches/{branch_id}/go-live/waive": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create temporary go-live waiver */
-        post: operations["waiveAdminBranchGoLive"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/branch-changes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List branch changes */
-        get: operations["listAdminBranchChanges"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/branch-changes/draft": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create branch change draft */
-        post: operations["draftAdminBranchChange"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/branch-changes/{change_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get branch change details */
-        get: operations["getAdminBranchChange"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/branch-changes/{change_id}/validate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Validate branch change draft */
-        post: operations["validateAdminBranchChange"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/branch-changes/{change_id}/publish": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Publish validated branch change */
-        post: operations["publishAdminBranchChange"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/branch-changes/{change_id}/rollback": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Roll back published branch change */
-        post: operations["rollbackAdminBranchChange"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/integrations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List branch integration status and drift signals */
-        get: operations["listAdminIntegrations"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/provider-lifecycle": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List provider lifecycle facts for branch WhatsApp operations */
-        get: operations["listAdminProviderLifecycle"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/integrations/{branch_id}/reconcile": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Run integration reconcile for a single branch */
-        post: operations["runAdminIntegrationReconcileForBranch"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/fleet/attention": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List active fleet risk and attention items */
-        get: operations["listFleetAttention"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/incidents": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List fleet incidents for platform admin */
-        get: operations["listAdminIncidents"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/agents": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create agent */
-        post: operations["createAdminAgent"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/memberships": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List memberships */
-        get: operations["listAdminMemberships"];
-        put?: never;
-        /** Create membership */
-        post: operations["createAdminMembership"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/memberships/{membership_id}": {
+    "/console/v1/admin/branches/{branch_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1734,115 +1271,19 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Update membership */
-        patch: operations["updateAdminMembership"];
+        /** Update Branch */
+        patch: operations["update_branch_console_v1_admin_branches__branch_id__patch"];
         trace?: never;
     };
-    "/admin/agents/{agent_id}/disable": {
+    "/console/v1/admin/branch-changes": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
-        /** Disable agent access */
-        post: operations["disableAdminAgent"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/agents/{agent_id}/enable": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Enable agent access */
-        post: operations["enableAdminAgent"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/agents/{agent_id}/oidc/rebind": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Rebind OIDC identity for agent */
-        post: operations["rebindAdminAgentOidc"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/capabilities": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Get effective capabilities */
-        get: operations["getAdminCapabilities"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Upsert capabilities record */
-        patch: operations["patchAdminCapabilities"];
-        trace?: never;
-    };
-    "/admin/onboarding-contract": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Get effective onboarding contract */
-        get: operations["getAdminOnboardingContract"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Upsert onboarding contract record */
-        patch: operations["patchAdminOnboardingContract"];
-        trace?: never;
-    };
-    "/admin/webhook-secret": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        /** Get or generate webhook secret from branch instance_id */
-        get: operations["getAdminWebhookSecret"];
+        /** List Branch Changes */
+        get: operations["list_branch_changes_console_v1_admin_branch_changes_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1851,35 +1292,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/admin/onboarding/autopilot": {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Run single-operator onboarding autopilot */
-        post: operations["runAdminOnboardingAutopilot"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/reference-packs": {
+    "/console/v1/admin/branch-changes/{change_id}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List niche reference packs */
-        get: operations["listAdminReferencePacks"];
+        /** Get Branch Change */
+        get: operations["get_branch_change_console_v1_admin_branch_changes__change_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1888,7 +1309,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/admin/reference-packs/{domain_slug}": {
+    "/console/v1/admin/branch-changes/draft": {
         parameters: {
             query?: never;
             header?: never;
@@ -1896,8 +1317,575 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Create or update niche reference pack */
-        put: operations["upsertAdminReferencePack"];
+        put?: never;
+        /** Draft Branch Change */
+        post: operations["draft_branch_change_console_v1_admin_branch_changes_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/branch-changes/{change_id}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate Branch Change */
+        post: operations["validate_branch_change_console_v1_admin_branch_changes__change_id__validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/branch-changes/{change_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Branch Change */
+        post: operations["publish_branch_change_console_v1_admin_branch_changes__change_id__publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/branch-changes/{change_id}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback Branch Change */
+        post: operations["rollback_branch_change_console_v1_admin_branch_changes__change_id__rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/branches/{branch_id}/go-live/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Branch Go Live */
+        post: operations["approve_branch_go_live_console_v1_admin_branches__branch_id__go_live_approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/branches/{branch_id}/go-live/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Branch Go Live */
+        post: operations["reject_branch_go_live_console_v1_admin_branches__branch_id__go_live_reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/branches/{branch_id}/go-live/waive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Waive Branch Go Live */
+        post: operations["waive_branch_go_live_console_v1_admin_branches__branch_id__go_live_waive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Agent */
+        post: operations["create_agent_console_v1_admin_agents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/memberships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Memberships */
+        get: operations["list_memberships_console_v1_admin_memberships_get"];
+        put?: never;
+        /** Create Membership */
+        post: operations["create_membership_console_v1_admin_memberships_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/memberships/{membership_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Membership */
+        patch: operations["update_membership_console_v1_admin_memberships__membership_id__patch"];
+        trace?: never;
+    };
+    "/console/v1/admin/agents/{agent_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable Agent Access */
+        post: operations["disable_agent_access_console_v1_admin_agents__agent_id__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/agents/{agent_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable Agent Access */
+        post: operations["enable_agent_access_console_v1_admin_agents__agent_id__enable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/agents/{agent_id}/oidc/rebind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rebind Agent Oidc Identity */
+        post: operations["rebind_agent_oidc_identity_console_v1_admin_agents__agent_id__oidc_rebind_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Capabilities */
+        get: operations["get_capabilities_console_v1_admin_capabilities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Capabilities */
+        patch: operations["patch_capabilities_console_v1_admin_capabilities_patch"];
+        trace?: never;
+    };
+    "/console/v1/admin/onboarding-contract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Onboarding Contract */
+        get: operations["get_onboarding_contract_console_v1_admin_onboarding_contract_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Onboarding Contract */
+        patch: operations["patch_onboarding_contract_console_v1_admin_onboarding_contract_patch"];
+        trace?: never;
+    };
+    "/console/v1/admin/webhook-secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Webhook Secret */
+        get: operations["get_webhook_secret_console_v1_admin_webhook_secret_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/onboarding/autopilot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Onboarding Autopilot */
+        post: operations["run_onboarding_autopilot_console_v1_admin_onboarding_autopilot_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/onboarding-blueprints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Onboarding Blueprints Api */
+        get: operations["list_onboarding_blueprints_api_console_v1_admin_onboarding_blueprints_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/reference-packs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Reference Packs */
+        get: operations["list_reference_packs_console_v1_admin_reference_packs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/admin/reference-packs/{domain_slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Upsert Reference Pack */
+        put: operations["upsert_reference_pack_console_v1_admin_reference_packs__domain_slug__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/calendar/specialists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Specialists
+         * @description Get all specialists for the client.
+         */
+        get: operations["list_specialists_console_v1_calendar_specialists_get"];
+        put?: never;
+        /** Create Specialist */
+        post: operations["create_specialist_console_v1_calendar_specialists_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/calendar/specialists/{specialist_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Specialist */
+        patch: operations["update_specialist_console_v1_calendar_specialists__specialist_id__patch"];
+        trace?: never;
+    };
+    "/console/v1/calendar/specialists/{specialist_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable Specialist */
+        post: operations["enable_specialist_console_v1_calendar_specialists__specialist_id__enable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/calendar/specialists/{specialist_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable Specialist */
+        post: operations["disable_specialist_console_v1_calendar_specialists__specialist_id__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/calendar/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Slots
+         * @description Get available time slots for a specialist on a given date.
+         *     Combines working hours, existing bookings, and Google Calendar.
+         */
+        get: operations["get_slots_console_v1_calendar_slots_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/calendar/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Bookings
+         * @description Get bookings with filters.
+         */
+        get: operations["list_bookings_console_v1_calendar_bookings_get"];
+        put?: never;
+        /**
+         * Create Booking
+         * @description Create a new booking.
+         *
+         *     Concurrency-safe: uses FOR UPDATE NOWAIT to prevent double-booking.
+         */
+        post: operations["create_booking_console_v1_calendar_bookings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/calendar/bookings/{booking_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Booking
+         * @description Cancel a booking.
+         */
+        post: operations["cancel_booking_console_v1_calendar_bookings__booking_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/calendar/bookings/{booking_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update Booking Status
+         * @description Update booking visit status (completed/no_show).
+         */
+        post: operations["update_booking_status_console_v1_calendar_bookings__booking_id__status_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/calendar/bookings/{booking_id}/no-show-followup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register Booking No Show Followup
+         * @description Record manager follow-up for a no-show booking.
+         */
+        post: operations["register_booking_no_show_followup_console_v1_calendar_bookings__booking_id__no_show_followup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/calendar/google/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Google Connect
+         * @description Start Google Calendar OAuth flow.
+         *     Redirects to Google consent screen.
+         */
+        get: operations["google_connect_console_v1_calendar_google_connect_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/calendar/google/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Google Callback
+         * @description Handle Google OAuth callback.
+         *     Stores tokens and redirects to settings page.
+         */
+        get: operations["google_callback_console_v1_calendar_google_callback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/console/v1/calendar/google/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Google Status
+         * @description Check if Google Calendar is connected.
+         */
+        get: operations["google_status_console_v1_calendar_google_status_get"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1909,2669 +1897,4978 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        Error: {
-            /** @description Machine-readable error code */
-            code: string;
-            /** @description Human-readable message */
-            message: string;
-            details?: {
-                [key: string]: unknown;
-            } | null;
-            /** @description Correlation ID for debugging */
-            trace_id: string;
-        };
-        ErrorResponse: {
-            error: components["schemas"]["Error"];
-        };
-        FastAPIErrorResponse: {
-            detail: string;
-        };
-        ValidationErrorItem: {
-            [key: string]: unknown;
-        };
-        ValidationError: {
-            detail: components["schemas"]["ValidationErrorItem"][];
-        };
-        Agent: {
-            /** Format: uuid */
-            id?: string;
-            name?: string | null;
-            /** @enum {string} */
-            role?: "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer";
-            /** Format: uuid */
-            client_id?: string;
+        /** Body_send_manager_media_console_v1_conversations__conversation_id__messages_media_post */
+        Body_send_manager_media_console_v1_conversations__conversation_id__messages_media_post: {
             /**
-             * Format: uuid
-             * @description Required when role=manager or specialist.
+             * File
+             * Format: binary
              */
-            branch_id?: string | null;
-            is_active?: boolean;
+            file: string;
+            /** Caption */
+            caption?: string | null;
+            /**
+             * Pause Enabled
+             * @default true
+             */
+            pause_enabled: boolean | null;
+            /**
+             * Pause Minutes
+             * @default 30
+             */
+            pause_minutes: number | null;
+            /** Pause Reason */
+            pause_reason?: string | null;
         };
-        AgentIdentity: {
-            /** @enum {string} */
-            channel?: "telegram";
-            external_id?: string;
+        /** BookingActionResponse */
+        BookingActionResponse: {
+            /** Success */
+            success: boolean;
+            booking: components["schemas"]["BookingResponse"];
+        };
+        /** BookingCreate */
+        BookingCreate: {
+            /** Specialist Id */
+            specialist_id: string;
+            /**
+             * Start At
+             * Format: date-time
+             */
+            start_at: string;
+            /**
+             * End At
+             * Format: date-time
+             */
+            end_at: string;
+            /** Customer Name */
+            customer_name?: string | null;
+            /** Customer Phone */
+            customer_phone?: string | null;
+            /** Service Type */
+            service_type?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Conversation Id */
+            conversation_id?: string | null;
+        };
+        /** BookingNoShowFollowUpRequest */
+        BookingNoShowFollowUpRequest: {
+            /**
+             * Result
+             * @default contacted
+             * @enum {string}
+             */
+            result: "contacted" | "rebooked";
+            /** Rebooked Appointment Id */
+            rebooked_appointment_id?: string | null;
+            /** Note */
+            note?: string | null;
+        };
+        /** BookingResponse */
+        BookingResponse: {
+            /** Id */
+            id: string;
+            /** Specialist Id */
+            specialist_id: string;
+            /** Specialist Name */
+            specialist_name: string;
+            /** Start At */
+            start_at: string;
+            /** End At */
+            end_at: string;
+            /** Customer Name */
+            customer_name?: string | null;
+            /** Customer Phone */
+            customer_phone?: string | null;
+            /** Service Type */
+            service_type?: string | null;
+            /** Status */
+            status: string;
+            /**
+             * No Show Followup Done
+             * @default false
+             */
+            no_show_followup_done: boolean;
+            /** No Show Followup Result */
+            no_show_followup_result?: string | null;
+            /** No Show Followup Closed At */
+            no_show_followup_closed_at?: string | null;
+            /** No Show Followup Closed By */
+            no_show_followup_closed_by?: string | null;
+            /** No Show Followup Rebooked Appointment Id */
+            no_show_followup_rebooked_appointment_id?: string | null;
+            /** Google Event Id */
+            google_event_id?: string | null;
+            /** Created At */
+            created_at: string;
+        };
+        /** BookingStatusUpdateRequest */
+        BookingStatusUpdateRequest: {
+            /** Status */
+            status: string;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** BookingsListResponse */
+        BookingsListResponse: {
+            /** Items */
+            items: components["schemas"]["BookingResponse"][];
+        };
+        /** CapabilitiesPayload */
+        CapabilitiesPayload: {
+            /** Domain Slug */
+            domain_slug?: string | null;
+            channels?: components["schemas"]["CapabilityChannels"];
+            providers?: components["schemas"]["CapabilityProviders"];
+            features?: components["schemas"]["CapabilityFeatures"];
+            tools?: components["schemas"]["CapabilityTools"];
+        };
+        /** CapabilityChannels */
+        CapabilityChannels: {
+            /** Whatsapp */
+            whatsapp?: boolean | null;
+            /** Telegram */
+            telegram?: boolean | null;
+            /** Instagram */
+            instagram?: boolean | null;
+        };
+        /** CapabilityFeatures */
+        CapabilityFeatures: {
+            /** Booking Mode */
+            booking_mode?: ("collect_preferences" | "confirm_slots") | null;
+            /** Knowledge Upload */
+            knowledge_upload?: boolean | null;
+            /** Analytics */
+            analytics?: boolean | null;
+            /** Auto Learn */
+            auto_learn?: boolean | null;
+        };
+        /** CapabilityProviders */
+        CapabilityProviders: {
+            /** Availability Provider */
+            availability_provider?: ("none" | "google_calendar" | "bitrix" | "amocrm" | "manual") | null;
+            /** Crm Provider */
+            crm_provider?: ("none" | "amocrm" | "bitrix" | "custom") | null;
+            /** Calendar Provider */
+            calendar_provider?: ("none" | "google_calendar" | "local") | null;
+        };
+        /** CapabilityTools */
+        CapabilityTools: {
+            /** Allow */
+            allow?: string[] | null;
+            /** Deny */
+            deny?: string[] | null;
+        };
+        /** ConsoleAgent */
+        ConsoleAgent: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name?: string | null;
+            /** Role */
+            role: string;
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Is Active */
+            is_active: boolean;
+        };
+        /** ConsoleAgentCreateRequest */
+        ConsoleAgentCreateRequest: {
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer";
+            /** Name */
+            name?: string | null;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean | null;
+            /** Oidc Subject */
+            oidc_subject?: string | null;
+            /** Sso Username */
+            sso_username?: string | null;
+            /** Sso Password */
+            sso_password?: string | null;
+            /**
+             * Sso Temp Password
+             * @default true
+             */
+            sso_temp_password: boolean | null;
+        };
+        /** ConsoleAgentCreateResponse */
+        ConsoleAgentCreateResponse: {
+            agent: components["schemas"]["ConsoleAgent"];
+        };
+        /** ConsoleAgentIdentity */
+        ConsoleAgentIdentity: {
+            /**
+             * Channel
+             * @constant
+             */
+            channel: "telegram";
+            /** External Id */
+            external_id: string;
+            /** Username */
             username?: string | null;
-            /** Format: date-time */
+            /** Linked At */
             linked_at?: string | null;
         };
-        AgentWithIdentities: {
-            /** Format: uuid */
-            id?: string;
+        /** ConsoleAgentInfo */
+        ConsoleAgentInfo: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
             name?: string | null;
-            /** @enum {string} */
-            role?: "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer";
-            /** Format: uuid */
-            client_id?: string;
-            /** Format: uuid */
-            branch_id?: string | null;
-            is_active?: boolean;
-            identities?: components["schemas"]["AgentIdentity"][];
+            /** Role */
+            role: string;
+            /** Is Active */
+            is_active: boolean;
         };
-        Company: {
-            /** Format: uuid */
-            id?: string;
-            name?: string;
-            billing_info?: {
-                [key: string]: unknown;
-            } | null;
-        };
-        CompanyCreateRequest: {
-            name: string;
-            billing_info?: {
-                [key: string]: unknown;
-            } | null;
-        };
-        CompanyCreateResponse: {
-            company?: components["schemas"]["Company"];
-        };
-        CompanyUpdateRequest: {
-            name?: string;
-            billing_info?: {
-                [key: string]: unknown;
-            } | null;
-        };
-        CompanyListResponse: {
-            items: components["schemas"]["Company"][];
-            cursor?: string | null;
-            has_more: boolean;
-        };
-        Client: {
-            /** Format: uuid */
-            id?: string;
-            slug?: string;
-            name?: string;
-            status?: string | null;
-            /** Format: uuid */
-            company_id?: string | null;
-            company_name?: string | null;
-            /** @enum {string|null} */
-            lifecycle_state?: "lead" | "contracting" | "onboarding" | "go_live_ready" | "active" | "paused" | "archived" | null;
-            /** @enum {string|null} */
-            payment_status?: "pending" | "confirmed" | "rejected" | "unknown" | null;
-            /** @enum {string|null} */
-            commercial_state?: "contract_missing" | "payment_pending" | "payment_confirmed" | "payment_rejected" | null;
-            /** @enum {string|null} */
-            service_state?: "ok" | "degraded" | "attention" | null;
-            owner_name?: string | null;
-            next_action?: string | null;
-            total_branches?: number | null;
-            active_branches?: number | null;
-            degraded_branches?: number | null;
-            go_live_ready_branches?: number | null;
-            /** Format: uuid */
-            reference_branch_ids?: string[] | null;
-            reference_branch_reason?: string | null;
-        };
-        ClientCreateRequest: {
-            slug: string;
-            /** Format: uuid */
-            company_id: string;
-            status?: string | null;
-        };
-        ClientCreateResponse: {
-            client?: components["schemas"]["Client"];
-        };
-        ClientUpdateRequest: {
-            slug?: string;
-            /** Format: uuid */
-            company_id?: string | null;
-            status?: string | null;
-        };
-        ClientLifecycleActionRequest: {
+        /** ConsoleAgentLifecycleActionRequest */
+        ConsoleAgentLifecycleActionRequest: {
+            /** Reason */
             reason: string;
         };
-        ClientListResponse: {
-            items: components["schemas"]["Client"][];
-            cursor?: string | null;
-            has_more: boolean;
-            summary?: components["schemas"]["FleetSummary"];
+        /** ConsoleAgentListResponse */
+        ConsoleAgentListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleAgentWithIdentities"][];
         };
-        FleetSummary: {
+        /** ConsoleAgentMembership */
+        ConsoleAgentMembership: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Agent Id
+             * Format: uuid
+             */
+            agent_id: string;
+            /** Agent Name */
+            agent_name?: string | null;
+            /** Agent Client Id */
+            agent_client_id?: string | null;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "company" | "client" | "branch";
+            /** Company Id */
+            company_id?: string | null;
+            /** Client Id */
+            client_id?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer";
+            /** Is Active */
+            is_active: boolean;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ConsoleAgentOidcRebindRequest */
+        ConsoleAgentOidcRebindRequest: {
+            /** Oidc Subject */
+            oidc_subject: string;
+            /** Reason */
+            reason: string;
+        };
+        /** ConsoleAgentOidcRebindResponse */
+        ConsoleAgentOidcRebindResponse: {
+            /**
+             * Agent Id
+             * Format: uuid
+             */
+            agent_id: string;
+            /** Oidc Subject */
+            oidc_subject: string;
+            /** Previous Oidc Subject */
+            previous_oidc_subject?: string | null;
+        };
+        /** ConsoleAgentWithIdentities */
+        ConsoleAgentWithIdentities: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name?: string | null;
+            /** Role */
+            role: string;
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Is Active */
+            is_active: boolean;
+            /**
+             * Identities
+             * @default []
+             */
+            identities: components["schemas"]["ConsoleAgentIdentity"][];
+        };
+        /** ConsoleAnalyticsTopIntent */
+        ConsoleAnalyticsTopIntent: {
+            /** Intent */
+            intent: string;
+            /** Count */
+            count: number;
+            /** Share */
+            share: number;
+        };
+        /** ConsoleAnalyticsTopSection */
+        ConsoleAnalyticsTopSection: {
+            /** Section */
+            section: string;
+            /** Count */
+            count: number;
+            /** Share */
+            share: number;
+        };
+        /** ConsoleAnalyticsTrendPoint */
+        ConsoleAnalyticsTrendPoint: {
+            /** Date */
+            date: string;
+            /** Bot Closed Rate */
+            bot_closed_rate?: number | null;
+            /** Booking Conversion Rate */
+            booking_conversion_rate?: number | null;
+            /** First Response P50 Seconds */
+            first_response_p50_seconds?: number | null;
+            /** After Hours Coverage Rate */
+            after_hours_coverage_rate?: number | null;
+            /** Escalation Quality Rate */
+            escalation_quality_rate?: number | null;
+            /** Outbox Failed Total */
+            outbox_failed_total?: number | null;
+            /** No Response Alert Total */
+            no_response_alert_total?: number | null;
+        };
+        /** ConsoleAuditEvent */
+        ConsoleAuditEvent: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Created At */
+            created_at: string;
+            /** Event Type */
+            event_type: string;
+            /** Actor Name */
+            actor_name?: string | null;
+            /** Entity Type */
+            entity_type?: string | null;
+            /** Entity Id */
+            entity_id?: string | null;
+            /** Payload */
+            payload?: Record<string, never> | null;
+        };
+        /** ConsoleAuditListResponse */
+        ConsoleAuditListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleAuditEvent"][];
+            /** Cursor */
+            cursor?: string | null;
+            /** Has More */
+            has_more: boolean;
+        };
+        /**
+         * ConsoleBotConfig
+         * @description Bot configuration from client_settings for display.
+         */
+        ConsoleBotConfig: {
+            /** Reminder Timeout 1 */
+            reminder_timeout_1?: number | null;
+            /** Reminder Timeout 2 */
+            reminder_timeout_2?: number | null;
+            /** Auto Close Timeout */
+            auto_close_timeout?: number | null;
+            /**
+             * Quiet Hours Enabled
+             * @default false
+             */
+            quiet_hours_enabled: boolean;
+            /** Quiet Hours Start */
+            quiet_hours_start?: string | null;
+            /** Quiet Hours End */
+            quiet_hours_end?: string | null;
+            /** Tone */
+            tone?: string | null;
+            /**
+             * Autolearn Enabled
+             * @default false
+             */
+            autolearn_enabled: boolean;
+            /**
+             * Booking Enabled
+             * @default false
+             */
+            booking_enabled: boolean;
+            /**
+             * Enable Reminders
+             * @default true
+             */
+            enable_reminders: boolean;
+            /**
+             * Enable Owner Escalation
+             * @default false
+             */
+            enable_owner_escalation: boolean;
+            /** Learning Consent Status */
+            learning_consent_status?: string | null;
+            /** Learning Anonymization Mode */
+            learning_anonymization_mode?: string | null;
+            /** Learning Retention Days */
+            learning_retention_days?: number | null;
+            /** Data Sharing */
+            data_sharing?: string | null;
+        };
+        /** ConsoleBranch */
+        ConsoleBranch: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Is Active */
+            is_active: boolean;
+            /** Instance Id */
+            instance_id?: string | null;
+            /** Telegram Chat Id */
+            telegram_chat_id?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Knowledge Tag */
+            knowledge_tag?: string | null;
+            /** Timezone */
+            timezone?: string | null;
+            /** Working Hours */
+            working_hours?: Record<string, never> | null;
+            /** Booking Settings */
+            booking_settings?: Record<string, never> | null;
+            /** Onboarding State */
+            onboarding_state?: string | null;
+            /** Onboarding Updated At */
+            onboarding_updated_at?: string | null;
+            /**
+             * Go Live State
+             * @default pending
+             * @enum {string}
+             */
+            go_live_state: "pending" | "approved" | "rejected";
+            /** Go Live Reason */
+            go_live_reason?: string | null;
+            /** Go Live Reviewed At */
+            go_live_reviewed_at?: string | null;
+            /** Go Live Reviewed By */
+            go_live_reviewed_by?: string | null;
+            /** Go Live Waiver Until */
+            go_live_waiver_until?: string | null;
+            /** Go Live Waiver Reason */
+            go_live_waiver_reason?: string | null;
+            /** Go Live Waiver By */
+            go_live_waiver_by?: string | null;
+            /**
+             * Go Live Waiver Active
+             * @default false
+             */
+            go_live_waiver_active: boolean;
+            /**
+             * Go Live Allowed
+             * @default false
+             */
+            go_live_allowed: boolean;
+        };
+        /** ConsoleBranchBootstrapAccountTemplate */
+        ConsoleBranchBootstrapAccountTemplate: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer";
+            /** Name */
+            name?: string | null;
+            /** Oidc Subject */
+            oidc_subject?: string | null;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean | null;
+        };
+        /** ConsoleBranchChangeDraftRequest */
+        ConsoleBranchChangeDraftRequest: {
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /** Reason */
+            reason: string;
+            patch: components["schemas"]["ConsoleBranchChangePatch"];
+        };
+        /** ConsoleBranchChangeListResponse */
+        ConsoleBranchChangeListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleBranchChangeRecord"][];
+            /** Cursor */
+            cursor?: string | null;
+            /** Has More */
+            has_more: boolean;
+        };
+        /** ConsoleBranchChangePatch */
+        ConsoleBranchChangePatch: {
+            /** Slug */
+            slug?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Timezone */
+            timezone?: string | null;
+            /** Instance Id */
+            instance_id?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Telegram Chat Id */
+            telegram_chat_id?: string | null;
+            /** Knowledge Tag */
+            knowledge_tag?: string | null;
+            /** Working Hours */
+            working_hours?: Record<string, never> | null;
+            /** Booking Settings */
+            booking_settings?: Record<string, never> | null;
+            /** Is Active */
+            is_active?: boolean | null;
+        };
+        /** ConsoleBranchChangePublishRequest */
+        ConsoleBranchChangePublishRequest: {
+            /** Confirmation Id */
+            confirmation_id?: string | null;
+        };
+        /** ConsoleBranchChangeRecord */
+        ConsoleBranchChangeRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "validated" | "publish_failed" | "published" | "rolled_back";
+            /** Reason */
+            reason: string;
+            /** Draft Payload */
+            draft_payload: Record<string, never>;
+            /** Diff Payload */
+            diff_payload: Record<string, never>;
+            /** Validation Payload */
+            validation_payload?: Record<string, never> | null;
+            /** Base Snapshot */
+            base_snapshot: Record<string, never>;
+            /** Published Snapshot */
+            published_snapshot?: Record<string, never> | null;
+            /** Rollback Snapshot */
+            rollback_snapshot?: Record<string, never> | null;
+            /** Publish Error */
+            publish_error?: string | null;
+            /** Rollback Error */
+            rollback_error?: string | null;
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Validated At */
+            validated_at?: string | null;
+            /** Published At */
+            published_at?: string | null;
+            /** Rolled Back At */
+            rolled_back_at?: string | null;
+        };
+        /** ConsoleBranchChangeResponse */
+        ConsoleBranchChangeResponse: {
+            change: components["schemas"]["ConsoleBranchChangeRecord"];
+            branch?: components["schemas"]["ConsoleBranch"] | null;
+        };
+        /** ConsoleBranchChangeRollbackRequest */
+        ConsoleBranchChangeRollbackRequest: {
+            /** Reason */
+            reason: string;
+            /** Confirmation Id */
+            confirmation_id?: string | null;
+        };
+        /** ConsoleBranchCreateRequest */
+        ConsoleBranchCreateRequest: {
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Timezone */
+            timezone?: string | null;
+            /** Instance Id */
+            instance_id?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Telegram Chat Id */
+            telegram_chat_id?: string | null;
+            /** Knowledge Tag */
+            knowledge_tag?: string | null;
+            /** Working Hours */
+            working_hours?: Record<string, never> | null;
+            /** Booking Settings */
+            booking_settings?: Record<string, never> | null;
+            /** Is Active */
+            is_active?: boolean | null;
+            /**
+             * Bootstrap Accounts
+             * @default []
+             */
+            bootstrap_accounts: components["schemas"]["ConsoleBranchBootstrapAccountTemplate"][];
+        };
+        /** ConsoleBranchCreateResponse */
+        ConsoleBranchCreateResponse: {
+            branch: components["schemas"]["ConsoleBranch"];
+            /**
+             * Created Agents
+             * @default []
+             */
+            created_agents: components["schemas"]["ConsoleAgent"][];
+        };
+        /** ConsoleBranchGoLiveDecisionRequest */
+        ConsoleBranchGoLiveDecisionRequest: {
+            /** Reason */
+            reason: string;
+        };
+        /** ConsoleBranchGoLiveWaiverRequest */
+        ConsoleBranchGoLiveWaiverRequest: {
+            /** Reason */
+            reason: string;
+            /** Ttl Hours */
+            ttl_hours: number;
+        };
+        /** ConsoleBranchIntegrationStatus */
+        ConsoleBranchIntegrationStatus: {
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Client Slug */
+            client_slug: string;
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /** Branch Slug */
+            branch_slug: string;
+            /** Branch Name */
+            branch_name: string;
+            /** Is Active */
+            is_active: boolean;
+            /** Instance Id */
+            instance_id?: string | null;
+            /** Telegram Chat Id */
+            telegram_chat_id?: string | null;
+            /** Webhook Url */
+            webhook_url?: string | null;
+            /**
+             * Webhook Url Valid
+             * @default false
+             */
+            webhook_url_valid: boolean;
+            /**
+             * Whatsapp Status
+             * @enum {string}
+             */
+            whatsapp_status: "ok" | "inactive" | "missing_instance_id" | "instance_id_mismatch" | "invalid_webhook_url" | "no_recent_inbound";
+            /**
+             * Telegram Status
+             * @enum {string}
+             */
+            telegram_status: "ok" | "inactive" | "missing_bot_token" | "missing_chat_id";
+            /** Last Inbound At */
+            last_inbound_at?: string | null;
+            /** Last Inbound Instance Id */
+            last_inbound_instance_id?: string | null;
+            /**
+             * Integration State
+             * @default ok
+             * @enum {string}
+             */
+            integration_state: "ok" | "degraded";
+            /** Integration Reason */
+            integration_reason?: string | null;
+            /** Integration Checked At */
+            integration_checked_at?: string | null;
+            /** Integration Degraded At */
+            integration_degraded_at?: string | null;
+            /** Integration Recovered At */
+            integration_recovered_at?: string | null;
+            /** Provider Binding Provider */
+            provider_binding_provider?: string | null;
+            /** Provider Binding Instance Id */
+            provider_binding_instance_id?: string | null;
+            /** Provider Binding Webhook Status */
+            provider_binding_webhook_status?: ("configured" | "pending" | "rebind_required") | null;
+            /** Provider Binding Paid Until */
+            provider_binding_paid_until?: string | null;
+            /** Provider Binding Owner */
+            provider_binding_owner?: string | null;
+            /** Provider Binding Next Renewal At */
+            provider_binding_next_renewal_at?: string | null;
+            /** Provider Binding Last Rebind At */
+            provider_binding_last_rebind_at?: string | null;
+            /** Provider Binding Rebind Required */
+            provider_binding_rebind_required?: boolean | null;
+            /**
+             * Provider Binding Alert State
+             * @default unknown
+             * @enum {string}
+             */
+            provider_binding_alert_state: "ok" | "warn" | "critical" | "unknown";
+            /** Provider Binding Notes */
+            provider_binding_notes?: string | null;
+            /**
+             * Provider Binding Payment Status
+             * @default unknown
+             * @enum {string}
+             */
+            provider_binding_payment_status: "pending" | "confirmed" | "rejected" | "unknown";
+            /** Provider Binding Payment Confirmed At */
+            provider_binding_payment_confirmed_at?: string | null;
+            /**
+             * Provider Binding Expiry Status
+             * @default unknown
+             * @enum {string}
+             */
+            provider_binding_expiry_status: "ok" | "expiring_soon" | "expired" | "unknown";
+            /** Provider Binding Days Until Expiry */
+            provider_binding_days_until_expiry?: number | null;
+            /**
+             * Drift Issues
+             * @default []
+             */
+            drift_issues: string[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "warn" | "error";
+        };
+        /** ConsoleBranchListResponse */
+        ConsoleBranchListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleBranch"][];
+            /** Cursor */
+            cursor?: string | null;
+            /** Has More */
+            has_more: boolean;
+        };
+        /** ConsoleBranchUpdateRequest */
+        ConsoleBranchUpdateRequest: {
+            /** Slug */
+            slug?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Timezone */
+            timezone?: string | null;
+            /** Instance Id */
+            instance_id?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Telegram Chat Id */
+            telegram_chat_id?: string | null;
+            /** Knowledge Tag */
+            knowledge_tag?: string | null;
+            /** Working Hours */
+            working_hours?: Record<string, never> | null;
+            /** Booking Settings */
+            booking_settings?: Record<string, never> | null;
+            /** Is Active */
+            is_active?: boolean | null;
+            /** Confirmation Id */
+            confirmation_id?: string | null;
+        };
+        /** ConsoleBusinessActionItem */
+        ConsoleBusinessActionItem: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Href */
+            href: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "critical" | "warn" | "info";
+        };
+        /** ConsoleBusinessSummaryResponse */
+        ConsoleBusinessSummaryResponse: {
+            /** Generated At */
+            generated_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "healthy" | "degraded" | "unhealthy";
+            /** Status Label */
+            status_label: string;
+            /** Scheduled Visits Today */
+            scheduled_visits_today: number;
+            /** Arrived Visits Today */
+            arrived_visits_today: number;
+            /** No Show Visits Today */
+            no_show_visits_today: number;
+            /** Cancelled Visits Today */
+            cancelled_visits_today: number;
+            /** Arrival Rate Percent */
+            arrival_rate_percent?: number | null;
+            /** Reminder Delivery Failures Today */
+            reminder_delivery_failures_today: number;
+            /** No Show Followup Pending */
+            no_show_followup_pending: number;
+            /** Outbox Backlog */
+            outbox_backlog: number;
+            /** Outbox Failed 24H */
+            outbox_failed_24h: number;
+            /** Pending Cases */
+            pending_cases: number;
+            /** Active Cases */
+            active_cases: number;
+            /** Unresolved Cases */
+            unresolved_cases: number;
+            /** Oldest Unresolved Minutes */
+            oldest_unresolved_minutes?: number | null;
+            /** First Response P90 Seconds */
+            first_response_p90_seconds?: number | null;
+            /**
+             * Actions
+             * @default []
+             */
+            actions: components["schemas"]["ConsoleBusinessActionItem"][];
+            /**
+             * Metric Meta
+             * @default {}
+             */
+            metric_meta: {
+                [key: string]: components["schemas"]["ConsoleMetricFactMeta"];
+            };
+        };
+        /** ConsoleCapabilitiesPatchRequest */
+        ConsoleCapabilitiesPatchRequest: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Status */
+            status?: ("active" | "disabled") | null;
+            /** Schema Version */
+            schema_version?: string | null;
+            payload: components["schemas"]["CapabilitiesPayload"];
+        };
+        /** ConsoleCapabilitiesRecord */
+        ConsoleCapabilitiesRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "disabled";
+            /** Schema Version */
+            schema_version: string;
+            payload: components["schemas"]["CapabilitiesPayload"];
+            /** Created By */
+            created_by?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ConsoleCapabilitiesResponse */
+        ConsoleCapabilitiesResponse: {
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            effective: components["schemas"]["CapabilitiesPayload"];
+            client_capabilities?: components["schemas"]["ConsoleCapabilitiesRecord"] | null;
+            branch_capabilities?: components["schemas"]["ConsoleCapabilitiesRecord"] | null;
+        };
+        /** ConsoleCase */
+        ConsoleCase: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Conversation Id
+             * Format: uuid
+             */
+            conversation_id: string;
+            /** Status */
+            status: string;
+            /** Trigger Type */
+            trigger_type: string;
+            /** Trigger Value */
+            trigger_value?: string | null;
+            /** Context Summary */
+            context_summary?: string | null;
+            /** User Message */
+            user_message?: string | null;
+            /** Assigned To Name */
+            assigned_to_name?: string | null;
+            /** First Response At */
+            first_response_at?: string | null;
+            /** Resolved At */
+            resolved_at?: string | null;
+            /** Resolution Time Seconds */
+            resolution_time_seconds?: number | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Channel */
+            channel?: string | null;
+            /** Created At */
+            created_at: string;
+            /**
+             * Sla Status
+             * @default ok
+             */
+            sla_status: string | null;
+            /** Customer Name */
+            customer_name?: string | null;
+            /** Customer Phone */
+            customer_phone?: string | null;
+            /** Customer Remote Jid */
+            customer_remote_jid?: string | null;
+            /** Handover Meta */
+            handover_meta?: Record<string, never> | null;
+            /** Handover Media Refs */
+            handover_media_refs?: Record<string, never>[] | null;
+            /** Handover Messages */
+            handover_messages?: Record<string, never>[] | null;
+            /** Decision Trace */
+            decision_trace?: Record<string, never>[] | null;
+            /** Last Inbound At */
+            last_inbound_at?: string | null;
+            /** Last Outbound At */
+            last_outbound_at?: string | null;
+            /** Last Activity At */
+            last_activity_at?: string | null;
+            /** Last Activity Channel */
+            last_activity_channel?: string | null;
+            /** Last Message Preview */
+            last_message_preview?: string | null;
+            /** Needs Reply */
+            needs_reply?: boolean | null;
+            /** Has Delivery Error */
+            has_delivery_error?: boolean | null;
+            /** Has Pending Outbox */
+            has_pending_outbox?: boolean | null;
+            /** Human Lock Active */
+            human_lock_active?: boolean | null;
+            /** Human Lock Until */
+            human_lock_until?: string | null;
+            /** Human Lock Remaining Seconds */
+            human_lock_remaining_seconds?: number | null;
+            /** Human Lock Source */
+            human_lock_source?: string | null;
+            /** Human Lock Reason */
+            human_lock_reason?: string | null;
+            /** Human Lock By */
+            human_lock_by?: string | null;
+            telegram_trail?: components["schemas"]["ConsoleTelegramTrail"] | null;
+        };
+        /** ConsoleCaseActionResponse */
+        ConsoleCaseActionResponse: {
+            /** Success */
+            success: boolean;
+            case: components["schemas"]["ConsoleCase"];
+            sync?: components["schemas"]["ConsoleCaseActionSync"] | null;
+        };
+        /** ConsoleCaseActionSync */
+        ConsoleCaseActionSync: {
+            telegram?: components["schemas"]["ConsoleSyncStatus"] | null;
+            client_notify?: components["schemas"]["ConsoleSyncStatus"] | null;
+        };
+        /** ConsoleCaseListResponse */
+        ConsoleCaseListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleCase"][];
+            /** Cursor */
+            cursor?: string | null;
+            /** Has More */
+            has_more: boolean;
+            /** Total */
+            total?: number | null;
+        };
+        /** ConsoleClient */
+        ConsoleClient: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Slug */
+            slug: string;
+            /** Name */
+            name?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Company Id */
+            company_id?: string | null;
+            /** Company Name */
+            company_name?: string | null;
+            /** Lifecycle State */
+            lifecycle_state?: ("lead" | "contracting" | "onboarding" | "go_live_ready" | "active" | "paused" | "archived") | null;
+            /** Payment Status */
+            payment_status?: ("pending" | "confirmed" | "rejected" | "unknown") | null;
+            /** Commercial State */
+            commercial_state?: ("contract_missing" | "payment_pending" | "payment_confirmed" | "payment_rejected") | null;
+            /** Service State */
+            service_state?: ("ok" | "degraded" | "attention") | null;
+            /** Owner Name */
+            owner_name?: string | null;
+            /** Next Action */
+            next_action?: string | null;
+            /** Total Branches */
+            total_branches?: number | null;
+            /** Active Branches */
+            active_branches?: number | null;
+            /** Degraded Branches */
+            degraded_branches?: number | null;
+            /** Go Live Ready Branches */
+            go_live_ready_branches?: number | null;
+            /** Reference Branch Ids */
+            reference_branch_ids?: string[] | null;
+            /** Reference Branch Reason */
+            reference_branch_reason?: string | null;
+        };
+        /** ConsoleClientCreateRequest */
+        ConsoleClientCreateRequest: {
+            /** Slug */
+            slug: string;
+            /**
+             * Company Id
+             * Format: uuid
+             */
+            company_id: string;
+            /**
+             * Status
+             * @default active
+             */
+            status: string | null;
+        };
+        /** ConsoleClientCreateResponse */
+        ConsoleClientCreateResponse: {
+            client: components["schemas"]["ConsoleClient"];
+        };
+        /** ConsoleClientLifecycleActionRequest */
+        ConsoleClientLifecycleActionRequest: {
+            /** Reason */
+            reason: string;
+        };
+        /** ConsoleClientListResponse */
+        ConsoleClientListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleClient"][];
+            /** Cursor */
+            cursor?: string | null;
+            /** Has More */
+            has_more: boolean;
+            summary?: components["schemas"]["ConsoleFleetSummary"] | null;
+        };
+        /** ConsoleClientUpdateRequest */
+        ConsoleClientUpdateRequest: {
+            /** Slug */
+            slug?: string | null;
+            /** Company Id */
+            company_id?: string | null;
+            /** Status */
+            status?: string | null;
+        };
+        /** ConsoleCompany */
+        ConsoleCompany: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Billing Info */
+            billing_info?: Record<string, never> | null;
+        };
+        /** ConsoleCompanyCreateRequest */
+        ConsoleCompanyCreateRequest: {
+            /** Name */
+            name: string;
+            /** Billing Info */
+            billing_info?: Record<string, never> | null;
+        };
+        /** ConsoleCompanyCreateResponse */
+        ConsoleCompanyCreateResponse: {
+            company: components["schemas"]["ConsoleCompany"];
+        };
+        /** ConsoleCompanyListResponse */
+        ConsoleCompanyListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleCompany"][];
+            /** Cursor */
+            cursor?: string | null;
+            /** Has More */
+            has_more: boolean;
+        };
+        /** ConsoleCompanyUpdateRequest */
+        ConsoleCompanyUpdateRequest: {
+            /** Name */
+            name?: string | null;
+            /** Billing Info */
+            billing_info?: Record<string, never> | null;
+        };
+        /** ConsoleConfirmationCreateRequest */
+        ConsoleConfirmationCreateRequest: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "knowledge_rollback" | "branch_deactivate" | "integration_reconcile" | "provider_ops_execute";
+            /**
+             * Target Type
+             * @enum {string}
+             */
+            target_type: "knowledge_version" | "branch";
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /** Reason */
+            reason: string;
+        };
+        /** ConsoleConfirmationResponse */
+        ConsoleConfirmationResponse: {
+            /**
+             * Confirmation Id
+             * Format: uuid
+             */
+            confirmation_id: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "knowledge_rollback" | "branch_deactivate" | "integration_reconcile" | "provider_ops_execute";
+            /**
+             * Target Type
+             * @enum {string}
+             */
+            target_type: "knowledge_version" | "branch";
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /** Expires At */
+            expires_at: string;
+        };
+        /** ConsoleDataTrustSummaryResponse */
+        ConsoleDataTrustSummaryResponse: {
+            /** Generated At */
+            generated_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "healthy" | "degraded" | "unhealthy";
+            /** Status Label */
+            status_label: string;
+            /** Metric Date */
+            metric_date?: string | null;
+            /**
+             * Analytics Scope Limited
+             * @default false
+             */
+            analytics_scope_limited: boolean;
+            /** First Response Missing Total */
+            first_response_missing_total?: number | null;
+            /** Escalation Meta Missing Total */
+            escalation_meta_missing_total?: number | null;
+            /** Intent Missing Total */
+            intent_missing_total?: number | null;
+            /** Knowledge Last Published At */
+            knowledge_last_published_at?: string | null;
+            /** Knowledge Stale Hours */
+            knowledge_stale_hours?: number | null;
+            /** Audit Events 24H */
+            audit_events_24h: number;
+            /** Critical Audit Events 24H */
+            critical_audit_events_24h: number;
+            /**
+             * Actions
+             * @default []
+             */
+            actions: components["schemas"]["ConsoleBusinessActionItem"][];
+            /**
+             * Metric Meta
+             * @default {}
+             */
+            metric_meta: {
+                [key: string]: components["schemas"]["ConsoleMetricFactMeta"];
+            };
+        };
+        /** ConsoleError */
+        ConsoleError: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Details */
+            details?: Record<string, never> | null;
+            /** Trace Id */
+            trace_id: string;
+        };
+        /** ConsoleErrorResponse */
+        ConsoleErrorResponse: {
+            error: components["schemas"]["ConsoleError"];
+        };
+        /** ConsoleFleetAttentionItem */
+        ConsoleFleetAttentionItem: {
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Client Slug */
+            client_slug: string;
+            /** Client Name */
+            client_name?: string | null;
+            /** Company Id */
+            company_id?: string | null;
+            /** Company Name */
+            company_name?: string | null;
+            /**
+             * Lifecycle State
+             * @enum {string}
+             */
+            lifecycle_state: "lead" | "contracting" | "onboarding" | "go_live_ready" | "active" | "paused" | "archived";
+            /**
+             * Payment Status
+             * @enum {string}
+             */
+            payment_status: "pending" | "confirmed" | "rejected" | "unknown";
+            /**
+             * Commercial State
+             * @enum {string}
+             */
+            commercial_state: "contract_missing" | "payment_pending" | "payment_confirmed" | "payment_rejected";
+            /**
+             * Service State
+             * @enum {string}
+             */
+            service_state: "ok" | "degraded" | "attention";
+            /** Owner Name */
+            owner_name?: string | null;
+            /** Next Action */
+            next_action: string;
+            /**
+             * Total Branches
+             * @default 0
+             */
+            total_branches: number;
+            /**
+             * Active Branches
+             * @default 0
+             */
+            active_branches: number;
+            /**
+             * Degraded Branches
+             * @default 0
+             */
+            degraded_branches: number;
+            /**
+             * Go Live Ready Branches
+             * @default 0
+             */
+            go_live_ready_branches: number;
+            /**
+             * Reference Branch Ids
+             * @default []
+             */
+            reference_branch_ids: string[];
+            /** Reference Branch Reason */
+            reference_branch_reason?: string | null;
+            /**
+             * Stale Branches
+             * @default 0
+             */
+            stale_branches: number;
+            /**
+             * Integration Error Branches
+             * @default 0
+             */
+            integration_error_branches: number;
+            /**
+             * Integration Warn Branches
+             * @default 0
+             */
+            integration_warn_branches: number;
+            /**
+             * Outbox Failed 24H
+             * @default 0
+             */
+            outbox_failed_24h: number;
+            /**
+             * Pending Handovers
+             * @default 0
+             */
+            pending_handovers: number;
+            /** Attention Score */
+            attention_score: number;
+            /**
+             * Attention Level
+             * @enum {string}
+             */
+            attention_level: "high" | "medium" | "low";
+            /**
+             * Reasons
+             * @default []
+             */
+            reasons: string[];
+            /**
+             * Suggested Actions
+             * @default []
+             */
+            suggested_actions: string[];
+        };
+        /** ConsoleFleetAttentionResponse */
+        ConsoleFleetAttentionResponse: {
+            /** Generated At */
+            generated_at: string;
+            /** Stale After Minutes */
+            stale_after_minutes: number;
+            summary: components["schemas"]["ConsoleFleetAttentionSummary"];
+            /** Items */
+            items: components["schemas"]["ConsoleFleetAttentionItem"][];
+        };
+        /** ConsoleFleetAttentionSummary */
+        ConsoleFleetAttentionSummary: {
+            /** Active Clients Total */
+            active_clients_total: number;
+            /** Clients With Attention */
+            clients_with_attention: number;
+            /** High Risk Clients */
+            high_risk_clients: number;
+            /** Medium Risk Clients */
+            medium_risk_clients: number;
+            /** Low Risk Clients */
+            low_risk_clients: number;
+            /** Stale Branches Total */
+            stale_branches_total: number;
+            /** Integration Error Branches Total */
+            integration_error_branches_total: number;
+            /** Integration Warn Branches Total */
+            integration_warn_branches_total: number;
+            /** Outbox Failed 24H Total */
+            outbox_failed_24h_total: number;
+            /** Pending Handovers Total */
+            pending_handovers_total: number;
+        };
+        /** ConsoleFleetSummary */
+        ConsoleFleetSummary: {
+            /** Total Companies */
             total_companies: number;
+            /** Total Clients */
             total_clients: number;
+            /** Active Clients */
             active_clients: number;
+            /** Onboarding Clients */
             onboarding_clients: number;
+            /** Archived Clients */
             archived_clients: number;
+            /** Paused Clients */
             paused_clients: number;
+            /** Go Live Ready Clients */
             go_live_ready_clients: number;
+            /** Degraded Clients */
             degraded_clients: number;
+            /** Payment Pending Clients */
             payment_pending_clients: number;
+            /** Payment Confirmed Clients */
             payment_confirmed_clients: number;
+            /** Lifecycle Counts */
             lifecycle_counts: {
                 [key: string]: number;
             };
+            /** Payment Counts */
             payment_counts: {
                 [key: string]: number;
             };
+            /** Service Counts */
             service_counts: {
                 [key: string]: number;
             };
             onboarding_throughput?: components["schemas"]["ConsoleOnboardingThroughputMetrics"] | null;
         };
-        ConsoleOnboardingThroughputMetrics: {
-            /** @default 24 */
-            window_hours: number;
-            /** @default 0 */
-            approved_branches_total: number;
-            /** @default 0 */
-            first_pass_approved_branches: number;
-            time_to_go_live_median_hours?: number | null;
-            blocker_age_p95_hours?: number | null;
-            first_pass_go_live_rate_pct?: number | null;
-            incident_reopen_rate_24h_pct?: number | null;
+        /** ConsoleHealthResponse */
+        ConsoleHealthResponse: {
+            /** Status */
+            status: string;
+            /** Version */
+            version: string;
+            /** Database */
+            database: string;
+            /** Redis */
+            redis: string;
+            /** Outbox Backlog */
+            outbox_backlog: number;
         };
-        FleetAttentionItem: {
-            /** Format: uuid */
-            client_id: string;
-            client_slug: string;
-            client_name?: string | null;
-            /** Format: uuid */
-            company_id?: string | null;
-            company_name?: string | null;
-            /** @enum {string} */
-            lifecycle_state: "lead" | "contracting" | "onboarding" | "go_live_ready" | "active" | "paused" | "archived";
-            /** @enum {string} */
-            payment_status: "pending" | "confirmed" | "rejected" | "unknown";
-            /** @enum {string} */
-            commercial_state: "contract_missing" | "payment_pending" | "payment_confirmed" | "payment_rejected";
-            /** @enum {string} */
-            service_state: "ok" | "degraded" | "attention";
-            owner_name?: string | null;
-            next_action: string;
-            /** @default 0 */
-            total_branches: number;
-            /** @default 0 */
-            active_branches: number;
-            /** @default 0 */
-            degraded_branches: number;
-            /** @default 0 */
-            go_live_ready_branches: number;
-            /** @default [] */
-            reference_branch_ids: string[];
-            reference_branch_reason?: string | null;
-            /** @default 0 */
-            stale_branches: number;
-            /** @default 0 */
-            integration_error_branches: number;
-            /** @default 0 */
-            integration_warn_branches: number;
-            /** @default 0 */
-            outbox_failed_24h: number;
-            /** @default 0 */
-            pending_handovers: number;
-            attention_score: number;
-            /** @enum {string} */
-            attention_level: "high" | "medium" | "low";
-            /** @default [] */
-            reasons: string[];
-            /** @default [] */
-            suggested_actions: string[];
-        };
-        FleetAttentionSummary: {
-            active_clients_total: number;
-            clients_with_attention: number;
-            high_risk_clients: number;
-            medium_risk_clients: number;
-            low_risk_clients: number;
-            stale_branches_total: number;
-            integration_error_branches_total: number;
-            integration_warn_branches_total: number;
-            outbox_failed_24h_total: number;
-            pending_handovers_total: number;
-        };
-        FleetAttentionResponse: {
-            /** Format: date-time */
-            generated_at: string;
-            stale_after_minutes: number;
-            summary: components["schemas"]["FleetAttentionSummary"];
-            items: components["schemas"]["FleetAttentionItem"][];
-        };
-        Branch: {
-            /** Format: uuid */
-            id?: string;
-            slug?: string;
-            name?: string;
-            is_active?: boolean;
-            instance_id?: string | null;
-            telegram_chat_id?: string | null;
-            phone?: string | null;
-            knowledge_tag?: string | null;
-            timezone?: string | null;
-            working_hours?: {
-                [key: string]: unknown;
-            } | null;
-            booking_settings?: {
-                [key: string]: unknown;
-            } | null;
-            onboarding_state?: string | null;
-            /** Format: date-time */
-            onboarding_updated_at?: string | null;
+        /** ConsoleHumanLockPauseRequest */
+        ConsoleHumanLockPauseRequest: {
             /**
-             * @default pending
-             * @enum {string}
+             * Minutes
+             * @default 30
              */
-            go_live_state: "pending" | "approved" | "rejected";
-            go_live_reason?: string | null;
-            /** Format: date-time */
-            go_live_reviewed_at?: string | null;
-            /** Format: uuid */
-            go_live_reviewed_by?: string | null;
-            /** Format: date-time */
-            go_live_waiver_until?: string | null;
-            go_live_waiver_reason?: string | null;
-            /** Format: uuid */
-            go_live_waiver_by?: string | null;
-            /** @default false */
-            go_live_waiver_active: boolean;
-            /** @default false */
-            go_live_allowed: boolean;
-        };
-        BranchBootstrapAccountTemplate: {
-            /** @enum {string} */
-            role: "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer";
-            name?: string | null;
-            oidc_subject?: string | null;
-            sso_username?: string | null;
-            sso_password?: string | null;
-            sso_temp_password?: boolean | null;
-            is_active?: boolean | null;
-        };
-        BranchCreateRequest: {
-            /** Format: uuid */
-            client_id: string;
-            slug: string;
-            name: string;
-            timezone?: string | null;
-            instance_id?: string | null;
-            phone?: string | null;
-            telegram_chat_id?: string | null;
-            knowledge_tag?: string | null;
-            working_hours?: {
-                [key: string]: unknown;
-            } | null;
-            booking_settings?: {
-                [key: string]: unknown;
-            } | null;
-            is_active?: boolean | null;
-            bootstrap_accounts?: components["schemas"]["BranchBootstrapAccountTemplate"][];
-        };
-        BranchCreateResponse: {
-            branch?: components["schemas"]["Branch"];
-            created_agents?: components["schemas"]["Agent"][];
-        };
-        BranchUpdateRequest: {
-            slug?: string | null;
-            name?: string | null;
-            timezone?: string | null;
-            instance_id?: string | null;
-            phone?: string | null;
-            telegram_chat_id?: string | null;
-            knowledge_tag?: string | null;
-            working_hours?: {
-                [key: string]: unknown;
-            } | null;
-            booking_settings?: {
-                [key: string]: unknown;
-            } | null;
-            is_active?: boolean | null;
-            /** Format: uuid */
-            confirmation_id?: string | null;
-        };
-        BranchChangePatch: {
-            slug?: string | null;
-            name?: string | null;
-            timezone?: string | null;
-            instance_id?: string | null;
-            phone?: string | null;
-            telegram_chat_id?: string | null;
-            knowledge_tag?: string | null;
-            working_hours?: {
-                [key: string]: unknown;
-            } | null;
-            booking_settings?: {
-                [key: string]: unknown;
-            } | null;
-            is_active?: boolean | null;
-        };
-        BranchChangeDraftRequest: {
-            /** Format: uuid */
-            branch_id: string;
-            reason: string;
-            patch: components["schemas"]["BranchChangePatch"];
-        };
-        BranchChangePublishRequest: {
-            /** Format: uuid */
-            confirmation_id?: string | null;
-        };
-        BranchChangeRollbackRequest: {
-            reason: string;
-            /** Format: uuid */
-            confirmation_id?: string | null;
-        };
-        BranchChangeRecord: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            branch_id: string;
-            /** @enum {string} */
-            status: "draft" | "validated" | "publish_failed" | "published" | "rolled_back";
-            reason: string;
-            draft_payload: {
-                [key: string]: unknown;
-            };
-            diff_payload: {
-                [key: string]: unknown;
-            };
-            validation_payload?: {
-                [key: string]: unknown;
-            } | null;
-            base_snapshot: {
-                [key: string]: unknown;
-            };
-            published_snapshot?: {
-                [key: string]: unknown;
-            } | null;
-            rollback_snapshot?: {
-                [key: string]: unknown;
-            } | null;
-            publish_error?: string | null;
-            rollback_error?: string | null;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at?: string | null;
-            /** Format: date-time */
-            validated_at?: string | null;
-            /** Format: date-time */
-            published_at?: string | null;
-            /** Format: date-time */
-            rolled_back_at?: string | null;
-        };
-        BranchChangeResponse: {
-            change: components["schemas"]["BranchChangeRecord"];
-            branch?: components["schemas"]["Branch"] | null;
-        };
-        BranchChangeListResponse: {
-            items: components["schemas"]["BranchChangeRecord"][];
-            cursor?: string | null;
-            has_more: boolean;
-        };
-        BranchGoLiveDecisionRequest: {
-            reason: string;
-        };
-        BranchGoLiveWaiverRequest: {
-            reason: string;
-            ttl_hours: number;
-        };
-        BranchListResponse: {
-            items: components["schemas"]["Branch"][];
-            cursor?: string | null;
-            has_more: boolean;
-        };
-        BranchIntegrationStatus: {
-            /** Format: uuid */
-            client_id: string;
-            client_slug: string;
-            /** Format: uuid */
-            branch_id: string;
-            branch_slug: string;
-            branch_name: string;
-            is_active: boolean;
-            instance_id?: string | null;
-            telegram_chat_id?: string | null;
-            webhook_url?: string | null;
-            webhook_url_valid: boolean;
-            /** @enum {string} */
-            whatsapp_status: "ok" | "inactive" | "missing_instance_id" | "instance_id_mismatch" | "invalid_webhook_url" | "no_recent_inbound";
-            /** @enum {string} */
-            telegram_status: "ok" | "inactive" | "missing_bot_token" | "missing_chat_id";
-            /** Format: date-time */
-            last_inbound_at?: string | null;
-            last_inbound_instance_id?: string | null;
-            /** @enum {string} */
-            integration_state?: "ok" | "degraded";
-            integration_reason?: string | null;
-            /** Format: date-time */
-            integration_checked_at?: string | null;
-            /** Format: date-time */
-            integration_degraded_at?: string | null;
-            /** Format: date-time */
-            integration_recovered_at?: string | null;
-            provider_binding_provider?: string | null;
-            provider_binding_instance_id?: string | null;
-            /** @enum {string|null} */
-            provider_binding_webhook_status?: "configured" | "pending" | "rebind_required" | null;
-            /** Format: date */
-            provider_binding_paid_until?: string | null;
-            provider_binding_owner?: string | null;
-            /** Format: date */
-            provider_binding_next_renewal_at?: string | null;
-            /** Format: date */
-            provider_binding_last_rebind_at?: string | null;
-            provider_binding_rebind_required?: boolean | null;
-            /** @enum {string} */
-            provider_binding_alert_state?: "ok" | "warn" | "critical" | "unknown";
-            provider_binding_notes?: string | null;
-            /** @enum {string} */
-            provider_binding_payment_status?: "pending" | "confirmed" | "rejected" | "unknown";
-            /** Format: date-time */
-            provider_binding_payment_confirmed_at?: string | null;
-            /** @enum {string} */
-            provider_binding_expiry_status?: "ok" | "expiring_soon" | "expired" | "unknown";
-            provider_binding_days_until_expiry?: number | null;
-            drift_issues: string[];
-            /** @enum {string} */
-            status: "ok" | "warn" | "error";
-        };
-        /** @enum {string} */
-        ProviderOpsAction: "integration_reconcile" | "provider_start_rebind" | "provider_complete_rebind" | "provider_renewal_confirmed" | "provider_webhook_updated" | "provider_send_reminder";
-        /** @enum {string} */
-        ProviderOpsQueuePriority: "p0" | "p1" | "p2";
-        ProviderOpsQueueItem: {
-            /** Format: uuid */
-            client_id: string;
-            client_slug: string;
-            /** Format: uuid */
-            branch_id: string;
-            branch_slug: string;
-            branch_name: string;
-            priority: components["schemas"]["ProviderOpsQueuePriority"];
-            recommended_action: components["schemas"]["ProviderOpsAction"];
-            reasons: string[];
-            requires_confirmation: boolean;
-            provider_binding_owner?: string | null;
-            /** Format: date */
-            provider_binding_next_renewal_at?: string | null;
-            /** Format: date */
-            provider_binding_last_rebind_at?: string | null;
-            /** @enum {string} */
-            provider_binding_alert_state?: "ok" | "warn" | "critical" | "unknown";
-            /** @enum {string} */
-            provider_binding_expiry_status?: "ok" | "expiring_soon" | "expired" | "unknown";
-            provider_binding_days_until_expiry?: number | null;
-            provider_binding_rebind_required?: boolean | null;
-            /** Format: date-time */
-            generated_at?: string | null;
-        };
-        /** @enum {string} */
-        ProviderLifecycleSlaState: "none" | "on_track" | "due_soon" | "overdue";
-        ProviderLifecycleItem: {
-            /** Format: uuid */
-            client_id: string;
-            client_slug: string;
-            /** Format: uuid */
-            branch_id: string;
-            branch_slug: string;
-            branch_name: string;
-            /** Format: uuid */
-            company_id?: string | null;
-            company_name?: string | null;
-            branch_phone?: string | null;
-            /** @enum {string} */
-            status: "ok" | "warn" | "error";
-            /** @enum {string} */
-            whatsapp_status: "ok" | "inactive" | "missing_instance_id" | "instance_id_mismatch" | "invalid_webhook_url" | "no_recent_inbound";
-            /** @enum {string} */
-            integration_state: "ok" | "degraded";
-            /** Format: date-time */
-            last_inbound_at?: string | null;
-            instance_id?: string | null;
-            provider_binding_provider?: string | null;
-            provider_binding_instance_id?: string | null;
-            /** @enum {string|null} */
-            provider_binding_webhook_status?: "configured" | "pending" | "rebind_required" | null;
-            /** Format: date */
-            provider_binding_paid_until?: string | null;
-            provider_binding_owner?: string | null;
-            /** Format: date */
-            provider_binding_next_renewal_at?: string | null;
-            /** Format: date */
-            provider_binding_last_rebind_at?: string | null;
-            provider_binding_rebind_required?: boolean | null;
-            /** @enum {string} */
-            provider_binding_alert_state?: "ok" | "warn" | "critical" | "unknown";
-            /** @enum {string} */
-            provider_binding_expiry_status?: "ok" | "expiring_soon" | "expired" | "unknown";
-            provider_binding_days_until_expiry?: number | null;
-            /** @enum {string|null} */
-            next_action?: "integration_reconcile" | "provider_start_rebind" | "provider_complete_rebind" | "provider_renewal_confirmed" | "provider_webhook_updated" | "provider_send_reminder" | null;
-            /** @enum {string|null} */
-            priority?: "p0" | "p1" | "p2" | null;
-            blockers: string[];
-            /** Format: date-time */
-            sla_deadline_at?: string | null;
-            sla_state: components["schemas"]["ProviderLifecycleSlaState"];
-            /** Format: date-time */
-            generated_at?: string | null;
-        };
-        ProviderLifecycleListResponse: {
-            stale_after_minutes: number;
-            cursor?: string | null;
-            has_more: boolean;
-            total_in_scope: number;
-            items: components["schemas"]["ProviderLifecycleItem"][];
-        };
-        IntegrationsListResponse: {
-            stale_after_minutes: number;
-            cursor?: string | null;
-            has_more: boolean;
-            total_in_scope: number;
-            items: components["schemas"]["BranchIntegrationStatus"][];
-            provider_ops_queue: components["schemas"]["ProviderOpsQueueItem"][];
-        };
-        IntegrationBranchActionRequest: {
-            /** @default integration_reconcile */
-            action: components["schemas"]["ProviderOpsAction"];
-            /**
-             * @default dry_run
-             * @enum {string}
-             */
-            mode: "dry_run" | "execute";
-            /** Format: uuid */
-            confirmation_id?: string | null;
-            owner?: string | null;
-            notes?: string | null;
-            /** Format: date */
-            paid_until?: string | null;
-            /** Format: date */
-            next_renewal_at?: string | null;
-            instance_id?: string | null;
-            /** @enum {string|null} */
-            webhook_status?: "configured" | "pending" | "rebind_required" | null;
-        };
-        IntegrationBranchActionResponse: {
-            /** Format: uuid */
-            branch_id: string;
-            action: components["schemas"]["ProviderOpsAction"];
-            /** @enum {string} */
-            mode: "dry_run" | "execute";
-            result: Record<string, never>;
-        };
-        OnboardingStepStatus: {
-            /** @enum {string} */
-            id: "branch_draft" | "integrations" | "team" | "telegram" | "knowledge" | "booking" | "go_no_go";
-            /** @enum {string} */
-            status: "complete" | "available" | "locked" | "skipped";
-            required: boolean;
-            missing?: string[];
-        };
-        OnboardingStatusResponse: {
-            /** Format: uuid */
-            branch_id: string;
-            /** @enum {string} */
-            current_step: "branch_draft" | "integrations" | "team" | "telegram" | "knowledge" | "booking" | "go_no_go";
-            steps: components["schemas"]["OnboardingStepStatus"][];
-            /** Format: date-time */
-            updated_at?: string | null;
-        };
-        OnboardingScorecardCheck: {
-            /** @enum {string} */
-            id: "branch_draft" | "integrations" | "team" | "telegram" | "knowledge" | "booking" | "go_no_go";
-            required: boolean;
-            passed: boolean;
-            missing?: string[];
-        };
-        OnboardingDocumentIngestion: {
-            /** @enum {string} */
-            status: "pass" | "fail" | "skipped";
-            valid: boolean;
-            /** @enum {string} */
-            source: "published" | "draft" | "none";
-            missing_fields?: string[];
-            critical_missing_fields?: string[];
-        };
-        OnboardingSlaControlLoop: {
-            /** @enum {string} */
-            status: "pass" | "warn" | "fail";
-            reminder_1_minutes: number;
-            reminder_2_minutes: number;
-            escalation_timeout_minutes: number;
-            pending_total: number;
-            warning_total: number;
-            breached_total: number;
-            /** @enum {string} */
-            provider_status: "configured" | "missing" | "webhook_not_configured" | "rebind_required" | "billing_expired" | "renewal_due" | "not_required" | "unknown";
-            provider_paid_until?: string | null;
-            provider_days_to_renewal?: number | null;
-            provider_alert_state?: string | null;
-            active_incidents?: string[];
-            recommended_actions?: string[];
-        };
-        OnboardingOperationalStage: {
-            id: string;
-            label: string;
-            owner_lane: string;
-            required: boolean;
-            /** @enum {string} */
-            status: "pass" | "warn" | "fail" | "skip";
-            blockers: string[];
-            next_action?: string | null;
-        };
-        OnboardingOperationalPipeline: {
-            /** @enum {string} */
-            status: "pass" | "warn" | "fail";
-            blocked: boolean;
-            current_stage_id?: string | null;
-            blockers: string[];
-            next_actions: string[];
-            stages: components["schemas"]["OnboardingOperationalStage"][];
-        };
-        OnboardingScorecardResponse: {
-            /** Format: uuid */
-            branch_id: string;
-            /** @enum {string} */
-            status: "pass" | "fail";
-            ready: boolean;
-            checks: components["schemas"]["OnboardingScorecardCheck"][];
-            missing: string[];
-            document_ingestion?: components["schemas"]["OnboardingDocumentIngestion"] | null;
-            sla_control_loop?: components["schemas"]["OnboardingSlaControlLoop"] | null;
-            operational_pipeline?: components["schemas"]["OnboardingOperationalPipeline"] | null;
-            /** Format: date-time */
-            generated_at: string;
-        };
-        OnboardingAdvanceRequest: {
-            /** Format: uuid */
-            branch_id: string;
-            /** @enum {string} */
-            step_id: "branch_draft" | "integrations" | "team" | "telegram" | "knowledge" | "booking" | "go_no_go";
-        };
-        /** @enum {string} */
-        ConfirmationAction: "knowledge_rollback" | "branch_deactivate" | "integration_reconcile" | "provider_ops_execute";
-        /** @enum {string} */
-        ConfirmationTargetType: "knowledge_version" | "branch";
-        ConfirmationCreateRequest: {
-            action: components["schemas"]["ConfirmationAction"];
-            target_type: components["schemas"]["ConfirmationTargetType"];
-            /** Format: uuid */
-            target_id: string;
-            reason: string;
-        };
-        ConfirmationResponse: {
-            /** Format: uuid */
-            confirmation_id: string;
-            action: components["schemas"]["ConfirmationAction"];
-            target_type: components["schemas"]["ConfirmationTargetType"];
-            /** Format: uuid */
-            target_id: string;
-            /** Format: date-time */
-            expires_at: string;
-        };
-        MeResponse: {
-            agent?: components["schemas"]["Agent"];
-            client?: components["schemas"]["Client"];
-            branches?: components["schemas"]["Branch"][];
-            clients?: components["schemas"]["Client"][];
-            companies?: components["schemas"]["Company"][];
-            company_selection_required?: boolean;
-            selection_required?: boolean;
-            branch_selection_required?: boolean;
-            /** Format: uuid */
-            selected_company_id?: string | null;
-            /** Format: uuid */
-            selected_branch_id?: string | null;
-        };
-        Case: {
-            /** Format: uuid */
-            id?: string;
-            /** Format: uuid */
-            conversation_id?: string;
-            /** @enum {string} */
-            status?: "pending" | "active" | "resolved" | "bot_handling";
-            trigger_type?: string;
-            trigger_value?: string | null;
-            context_summary?: string | null;
-            user_message?: string | null;
-            assigned_to_name?: string | null;
-            /** Format: date-time */
-            first_response_at?: string | null;
-            /** Format: date-time */
-            resolved_at?: string | null;
-            resolution_time_seconds?: number | null;
-            /** Format: uuid */
-            branch_id?: string | null;
-            /** @enum {string|null} */
-            channel?: "whatsapp" | "telegram" | null;
-            /** Format: date-time */
-            created_at?: string;
-            /** @enum {string} */
-            sla_status?: "ok" | "warning" | "breached";
-            customer_name?: string | null;
-            customer_phone?: string | null;
-            customer_remote_jid?: string | null;
-            decision_trace?: Record<string, never>[] | null;
-            /** Format: date-time */
-            last_inbound_at?: string | null;
-            /** Format: date-time */
-            last_outbound_at?: string | null;
-            /** Format: date-time */
-            last_activity_at?: string | null;
-            /** @enum {string|null} */
-            last_activity_channel?: "whatsapp" | "telegram" | "console" | "system" | null;
-            last_message_preview?: string | null;
-            needs_reply?: boolean | null;
-            has_delivery_error?: boolean | null;
-            has_pending_outbox?: boolean | null;
-            telegram_trail?: components["schemas"]["TelegramTrail"];
-        };
-        CaseListResponse: {
-            items?: components["schemas"]["Case"][];
-            cursor?: string | null;
-            has_more?: boolean;
-            total?: number | null;
-        };
-        CaseActionResponse: {
-            success?: boolean;
-            case?: components["schemas"]["Case"];
-            sync?: components["schemas"]["CaseActionSync"];
-        };
-        CaseActionSync: {
-            telegram?: components["schemas"]["SyncStatus"];
-            client_notify?: components["schemas"]["SyncStatus"];
-        };
-        InboxMacro: {
-            /** Format: uuid */
-            id: string;
-            /** @enum {string} */
-            scope: "personal" | "team";
-            label: string;
-            body: string;
-            is_active: boolean;
-            /** Format: date-time */
-            created_at?: string | null;
-            /** Format: date-time */
-            updated_at?: string | null;
-        };
-        InboxMacroListResponse: {
-            items?: components["schemas"]["InboxMacro"][];
-        };
-        InboxMacroCreateRequest: {
-            /** @enum {string} */
-            scope: "personal" | "team";
-            label: string;
-            body: string;
-            /** @default true */
-            is_active: boolean;
-        };
-        InboxMacroCreateResponse: {
-            macro?: components["schemas"]["InboxMacro"];
-        };
-        InboxMacroUpdateRequest: {
-            label?: string;
-            body?: string;
-            is_active?: boolean;
-        };
-        SyncStatus: {
-            /** @enum {string} */
-            status?: "ok" | "skipped" | "failed";
-            detail?: string | null;
-        };
-        AgentListResponse: {
-            items?: components["schemas"]["AgentWithIdentities"][];
-        };
-        AgentCreateRequest: {
-            /** Format: uuid */
-            client_id: string;
-            /** Format: uuid */
-            branch_id?: string | null;
-            /** @enum {string} */
-            role: "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer";
-            name?: string | null;
-            is_active?: boolean | null;
-            oidc_subject?: string | null;
-            sso_username?: string | null;
-            sso_password?: string | null;
-            sso_temp_password?: boolean | null;
-        };
-        AgentCreateResponse: {
-            agent?: components["schemas"]["Agent"];
-        };
-        AgentLifecycleActionRequest: {
-            reason: string;
-        };
-        AgentOidcRebindRequest: {
-            oidc_subject: string;
-            reason: string;
-        };
-        AgentOidcRebindResponse: {
-            /** Format: uuid */
-            agent_id: string;
-            oidc_subject: string;
-            previous_oidc_subject?: string | null;
-        };
-        AgentMembership: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            agent_id: string;
-            agent_name?: string | null;
-            /** Format: uuid */
-            agent_client_id?: string | null;
-            /** @enum {string} */
-            scope: "company" | "client" | "branch";
-            /** Format: uuid */
-            company_id?: string | null;
-            /** Format: uuid */
-            client_id?: string | null;
-            /** Format: uuid */
-            branch_id?: string | null;
-            /** @enum {string} */
-            role: "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer";
-            is_active: boolean;
-            /** Format: date-time */
-            created_at?: string | null;
-            /** Format: date-time */
-            updated_at?: string | null;
-        };
-        MembershipListResponse: {
-            items?: components["schemas"]["AgentMembership"][];
-        };
-        MembershipCreateRequest: {
-            /** Format: uuid */
-            agent_id: string;
-            /** @enum {string} */
-            scope: "company" | "client" | "branch";
-            /** @enum {string} */
-            role: "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer";
-            /** Format: uuid */
-            company_id?: string | null;
-            /** Format: uuid */
-            client_id?: string | null;
-            /** Format: uuid */
-            branch_id?: string | null;
-            is_active?: boolean | null;
-        };
-        MembershipUpdateRequest: {
-            /** @enum {string|null} */
-            scope?: "company" | "client" | "branch" | null;
-            /** @enum {string|null} */
-            role?: "platform_admin" | "owner" | "admin" | "manager" | "support" | "specialist" | "viewer" | null;
-            /** Format: uuid */
-            company_id?: string | null;
-            /** Format: uuid */
-            client_id?: string | null;
-            /** Format: uuid */
-            branch_id?: string | null;
-            is_active?: boolean | null;
+            minutes: number;
+            /** Reason */
             reason?: string | null;
         };
-        Message: {
-            /** Format: uuid */
-            id?: string;
-            /** @enum {string} */
-            role?: "user" | "assistant" | "manager" | "system";
-            content?: string;
-            /** Format: date-time */
-            created_at?: string;
-            metadata?: Record<string, never> | null;
+        /** ConsoleHumanLockStatus */
+        ConsoleHumanLockStatus: {
+            /** Active */
+            active: boolean;
+            /** Remote Jid */
+            remote_jid?: string | null;
+            /** Lock Until */
+            lock_until?: string | null;
+            /** Remaining Seconds */
+            remaining_seconds?: number | null;
+            /** Source */
+            source?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Locked By Name */
+            locked_by_name?: string | null;
+            /** Lock Scope */
+            lock_scope?: string | null;
         };
-        MessageListResponse: {
-            items?: components["schemas"]["Message"][];
-            cursor?: string | null;
-            has_more?: boolean;
+        /** ConsoleHumanLockStatusResponse */
+        ConsoleHumanLockStatusResponse: {
+            /** Success */
+            success: boolean;
+            status: components["schemas"]["ConsoleHumanLockStatus"];
         };
-        SendMessageRequest: {
-            content: string;
-        };
-        SendMediaRequest: {
-            /** Format: binary */
-            file: string;
-            caption?: string;
-        };
-        SendMessageResponse: {
-            success?: boolean;
-            message?: components["schemas"]["Message"];
-        };
-        HealthResponse: {
-            /** @enum {string} */
-            status?: "ok" | "healthy" | "degraded" | "unhealthy";
-            version?: string;
-            /** @enum {string} */
-            database?: "ok" | "error" | "connected";
-            /** @enum {string} */
-            redis?: "ok" | "error" | "connected" | "unknown";
-            outbox_backlog?: number;
-        };
-        MetricFactMeta: {
-            /** @enum {string} */
-            kind: "fact" | "estimate" | "missing";
-            source: string;
-            as_of?: string | null;
-            /** @enum {string} */
-            scope: "system" | "client" | "branch";
-            sample_size?: number | null;
-            note?: string | null;
-        };
-        BusinessSummaryAction: {
+        /** ConsoleIncidentAction */
+        ConsoleIncidentAction: {
+            /** Id */
             id: string;
+            /** Title */
             title: string;
+            /** Description */
             description: string;
-            href: string;
-            /** @enum {string} */
-            severity: "critical" | "warn" | "info";
-        };
-        IncidentAction: {
-            id: string;
-            title: string;
-            description: string;
+            /** Href */
             href?: string | null;
-            /** @enum {string|null} */
-            job_type?: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state" | null;
-            /** @enum {string|null} */
-            mode?: "dry_run" | "execute" | null;
-            params?: {
-                [key: string]: unknown;
-            } | null;
+            /** Job Type */
+            job_type?: ("outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state") | null;
+            /** Mode */
+            mode?: ("dry_run" | "execute") | null;
+            /** Params */
+            params?: Record<string, never> | null;
+            /**
+             * Dry Run First
+             * @default true
+             */
             dry_run_first: boolean;
+            /**
+             * Requires Confirmation
+             * @default false
+             */
             requires_confirmation: boolean;
         };
-        IncidentItem: {
+        /** ConsoleIncidentItem */
+        ConsoleIncidentItem: {
+            /** Id */
             id: string;
-            /** @enum {string} */
+            /**
+             * Scope
+             * @enum {string}
+             */
             scope: "fleet" | "client" | "branch";
-            /** @enum {string} */
+            /**
+             * Severity
+             * @enum {string}
+             */
             severity: "critical" | "warn" | "info";
+            /** Title */
             title: string;
+            /** Summary */
             summary: string;
-            /** @enum {string} */
-            reason_code: "outbox_backlog" | "provider_billing_blocked" | "provider_unavailable" | "provider_auth" | "provider_rate_limited" | "integration_degraded" | "handover_backlog" | "unknown";
+            /**
+             * Reason Code
+             * @enum {string}
+             */
+            reason_code: "outbox_backlog" | "provider_billing_blocked" | "provider_invalid_recipient" | "provider_unavailable" | "provider_auth" | "provider_rate_limited" | "integration_degraded" | "handover_backlog" | "unknown";
+            /** Reason Label */
             reason_label: string;
+            /** Source */
             source: string;
+            /** Detected At */
             detected_at: string;
-            /** Format: uuid */
+            /** Client Id */
             client_id?: string | null;
+            /** Client Slug */
             client_slug?: string | null;
-            /** Format: uuid */
+            /** Branch Id */
             branch_id?: string | null;
-            /** @enum {string} */
+            /**
+             * Incident State
+             * @default open
+             * @enum {string}
+             */
             incident_state: "open" | "in_progress" | "resolved";
+            /** Incident State Updated At */
             incident_state_updated_at?: string | null;
+            /** Incident State Owner */
             incident_state_owner?: string | null;
+            /** Incident State Due At */
             incident_state_due_at?: string | null;
+            /** Incident State Note */
             incident_state_note?: string | null;
+            /**
+             * Metrics
+             * @default {}
+             */
             metrics: {
-                [key: string]: unknown;
+                [key: string]: string | number | boolean | null;
             };
-            actions: components["schemas"]["IncidentAction"][];
+            /**
+             * Actions
+             * @default []
+             */
+            actions: components["schemas"]["ConsoleIncidentAction"][];
         };
-        IncidentSummary: {
+        /** ConsoleIncidentListResponse */
+        ConsoleIncidentListResponse: {
+            /** Generated At */
+            generated_at: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "fleet" | "client" | "branch";
+            summary: components["schemas"]["ConsoleIncidentSummary"];
+            /** Items */
+            items: components["schemas"]["ConsoleIncidentItem"][];
+        };
+        /** ConsoleIncidentSummary */
+        ConsoleIncidentSummary: {
+            /** Total */
             total: number;
+            /** Critical */
             critical: number;
+            /** Warn */
             warn: number;
+            /** Info */
             info: number;
         };
-        IncidentListResponse: {
-            generated_at: string;
-            /** @enum {string} */
-            scope: "fleet" | "client" | "branch";
-            summary: components["schemas"]["IncidentSummary"];
-            items: components["schemas"]["IncidentItem"][];
-        };
-        BusinessSummaryResponse: {
-            generated_at: string;
-            /** @enum {string} */
-            status: "healthy" | "degraded" | "unhealthy";
-            status_label: string;
-            outbox_backlog: number;
-            outbox_failed_24h: number;
-            pending_cases: number;
-            active_cases: number;
-            unresolved_cases: number;
-            oldest_unresolved_minutes?: number | null;
-            first_response_p90_seconds?: number | null;
-            actions: components["schemas"]["BusinessSummaryAction"][];
-            metric_meta: {
-                [key: string]: components["schemas"]["MetricFactMeta"];
-            };
-        };
-        SubscriptionEvidenceItem: {
-            /** Format: uuid */
-            outbox_id: string;
-            /** Format: uuid */
-            conversation_id?: string | null;
-            inbound_message_id: string;
-            created_at: string;
-            status: string;
-            provider_status?: string | null;
-            provider_message_id?: string | null;
-        };
-        SubscriptionSummaryResponse: {
-            generated_at: string;
-            period_start: string;
-            period_end: string;
-            next_billing_date: string;
-            plan_name?: string | null;
-            contract_label?: string | null;
-            currency?: string | null;
-            monthly_quota?: number | null;
-            /** @enum {string} */
-            quota_source: "company_billing_info" | "client_config" | "unknown";
-            billable_messages: number;
-            remaining_quota?: number | null;
-            projected_month_total?: number | null;
-            usage_percent?: number | null;
-            projected_remaining_quota?: number | null;
-            projected_over_quota: boolean;
-            projected_overage_messages?: number | null;
-            /** @enum {string} */
-            quota_alert_level: "normal" | "warning_80" | "limit_100";
-            quota_alert_message: string;
-            overage_policy_message: string;
-            over_quota: boolean;
-            evidence: components["schemas"]["SubscriptionEvidenceItem"][];
-            metric_meta: {
-                [key: string]: components["schemas"]["MetricFactMeta"];
-            };
-        };
-        DataTrustSummaryResponse: {
-            generated_at: string;
-            /** @enum {string} */
-            status: "healthy" | "degraded" | "unhealthy";
-            status_label: string;
-            metric_date?: string | null;
-            analytics_scope_limited: boolean;
-            first_response_missing_total?: number | null;
-            escalation_meta_missing_total?: number | null;
-            intent_missing_total?: number | null;
-            knowledge_last_published_at?: string | null;
-            knowledge_stale_hours?: number | null;
-            audit_events_24h: number;
-            critical_audit_events_24h: number;
-            actions: components["schemas"]["BusinessSummaryAction"][];
-            metric_meta: {
-                [key: string]: components["schemas"]["MetricFactMeta"];
-            };
-        };
-        TeamManagerPerformanceItem: {
-            manager_name: string;
-            unresolved_cases: number;
-            pending_cases: number;
-            active_cases: number;
-            oldest_unresolved_minutes?: number | null;
-            avg_first_response_seconds_30d?: number | null;
-        };
-        TeamPerformanceSummaryResponse: {
-            generated_at: string;
-            /** @enum {string} */
-            status: "healthy" | "degraded" | "unhealthy";
-            status_label: string;
-            metric_date?: string | null;
-            analytics_scope_limited: boolean;
-            manager_median_response_seconds?: number | null;
-            first_response_p90_seconds?: number | null;
-            unresolved_cases: number;
-            unresolved_older_than_60m: number;
-            managers: components["schemas"]["TeamManagerPerformanceItem"][];
-            actions: components["schemas"]["BusinessSummaryAction"][];
-            metric_meta: {
-                [key: string]: components["schemas"]["MetricFactMeta"];
-            };
-        };
-        OwnerOperationApplyRequest: {
-            /** @enum {string} */
-            mode: "capture_leads" | "stable_quality" | "team_protection";
-        };
-        OwnerOperationSettingsPatch: {
-            reminder_1_minutes: number;
-            reminder_2_minutes: number;
-            escalation_timeout_minutes: number;
-        };
-        OwnerOperationMetricSnapshot: {
-            outbox_backlog: number;
-            unresolved_older_than_60m: number;
-            manager_median_response_seconds?: number | null;
-        };
-        OwnerOperationPreviewResponse: {
-            generated_at: string;
-            /** @enum {string} */
-            mode: "capture_leads" | "stable_quality" | "team_protection";
-            mode_label: string;
-            settings_patch: components["schemas"]["OwnerOperationSettingsPatch"];
-            current_settings: components["schemas"]["OwnerOperationSettingsPatch"];
-            baseline: components["schemas"]["OwnerOperationMetricSnapshot"];
-            warnings: string[];
-            metric_meta: {
-                [key: string]: components["schemas"]["MetricFactMeta"];
-            };
-        };
-        OwnerOperationApplyResponse: {
-            success: boolean;
-            /** Format: uuid */
-            operation_id: string;
-            /** @enum {string} */
-            mode: "capture_leads" | "stable_quality" | "team_protection";
-            mode_label: string;
-            applied_settings: components["schemas"]["OwnerOperationSettingsPatch"];
-            previous_settings: components["schemas"]["OwnerOperationSettingsPatch"];
-            baseline: components["schemas"]["OwnerOperationMetricSnapshot"];
-            applied_at: string;
-            impact_check_due_at: string;
-            metric_meta: {
-                [key: string]: components["schemas"]["MetricFactMeta"];
-            };
-        };
-        OwnerOperationRollbackRequest: {
-            /** Format: uuid */
-            operation_id?: string | null;
-        };
-        OwnerOperationRollbackResponse: {
-            success: boolean;
-            /** Format: uuid */
-            operation_id: string;
-            restored_settings: components["schemas"]["OwnerOperationSettingsPatch"];
-            rolled_back_at: string;
-            message: string;
-        };
-        OwnerOperationMetricDelta: {
-            baseline?: number | null;
-            current?: number | null;
-            delta?: number | null;
-            /** @enum {string} */
-            trend: "up" | "down" | "stable" | "unknown";
-        };
-        OwnerOperationImpactResponse: {
-            /** Format: uuid */
-            operation_id: string;
-            /** @enum {string} */
-            mode: "capture_leads" | "stable_quality" | "team_protection";
-            checked_at: string;
-            due_at: string;
-            /** @enum {string} */
-            summary: "improved" | "regressed" | "mixed_or_stable";
-            baseline: components["schemas"]["OwnerOperationMetricSnapshot"];
-            current: components["schemas"]["OwnerOperationMetricSnapshot"];
-            metrics: {
-                [key: string]: components["schemas"]["OwnerOperationMetricDelta"];
-            };
-            metric_meta: {
-                [key: string]: components["schemas"]["MetricFactMeta"];
-            };
-        };
-        /** @enum {string} */
-        KpiStatus: "fact" | "estimate" | "need";
-        AnalyticsTopIntent: {
-            intent: string;
-            count: number;
-            share: number;
-        };
-        AnalyticsTopSection: {
-            section: string;
-            count: number;
-            share: number;
-        };
-        AnalyticsTrendPoint: {
-            /** Format: date */
-            date: string;
-            bot_closed_rate?: number | null;
-            booking_conversion_rate?: number | null;
-            first_response_p50_seconds?: number | null;
-            after_hours_coverage_rate?: number | null;
-            escalation_quality_rate?: number | null;
-            outbox_failed_total?: number | null;
-            no_response_alert_total?: number | null;
-        };
-        MetricsDailyResponse: {
-            /** Format: date */
-            date?: string;
-            total_cases?: number;
-            pending_cases?: number;
-            active_cases?: number;
-            resolved_cases?: number;
-            avg_resolution_hours?: number | null;
-            total_client_messages?: number | null;
-            total_bot_messages?: number | null;
-            inbound_conversations_total?: number | null;
-            bot_closed_sessions?: number | null;
-            bot_closed_total_sessions?: number | null;
-            bot_closed_incomplete_total?: number | null;
-            bot_closed_rate?: number | null;
-            bot_closed_status?: components["schemas"]["KpiStatus"];
-            manager_median_response_seconds?: number | null;
-            manager_time_saved_seconds_estimate?: number | null;
-            manager_time_saved_status?: components["schemas"]["KpiStatus"];
-            booking_total?: number | null;
-            booking_attributed?: number | null;
-            booking_missing_conversation_total?: number | null;
-            booking_conversion_rate?: number | null;
-            booking_status?: components["schemas"]["KpiStatus"];
-            first_response_p50_seconds?: number | null;
-            first_response_p90_seconds?: number | null;
-            first_response_missing_total?: number | null;
-            first_response_status?: components["schemas"]["KpiStatus"];
-            after_hours_total?: number | null;
-            after_hours_covered?: number | null;
-            after_hours_missing_total?: number | null;
-            after_hours_coverage_rate?: number | null;
-            after_hours_status?: components["schemas"]["KpiStatus"];
-            escalation_total?: number | null;
-            escalation_quality_total?: number | null;
-            escalation_meta_missing_total?: number | null;
-            escalation_quality_rate?: number | null;
-            escalation_quality_status?: components["schemas"]["KpiStatus"];
-            outbox_failed_total?: number | null;
-            outbox_saved_total?: number | null;
-            no_response_alert_total?: number | null;
-            loss_risk_status?: components["schemas"]["KpiStatus"];
-            intent_missing_total?: number | null;
-            top_intents?: components["schemas"]["AnalyticsTopIntent"][] | null;
-            top_info_sections?: components["schemas"]["AnalyticsTopSection"][] | null;
-            top_intents_status?: components["schemas"]["KpiStatus"];
-            analytics_trend?: components["schemas"]["AnalyticsTrendPoint"][] | null;
-        };
-        OutboxCounts: {
-            pending?: number;
-            processing?: number;
-            failed?: number;
-        };
-        OutboxItem: {
-            /** Format: uuid */
-            id?: string;
-            /** @enum {string} */
-            status?: "pending" | "processing" | "failed";
-            attempts?: number;
-            /** Format: date-time */
-            next_attempt_at?: string | null;
-            last_error?: string | null;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
-            /** Format: uuid */
-            conversation_id?: string | null;
-            /** Format: uuid */
-            branch_id?: string | null;
-            inbound_message_id?: string;
-            channel?: string | null;
-            message_type?: string | null;
-            message_preview?: string | null;
-            remote_jid?: string | null;
-            instance_id?: string | null;
-            forwarded_to_telegram?: boolean | null;
-        };
-        OutboxListResponse: {
-            items?: components["schemas"]["OutboxItem"][];
-            cursor?: string | null;
-            has_more?: boolean;
-            counts?: components["schemas"]["OutboxCounts"];
-        };
-        OutboxRetryRequest: {
-            ids?: string[] | null;
-            /** @default 100 */
-            limit: number;
-        };
-        OutboxRetryResponse: {
-            success?: boolean;
-            retried?: number;
-            skipped?: number;
-        };
-        OpsJobDefinition: {
-            /** @enum {string} */
-            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state";
-            label: string;
-            description: string;
-            supports_dry_run: boolean;
-        };
-        OpsJobCatalogResponse: {
-            items: components["schemas"]["OpsJobDefinition"][];
-        };
-        OpsJobRunRequest: {
-            /** @enum {string} */
-            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state";
+        /** ConsoleIntegrationBranchActionRequest */
+        ConsoleIntegrationBranchActionRequest: {
             /**
+             * Action
+             * @default integration_reconcile
+             * @enum {string}
+             */
+            action: "integration_reconcile" | "provider_start_rebind" | "provider_complete_rebind" | "provider_renewal_confirmed" | "provider_webhook_updated" | "provider_send_reminder";
+            /**
+             * Mode
              * @default dry_run
              * @enum {string}
              */
             mode: "dry_run" | "execute";
-            params?: {
-                [key: string]: unknown;
-            } | null;
+            /** Confirmation Id */
+            confirmation_id?: string | null;
+            /** Owner */
+            owner?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Paid Until */
+            paid_until?: string | null;
+            /** Next Renewal At */
+            next_renewal_at?: string | null;
+            /** Instance Id */
+            instance_id?: string | null;
+            /** Webhook Status */
+            webhook_status?: ("configured" | "pending" | "rebind_required") | null;
         };
-        OpsJobRecord: {
-            /** Format: uuid */
-            id: string;
-            /** @enum {string} */
-            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state";
-            /** @enum {string} */
+        /** ConsoleIntegrationBranchActionResponse */
+        ConsoleIntegrationBranchActionResponse: {
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "integration_reconcile" | "provider_start_rebind" | "provider_complete_rebind" | "provider_renewal_confirmed" | "provider_webhook_updated" | "provider_send_reminder";
+            /**
+             * Mode
+             * @enum {string}
+             */
             mode: "dry_run" | "execute";
-            /** @enum {string} */
-            status: "success" | "failed";
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            finished_at?: string | null;
-            error_message?: string | null;
-            request_payload?: {
-                [key: string]: unknown;
-            } | null;
-            result_payload?: {
-                [key: string]: unknown;
-            } | null;
+            /** Result */
+            result: Record<string, never>;
         };
-        OpsJobRunResponse: {
-            job: components["schemas"]["OpsJobRecord"];
-        };
-        OpsJobListResponse: {
-            items: components["schemas"]["OpsJobRecord"][];
+        /** ConsoleIntegrationsListResponse */
+        ConsoleIntegrationsListResponse: {
+            /** Stale After Minutes */
+            stale_after_minutes: number;
+            /** Cursor */
             cursor?: string | null;
+            /**
+             * Has More
+             * @default false
+             */
             has_more: boolean;
+            /**
+             * Total In Scope
+             * @default 0
+             */
+            total_in_scope: number;
+            /** Items */
+            items: components["schemas"]["ConsoleBranchIntegrationStatus"][];
+            /**
+             * Provider Ops Queue
+             * @default []
+             */
+            provider_ops_queue: components["schemas"]["ConsoleProviderOpsQueueItem"][];
         };
-        BotConfig: {
-            reminder_timeout_1?: number | null;
-            reminder_timeout_2?: number | null;
-            auto_close_timeout?: number | null;
-            quiet_hours_enabled?: boolean;
-            quiet_hours_start?: string | null;
-            quiet_hours_end?: string | null;
-            tone?: string | null;
-            autolearn_enabled?: boolean;
-            booking_enabled?: boolean;
-            enable_reminders?: boolean;
-            enable_owner_escalation?: boolean;
-            learning_consent_status?: string | null;
-            learning_anonymization_mode?: string | null;
-            learning_retention_days?: number | null;
-            data_sharing?: string | null;
-        };
-        SettingsResponse: {
-            branches?: components["schemas"]["Branch"][];
-            agents?: components["schemas"]["Agent"][];
-            bot_config?: components["schemas"]["BotConfig"];
-        };
-        SettingsUpdateRequest: {
-            reminder_1_minutes?: number;
-            reminder_2_minutes?: number;
-            escalation_timeout_minutes?: number;
-        };
-        SettingsUpdateResponse: {
-            success?: boolean;
-            message?: string;
-        };
-        LearningCandidate: {
-            /** Format: uuid */
-            id?: string;
-            status?: string;
-            question_text?: string;
-            response_text?: string;
-            source_name?: string | null;
-            source_role?: string | null;
-            source_channel?: string | null;
-            candidate_type?: string | null;
-            /** Format: uuid */
-            branch_id?: string | null;
-            /** Format: uuid */
-            handover_id?: string | null;
-            created_at?: string | null;
-            updated_at?: string | null;
-            approved_at?: string | null;
-            rejected_at?: string | null;
-            retention_expires_at?: string | null;
-            consent_status?: string | null;
-            anonymization_mode?: string | null;
-            can_approve?: boolean;
-            ineligible_reason?: string | null;
-        };
-        LearningCandidateListResponse: {
-            items?: components["schemas"]["LearningCandidate"][];
-            cursor?: string | null;
-            has_more?: boolean;
-        };
-        LearningCandidateActionResponse: {
-            success?: boolean;
-            message?: string;
-        };
-        KnowledgeCurrentResponse: {
-            /** Format: uuid */
+        /** ConsoleKnowledgeCurrentResponse */
+        ConsoleKnowledgeCurrentResponse: {
+            /** Version Id */
             version_id?: string | null;
-            payload?: {
-                [key: string]: unknown;
-            } | null;
+            /** Payload */
+            payload?: Record<string, never> | null;
+            /** Content */
             content?: string | null;
         };
-        KnowledgeValidationRequest: {
-            draft_text: string;
+        /** ConsoleKnowledgeHistoryItem */
+        ConsoleKnowledgeHistoryItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Status */
+            status: string;
+            /** Created At */
+            created_at?: string | null;
+            /** Published At */
+            published_at?: string | null;
+            /** Summary */
+            summary?: string | null;
         };
-        KnowledgeValidationResponse: {
-            valid?: boolean;
-            errors?: string[];
-            warnings?: string[];
-            diff?: string | null;
+        /** ConsoleKnowledgeHistoryResponse */
+        ConsoleKnowledgeHistoryResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleKnowledgeHistoryItem"][];
         };
-        KnowledgePublishRequest: {
+        /** ConsoleKnowledgePublishRequest */
+        ConsoleKnowledgePublishRequest: {
+            /** Draft Text */
             draft_text: string;
             /**
-             * @description Allow publish without recent validate preflight for the same draft hash.
+             * Skip Preflight Check
              * @default false
              */
             skip_preflight_check: boolean;
         };
-        KnowledgePublishResponse: {
-            success?: boolean;
-            /** Format: uuid */
+        /** ConsoleKnowledgePublishResponse */
+        ConsoleKnowledgePublishResponse: {
+            /** Success */
+            success: boolean;
+            /** Version Id */
             version_id?: string | null;
-            /** Format: date-time */
+            /** Published At */
             published_at?: string | null;
+            /** Message */
             message?: string | null;
         };
-        KnowledgeHistoryItem: {
-            /** Format: uuid */
-            id?: string;
-            status?: string;
-            /** Format: date-time */
-            created_at?: string | null;
-            /** Format: date-time */
-            published_at?: string | null;
-            summary?: string | null;
-        };
-        KnowledgeHistoryResponse: {
-            items?: components["schemas"]["KnowledgeHistoryItem"][];
-        };
-        KnowledgeRollbackRequest: {
-            /** Format: uuid */
+        /** ConsoleKnowledgeRollbackRequest */
+        ConsoleKnowledgeRollbackRequest: {
+            /**
+             * Version Id
+             * Format: uuid
+             */
             version_id: string;
-            /** Format: uuid */
+            /** Confirmation Id */
             confirmation_id?: string | null;
         };
-        KnowledgeRollbackResponse: {
-            success?: boolean;
-            /** Format: uuid */
+        /** ConsoleKnowledgeRollbackResponse */
+        ConsoleKnowledgeRollbackResponse: {
+            /** Success */
+            success: boolean;
+            /** Version Id */
             version_id?: string | null;
         };
-        CapabilitiesPayload: {
-            domain_slug?: string | null;
-            channels: components["schemas"]["CapabilityChannels"];
-            providers: components["schemas"]["CapabilityProviders"];
-            features: components["schemas"]["CapabilityFeatures"];
+        /** ConsoleKnowledgeValidateRequest */
+        ConsoleKnowledgeValidateRequest: {
+            /** Draft Text */
+            draft_text: string;
         };
-        CapabilityChannels: {
-            whatsapp?: boolean | null;
-            telegram?: boolean | null;
-            instagram?: boolean | null;
-        };
-        CapabilityProviders: {
-            /** @enum {string|null} */
-            availability_provider?: "none" | "google_calendar" | "bitrix" | "amocrm" | "manual" | null;
-            /** @enum {string|null} */
-            crm_provider?: "none" | "amocrm" | "bitrix" | "custom" | null;
-            /** @enum {string|null} */
-            calendar_provider?: "none" | "google_calendar" | "local" | null;
-        };
-        CapabilityFeatures: {
-            /** @enum {string|null} */
-            booking_mode?: "collect_preferences" | "confirm_slots" | null;
-            knowledge_upload?: boolean | null;
-            analytics?: boolean | null;
-            auto_learn?: boolean | null;
-        };
-        CapabilitiesRecord: {
-            /** Format: uuid */
-            id?: string;
-            /** Format: uuid */
-            client_id?: string;
-            /** Format: uuid */
-            branch_id?: string | null;
-            /** @enum {string} */
-            scope?: "client" | "branch";
-            /** @enum {string} */
-            status?: "active" | "disabled";
-            schema_version?: string;
-            payload?: components["schemas"]["CapabilitiesPayload"];
-            /** Format: uuid */
-            created_by?: string | null;
-            /** Format: date-time */
-            created_at?: string | null;
-            /** Format: date-time */
-            updated_at?: string | null;
-        };
-        CapabilitiesResponse: {
-            /** Format: uuid */
-            client_id?: string;
-            /** Format: uuid */
-            branch_id?: string | null;
-            effective?: components["schemas"]["CapabilitiesPayload"];
-            client_capabilities?: components["schemas"]["CapabilitiesRecord"];
-            branch_capabilities?: components["schemas"]["CapabilitiesRecord"];
-        };
-        CapabilitiesPatchRequest: {
-            /** @enum {string} */
-            scope: "client" | "branch";
-            /** Format: uuid */
-            branch_id?: string | null;
-            /** @enum {string|null} */
-            status?: "active" | "disabled" | null;
-            schema_version?: string | null;
-            payload: components["schemas"]["CapabilitiesPayload"];
-        };
-        OnboardingContractPayload: {
-            domain_slug?: string | null;
-            purchased?: components["schemas"]["CapabilitiesPayload"];
-            provider_binding?: components["schemas"]["OnboardingProviderBindingPayload"];
-        };
-        OnboardingProviderBindingPayload: {
-            whatsapp?: components["schemas"]["OnboardingProviderBindingWhatsApp"];
-        };
-        OnboardingProviderBindingWhatsApp: {
-            provider?: string | null;
-            instance_id?: string | null;
-            /** @enum {string|null} */
-            webhook_status?: "configured" | "pending" | "rebind_required" | null;
-            /** Format: date */
-            paid_until?: string | null;
-            owner?: string | null;
-            /** Format: date */
-            next_renewal_at?: string | null;
-            /** Format: date */
-            last_rebind_at?: string | null;
-            rebind_required?: boolean | null;
-            /** @enum {string|null} */
-            alert_state?: "ok" | "warn" | "critical" | null;
-            notes?: string | null;
-        };
-        OnboardingContractRecord: {
-            /** Format: uuid */
-            id?: string;
-            /** Format: uuid */
-            client_id?: string;
-            /** Format: uuid */
-            branch_id?: string | null;
-            /** @enum {string} */
-            scope?: "client" | "branch";
-            /** @enum {string} */
-            status?: "active" | "disabled";
-            schema_version?: string;
-            /** @enum {string} */
-            payment_status?: "pending" | "confirmed" | "rejected";
-            /** Format: date-time */
-            payment_confirmed_at?: string | null;
-            /** Format: uuid */
-            payment_confirmed_by?: string | null;
-            payload?: components["schemas"]["OnboardingContractPayload"];
-            /** Format: uuid */
-            created_by?: string | null;
-            /** Format: date-time */
-            created_at?: string | null;
-            /** Format: date-time */
-            updated_at?: string | null;
-        };
-        OnboardingContractResponse: {
-            /** Format: uuid */
-            client_id?: string;
-            /** Format: uuid */
-            branch_id?: string | null;
-            effective?: components["schemas"]["OnboardingContractPayload"];
-            /** @enum {string} */
-            payment_status?: "pending" | "confirmed" | "rejected";
-            /** Format: date-time */
-            payment_confirmed_at?: string | null;
-            /** Format: uuid */
-            payment_confirmed_by?: string | null;
-            capability_mismatches?: string[];
-            client_contract?: components["schemas"]["OnboardingContractRecord"];
-            branch_contract?: components["schemas"]["OnboardingContractRecord"];
-        };
-        OnboardingContractPatchRequest: {
-            /** @enum {string} */
-            scope: "client" | "branch";
-            /** Format: uuid */
-            branch_id?: string | null;
-            /** @enum {string|null} */
-            status?: "active" | "disabled" | null;
-            schema_version?: string | null;
-            /** @enum {string|null} */
-            payment_status?: "pending" | "confirmed" | "rejected" | null;
-            payload: components["schemas"]["OnboardingContractPayload"];
-        };
-        /** @enum {string} */
-        OnboardingPurchasedService: "whatsapp" | "telegram" | "instagram" | "booking_collect" | "booking_confirm" | "knowledge_upload" | "analytics" | "auto_learn" | "provider_google_calendar" | "provider_local_calendar" | "provider_manual" | "provider_amocrm" | "provider_bitrix";
-        OnboardingAutopilotRequest: {
-            /** Format: uuid */
-            company_id?: string | null;
-            company_name?: string | null;
-            /** Format: uuid */
-            client_id?: string | null;
-            client_slug?: string | null;
-            /** Format: uuid */
-            branch_id?: string | null;
-            branch_slug?: string | null;
-            branch_name?: string | null;
-            timezone?: string | null;
-            phone: string;
-            instance_id: string;
-            /** @enum {string|null} */
-            payment_status?: "pending" | "confirmed" | "rejected" | null;
-            domain_slug?: string | null;
-            purchased?: components["schemas"]["CapabilitiesPayload"];
-            purchased_services?: components["schemas"]["OnboardingPurchasedService"][] | null;
-            provider_binding?: components["schemas"]["OnboardingProviderBindingPayload"];
-            client_data_text?: string | null;
-            client_data_json?: {
-                [key: string]: unknown;
-            } | null;
-            /** @default false */
-            activate_branch: boolean | null;
-            auto_create_reference_pack?: boolean | null;
-            auto_publish_knowledge?: boolean | null;
-        };
-        OnboardingIntakeFieldState: {
-            field: string;
-            /** @enum {string} */
-            status: "unknown" | "assumed" | "confirmed";
-            /** @enum {string} */
-            priority: "critical" | "high" | "medium" | "low";
-        };
-        OnboardingIntakeQuestion: {
-            field: string;
-            question: string;
-            /** @enum {string} */
-            priority: "critical" | "high" | "medium" | "low";
-            /** @default false */
-            blocking_go_live: boolean;
-        };
-        OnboardingIntakeCompile: {
-            /** @enum {string} */
-            status: "pass" | "fail";
-            infra_valid: boolean;
-            schema_version?: string | null;
-            hash?: string | null;
-            pack_index_hash?: string | null;
-            signal_graph_present: boolean;
-            policy_bundle_present: boolean;
+        /** ConsoleKnowledgeValidateResponse */
+        ConsoleKnowledgeValidateResponse: {
+            /** Valid */
+            valid: boolean;
+            /** Errors */
             errors: string[];
+            /** Warnings */
+            warnings: string[];
+            /** Diff */
+            diff?: string | null;
         };
-        OnboardingIntakeQualityDimension: {
+        /** ConsoleLearningCandidate */
+        ConsoleLearningCandidate: {
+            /**
+             * Id
+             * Format: uuid
+             */
             id: string;
-            /** @enum {string} */
-            status: "pass" | "fail" | "warn" | "skip";
-            required: boolean;
-            details: string[];
-        };
-        OnboardingIntakeQualityMatrix: {
-            /** @enum {string} */
-            status: "pass" | "fail";
-            infra_valid: boolean;
-            semantic_valid: boolean;
-            required_fields_count: number;
-            missing_fields_count: number;
-            critical_missing_fields_count: number;
-            integrity_missing_count: number;
-            missing_fields: string[];
-            critical_missing_fields: string[];
-            integrity_missing: string[];
-            dimensions: components["schemas"]["OnboardingIntakeQualityDimension"][];
-            regressions: string[];
-            comparison_blocked: boolean;
-            comparison_block_reason?: string | null;
-        };
-        OnboardingAutopilotIntake: {
-            knowledge_tag: string;
-            draft_saved: boolean;
-            published: boolean;
-            /** Format: uuid */
-            published_version_id?: string | null;
-            missing_fields: string[];
-            missing_questions: string[];
-            field_states?: components["schemas"]["OnboardingIntakeFieldState"][];
-            question_queue?: components["schemas"]["OnboardingIntakeQuestion"][];
-            compile?: components["schemas"]["OnboardingIntakeCompile"];
-            quality_matrix?: components["schemas"]["OnboardingIntakeQualityMatrix"];
-            payload: {
-                [key: string]: unknown;
-            };
-        };
-        OnboardingAutopilotResponse: {
-            company: components["schemas"]["Company"];
-            client: components["schemas"]["Client"];
-            branch: components["schemas"]["Branch"];
-            capabilities: components["schemas"]["CapabilitiesRecord"];
-            onboarding_contract: components["schemas"]["OnboardingContractRecord"];
-            /** @enum {string} */
-            payment_status: "pending" | "confirmed" | "rejected";
-            webhook_secret: string;
-            webhook_url: string;
-            reference_pack?: components["schemas"]["ReferencePack"];
-            onboarding_status: components["schemas"]["OnboardingStatusResponse"];
-            go_no_go_missing: string[];
-            intake: components["schemas"]["OnboardingAutopilotIntake"];
-            actions: string[];
-        };
-        WebhookSecretResponse: {
-            /** Format: uuid */
-            client_id: string;
-            /** Format: uuid */
-            branch_id: string;
-            instance_id: string;
-            webhook_secret: string;
-            webhook_url: string;
-        };
-        ReferencePack: {
-            /** Format: uuid */
-            id?: string;
-            domain_slug?: string;
-            title?: string;
-            description?: string | null;
-            schema_version?: string;
-            /** @enum {string} */
-            status?: "active" | "disabled";
-            metadata?: {
-                [key: string]: unknown;
-            };
-            /** Format: uuid */
-            created_by?: string | null;
-            /** Format: date-time */
+            /** Status */
+            status: string;
+            /** Question Text */
+            question_text: string;
+            /** Response Text */
+            response_text: string;
+            /** Source Name */
+            source_name?: string | null;
+            /** Source Role */
+            source_role?: string | null;
+            /** Source Channel */
+            source_channel?: string | null;
+            /** Candidate Type */
+            candidate_type?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Handover Id */
+            handover_id?: string | null;
+            /** Created At */
             created_at?: string | null;
-            /** Format: date-time */
+            /** Updated At */
+            updated_at?: string | null;
+            /** Approved At */
+            approved_at?: string | null;
+            /** Rejected At */
+            rejected_at?: string | null;
+            /** Retention Expires At */
+            retention_expires_at?: string | null;
+            /** Consent Status */
+            consent_status?: string | null;
+            /** Anonymization Mode */
+            anonymization_mode?: string | null;
+            /**
+             * Can Approve
+             * @default false
+             */
+            can_approve: boolean;
+            /** Ineligible Reason */
+            ineligible_reason?: string | null;
+        };
+        /** ConsoleLearningCandidateActionResponse */
+        ConsoleLearningCandidateActionResponse: {
+            /** Success */
+            success: boolean;
+            /** Message */
+            message: string;
+        };
+        /** ConsoleLearningCandidateListResponse */
+        ConsoleLearningCandidateListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleLearningCandidate"][];
+            /** Cursor */
+            cursor?: string | null;
+            /** Has More */
+            has_more: boolean;
+        };
+        /** ConsoleMacro */
+        ConsoleMacro: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "personal" | "team";
+            /** Label */
+            label: string;
+            /** Body */
+            body: string;
+            /** Is Active */
+            is_active: boolean;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
             updated_at?: string | null;
         };
-        ReferencePackListResponse: {
-            items?: components["schemas"]["ReferencePack"][];
-        };
-        ReferencePackUpsertRequest: {
-            title: string;
-            description?: string | null;
-            schema_version?: string | null;
-            /** @enum {string|null} */
-            status?: "active" | "disabled" | null;
-            metadata?: {
-                [key: string]: unknown;
-            } | null;
-        };
-        TelegramTrail: {
-            message_id?: number | null;
-            topic_id?: number | null;
-            chat_id?: string | null;
-            telegram_link?: string | null;
-            telegram_desktop_link?: string | null;
-            /** @enum {string|null} */
-            delivery_status?: "sent" | "failed" | "pending" | null;
-            /** Format: date-time */
-            delivered_at?: string | null;
-        };
-        TelegramHealthResponse: {
-            /** @enum {string} */
-            status?: "ok" | "degraded" | "error";
-            webhook_alive?: boolean;
-            /** Format: date-time */
-            last_success_at?: string | null;
-            /** Format: date-time */
-            last_error_at?: string | null;
-            last_error_message?: string | null;
-            error_rate_24h?: number;
-            pending_messages?: number;
-        };
-        TelegramVerifyRequest: {
+        /** ConsoleMacroCreateRequest */
+        ConsoleMacroCreateRequest: {
             /**
-             * @default client
+             * Scope
              * @enum {string}
              */
-            scope: "client" | "branch";
-            /** Format: uuid */
-            branch_id?: string | null;
-            chat_id?: string | null;
-        };
-        TelegramVerifyResponse: {
-            success?: boolean;
-            /** @enum {string} */
-            delivery_status?: "sent" | "failed";
-            verification_code?: string;
-            message_id?: number | null;
-            chat_id?: string | null;
-            /** Format: uuid */
-            branch_id?: string | null;
-            error_message?: string | null;
-        };
-        TelegramTestRequest: {
+            scope: "personal" | "team";
+            /** Label */
+            label: string;
+            /** Body */
+            body: string;
             /**
-             * @default client
-             * @enum {string}
+             * Is Active
+             * @default true
              */
-            scope: "client" | "branch";
-            /** Format: uuid */
-            branch_id?: string | null;
-            chat_id?: string | null;
-            message?: string | null;
+            is_active: boolean | null;
         };
-        TelegramTestResponse: {
-            success?: boolean;
-            /** @enum {string} */
-            delivery_status?: "sent" | "failed";
-            message_id?: number | null;
-            chat_id?: string | null;
-            /** Format: uuid */
-            branch_id?: string | null;
-            error_message?: string | null;
+        /** ConsoleMacroCreateResponse */
+        ConsoleMacroCreateResponse: {
+            macro: components["schemas"]["ConsoleMacro"];
         };
-        TelegramLinkResponse: {
-            token?: string;
-            deep_link?: string | null;
-            bot_username?: string | null;
-            /** Format: date-time */
-            expires_at?: string;
+        /** ConsoleMacroListResponse */
+        ConsoleMacroListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleMacro"][];
         };
-        SpecialistServicePayload: {
-            name: string;
-            duration_min?: number | null;
-            price?: number | null;
-        };
-        SpecialistCreate: {
-            name: string;
-            /** Format: uuid */
-            branch_id?: string | null;
-            phone?: string | null;
-            email?: string | null;
-            google_calendar_id?: string | null;
-            /** @default [] */
-            services: components["schemas"]["SpecialistServicePayload"][];
-            working_hours?: Record<string, never> | null;
-            /** @default true */
-            is_active: boolean;
-        };
-        SpecialistUpdate: {
-            name?: string | null;
-            /** Format: uuid */
-            branch_id?: string | null;
-            phone?: string | null;
-            email?: string | null;
-            google_calendar_id?: string | null;
-            services?: components["schemas"]["SpecialistServicePayload"][] | null;
-            working_hours?: Record<string, never> | null;
+        /** ConsoleMacroUpdateRequest */
+        ConsoleMacroUpdateRequest: {
+            /** Label */
+            label?: string | null;
+            /** Body */
+            body?: string | null;
+            /** Is Active */
             is_active?: boolean | null;
         };
-        BookingCreate: {
-            /** Format: uuid */
-            specialist_id: string;
-            /** Format: date-time */
-            start_at: string;
-            /** Format: date-time */
-            end_at: string;
-            customer_name?: string | null;
-            customer_phone?: string | null;
-            service_type?: string | null;
-            notes?: string | null;
-            /** Format: uuid */
-            conversation_id?: string | null;
+        /** ConsoleManagerMessageRequest */
+        ConsoleManagerMessageRequest: {
+            /** Content */
+            content: string;
+            /**
+             * Pause Enabled
+             * @default true
+             */
+            pause_enabled: boolean;
+            /**
+             * Pause Minutes
+             * @default 30
+             */
+            pause_minutes: number;
+            /** Pause Reason */
+            pause_reason?: string | null;
         };
-        BookingResponse: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            specialist_id: string;
-            specialist_name: string;
-            /** Format: date-time */
-            start_at: string;
-            /** Format: date-time */
-            end_at: string;
-            customer_name?: string | null;
-            customer_phone?: string | null;
-            service_type?: string | null;
-            status: string;
-            google_event_id?: string | null;
-            /** Format: date-time */
-            created_at: string;
-        };
-        BookingActionResponse: {
+        /** ConsoleManagerMessageResponse */
+        ConsoleManagerMessageResponse: {
+            /** Success */
             success: boolean;
-            booking: components["schemas"]["BookingResponse"];
+            message: components["schemas"]["ConsoleMessage"];
         };
-        BookingsListResponse: {
-            items: components["schemas"]["BookingResponse"][];
+        /** ConsoleMarketingCampaign */
+        ConsoleMarketingCampaign: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /** Name */
+            name: string;
+            /** Message Text */
+            message_text: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "ready" | "executed" | "paused";
+            /**
+             * Audience Mode
+             * @constant
+             */
+            audience_mode: "branch_active_conversations";
+            /**
+             * Preview Total
+             * @default 0
+             */
+            preview_total: number;
+            /** Last Preview At */
+            last_preview_at?: string | null;
+            /** Executed At */
+            executed_at?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
         };
-        SlotResponse: {
-            start?: string;
-            end?: string;
-            start_time?: string;
-            end_time?: string;
-            available?: boolean;
+        /** ConsoleMarketingCampaignCreateRequest */
+        ConsoleMarketingCampaignCreateRequest: {
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /** Name */
+            name: string;
+            /** Message Text */
+            message_text: string;
+            /**
+             * Audience Mode
+             * @default branch_active_conversations
+             * @constant
+             */
+            audience_mode: "branch_active_conversations";
         };
-        SlotsResponse: {
-            date?: string;
-            /** Format: uuid */
-            specialist_id?: string;
-            specialist_name?: string;
-            duration_minutes?: number;
-            slots?: components["schemas"]["SlotResponse"][];
+        /** ConsoleMarketingCampaignCreateResponse */
+        ConsoleMarketingCampaignCreateResponse: {
+            campaign: components["schemas"]["ConsoleMarketingCampaign"];
         };
-        SpecialistResponse: {
-            /** Format: uuid */
-            id?: string;
-            name?: string;
-            /** Format: uuid */
+        /** ConsoleMarketingCampaignDiagnosticsResponse */
+        ConsoleMarketingCampaignDiagnosticsResponse: {
+            /**
+             * Campaign Id
+             * Format: uuid
+             */
+            campaign_id: string;
+            /** Queued Count */
+            queued_count: number;
+            /** Sent Count */
+            sent_count: number;
+            /** Failed Count */
+            failed_count: number;
+            /** Replied Count */
+            replied_count: number;
+            /** Total Count */
+            total_count: number;
+            /** Sample Failed */
+            sample_failed: components["schemas"]["ConsoleMarketingDeliverySample"][];
+        };
+        /** ConsoleMarketingCampaignExecuteRequest */
+        ConsoleMarketingCampaignExecuteRequest: {
+            /** Confirm Send */
+            confirm_send: boolean;
+            /** Max Recipients */
+            max_recipients?: number | null;
+        };
+        /** ConsoleMarketingCampaignExecuteResponse */
+        ConsoleMarketingCampaignExecuteResponse: {
+            /**
+             * Campaign Id
+             * Format: uuid
+             */
+            campaign_id: string;
+            /** Queued Count */
+            queued_count: number;
+            /** Skipped Count */
+            skipped_count: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "skipped";
+        };
+        /** ConsoleMarketingCampaignListResponse */
+        ConsoleMarketingCampaignListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleMarketingCampaign"][];
+        };
+        /** ConsoleMarketingCampaignPreviewRequest */
+        ConsoleMarketingCampaignPreviewRequest: {
+            /**
+             * Sample Limit
+             * @default 5
+             */
+            sample_limit: number | null;
+        };
+        /** ConsoleMarketingCampaignPreviewResponse */
+        ConsoleMarketingCampaignPreviewResponse: {
+            /**
+             * Campaign Id
+             * Format: uuid
+             */
+            campaign_id: string;
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /**
+             * Audience Mode
+             * @constant
+             */
+            audience_mode: "branch_active_conversations";
+            /** Estimated Recipients */
+            estimated_recipients: number;
+            /** Sample Conversation Ids */
+            sample_conversation_ids: string[];
+            /** Sample Recipient Jids */
+            sample_recipient_jids: string[];
+        };
+        /** ConsoleMarketingCampaignRetryRequest */
+        ConsoleMarketingCampaignRetryRequest: {
+            /** Confirm Retry */
+            confirm_retry: boolean;
+            /**
+             * Limit
+             * @default 100
+             */
+            limit: number | null;
+        };
+        /** ConsoleMarketingCampaignRetryResponse */
+        ConsoleMarketingCampaignRetryResponse: {
+            /**
+             * Campaign Id
+             * Format: uuid
+             */
+            campaign_id: string;
+            /** Retried Count */
+            retried_count: number;
+            /** Skipped Count */
+            skipped_count: number;
+        };
+        /** ConsoleMarketingDeliverySample */
+        ConsoleMarketingDeliverySample: {
+            /**
+             * Delivery Id
+             * Format: uuid
+             */
+            delivery_id: string;
+            /**
+             * Conversation Id
+             * Format: uuid
+             */
+            conversation_id?: string;
+            /** Recipient Jid */
+            recipient_jid?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "sent" | "failed" | "replied";
+            /** Outbox Status */
+            outbox_status?: string | null;
+            /** Last Error */
+            last_error?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ConsoleMeResponse */
+        ConsoleMeResponse: {
+            agent: components["schemas"]["ConsoleAgent"];
+            client?: components["schemas"]["ConsoleClient"] | null;
+            /** Branches */
+            branches: components["schemas"]["ConsoleBranch"][];
+            /**
+             * Clients
+             * @default []
+             */
+            clients: components["schemas"]["ConsoleClient"][];
+            /**
+             * Companies
+             * @default []
+             */
+            companies: components["schemas"]["ConsoleCompany"][];
+            /**
+             * Company Selection Required
+             * @default false
+             */
+            company_selection_required: boolean;
+            /**
+             * Selection Required
+             * @default false
+             */
+            selection_required: boolean;
+            /**
+             * Branch Selection Required
+             * @default false
+             */
+            branch_selection_required: boolean;
+            /** Selected Company Id */
+            selected_company_id?: string | null;
+            /** Selected Branch Id */
+            selected_branch_id?: string | null;
+        };
+        /** ConsoleMembershipCreateRequest */
+        ConsoleMembershipCreateRequest: {
+            /**
+             * Agent Id
+             * Format: uuid
+             */
+            agent_id: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "company" | "client" | "branch";
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer";
+            /** Company Id */
+            company_id?: string | null;
+            /** Client Id */
+            client_id?: string | null;
+            /** Branch Id */
             branch_id?: string | null;
-            branch_name?: string | null;
-            services?: Record<string, never>[];
-            is_active?: boolean;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean | null;
         };
-        SpecialistsResponse: {
-            items?: components["schemas"]["SpecialistResponse"][];
+        /** ConsoleMembershipListResponse */
+        ConsoleMembershipListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleAgentMembership"][];
         };
-        GoogleStatusResponse: {
-            connected: boolean;
-            /** Format: date-time */
-            expires_at?: string | null;
-            is_expired: boolean;
+        /** ConsoleMembershipUpdateRequest */
+        ConsoleMembershipUpdateRequest: {
+            /** Scope */
+            scope?: ("company" | "client" | "branch") | null;
+            /** Role */
+            role?: ("owner" | "admin" | "manager" | "support" | "platform_admin" | "specialist" | "viewer") | null;
+            /** Company Id */
+            company_id?: string | null;
+            /** Client Id */
+            client_id?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Is Active */
+            is_active?: boolean | null;
+            /** Reason */
+            reason?: string | null;
         };
-        AuditEvent: {
-            /** Format: uuid */
-            id?: string;
-            /** Format: date-time */
-            created_at?: string;
-            event_type?: string;
-            actor_name?: string | null;
-            entity_type?: string | null;
-            /** Format: uuid */
-            entity_id?: string | null;
-            payload?: Record<string, never> | null;
+        /** ConsoleMessage */
+        ConsoleMessage: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Role */
+            role: string;
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: string;
+            /** Metadata */
+            metadata?: Record<string, never> | null;
         };
-        AuditListResponse: {
-            items?: components["schemas"]["AuditEvent"][];
+        /** ConsoleMessageListResponse */
+        ConsoleMessageListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleMessage"][];
+            /** Cursor */
             cursor?: string | null;
-            has_more?: boolean;
+            /** Has More */
+            has_more: boolean;
         };
-    };
-    responses: {
-        /** @description Missing or invalid auth token */
-        Unauthorized: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "error": {
-                 *         "code": "AUTH_REQUIRED",
-                 *         "message": "Authentication required",
-                 *         "trace_id": "abc123"
-                 *       }
-                 *     }
-                 */
-                "application/json": components["schemas"]["ErrorResponse"];
+        /** ConsoleMetricFactMeta */
+        ConsoleMetricFactMeta: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "fact" | "estimate" | "missing";
+            /** Source */
+            source: string;
+            /** As Of */
+            as_of?: string | null;
+            /**
+             * Scope
+             * @default client
+             * @enum {string}
+             */
+            scope: "system" | "client" | "branch";
+            /** Sample Size */
+            sample_size?: number | null;
+            /** Note */
+            note?: string | null;
+        };
+        /** ConsoleMetricsDailyResponse */
+        ConsoleMetricsDailyResponse: {
+            /** Date */
+            date: string;
+            /** Total Cases */
+            total_cases: number;
+            /** Pending Cases */
+            pending_cases: number;
+            /** Active Cases */
+            active_cases: number;
+            /** Resolved Cases */
+            resolved_cases: number;
+            /** Avg Resolution Hours */
+            avg_resolution_hours?: number | null;
+            /** Total Client Messages */
+            total_client_messages?: number | null;
+            /** Total Bot Messages */
+            total_bot_messages?: number | null;
+            /** Inbound Conversations Total */
+            inbound_conversations_total?: number | null;
+            /** Bot Closed Sessions */
+            bot_closed_sessions?: number | null;
+            /** Bot Closed Total Sessions */
+            bot_closed_total_sessions?: number | null;
+            /** Bot Closed Incomplete Total */
+            bot_closed_incomplete_total?: number | null;
+            /** Bot Closed Rate */
+            bot_closed_rate?: number | null;
+            /** Bot Closed Status */
+            bot_closed_status?: ("fact" | "estimate" | "need") | null;
+            /** Manager Median Response Seconds */
+            manager_median_response_seconds?: number | null;
+            /** Manager Time Saved Seconds Estimate */
+            manager_time_saved_seconds_estimate?: number | null;
+            /** Manager Time Saved Status */
+            manager_time_saved_status?: ("fact" | "estimate" | "need") | null;
+            /** Booking Total */
+            booking_total?: number | null;
+            /** Booking Attributed */
+            booking_attributed?: number | null;
+            /** Booking Missing Conversation Total */
+            booking_missing_conversation_total?: number | null;
+            /** Booking Conversion Rate */
+            booking_conversion_rate?: number | null;
+            /** Booking Status */
+            booking_status?: ("fact" | "estimate" | "need") | null;
+            /** First Response P50 Seconds */
+            first_response_p50_seconds?: number | null;
+            /** First Response P90 Seconds */
+            first_response_p90_seconds?: number | null;
+            /** First Response Missing Total */
+            first_response_missing_total?: number | null;
+            /** First Response Status */
+            first_response_status?: ("fact" | "estimate" | "need") | null;
+            /** After Hours Total */
+            after_hours_total?: number | null;
+            /** After Hours Covered */
+            after_hours_covered?: number | null;
+            /** After Hours Missing Total */
+            after_hours_missing_total?: number | null;
+            /** After Hours Coverage Rate */
+            after_hours_coverage_rate?: number | null;
+            /** After Hours Status */
+            after_hours_status?: ("fact" | "estimate" | "need") | null;
+            /** Escalation Total */
+            escalation_total?: number | null;
+            /** Escalation Quality Total */
+            escalation_quality_total?: number | null;
+            /** Escalation Meta Missing Total */
+            escalation_meta_missing_total?: number | null;
+            /** Escalation Quality Rate */
+            escalation_quality_rate?: number | null;
+            /** Escalation Quality Status */
+            escalation_quality_status?: ("fact" | "estimate" | "need") | null;
+            /** Outbox Failed Total */
+            outbox_failed_total?: number | null;
+            /** Outbox Saved Total */
+            outbox_saved_total?: number | null;
+            /** No Response Alert Total */
+            no_response_alert_total?: number | null;
+            /** Loss Risk Status */
+            loss_risk_status?: ("fact" | "estimate" | "need") | null;
+            /** Intent Missing Total */
+            intent_missing_total?: number | null;
+            /** Top Intents */
+            top_intents?: components["schemas"]["ConsoleAnalyticsTopIntent"][] | null;
+            /** Top Info Sections */
+            top_info_sections?: components["schemas"]["ConsoleAnalyticsTopSection"][] | null;
+            /** Top Intents Status */
+            top_intents_status?: ("fact" | "estimate" | "need") | null;
+            /** Analytics Trend */
+            analytics_trend?: components["schemas"]["ConsoleAnalyticsTrendPoint"][] | null;
+        };
+        /** ConsoleOnboardingAdvanceRequest */
+        ConsoleOnboardingAdvanceRequest: {
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /**
+             * Step Id
+             * @enum {string}
+             */
+            step_id: "branch_draft" | "integrations" | "team" | "telegram" | "knowledge" | "booking" | "go_no_go";
+        };
+        /** ConsoleOnboardingAutopilotIntake */
+        ConsoleOnboardingAutopilotIntake: {
+            /** Knowledge Tag */
+            knowledge_tag: string;
+            /** Draft Saved */
+            draft_saved: boolean;
+            /** Published */
+            published: boolean;
+            /** Published Version Id */
+            published_version_id?: string | null;
+            /**
+             * Missing Fields
+             * @default []
+             */
+            missing_fields: string[];
+            /**
+             * Missing Questions
+             * @default []
+             */
+            missing_questions: string[];
+            /**
+             * Field States
+             * @default []
+             */
+            field_states: components["schemas"]["ConsoleOnboardingIntakeFieldState"][];
+            /**
+             * Question Queue
+             * @default []
+             */
+            question_queue: components["schemas"]["ConsoleOnboardingIntakeQuestion"][];
+            compile?: components["schemas"]["ConsoleOnboardingIntakeCompile"] | null;
+            quality_matrix?: components["schemas"]["ConsoleOnboardingIntakeQualityMatrix"] | null;
+            /** Payload */
+            payload: Record<string, never>;
+        };
+        /** ConsoleOnboardingAutopilotRequest */
+        ConsoleOnboardingAutopilotRequest: {
+            /** Company Id */
+            company_id?: string | null;
+            /** Company Name */
+            company_name?: string | null;
+            /** Client Id */
+            client_id?: string | null;
+            /** Client Slug */
+            client_slug?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Branch Slug */
+            branch_slug?: string | null;
+            /** Branch Name */
+            branch_name?: string | null;
+            /** Timezone */
+            timezone?: string | null;
+            /** Phone */
+            phone: string;
+            /** Instance Id */
+            instance_id: string;
+            /**
+             * Payment Status
+             * @default pending
+             */
+            payment_status: ("pending" | "confirmed" | "rejected") | null;
+            /** Domain Slug */
+            domain_slug?: string | null;
+            purchased?: components["schemas"]["CapabilitiesPayload"] | null;
+            /** Purchased Services */
+            purchased_services?: ("whatsapp" | "telegram" | "instagram" | "booking_collect" | "booking_confirm" | "knowledge_upload" | "analytics" | "auto_learn" | "provider_google_calendar" | "provider_local_calendar" | "provider_manual" | "provider_amocrm" | "provider_bitrix")[] | null;
+            provider_binding?: components["schemas"]["OnboardingProviderBindingPayload"] | null;
+            /** Client Data Text */
+            client_data_text?: string | null;
+            /** Client Data Json */
+            client_data_json?: Record<string, never> | null;
+            /**
+             * Activate Branch
+             * @default false
+             */
+            activate_branch: boolean | null;
+            /**
+             * Auto Create Reference Pack
+             * @default true
+             */
+            auto_create_reference_pack: boolean | null;
+            /**
+             * Auto Publish Knowledge
+             * @default false
+             */
+            auto_publish_knowledge: boolean | null;
+        };
+        /** ConsoleOnboardingAutopilotResponse */
+        ConsoleOnboardingAutopilotResponse: {
+            company: components["schemas"]["ConsoleCompany"];
+            client: components["schemas"]["ConsoleClient"];
+            branch: components["schemas"]["ConsoleBranch"];
+            capabilities: components["schemas"]["ConsoleCapabilitiesRecord"];
+            onboarding_contract: components["schemas"]["ConsoleOnboardingContractRecord"];
+            /**
+             * Payment Status
+             * @enum {string}
+             */
+            payment_status: "pending" | "confirmed" | "rejected";
+            /** Webhook Secret */
+            webhook_secret: string;
+            /** Webhook Url */
+            webhook_url: string;
+            reference_pack?: components["schemas"]["ConsoleReferencePack"] | null;
+            onboarding_status: components["schemas"]["ConsoleOnboardingStatusResponse"];
+            /**
+             * Go No Go Missing
+             * @default []
+             */
+            go_no_go_missing: string[];
+            intake: components["schemas"]["ConsoleOnboardingAutopilotIntake"];
+            /**
+             * Actions
+             * @default []
+             */
+            actions: string[];
+        };
+        /** ConsoleOnboardingBlueprint */
+        ConsoleOnboardingBlueprint: {
+            /** Id */
+            id: string;
+            /** Domain Slug */
+            domain_slug: string;
+            /** Label */
+            label: string;
+            /** Summary */
+            summary: string;
+            payload: components["schemas"]["CapabilitiesPayload"];
+            /**
+             * Go Live Blockers Profile
+             * @default []
+             */
+            go_live_blockers_profile: string[];
+            /**
+             * Question Templates
+             * @default []
+             */
+            question_templates: components["schemas"]["ConsoleOnboardingBlueprintQuestionTemplate"][];
+            required_fields_profile: components["schemas"]["ConsoleOnboardingBlueprintRequiredFieldsProfile"];
+            /**
+             * Readiness Weights
+             * @default {}
+             */
+            readiness_weights: {
+                [key: string]: number;
             };
         };
-        /** @description Malformed request */
-        BadRequest: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "error": {
-                 *         "code": "INVALID_PARAM",
-                 *         "message": "Invalid parameter",
-                 *         "trace_id": "abc123"
-                 *       }
-                 *     }
-                 */
-                "application/json": components["schemas"]["ErrorResponse"];
+        /** ConsoleOnboardingBlueprintListResponse */
+        ConsoleOnboardingBlueprintListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleOnboardingBlueprint"][];
+        };
+        /** ConsoleOnboardingBlueprintQuestionTemplate */
+        ConsoleOnboardingBlueprintQuestionTemplate: {
+            /** Code */
+            code: string;
+            /** Question */
+            question: string;
+            /**
+             * Blocking Go Live
+             * @default false
+             */
+            blocking_go_live: boolean;
+        };
+        /** ConsoleOnboardingBlueprintRequiredFieldsProfile */
+        ConsoleOnboardingBlueprintRequiredFieldsProfile: {
+            /**
+             * Fields
+             * @default []
+             */
+            fields: string[];
+            /** Checksum */
+            checksum: string;
+        };
+        /** ConsoleOnboardingContractPatchRequest */
+        ConsoleOnboardingContractPatchRequest: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Status */
+            status?: ("active" | "disabled") | null;
+            /** Schema Version */
+            schema_version?: string | null;
+            /** Payment Status */
+            payment_status?: ("pending" | "confirmed" | "rejected") | null;
+            payload: components["schemas"]["OnboardingContractPayload-Input"];
+        };
+        /** ConsoleOnboardingContractRecord */
+        ConsoleOnboardingContractRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "disabled";
+            /** Schema Version */
+            schema_version: string;
+            /**
+             * Payment Status
+             * @enum {string}
+             */
+            payment_status: "pending" | "confirmed" | "rejected";
+            /** Payment Confirmed At */
+            payment_confirmed_at?: string | null;
+            /** Payment Confirmed By */
+            payment_confirmed_by?: string | null;
+            payload: components["schemas"]["OnboardingContractPayload-Output"];
+            /** Created By */
+            created_by?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ConsoleOnboardingContractResponse */
+        ConsoleOnboardingContractResponse: {
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            effective: components["schemas"]["OnboardingContractPayload-Output"];
+            /**
+             * Payment Status
+             * @enum {string}
+             */
+            payment_status: "pending" | "confirmed" | "rejected";
+            /** Payment Confirmed At */
+            payment_confirmed_at?: string | null;
+            /** Payment Confirmed By */
+            payment_confirmed_by?: string | null;
+            /**
+             * Capability Mismatches
+             * @default []
+             */
+            capability_mismatches: string[];
+            client_contract?: components["schemas"]["ConsoleOnboardingContractRecord"] | null;
+            branch_contract?: components["schemas"]["ConsoleOnboardingContractRecord"] | null;
+        };
+        /** ConsoleOnboardingDocumentIngestion */
+        ConsoleOnboardingDocumentIngestion: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pass" | "fail" | "skipped";
+            /** Valid */
+            valid: boolean;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "published" | "draft" | "none";
+            /**
+             * Missing Fields
+             * @default []
+             */
+            missing_fields: string[];
+            /**
+             * Critical Missing Fields
+             * @default []
+             */
+            critical_missing_fields: string[];
+        };
+        /** ConsoleOnboardingIntakeCompile */
+        ConsoleOnboardingIntakeCompile: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pass" | "fail";
+            /** Infra Valid */
+            infra_valid: boolean;
+            /** Schema Version */
+            schema_version?: string | null;
+            /** Hash */
+            hash?: string | null;
+            /** Pack Index Hash */
+            pack_index_hash?: string | null;
+            /**
+             * Signal Graph Present
+             * @default false
+             */
+            signal_graph_present: boolean;
+            /**
+             * Policy Bundle Present
+             * @default false
+             */
+            policy_bundle_present: boolean;
+            /**
+             * Errors
+             * @default []
+             */
+            errors: string[];
+        };
+        /** ConsoleOnboardingIntakeFieldState */
+        ConsoleOnboardingIntakeFieldState: {
+            /** Field */
+            field: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "unknown" | "assumed" | "confirmed";
+            /**
+             * Priority
+             * @enum {string}
+             */
+            priority: "critical" | "high" | "medium" | "low";
+        };
+        /** ConsoleOnboardingIntakeQualityDimension */
+        ConsoleOnboardingIntakeQualityDimension: {
+            /** Id */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pass" | "fail" | "warn" | "skip";
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
+            /**
+             * Details
+             * @default []
+             */
+            details: string[];
+        };
+        /** ConsoleOnboardingIntakeQualityMatrix */
+        ConsoleOnboardingIntakeQualityMatrix: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pass" | "fail";
+            /** Infra Valid */
+            infra_valid: boolean;
+            /** Semantic Valid */
+            semantic_valid: boolean;
+            /** Required Fields Count */
+            required_fields_count: number;
+            /** Missing Fields Count */
+            missing_fields_count: number;
+            /** Critical Missing Fields Count */
+            critical_missing_fields_count: number;
+            /** Integrity Missing Count */
+            integrity_missing_count: number;
+            /**
+             * Missing Fields
+             * @default []
+             */
+            missing_fields: string[];
+            /**
+             * Critical Missing Fields
+             * @default []
+             */
+            critical_missing_fields: string[];
+            /**
+             * Integrity Missing
+             * @default []
+             */
+            integrity_missing: string[];
+            /**
+             * Dimensions
+             * @default []
+             */
+            dimensions: components["schemas"]["ConsoleOnboardingIntakeQualityDimension"][];
+            /**
+             * Regressions
+             * @default []
+             */
+            regressions: string[];
+            /**
+             * Comparison Blocked
+             * @default false
+             */
+            comparison_blocked: boolean;
+            /** Comparison Block Reason */
+            comparison_block_reason?: string | null;
+        };
+        /** ConsoleOnboardingIntakeQuestion */
+        ConsoleOnboardingIntakeQuestion: {
+            /** Field */
+            field: string;
+            /** Question */
+            question: string;
+            /**
+             * Priority
+             * @enum {string}
+             */
+            priority: "critical" | "high" | "medium" | "low";
+            /**
+             * Blocking Go Live
+             * @default false
+             */
+            blocking_go_live: boolean;
+        };
+        /** ConsoleOnboardingOperationalPipeline */
+        ConsoleOnboardingOperationalPipeline: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pass" | "warn" | "fail";
+            /** Blocked */
+            blocked: boolean;
+            /** Current Stage Id */
+            current_stage_id?: string | null;
+            /**
+             * Blockers
+             * @default []
+             */
+            blockers: string[];
+            /**
+             * Next Actions
+             * @default []
+             */
+            next_actions: string[];
+            /**
+             * Stages
+             * @default []
+             */
+            stages: components["schemas"]["ConsoleOnboardingOperationalStage"][];
+        };
+        /** ConsoleOnboardingOperationalStage */
+        ConsoleOnboardingOperationalStage: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Owner Lane */
+            owner_lane: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pass" | "warn" | "fail" | "skip";
+            /**
+             * Blockers
+             * @default []
+             */
+            blockers: string[];
+            /** Next Action */
+            next_action?: string | null;
+        };
+        /** ConsoleOnboardingReadinessDimension */
+        ConsoleOnboardingReadinessDimension: {
+            /** Id */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pass" | "warn" | "fail";
+            /**
+             * Blocker Codes
+             * @default []
+             */
+            blocker_codes: string[];
+            /**
+             * Next Action Codes
+             * @default []
+             */
+            next_action_codes: string[];
+        };
+        /** ConsoleOnboardingReadinessHardGate */
+        ConsoleOnboardingReadinessHardGate: {
+            /** Enforced */
+            enforced: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pass" | "fail";
+            /**
+             * Blocker Codes
+             * @default []
+             */
+            blocker_codes: string[];
+        };
+        /** ConsoleOnboardingReadinessKernel */
+        ConsoleOnboardingReadinessKernel: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pass" | "warn" | "fail";
+            /**
+             * Blocker Codes
+             * @default []
+             */
+            blocker_codes: string[];
+            /**
+             * Next Action Codes
+             * @default []
+             */
+            next_action_codes: string[];
+            /**
+             * Auto Questions
+             * @default []
+             */
+            auto_questions: components["schemas"]["ConsoleOnboardingReadinessQuestion"][];
+            /**
+             * Dimensions
+             * @default []
+             */
+            dimensions: components["schemas"]["ConsoleOnboardingReadinessDimension"][];
+            shadow_hard_gate: components["schemas"]["ConsoleOnboardingReadinessHardGate"];
+        };
+        /** ConsoleOnboardingReadinessQuestion */
+        ConsoleOnboardingReadinessQuestion: {
+            /** Code */
+            code: string;
+            /** Question */
+            question: string;
+            /**
+             * Blocking Go Live
+             * @default false
+             */
+            blocking_go_live: boolean;
+        };
+        /** ConsoleOnboardingScorecardCheck */
+        ConsoleOnboardingScorecardCheck: {
+            /**
+             * Id
+             * @enum {string}
+             */
+            id: "branch_draft" | "integrations" | "team" | "telegram" | "knowledge" | "booking" | "go_no_go";
+            /** Required */
+            required: boolean;
+            /** Passed */
+            passed: boolean;
+            /**
+             * Missing
+             * @default []
+             */
+            missing: string[];
+        };
+        /** ConsoleOnboardingScorecardResponse */
+        ConsoleOnboardingScorecardResponse: {
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pass" | "fail";
+            /** Ready */
+            ready: boolean;
+            /** Checks */
+            checks: components["schemas"]["ConsoleOnboardingScorecardCheck"][];
+            /**
+             * Missing
+             * @default []
+             */
+            missing: string[];
+            document_ingestion?: components["schemas"]["ConsoleOnboardingDocumentIngestion"] | null;
+            sla_control_loop?: components["schemas"]["ConsoleOnboardingSlaControlLoop"] | null;
+            operational_pipeline?: components["schemas"]["ConsoleOnboardingOperationalPipeline"] | null;
+            readiness_kernel?: components["schemas"]["ConsoleOnboardingReadinessKernel"] | null;
+            /** Generated At */
+            generated_at: string;
+        };
+        /** ConsoleOnboardingSlaControlLoop */
+        ConsoleOnboardingSlaControlLoop: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pass" | "warn" | "fail";
+            /** Reminder 1 Minutes */
+            reminder_1_minutes: number;
+            /** Reminder 2 Minutes */
+            reminder_2_minutes: number;
+            /** Escalation Timeout Minutes */
+            escalation_timeout_minutes: number;
+            /** Pending Total */
+            pending_total: number;
+            /** Warning Total */
+            warning_total: number;
+            /** Breached Total */
+            breached_total: number;
+            /**
+             * Provider Status
+             * @enum {string}
+             */
+            provider_status: "configured" | "missing" | "webhook_not_configured" | "rebind_required" | "billing_expired" | "renewal_due" | "not_required" | "unknown";
+            /** Provider Paid Until */
+            provider_paid_until?: string | null;
+            /** Provider Days To Renewal */
+            provider_days_to_renewal?: number | null;
+            /**
+             * Provider Alert State
+             * @default unknown
+             */
+            provider_alert_state: string;
+            /**
+             * Active Incidents
+             * @default []
+             */
+            active_incidents: string[];
+            /**
+             * Recommended Actions
+             * @default []
+             */
+            recommended_actions: string[];
+        };
+        /** ConsoleOnboardingStatusResponse */
+        ConsoleOnboardingStatusResponse: {
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /**
+             * Current Step
+             * @enum {string}
+             */
+            current_step: "branch_draft" | "integrations" | "team" | "telegram" | "knowledge" | "booking" | "go_no_go";
+            /** Steps */
+            steps: components["schemas"]["ConsoleOnboardingStepStatus"][];
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ConsoleOnboardingStepStatus */
+        ConsoleOnboardingStepStatus: {
+            /**
+             * Id
+             * @enum {string}
+             */
+            id: "branch_draft" | "integrations" | "team" | "telegram" | "knowledge" | "booking" | "go_no_go";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "complete" | "available" | "locked" | "skipped";
+            /** Required */
+            required: boolean;
+            /**
+             * Missing
+             * @default []
+             */
+            missing: string[];
+        };
+        /** ConsoleOnboardingThroughputMetrics */
+        ConsoleOnboardingThroughputMetrics: {
+            /**
+             * Window Hours
+             * @default 24
+             */
+            window_hours: number;
+            /**
+             * Approved Branches Total
+             * @default 0
+             */
+            approved_branches_total: number;
+            /**
+             * First Pass Approved Branches
+             * @default 0
+             */
+            first_pass_approved_branches: number;
+            /** Time To Go Live Median Hours */
+            time_to_go_live_median_hours?: number | null;
+            /** Blocker Age P95 Hours */
+            blocker_age_p95_hours?: number | null;
+            /** First Pass Go Live Rate Pct */
+            first_pass_go_live_rate_pct?: number | null;
+            /** Incident Reopen Rate 24H Pct */
+            incident_reopen_rate_24h_pct?: number | null;
+        };
+        /** ConsoleOpsJobCatalogResponse */
+        ConsoleOpsJobCatalogResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleOpsJobDefinition"][];
+        };
+        /** ConsoleOpsJobDefinition */
+        ConsoleOpsJobDefinition: {
+            /**
+             * Job Type
+             * @enum {string}
+             */
+            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state";
+            /** Label */
+            label: string;
+            /** Description */
+            description: string;
+            /** Supports Dry Run */
+            supports_dry_run: boolean;
+        };
+        /** ConsoleOpsJobListResponse */
+        ConsoleOpsJobListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleOpsJobRecord"][];
+            /** Cursor */
+            cursor?: string | null;
+            /** Has More */
+            has_more: boolean;
+        };
+        /** ConsoleOpsJobRecord */
+        ConsoleOpsJobRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Job Type
+             * @enum {string}
+             */
+            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state";
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "dry_run" | "execute";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "success" | "failed";
+            /** Created At */
+            created_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Error Message */
+            error_message?: string | null;
+            /** Request Payload */
+            request_payload?: Record<string, never> | null;
+            /** Result Payload */
+            result_payload?: Record<string, never> | null;
+        };
+        /** ConsoleOpsJobRunRequest */
+        ConsoleOpsJobRunRequest: {
+            /**
+             * Job Type
+             * @enum {string}
+             */
+            job_type: "outbox_process" | "integration_reconcile" | "heal" | "metrics_snapshot" | "incident_state";
+            /**
+             * Mode
+             * @default dry_run
+             * @enum {string}
+             */
+            mode: "dry_run" | "execute";
+            /** Params */
+            params?: Record<string, never> | null;
+        };
+        /** ConsoleOpsJobRunResponse */
+        ConsoleOpsJobRunResponse: {
+            job: components["schemas"]["ConsoleOpsJobRecord"];
+        };
+        /** ConsoleOutboxCounts */
+        ConsoleOutboxCounts: {
+            /** Pending */
+            pending: number;
+            /** Processing */
+            processing: number;
+            /** Failed */
+            failed: number;
+        };
+        /** ConsoleOutboxItem */
+        ConsoleOutboxItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Status */
+            status: string;
+            /** Attempts */
+            attempts: number;
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
+            /** Last Error */
+            last_error?: string | null;
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Inbound Message Id */
+            inbound_message_id: string;
+            /** Channel */
+            channel?: string | null;
+            /** Message Type */
+            message_type?: string | null;
+            /** Message Preview */
+            message_preview?: string | null;
+            /** Remote Jid */
+            remote_jid?: string | null;
+            /** Instance Id */
+            instance_id?: string | null;
+            /** Forwarded To Telegram */
+            forwarded_to_telegram?: boolean | null;
+        };
+        /** ConsoleOutboxListResponse */
+        ConsoleOutboxListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleOutboxItem"][];
+            /** Cursor */
+            cursor?: string | null;
+            /** Has More */
+            has_more: boolean;
+            counts: components["schemas"]["ConsoleOutboxCounts"];
+        };
+        /** ConsoleOutboxRetryRequest */
+        ConsoleOutboxRetryRequest: {
+            /** Ids */
+            ids?: string[] | null;
+            /**
+             * Limit
+             * @default 100
+             */
+            limit: number | null;
+        };
+        /** ConsoleOutboxRetryResponse */
+        ConsoleOutboxRetryResponse: {
+            /** Success */
+            success: boolean;
+            /** Retried */
+            retried: number;
+            /** Skipped */
+            skipped: number;
+        };
+        /** ConsoleOutreachMessageRequest */
+        ConsoleOutreachMessageRequest: {
+            /** Destination */
+            destination: string;
+            /** Content */
+            content: string;
+            /** Conversation Id */
+            conversation_id: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /**
+             * Pause Bot Minutes
+             * @default 30
+             */
+            pause_bot_minutes: number | null;
+            /** Pause Reason */
+            pause_reason?: string | null;
+        };
+        /** ConsoleOutreachMessageResponse */
+        ConsoleOutreachMessageResponse: {
+            /** Success */
+            success: boolean;
+            /**
+             * Delivery Status
+             * @enum {string}
+             */
+            delivery_status: "queued" | "delivered" | "failed";
+            /** Remote Jid */
+            remote_jid?: string | null;
+            /** Outbox Enqueued */
+            outbox_enqueued?: boolean | null;
+            /** Lock Until */
+            lock_until?: string | null;
+            message?: components["schemas"]["ConsoleMessage"] | null;
+            /** Error Code */
+            error_code?: string | null;
+        };
+        /** ConsoleOwnerOperationApplyRequest */
+        ConsoleOwnerOperationApplyRequest: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "capture_leads" | "stable_quality" | "team_protection";
+        };
+        /** ConsoleOwnerOperationApplyResponse */
+        ConsoleOwnerOperationApplyResponse: {
+            /** Success */
+            success: boolean;
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "capture_leads" | "stable_quality" | "team_protection";
+            /** Mode Label */
+            mode_label: string;
+            applied_settings: components["schemas"]["ConsoleOwnerOperationSettingsPatch"];
+            previous_settings: components["schemas"]["ConsoleOwnerOperationSettingsPatch"];
+            baseline: components["schemas"]["ConsoleOwnerOperationMetricSnapshot"];
+            /** Applied At */
+            applied_at: string;
+            /** Impact Check Due At */
+            impact_check_due_at: string;
+            /**
+             * Metric Meta
+             * @default {}
+             */
+            metric_meta: {
+                [key: string]: components["schemas"]["ConsoleMetricFactMeta"];
             };
         };
-        /** @description Insufficient permissions */
-        Forbidden: {
-            headers: {
-                [name: string]: unknown;
+        /** ConsoleOwnerOperationImpactResponse */
+        ConsoleOwnerOperationImpactResponse: {
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "capture_leads" | "stable_quality" | "team_protection";
+            /** Checked At */
+            checked_at: string;
+            /** Due At */
+            due_at: string;
+            /**
+             * Summary
+             * @enum {string}
+             */
+            summary: "improved" | "regressed" | "mixed_or_stable";
+            baseline: components["schemas"]["ConsoleOwnerOperationMetricSnapshot"];
+            current: components["schemas"]["ConsoleOwnerOperationMetricSnapshot"];
+            /**
+             * Metrics
+             * @default {}
+             */
+            metrics: {
+                [key: string]: components["schemas"]["ConsoleOwnerOperationMetricDelta"];
             };
-            content: {
-                /**
-                 * @example {
-                 *       "error": {
-                 *         "code": "ACCESS_DENIED",
-                 *         "message": "You do not have permission to perform this action",
-                 *         "trace_id": "abc123"
-                 *       }
-                 *     }
-                 */
-                "application/json": components["schemas"]["ErrorResponse"];
-            };
-        };
-        /** @description Resource not found */
-        NotFound: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "error": {
-                 *         "code": "NOT_FOUND",
-                 *         "message": "Case not found",
-                 *         "trace_id": "abc123"
-                 *       }
-                 *     }
-                 */
-                "application/json": components["schemas"]["ErrorResponse"];
-            };
-        };
-        /** @description Case already assigned to another agent */
-        CaseAlreadyTaken: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "error": {
-                 *         "code": "CASE_ALREADY_TAKEN",
-                 *         "message": "Case is already assigned to another agent",
-                 *         "details": {
-                 *           "assigned_to": "John Doe"
-                 *         },
-                 *         "trace_id": "abc123"
-                 *       }
-                 *     }
-                 */
-                "application/json": components["schemas"]["ErrorResponse"];
+            /**
+             * Metric Meta
+             * @default {}
+             */
+            metric_meta: {
+                [key: string]: components["schemas"]["ConsoleMetricFactMeta"];
             };
         };
-        /** @description Case not assigned to current agent */
-        NotAssigned: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "error": {
-                 *         "code": "NOT_ASSIGNED",
-                 *         "message": "You must take the case before performing this action",
-                 *         "trace_id": "abc123"
-                 *       }
-                 *     }
-                 */
-                "application/json": components["schemas"]["ErrorResponse"];
+        /** ConsoleOwnerOperationMetricDelta */
+        ConsoleOwnerOperationMetricDelta: {
+            /** Baseline */
+            baseline?: number | null;
+            /** Current */
+            current?: number | null;
+            /** Delta */
+            delta?: number | null;
+            /**
+             * Trend
+             * @default unknown
+             * @enum {string}
+             */
+            trend: "up" | "down" | "stable" | "unknown";
+        };
+        /** ConsoleOwnerOperationMetricSnapshot */
+        ConsoleOwnerOperationMetricSnapshot: {
+            /** Outbox Backlog */
+            outbox_backlog: number;
+            /** Unresolved Older Than 60M */
+            unresolved_older_than_60m: number;
+            /** Manager Median Response Seconds */
+            manager_median_response_seconds?: number | null;
+        };
+        /** ConsoleOwnerOperationPreviewResponse */
+        ConsoleOwnerOperationPreviewResponse: {
+            /** Generated At */
+            generated_at: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "capture_leads" | "stable_quality" | "team_protection";
+            /** Mode Label */
+            mode_label: string;
+            settings_patch: components["schemas"]["ConsoleOwnerOperationSettingsPatch"];
+            current_settings: components["schemas"]["ConsoleOwnerOperationSettingsPatch"];
+            baseline: components["schemas"]["ConsoleOwnerOperationMetricSnapshot"];
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
+            /**
+             * Metric Meta
+             * @default {}
+             */
+            metric_meta: {
+                [key: string]: components["schemas"]["ConsoleMetricFactMeta"];
             };
         };
-        /** @description Idempotency key already used or in progress */
-        IdempotencyConflict: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "error": {
-                 *         "code": "IDEMPOTENCY_CONFLICT",
-                 *         "message": "Request already processed",
-                 *         "trace_id": "abc123"
-                 *       }
-                 *     }
-                 */
-                "application/json": components["schemas"]["ErrorResponse"];
+        /** ConsoleOwnerOperationRollbackRequest */
+        ConsoleOwnerOperationRollbackRequest: {
+            /** Operation Id */
+            operation_id?: string | null;
+        };
+        /** ConsoleOwnerOperationRollbackResponse */
+        ConsoleOwnerOperationRollbackResponse: {
+            /** Success */
+            success: boolean;
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+            restored_settings: components["schemas"]["ConsoleOwnerOperationSettingsPatch"];
+            /** Rolled Back At */
+            rolled_back_at: string;
+            /** Message */
+            message: string;
+        };
+        /** ConsoleOwnerOperationSettingsPatch */
+        ConsoleOwnerOperationSettingsPatch: {
+            /** Reminder 1 Minutes */
+            reminder_1_minutes: number;
+            /** Reminder 2 Minutes */
+            reminder_2_minutes: number;
+            /** Escalation Timeout Minutes */
+            escalation_timeout_minutes: number;
+        };
+        /** ConsoleProviderLifecycleItem */
+        ConsoleProviderLifecycleItem: {
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Client Slug */
+            client_slug: string;
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /** Branch Slug */
+            branch_slug: string;
+            /** Branch Name */
+            branch_name: string;
+            /** Company Id */
+            company_id?: string | null;
+            /** Company Name */
+            company_name?: string | null;
+            /** Branch Phone */
+            branch_phone?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "warn" | "error";
+            /**
+             * Whatsapp Status
+             * @enum {string}
+             */
+            whatsapp_status: "ok" | "inactive" | "missing_instance_id" | "instance_id_mismatch" | "invalid_webhook_url" | "no_recent_inbound";
+            /**
+             * Integration State
+             * @default ok
+             * @enum {string}
+             */
+            integration_state: "ok" | "degraded";
+            /** Last Inbound At */
+            last_inbound_at?: string | null;
+            /** Instance Id */
+            instance_id?: string | null;
+            /** Provider Binding Provider */
+            provider_binding_provider?: string | null;
+            /** Provider Binding Instance Id */
+            provider_binding_instance_id?: string | null;
+            /** Provider Binding Webhook Status */
+            provider_binding_webhook_status?: ("configured" | "pending" | "rebind_required") | null;
+            /** Provider Binding Paid Until */
+            provider_binding_paid_until?: string | null;
+            /** Provider Binding Owner */
+            provider_binding_owner?: string | null;
+            /** Provider Binding Next Renewal At */
+            provider_binding_next_renewal_at?: string | null;
+            /** Provider Binding Last Rebind At */
+            provider_binding_last_rebind_at?: string | null;
+            /** Provider Binding Rebind Required */
+            provider_binding_rebind_required?: boolean | null;
+            /**
+             * Provider Binding Alert State
+             * @default unknown
+             * @enum {string}
+             */
+            provider_binding_alert_state: "ok" | "warn" | "critical" | "unknown";
+            /**
+             * Provider Binding Expiry Status
+             * @default unknown
+             * @enum {string}
+             */
+            provider_binding_expiry_status: "ok" | "expiring_soon" | "expired" | "unknown";
+            /** Provider Binding Days Until Expiry */
+            provider_binding_days_until_expiry?: number | null;
+            /** Next Action */
+            next_action?: ("integration_reconcile" | "provider_start_rebind" | "provider_complete_rebind" | "provider_renewal_confirmed" | "provider_webhook_updated" | "provider_send_reminder") | null;
+            /** Priority */
+            priority?: ("p0" | "p1" | "p2") | null;
+            /**
+             * Blockers
+             * @default []
+             */
+            blockers: string[];
+            /** Sla Deadline At */
+            sla_deadline_at?: string | null;
+            /**
+             * Sla State
+             * @default none
+             * @enum {string}
+             */
+            sla_state: "none" | "on_track" | "due_soon" | "overdue";
+            /** Generated At */
+            generated_at?: string | null;
+        };
+        /** ConsoleProviderLifecycleListResponse */
+        ConsoleProviderLifecycleListResponse: {
+            /** Stale After Minutes */
+            stale_after_minutes: number;
+            /** Cursor */
+            cursor?: string | null;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
+            /**
+             * Total In Scope
+             * @default 0
+             */
+            total_in_scope: number;
+            /** Items */
+            items: components["schemas"]["ConsoleProviderLifecycleItem"][];
+        };
+        /** ConsoleProviderOpsQueueItem */
+        ConsoleProviderOpsQueueItem: {
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Client Slug */
+            client_slug: string;
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /** Branch Slug */
+            branch_slug: string;
+            /** Branch Name */
+            branch_name: string;
+            /**
+             * Priority
+             * @enum {string}
+             */
+            priority: "p0" | "p1" | "p2";
+            /**
+             * Recommended Action
+             * @enum {string}
+             */
+            recommended_action: "integration_reconcile" | "provider_start_rebind" | "provider_complete_rebind" | "provider_renewal_confirmed" | "provider_webhook_updated" | "provider_send_reminder";
+            /**
+             * Reasons
+             * @default []
+             */
+            reasons: string[];
+            /**
+             * Requires Confirmation
+             * @default true
+             */
+            requires_confirmation: boolean;
+            /** Provider Binding Owner */
+            provider_binding_owner?: string | null;
+            /** Provider Binding Next Renewal At */
+            provider_binding_next_renewal_at?: string | null;
+            /** Provider Binding Last Rebind At */
+            provider_binding_last_rebind_at?: string | null;
+            /**
+             * Provider Binding Alert State
+             * @default unknown
+             * @enum {string}
+             */
+            provider_binding_alert_state: "ok" | "warn" | "critical" | "unknown";
+            /**
+             * Provider Binding Expiry Status
+             * @default unknown
+             * @enum {string}
+             */
+            provider_binding_expiry_status: "ok" | "expiring_soon" | "expired" | "unknown";
+            /** Provider Binding Days Until Expiry */
+            provider_binding_days_until_expiry?: number | null;
+            /** Provider Binding Rebind Required */
+            provider_binding_rebind_required?: boolean | null;
+            /** Generated At */
+            generated_at?: string | null;
+        };
+        /** ConsoleReferencePack */
+        ConsoleReferencePack: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Domain Slug */
+            domain_slug: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description?: string | null;
+            /** Schema Version */
+            schema_version: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "disabled";
+            /** Metadata */
+            metadata: Record<string, never>;
+            /** Created By */
+            created_by?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ConsoleReferencePackListResponse */
+        ConsoleReferencePackListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleReferencePack"][];
+        };
+        /** ConsoleReferencePackUpsertRequest */
+        ConsoleReferencePackUpsertRequest: {
+            /** Title */
+            title: string;
+            /** Description */
+            description?: string | null;
+            /** Schema Version */
+            schema_version?: string | null;
+            /** Status */
+            status?: ("active" | "disabled") | null;
+            /** Metadata */
+            metadata?: Record<string, never> | null;
+        };
+        /** ConsoleReminderCounts */
+        ConsoleReminderCounts: {
+            /** Pending */
+            pending: number;
+            /** Sent */
+            sent: number;
+            /** Failed */
+            failed: number;
+            /** Due Now */
+            due_now: number;
+            /** Overdue 15M */
+            overdue_15m: number;
+        };
+        /** ConsoleReminderErrorBucket */
+        ConsoleReminderErrorBucket: {
+            /** Reason */
+            reason: string;
+            /** Count */
+            count: number;
+        };
+        /** ConsoleReminderItem */
+        ConsoleReminderItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Appointment Id
+             * Format: uuid
+             */
+            appointment_id: string;
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /** Channel */
+            channel: string;
+            /** Template */
+            template: string;
+            /** Run At */
+            run_at: string;
+            /** Status */
+            status: string;
+            /** Attempt */
+            attempt: number;
+            /** Max Attempts */
+            max_attempts: number;
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
+            /** Last Error */
+            last_error?: string | null;
+            /** Dedupe Key */
+            dedupe_key: string;
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
+            /** Outbox Id */
+            outbox_id?: string | null;
+            /** Outbox Status */
+            outbox_status?: string | null;
+            /** Outbox Attempts */
+            outbox_attempts?: number | null;
+            /** Outbox Last Error */
+            outbox_last_error?: string | null;
+            /** Outbox Updated At */
+            outbox_updated_at?: string | null;
+        };
+        /** ConsoleReminderListResponse */
+        ConsoleReminderListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleReminderItem"][];
+            /** Cursor */
+            cursor?: string | null;
+            /** Has More */
+            has_more: boolean;
+            counts: components["schemas"]["ConsoleReminderCounts"];
+            /**
+             * Error Buckets
+             * @default []
+             */
+            error_buckets: components["schemas"]["ConsoleReminderErrorBucket"][];
+        };
+        /** ConsoleReminderRetryRequest */
+        ConsoleReminderRetryRequest: {
+            /** Ids */
+            ids?: string[] | null;
+            /**
+             * Limit
+             * @default 100
+             */
+            limit: number | null;
+            /**
+             * Status
+             * @default failed
+             * @enum {string}
+             */
+            status: "failed" | "pending" | "all";
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm: boolean;
+        };
+        /** ConsoleReminderRetryResponse */
+        ConsoleReminderRetryResponse: {
+            /** Success */
+            success: boolean;
+            /** Retried */
+            retried: number;
+            /** Skipped */
+            skipped: number;
+            /** Matched */
+            matched: number;
+        };
+        /** ConsoleSettingsResponse */
+        ConsoleSettingsResponse: {
+            /** Branches */
+            branches: components["schemas"]["ConsoleBranch"][];
+            /** Agents */
+            agents: components["schemas"]["ConsoleAgentInfo"][];
+            bot_config?: components["schemas"]["ConsoleBotConfig"] | null;
+        };
+        /** ConsoleSettingsUpdateRequest */
+        ConsoleSettingsUpdateRequest: {
+            /** Reminder 1 Minutes */
+            reminder_1_minutes?: number | null;
+            /** Reminder 2 Minutes */
+            reminder_2_minutes?: number | null;
+            /** Escalation Timeout Minutes */
+            escalation_timeout_minutes?: number | null;
+        };
+        /** ConsoleSettingsUpdateResponse */
+        ConsoleSettingsUpdateResponse: {
+            /** Success */
+            success: boolean;
+            /** Message */
+            message: string;
+        };
+        /** ConsoleSubscriptionContractGap */
+        ConsoleSubscriptionContractGap: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /**
+             * Severity
+             * @default warn
+             * @enum {string}
+             */
+            severity: "critical" | "warn" | "info";
+        };
+        /** ConsoleSubscriptionContractHealth */
+        ConsoleSubscriptionContractHealth: {
+            /**
+             * Status
+             * @default missing
+             * @enum {string}
+             */
+            status: "ok" | "partial" | "missing";
+            /** Summary */
+            summary: string;
+            /**
+             * Gaps
+             * @default []
+             */
+            gaps: components["schemas"]["ConsoleSubscriptionContractGap"][];
+            /**
+             * Quota Source
+             * @default unknown
+             * @enum {string}
+             */
+            quota_source: "company_billing_info" | "client_config" | "unknown";
+            /**
+             * Whatsapp Source
+             * @default unknown
+             * @enum {string}
+             */
+            whatsapp_source: "company_billing_info" | "client_config" | "onboarding_contract" | "unknown";
+            /**
+             * Payment Status Source
+             * @default unknown
+             * @enum {string}
+             */
+            payment_status_source: "onboarding_contract" | "unknown";
+            /**
+             * Has Active Onboarding Contract
+             * @default false
+             */
+            has_active_onboarding_contract: boolean;
+        };
+        /** ConsoleSubscriptionEvidenceItem */
+        ConsoleSubscriptionEvidenceItem: {
+            /**
+             * Outbox Id
+             * Format: uuid
+             */
+            outbox_id: string;
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /** Inbound Message Id */
+            inbound_message_id: string;
+            /** Created At */
+            created_at: string;
+            /** Status */
+            status: string;
+            /** Provider Status */
+            provider_status?: string | null;
+            /** Provider Message Id */
+            provider_message_id?: string | null;
+        };
+        /** ConsoleSubscriptionMeterItem */
+        ConsoleSubscriptionMeterItem: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /**
+             * Meter Type
+             * @enum {string}
+             */
+            meter_type: "messages" | "channels" | "addon";
+            /** Included */
+            included?: number | null;
+            /** Used */
+            used?: number | null;
+            /** Remaining */
+            remaining?: number | null;
+            /**
+             * Status
+             * @default unknown
+             * @enum {string}
+             */
+            status: "ok" | "warning" | "limit_reached" | "over_limit" | "not_included" | "included_not_configured" | "unknown";
+            /** Source */
+            source: string;
+            /** Note */
+            note?: string | null;
+        };
+        /** ConsoleSubscriptionPlanDefaults */
+        ConsoleSubscriptionPlanDefaults: {
+            /** Plan Name */
+            plan_name: string;
+            /** Included Messages */
+            included_messages: number;
+            /** Included Whatsapp Channels */
+            included_whatsapp_channels: number;
+            /** Source */
+            source: string;
+            /**
+             * Reference Only
+             * @default true
+             */
+            reference_only: boolean;
+        };
+        /** ConsoleSubscriptionSummaryResponse */
+        ConsoleSubscriptionSummaryResponse: {
+            /** Generated At */
+            generated_at: string;
+            /** Period Start */
+            period_start: string;
+            /** Period End */
+            period_end: string;
+            /** Next Billing Date */
+            next_billing_date: string;
+            /** Plan Name */
+            plan_name?: string | null;
+            /** Contract Label */
+            contract_label?: string | null;
+            /** Currency */
+            currency?: string | null;
+            /** Monthly Quota */
+            monthly_quota?: number | null;
+            /**
+             * Quota Source
+             * @default unknown
+             * @enum {string}
+             */
+            quota_source: "company_billing_info" | "client_config" | "unknown";
+            /** Billable Messages */
+            billable_messages: number;
+            /** Remaining Quota */
+            remaining_quota?: number | null;
+            /** Projected Month Total */
+            projected_month_total?: number | null;
+            /** Usage Percent */
+            usage_percent?: number | null;
+            /** Projected Remaining Quota */
+            projected_remaining_quota?: number | null;
+            /**
+             * Projected Over Quota
+             * @default false
+             */
+            projected_over_quota: boolean;
+            /** Projected Overage Messages */
+            projected_overage_messages?: number | null;
+            /**
+             * Quota Alert Level
+             * @default normal
+             * @enum {string}
+             */
+            quota_alert_level: "normal" | "warning_80" | "limit_100";
+            /** Quota Alert Message */
+            quota_alert_message: string;
+            /** Overage Policy Message */
+            overage_policy_message: string;
+            /**
+             * Over Quota
+             * @default false
+             */
+            over_quota: boolean;
+            /**
+             * Payment Status
+             * @default unknown
+             * @enum {string}
+             */
+            payment_status: "pending" | "confirmed" | "rejected" | "unknown";
+            /** Payment Confirmed At */
+            payment_confirmed_at?: string | null;
+            /**
+             * Payment Status Source
+             * @default unknown
+             * @enum {string}
+             */
+            payment_status_source: "onboarding_contract" | "unknown";
+            /** Payment Status Message */
+            payment_status_message?: string | null;
+            contract_health: components["schemas"]["ConsoleSubscriptionContractHealth"];
+            plan_defaults: components["schemas"]["ConsoleSubscriptionPlanDefaults"];
+            /**
+             * Meters
+             * @default []
+             */
+            meters: components["schemas"]["ConsoleSubscriptionMeterItem"][];
+            /**
+             * Recommended Actions
+             * @default []
+             */
+            recommended_actions: components["schemas"]["ConsoleBusinessActionItem"][];
+            /**
+             * Evidence
+             * @default []
+             */
+            evidence: components["schemas"]["ConsoleSubscriptionEvidenceItem"][];
+            /**
+             * Metric Meta
+             * @default {}
+             */
+            metric_meta: {
+                [key: string]: components["schemas"]["ConsoleMetricFactMeta"];
             };
         };
-        /** @description Onboarding step required before this action */
-        OnboardingStepRequired: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "error": {
-                 *         "code": "ONBOARDING_STEP_REQUIRED",
-                 *         "message": "Complete previous onboarding step",
-                 *         "details": {
-                 *           "required_step": "integrations"
-                 *         },
-                 *         "trace_id": "abc123"
-                 *       }
-                 *     }
-                 */
-                "application/json": components["schemas"]["ErrorResponse"];
+        /** ConsoleSyncStatus */
+        ConsoleSyncStatus: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "skipped" | "failed";
+            /** Detail */
+            detail?: string | null;
+        };
+        /** ConsoleTeamManagerPerformanceItem */
+        ConsoleTeamManagerPerformanceItem: {
+            /** Manager Name */
+            manager_name: string;
+            /** Unresolved Cases */
+            unresolved_cases: number;
+            /** Pending Cases */
+            pending_cases: number;
+            /** Active Cases */
+            active_cases: number;
+            /** Oldest Unresolved Minutes */
+            oldest_unresolved_minutes?: number | null;
+            /** Avg First Response Seconds 30D */
+            avg_first_response_seconds_30d?: number | null;
+        };
+        /** ConsoleTeamPerformanceSummaryResponse */
+        ConsoleTeamPerformanceSummaryResponse: {
+            /** Generated At */
+            generated_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "healthy" | "degraded" | "unhealthy";
+            /** Status Label */
+            status_label: string;
+            /** Metric Date */
+            metric_date?: string | null;
+            /**
+             * Analytics Scope Limited
+             * @default false
+             */
+            analytics_scope_limited: boolean;
+            /** Manager Median Response Seconds */
+            manager_median_response_seconds?: number | null;
+            /** First Response P90 Seconds */
+            first_response_p90_seconds?: number | null;
+            /** Unresolved Cases */
+            unresolved_cases: number;
+            /** Unresolved Older Than 60M */
+            unresolved_older_than_60m: number;
+            /**
+             * Managers
+             * @default []
+             */
+            managers: components["schemas"]["ConsoleTeamManagerPerformanceItem"][];
+            /**
+             * Actions
+             * @default []
+             */
+            actions: components["schemas"]["ConsoleBusinessActionItem"][];
+            /**
+             * Metric Meta
+             * @default {}
+             */
+            metric_meta: {
+                [key: string]: components["schemas"]["ConsoleMetricFactMeta"];
             };
         };
-        /** @description Request conflicts with current resource state */
-        Conflict: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "error": {
-                 *         "code": "INVALID_STATE",
-                 *         "message": "Action conflicts with current state",
-                 *         "trace_id": "abc123"
-                 *       }
-                 *     }
-                 */
-                "application/json": components["schemas"]["ErrorResponse"];
-            };
+        /** ConsoleTelegramHealthResponse */
+        ConsoleTelegramHealthResponse: {
+            /** Status */
+            status: string;
+            /** Webhook Alive */
+            webhook_alive: boolean;
+            /** Last Success At */
+            last_success_at?: string | null;
+            /** Last Error At */
+            last_error_at?: string | null;
+            /** Last Error Message */
+            last_error_message?: string | null;
+            /** Error Rate 24H */
+            error_rate_24h: number;
+            /** Pending Messages */
+            pending_messages: number;
         };
-        /** @description Confirmation required for destructive action */
-        ConfirmationRequired: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "error": {
-                 *         "code": "CONFIRMATION_REQUIRED",
-                 *         "message": "Confirmation required",
-                 *         "details": {
-                 *           "action": "knowledge_rollback"
-                 *         },
-                 *         "trace_id": "abc123"
-                 *       }
-                 *     }
-                 */
-                "application/json": components["schemas"]["ErrorResponse"];
-            };
+        /** ConsoleTelegramLinkResponse */
+        ConsoleTelegramLinkResponse: {
+            /** Token */
+            token: string;
+            /** Deep Link */
+            deep_link?: string | null;
+            /** Bot Username */
+            bot_username?: string | null;
+            /** Expires At */
+            expires_at: string;
         };
-        /** @description Request validation error */
+        /** ConsoleTelegramTestRequest */
+        ConsoleTelegramTestRequest: {
+            /**
+             * Scope
+             * @default client
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Chat Id */
+            chat_id?: string | null;
+            /** Message */
+            message?: string | null;
+        };
+        /** ConsoleTelegramTestResponse */
+        ConsoleTelegramTestResponse: {
+            /** Success */
+            success: boolean;
+            /** Delivery Status */
+            delivery_status: string;
+            /** Message Id */
+            message_id?: number | null;
+            /** Chat Id */
+            chat_id?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Error Message */
+            error_message?: string | null;
+        };
+        /** ConsoleTelegramTrail */
+        ConsoleTelegramTrail: {
+            /** Message Id */
+            message_id?: number | null;
+            /** Topic Id */
+            topic_id?: number | null;
+            /** Chat Id */
+            chat_id?: string | null;
+            /** Telegram Link */
+            telegram_link?: string | null;
+            /** Telegram Desktop Link */
+            telegram_desktop_link?: string | null;
+            /** Delivery Status */
+            delivery_status?: string | null;
+            /** Delivered At */
+            delivered_at?: string | null;
+        };
+        /** ConsoleTelegramVerifyRequest */
+        ConsoleTelegramVerifyRequest: {
+            /**
+             * Scope
+             * @default client
+             * @enum {string}
+             */
+            scope: "client" | "branch";
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Chat Id */
+            chat_id?: string | null;
+        };
+        /** ConsoleTelegramVerifyResponse */
+        ConsoleTelegramVerifyResponse: {
+            /** Success */
+            success: boolean;
+            /** Delivery Status */
+            delivery_status: string;
+            /** Verification Code */
+            verification_code: string;
+            /** Message Id */
+            message_id?: number | null;
+            /** Chat Id */
+            chat_id?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Error Message */
+            error_message?: string | null;
+        };
+        /** ConsoleTenantsSensitiveAccessAuditRequest */
+        ConsoleTenantsSensitiveAccessAuditRequest: {
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /** Field */
+            field: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "reveal" | "copy";
+            /** Context */
+            context?: string | null;
+        };
+        /** ConsoleTenantsSensitiveAccessAuditResponse */
+        ConsoleTenantsSensitiveAccessAuditResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Audit Id
+             * Format: uuid
+             */
+            audit_id: string;
+        };
+        /** ConsoleTenantsWeeklySnapshotCreateRequest */
+        ConsoleTenantsWeeklySnapshotCreateRequest: {
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Week Key */
+            week_key: string;
+            /** Snapshot */
+            snapshot: Record<string, never>;
+        };
+        /** ConsoleTenantsWeeklySnapshotCreateResponse */
+        ConsoleTenantsWeeklySnapshotCreateResponse: {
+            item: components["schemas"]["ConsoleTenantsWeeklySnapshotRecord"];
+        };
+        /** ConsoleTenantsWeeklySnapshotListResponse */
+        ConsoleTenantsWeeklySnapshotListResponse: {
+            /** Items */
+            items: components["schemas"]["ConsoleTenantsWeeklySnapshotRecord"][];
+            /** Cursor */
+            cursor?: string | null;
+            /** Has More */
+            has_more: boolean;
+        };
+        /** ConsoleTenantsWeeklySnapshotRecord */
+        ConsoleTenantsWeeklySnapshotRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Created At */
+            created_at: string;
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /** Week Key */
+            week_key: string;
+            /** Snapshot */
+            snapshot: Record<string, never>;
+            /** Actor Name */
+            actor_name?: string | null;
+        };
+        /** ConsoleWebhookSecretResponse */
+        ConsoleWebhookSecretResponse: {
+            /**
+             * Client Id
+             * Format: uuid
+             */
+            client_id: string;
+            /**
+             * Branch Id
+             * Format: uuid
+             */
+            branch_id: string;
+            /** Instance Id */
+            instance_id: string;
+            /** Webhook Secret */
+            webhook_secret: string;
+            /** Webhook Url */
+            webhook_url: string;
+        };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
+        /** OnboardingContractPayload */
+        "OnboardingContractPayload-Input": {
+            /** Domain Slug */
+            domain_slug?: string | null;
+            purchased?: components["schemas"]["CapabilitiesPayload"];
+            provider_binding?: components["schemas"]["OnboardingProviderBindingPayload"];
+        };
+        /** OnboardingContractPayload */
+        "OnboardingContractPayload-Output": {
+            /** Domain Slug */
+            domain_slug?: string | null;
+            purchased?: components["schemas"]["CapabilitiesPayload"];
+            provider_binding?: components["schemas"]["OnboardingProviderBindingPayload"];
+        };
+        /** OnboardingProviderBindingPayload */
+        OnboardingProviderBindingPayload: {
+            whatsapp?: components["schemas"]["OnboardingProviderBindingWhatsApp"] | null;
+        };
+        /** OnboardingProviderBindingWhatsApp */
+        OnboardingProviderBindingWhatsApp: {
+            /** Provider */
+            provider?: string | null;
+            /** Instance Id */
+            instance_id?: string | null;
+            /** Webhook Status */
+            webhook_status?: ("configured" | "pending" | "rebind_required") | null;
+            /** Paid Until */
+            paid_until?: string | null;
+            /** Owner */
+            owner?: string | null;
+            /** Next Renewal At */
+            next_renewal_at?: string | null;
+            /** Last Rebind At */
+            last_rebind_at?: string | null;
+            /** Rebind Required */
+            rebind_required?: boolean | null;
+            /** Alert State */
+            alert_state?: ("ok" | "warn" | "critical") | null;
+            /** Notes */
+            notes?: string | null;
+        };
+        /** SlotResponse */
+        SlotResponse: {
+            /** Start */
+            start: string;
+            /** End */
+            end: string;
+            /** Start Time */
+            start_time: string;
+            /** End Time */
+            end_time: string;
+            /** Available */
+            available: boolean;
+        };
+        /** SlotsResponse */
+        SlotsResponse: {
+            /** Date */
+            date: string;
+            /** Specialist Id */
+            specialist_id: string;
+            /** Specialist Name */
+            specialist_name: string;
+            /** Duration Minutes */
+            duration_minutes: number;
+            /** Slots */
+            slots: components["schemas"]["SlotResponse"][];
+        };
+        /** SpecialistCreate */
+        SpecialistCreate: {
+            /** Name */
+            name: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Email */
+            email?: string | null;
+            /** Google Calendar Id */
+            google_calendar_id?: string | null;
+            /** Services */
+            services?: components["schemas"]["SpecialistServicePayload"][];
+            /** Working Hours */
+            working_hours?: {
+                [key: string]: {
+                    [key: string]: string;
+                };
+            } | null;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
+        };
+        /** SpecialistResponse */
+        SpecialistResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Branch Name */
+            branch_name?: string | null;
+            /** Services */
+            services?: Record<string, never>[];
+            /** Is Active */
+            is_active: boolean;
+        };
+        /** SpecialistServicePayload */
+        SpecialistServicePayload: {
+            /** Name */
+            name: string;
+            /** Duration Min */
+            duration_min?: number | null;
+            /** Price */
+            price?: number | null;
+        };
+        /** SpecialistUpdate */
+        SpecialistUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Branch Id */
+            branch_id?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Email */
+            email?: string | null;
+            /** Google Calendar Id */
+            google_calendar_id?: string | null;
+            /** Services */
+            services?: components["schemas"]["SpecialistServicePayload"][] | null;
+            /** Working Hours */
+            working_hours?: {
+                [key: string]: {
+                    [key: string]: string;
+                };
+            } | null;
+            /** Is Active */
+            is_active?: boolean | null;
+        };
+        /** SpecialistsResponse */
+        SpecialistsResponse: {
+            /** Items */
+            items: components["schemas"]["SpecialistResponse"][];
+        };
+        /** ValidationError */
         ValidationError: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["ValidationError"];
-            };
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
         };
+        Agent: components["schemas"]["ConsoleAgent"];
+        AgentCreateRequest: components["schemas"]["ConsoleAgentCreateRequest"];
+        AgentCreateResponse: components["schemas"]["ConsoleAgentCreateResponse"];
+        AgentIdentity: components["schemas"]["ConsoleAgentIdentity"];
+        AgentLifecycleActionRequest: components["schemas"]["ConsoleAgentLifecycleActionRequest"];
+        AgentListResponse: components["schemas"]["ConsoleAgentListResponse"];
+        AgentMembership: components["schemas"]["ConsoleAgentMembership"];
+        AgentOidcRebindRequest: components["schemas"]["ConsoleAgentOidcRebindRequest"];
+        AgentOidcRebindResponse: components["schemas"]["ConsoleAgentOidcRebindResponse"];
+        AgentWithIdentities: components["schemas"]["ConsoleAgentWithIdentities"];
+        AuditEvent: components["schemas"]["ConsoleAuditEvent"];
+        AuditListResponse: components["schemas"]["ConsoleAuditListResponse"];
+        Branch: components["schemas"]["ConsoleBranch"];
+        BranchBootstrapAccountTemplate: components["schemas"]["ConsoleBranchBootstrapAccountTemplate"];
+        BranchChangeDraftRequest: components["schemas"]["ConsoleBranchChangeDraftRequest"];
+        BranchChangeListResponse: components["schemas"]["ConsoleBranchChangeListResponse"];
+        BranchChangePatch: components["schemas"]["ConsoleBranchChangePatch"];
+        BranchChangePublishRequest: components["schemas"]["ConsoleBranchChangePublishRequest"];
+        BranchChangeRecord: components["schemas"]["ConsoleBranchChangeRecord"];
+        BranchChangeResponse: components["schemas"]["ConsoleBranchChangeResponse"];
+        BranchChangeRollbackRequest: components["schemas"]["ConsoleBranchChangeRollbackRequest"];
+        BranchCreateRequest: components["schemas"]["ConsoleBranchCreateRequest"];
+        BranchCreateResponse: components["schemas"]["ConsoleBranchCreateResponse"];
+        BranchIntegrationStatus: components["schemas"]["ConsoleBranchIntegrationStatus"];
+        BranchListResponse: components["schemas"]["ConsoleBranchListResponse"];
+        BranchUpdateRequest: components["schemas"]["ConsoleBranchUpdateRequest"];
+        CapabilitiesPatchRequest: components["schemas"]["ConsoleCapabilitiesPatchRequest"];
+        CapabilitiesRecord: components["schemas"]["ConsoleCapabilitiesRecord"];
+        CapabilitiesResponse: components["schemas"]["ConsoleCapabilitiesResponse"];
+        Case: components["schemas"]["ConsoleCase"];
+        CaseActionResponse: components["schemas"]["ConsoleCaseActionResponse"];
+        CaseListResponse: components["schemas"]["ConsoleCaseListResponse"];
+        Client: components["schemas"]["ConsoleClient"];
+        ClientCreateRequest: components["schemas"]["ConsoleClientCreateRequest"];
+        ClientCreateResponse: components["schemas"]["ConsoleClientCreateResponse"];
+        ClientLifecycleActionRequest: components["schemas"]["ConsoleClientLifecycleActionRequest"];
+        ClientListResponse: components["schemas"]["ConsoleClientListResponse"];
+        ClientUpdateRequest: components["schemas"]["ConsoleClientUpdateRequest"];
+        Company: components["schemas"]["ConsoleCompany"];
+        CompanyCreateRequest: components["schemas"]["ConsoleCompanyCreateRequest"];
+        CompanyCreateResponse: components["schemas"]["ConsoleCompanyCreateResponse"];
+        CompanyListResponse: components["schemas"]["ConsoleCompanyListResponse"];
+        CompanyUpdateRequest: components["schemas"]["ConsoleCompanyUpdateRequest"];
+        ConfirmationCreateRequest: components["schemas"]["ConsoleConfirmationCreateRequest"];
+        ConfirmationResponse: components["schemas"]["ConsoleConfirmationResponse"];
+        Error: components["schemas"]["ConsoleError"];
+        ErrorResponse: components["schemas"]["ConsoleErrorResponse"];
+        FleetAttentionItem: components["schemas"]["ConsoleFleetAttentionItem"];
+        FleetAttentionResponse: components["schemas"]["ConsoleFleetAttentionResponse"];
+        HealthResponse: components["schemas"]["ConsoleHealthResponse"];
+        InboxMacro: components["schemas"]["ConsoleMacro"];
+        InboxMacroCreateRequest: components["schemas"]["ConsoleMacroCreateRequest"];
+        InboxMacroCreateResponse: components["schemas"]["ConsoleMacroCreateResponse"];
+        InboxMacroListResponse: components["schemas"]["ConsoleMacroListResponse"];
+        InboxMacroUpdateRequest: components["schemas"]["ConsoleMacroUpdateRequest"];
+        IntegrationBranchActionRequest: components["schemas"]["ConsoleIntegrationBranchActionRequest"];
+        IntegrationBranchActionResponse: components["schemas"]["ConsoleIntegrationBranchActionResponse"];
+        IntegrationsListResponse: components["schemas"]["ConsoleIntegrationsListResponse"];
+        LearningCandidate: components["schemas"]["ConsoleLearningCandidate"];
+        LearningCandidateActionResponse: components["schemas"]["ConsoleLearningCandidateActionResponse"];
+        LearningCandidateListResponse: components["schemas"]["ConsoleLearningCandidateListResponse"];
+        MeResponse: components["schemas"]["ConsoleMeResponse"];
+        MembershipCreateRequest: components["schemas"]["ConsoleMembershipCreateRequest"];
+        MembershipListResponse: components["schemas"]["ConsoleMembershipListResponse"];
+        MembershipUpdateRequest: components["schemas"]["ConsoleMembershipUpdateRequest"];
+        Message: components["schemas"]["ConsoleMessage"];
+        MessageListResponse: components["schemas"]["ConsoleMessageListResponse"];
+        MetricsDailyResponse: components["schemas"]["ConsoleMetricsDailyResponse"];
+        OnboardingAdvanceRequest: components["schemas"]["ConsoleOnboardingAdvanceRequest"];
+        OnboardingAutopilotRequest: components["schemas"]["ConsoleOnboardingAutopilotRequest"];
+        OnboardingAutopilotResponse: components["schemas"]["ConsoleOnboardingAutopilotResponse"];
+        OnboardingContractPatchRequest: components["schemas"]["ConsoleOnboardingContractPatchRequest"];
+        OnboardingContractPayload: components["schemas"]["OnboardingContractPayload-Input"];
+        OnboardingContractRecord: components["schemas"]["ConsoleOnboardingContractRecord"];
+        OnboardingContractResponse: components["schemas"]["ConsoleOnboardingContractResponse"];
+        OnboardingDocumentIngestion: components["schemas"]["ConsoleOnboardingDocumentIngestion"];
+        OnboardingIntakeFieldState: components["schemas"]["ConsoleOnboardingIntakeFieldState"];
+        OnboardingIntakeQualityDimension: components["schemas"]["ConsoleOnboardingIntakeQualityDimension"];
+        OnboardingIntakeQuestion: components["schemas"]["ConsoleOnboardingIntakeQuestion"];
+        OnboardingPurchasedService: NonNullable<components["schemas"]["ConsoleOnboardingAutopilotRequest"]["purchased_services"]>[number];
+        OnboardingScorecardCheck: components["schemas"]["ConsoleOnboardingScorecardCheck"];
+        OnboardingScorecardResponse: components["schemas"]["ConsoleOnboardingScorecardResponse"];
+        OnboardingStatusResponse: components["schemas"]["ConsoleOnboardingStatusResponse"];
+        OnboardingStepStatus: components["schemas"]["ConsoleOnboardingStepStatus"];
+        OpsJobCatalogResponse: components["schemas"]["ConsoleOpsJobCatalogResponse"];
+        OpsJobDefinition: components["schemas"]["ConsoleOpsJobDefinition"];
+        OpsJobListResponse: components["schemas"]["ConsoleOpsJobListResponse"];
+        OpsJobRecord: components["schemas"]["ConsoleOpsJobRecord"];
+        OpsJobRunRequest: components["schemas"]["ConsoleOpsJobRunRequest"];
+        OpsJobRunResponse: components["schemas"]["ConsoleOpsJobRunResponse"];
+        ProviderLifecycleItem: components["schemas"]["ConsoleProviderLifecycleItem"];
+        ProviderLifecycleListResponse: components["schemas"]["ConsoleProviderLifecycleListResponse"];
+        ProviderOpsAction: components["schemas"]["ConsoleIntegrationBranchActionRequest"]["action"];
+        ProviderOpsQueueItem: components["schemas"]["ConsoleProviderOpsQueueItem"];
+        ReferencePack: components["schemas"]["ConsoleReferencePack"];
+        ReferencePackListResponse: components["schemas"]["ConsoleReferencePackListResponse"];
+        ReferencePackUpsertRequest: components["schemas"]["ConsoleReferencePackUpsertRequest"];
+        SendMessageResponse: components["schemas"]["ConsoleManagerMessageResponse"];
+        SettingsResponse: components["schemas"]["ConsoleSettingsResponse"];
+        SettingsUpdateRequest: components["schemas"]["ConsoleSettingsUpdateRequest"];
+        SettingsUpdateResponse: components["schemas"]["ConsoleSettingsUpdateResponse"];
+        TelegramLinkResponse: components["schemas"]["ConsoleTelegramLinkResponse"];
+        TelegramTestRequest: components["schemas"]["ConsoleTelegramTestRequest"];
+        TelegramTestResponse: components["schemas"]["ConsoleTelegramTestResponse"];
+        TelegramVerifyRequest: components["schemas"]["ConsoleTelegramVerifyRequest"];
+        TelegramVerifyResponse: components["schemas"]["ConsoleTelegramVerifyResponse"];
+        WebhookSecretResponse: components["schemas"]["ConsoleWebhookSecretResponse"];
     };
-    parameters: {
-        /** @description Stable key for safe retries of mutating requests. */
-        idempotency_key: string;
-        /** @description Client selection when identity maps to multiple clients. */
-        client_id_header: string;
-        /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-        branch_id_header: string;
-        /** @description Optional branch override for branch-scoped operations. */
-        branch_id_query: string;
-        /** @example 39af8e47-a062-4b81-8343-34bdc3084ef9 */
-        case_id: string;
-        /** @example f0b1a4c7-8f33-4f92-9b1f-9fe0f3d3e7b1 */
-        agent_id: string;
-        /** @description Pagination cursor (opaque) */
-        cursor: string;
-        limit: number;
-    };
+    responses: never;
+    parameters: never;
     requestBodies: never;
     headers: never;
     pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    getMe: {
+    get_me_console_v1_me_get: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Agent context */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MeResponse"];
+                    "application/json": components["schemas"]["ConsoleMeResponse"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
         };
     };
-    listAgents: {
+    list_agents_console_v1_agents_get: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Agent list */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AgentListResponse"];
+                    "application/json": components["schemas"]["ConsoleAgentListResponse"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description Resource not found */
-            404: {
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"] | components["schemas"]["FastAPIErrorResponse"];
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
                 };
             };
-            422: components["responses"]["ValidationError"];
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
         };
     };
-    linkAgentTelegram: {
+    link_agent_telegram_console_v1_agents__agent_id__telegram_link_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path: {
-                /** @example f0b1a4c7-8f33-4f92-9b1f-9fe0f3d3e7b1 */
-                agent_id: components["parameters"]["agent_id"];
+                agent_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Link token created */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TelegramLinkResponse"];
+                    "application/json": components["schemas"]["ConsoleTelegramLinkResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["OnboardingStepRequired"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    listCases: {
+    list_cases_console_v1_cases_get: {
         parameters: {
             query?: {
-                /** @description Case status filter. `open` matches `pending` + `active`. */
-                status?: "open" | "pending" | "active" | "resolved";
-                q?: string;
-                branch_id?: string;
+                status?: string | null;
+                q?: string | null;
+                branch_id?: string | null;
                 assigned_to_me?: boolean;
-                phone?: string;
+                phone?: string | null;
                 has_delivery_error?: boolean;
                 has_pending_outbox?: boolean;
-                last_activity_since?: string;
-                /** @description Sort order for inbox results. */
-                sort_by?: "last_activity" | "created_at" | "sla";
-                date_from?: string;
-                date_to?: string;
-                /** @description Pagination cursor (opaque) */
-                cursor?: components["parameters"]["cursor"];
-                limit?: components["parameters"]["limit"];
+                has_human_lock?: boolean;
+                last_activity_since?: string | null;
+                sort_by?: string | null;
+                date_from?: string | null;
+                date_to?: string | null;
+                cursor?: string | null;
+                limit?: number;
             };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Case list */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CaseListResponse"];
+                    "application/json": components["schemas"]["ConsoleCaseListResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    getCase: {
+    take_case_console_v1_cases__case_id__take_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path: {
-                /** @example 39af8e47-a062-4b81-8343-34bdc3084ef9 */
-                case_id: components["parameters"]["case_id"];
+                case_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Case details */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Case"];
+                    "application/json": components["schemas"]["ConsoleCaseActionResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    takeCase: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-                /** @description Stable key for safe retries of mutating requests. */
-                "Idempotency-Key"?: components["parameters"]["idempotency_key"];
-            };
-            path: {
-                /** @example 39af8e47-a062-4b81-8343-34bdc3084ef9 */
-                case_id: components["parameters"]["case_id"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Case taken successfully */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CaseActionResponse"];
-                };
-            };
-            /** @description Case already taken or idempotency key conflict */
+            /** @description Conflict */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    resolveCase: {
+    resolve_case_console_v1_cases__case_id__resolve_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-                /** @description Stable key for safe retries of mutating requests. */
-                "Idempotency-Key"?: components["parameters"]["idempotency_key"];
-            };
+            header?: never;
             path: {
-                /** @example 39af8e47-a062-4b81-8343-34bdc3084ef9 */
-                case_id: components["parameters"]["case_id"];
+                case_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Case resolved */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CaseActionResponse"];
+                    "application/json": components["schemas"]["ConsoleCaseActionResponse"];
                 };
             };
-            403: components["responses"]["NotAssigned"];
-            409: components["responses"]["IdempotencyConflict"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    returnCase: {
+    return_case_console_v1_cases__case_id__return_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-                /** @description Stable key for safe retries of mutating requests. */
-                "Idempotency-Key"?: components["parameters"]["idempotency_key"];
-            };
+            header?: never;
             path: {
-                /** @example 39af8e47-a062-4b81-8343-34bdc3084ef9 */
-                case_id: components["parameters"]["case_id"];
+                case_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Case returned */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CaseActionResponse"];
+                    "application/json": components["schemas"]["ConsoleCaseActionResponse"];
                 };
             };
-            403: components["responses"]["NotAssigned"];
-            409: components["responses"]["IdempotencyConflict"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    getCaseMessages: {
+    get_case_messages_console_v1_cases__case_id__messages_get: {
         parameters: {
             query?: {
-                /** @description Pagination cursor (opaque) */
-                cursor?: components["parameters"]["cursor"];
-                limit?: components["parameters"]["limit"];
+                cursor?: string | null;
+                limit?: number;
             };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path: {
-                /** @example 39af8e47-a062-4b81-8343-34bdc3084ef9 */
-                case_id: components["parameters"]["case_id"];
+                case_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Message list */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MessageListResponse"];
+                    "application/json": components["schemas"]["ConsoleMessageListResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    sendManagerMessage: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-                /** @description Stable key for safe retries of mutating requests. */
-                "Idempotency-Key"?: components["parameters"]["idempotency_key"];
-            };
-            path: {
-                /** @example e03933eb-780e-4d0d-890f-741bc3ca9733 */
-                conversation_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SendMessageRequest"];
-            };
-        };
-        responses: {
-            /** @description Message queued */
-            200: {
+            /** @description Validation Error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SendMessageResponse"];
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            403: components["responses"]["NotAssigned"];
-            409: components["responses"]["IdempotencyConflict"];
         };
     };
-    sendManagerMedia: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-                /** @description Stable key for safe retries of mutating requests. */
-                "Idempotency-Key"?: components["parameters"]["idempotency_key"];
-            };
-            path: {
-                /** @example e03933eb-780e-4d0d-890f-741bc3ca9733 */
-                conversation_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["SendMediaRequest"];
-            };
-        };
-        responses: {
-            /** @description Media accepted */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SendMessageResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["NotAssigned"];
-            409: components["responses"]["IdempotencyConflict"];
-        };
-    };
-    listInboxMacros: {
+    list_inbox_macros_console_v1_inbox_macros_get: {
         parameters: {
             query?: {
                 include_inactive?: boolean;
             };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Macro list */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InboxMacroListResponse"];
+                    "application/json": components["schemas"]["ConsoleMacroListResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    createInboxMacro: {
+    create_inbox_macro_console_v1_inbox_macros_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["InboxMacroCreateRequest"];
+                "application/json": components["schemas"]["ConsoleMacroCreateRequest"];
             };
         };
         responses: {
-            /** @description Macro created */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InboxMacroCreateResponse"];
+                    "application/json": components["schemas"]["ConsoleMacroCreateResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    updateInboxMacro: {
+    update_inbox_macro_console_v1_inbox_macros__macro_id__patch: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path: {
                 macro_id: string;
             };
@@ -4579,322 +6876,653 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["InboxMacroUpdateRequest"];
+                "application/json": components["schemas"]["ConsoleMacroUpdateRequest"];
             };
         };
         responses: {
-            /** @description Macro updated */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InboxMacro"];
+                    "application/json": components["schemas"]["ConsoleMacro"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    getHealth: {
+    get_case_console_v1_cases__case_id__get: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            header?: never;
+            path: {
+                case_id: string;
             };
-            path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Health status */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HealthResponse"];
+                    "application/json": components["schemas"]["ConsoleCase"];
                 };
             };
-        };
-    };
-    getMetricsDaily: {
-        parameters: {
-            query?: {
-                /** @description Defaults to today */
-                date?: string;
-                /** @description Trend window size (defaults to 7) */
-                trend_days?: number;
-            };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Daily metrics */
-            200: {
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MetricsDailyResponse"];
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    getBusinessSummary: {
+    send_manager_message_console_v1_conversations__conversation_id__messages_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            header?: never;
+            path: {
+                conversation_id: string;
             };
-            path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleManagerMessageRequest"];
+            };
+        };
         responses: {
-            /** @description Business control summary */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BusinessSummaryResponse"];
+                    "application/json": components["schemas"]["ConsoleManagerMessageResponse"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    listBusinessIncidents: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Business incident list */
-            200: {
+            /** @description Validation Error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["IncidentListResponse"];
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
         };
     };
-    getBusinessDataTrust: {
+    send_outreach_message_console_v1_outreach_messages_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Data trust and governance summary */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataTrustSummaryResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    getBusinessTeamPerformance: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Team workload and responsiveness summary */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TeamPerformanceSummaryResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    getSubscriptionSummary: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Subscription usage and billing evidence summary */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SubscriptionSummaryResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    previewOwnerModeOperation: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["OwnerOperationApplyRequest"];
+                "application/json": components["schemas"]["ConsoleOutreachMessageRequest"];
             };
         };
         responses: {
-            /** @description Owner mode preview payload */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OwnerOperationPreviewResponse"];
+                    "application/json": components["schemas"]["ConsoleOutreachMessageResponse"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    applyOwnerModeOperation: {
+    get_conversation_human_lock_status_console_v1_conversations__conversation_id__human_lock_get: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            header?: never;
+            path: {
+                conversation_id: string;
             };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleHumanLockStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    release_conversation_human_lock_console_v1_conversations__conversation_id__human_lock_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleHumanLockStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_conversation_human_lock_console_v1_conversations__conversation_id__human_lock_pause_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleHumanLockPauseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleHumanLockStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_manager_media_console_v1_conversations__conversation_id__messages_media_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_send_manager_media_console_v1_conversations__conversation_id__messages_media_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleManagerMessageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_business_summary_console_v1_business_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleBusinessSummaryResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+        };
+    };
+    list_business_incidents_console_v1_business_incidents_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleIncidentListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+        };
+    };
+    get_subscription_summary_console_v1_subscription_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleSubscriptionSummaryResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+        };
+    };
+    get_business_data_trust_console_v1_business_data_trust_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleDataTrustSummaryResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+        };
+    };
+    get_business_team_performance_console_v1_business_team_performance_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleTeamPerformanceSummaryResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+        };
+    };
+    preview_owner_mode_operation_console_v1_business_operations_owner_mode_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["OwnerOperationApplyRequest"];
+                "application/json": components["schemas"]["ConsoleOwnerOperationApplyRequest"];
             };
         };
         responses: {
-            /** @description Owner mode apply result */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OwnerOperationApplyResponse"];
+                    "application/json": components["schemas"]["ConsoleOwnerOperationPreviewResponse"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    rollbackOwnerModeOperation: {
+    apply_owner_mode_operation_console_v1_business_operations_owner_mode_apply_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: {
+        requestBody: {
             content: {
-                "application/json": components["schemas"]["OwnerOperationRollbackRequest"];
+                "application/json": components["schemas"]["ConsoleOwnerOperationApplyRequest"];
             };
         };
         responses: {
-            /** @description Rollback result */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OwnerOperationRollbackResponse"];
+                    "application/json": components["schemas"]["ConsoleOwnerOperationApplyResponse"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    getOwnerModeOperationImpact: {
+    rollback_owner_mode_operation_console_v1_business_operations_owner_mode_rollback_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleOwnerOperationRollbackRequest"];
             };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleOwnerOperationRollbackResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_owner_mode_operation_impact_console_v1_business_operations__operation_id__impact_get: {
+        parameters: {
+            query?: never;
+            header?: never;
             path: {
                 operation_id: string;
             };
@@ -4902,250 +7530,397 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Owner mode impact snapshot */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OwnerOperationImpactResponse"];
+                    "application/json": components["schemas"]["ConsoleOwnerOperationImpactResponse"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    getTelegramHealth: {
+    get_health_console_v1_health_get: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Telegram health status */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TelegramHealthResponse"];
+                    "application/json": components["schemas"]["ConsoleHealthResponse"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
         };
     };
-    verifyTelegramConnector: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TelegramVerifyRequest"];
-            };
-        };
-        responses: {
-            /** @description Verification message result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TelegramVerifyResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["OnboardingStepRequired"];
-        };
-    };
-    sendTelegramTest: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TelegramTestRequest"];
-            };
-        };
-        responses: {
-            /** @description Test message result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TelegramTestResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["ConfirmationRequired"];
-        };
-    };
-    listOutbox: {
+    list_outbox_console_v1_ops_outbox_get: {
         parameters: {
             query?: {
-                /** @description Filter by outbox status (default: failed) */
-                status?: "pending" | "processing" | "failed" | "all";
-                /** @description ISO timestamp cursor for pagination */
-                cursor?: string;
+                status?: string | null;
+                cursor?: string | null;
                 limit?: number;
             };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Outbox list */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OutboxListResponse"];
+                    "application/json": components["schemas"]["ConsoleOutboxListResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    retryOutbox: {
+    retry_outbox_console_v1_ops_outbox_retry_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["OutboxRetryRequest"];
+                "application/json": components["schemas"]["ConsoleOutboxRetryRequest"];
             };
         };
         responses: {
-            /** @description Retry result */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OutboxRetryResponse"];
+                    "application/json": components["schemas"]["ConsoleOutboxRetryResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    getOpsJobsCatalog: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Available ops jobs */
-            200: {
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OpsJobCatalogResponse"];
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    listOpsJobs: {
+    list_reminders_console_v1_ops_reminders_get: {
         parameters: {
             query?: {
-                /** @description ISO timestamp cursor for pagination */
-                cursor?: string;
+                status?: string | null;
+                template?: string | null;
+                cursor?: string | null;
                 limit?: number;
             };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Ops jobs history */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OpsJobListResponse"];
+                    "application/json": components["schemas"]["ConsoleReminderListResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    getOpsJob: {
+    retry_reminders_console_v1_ops_reminders_retry_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleReminderRetryRequest"];
             };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleReminderRetryResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ops_jobs_catalog_console_v1_ops_jobs_catalog_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleOpsJobCatalogResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+        };
+    };
+    list_ops_jobs_console_v1_ops_jobs_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleOpsJobListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ops_job_console_v1_ops_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
             path: {
                 job_id: string;
             };
@@ -5153,256 +7928,3636 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Ops job record */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OpsJobRunResponse"];
+                    "application/json": components["schemas"]["ConsoleOpsJobRunResponse"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    runOpsJob: {
+    run_ops_job_console_v1_ops_jobs_run_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["OpsJobRunRequest"];
+                "application/json": components["schemas"]["ConsoleOpsJobRunRequest"];
             };
         };
         responses: {
-            /** @description Ops job execution result */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OpsJobRunResponse"];
+                    "application/json": components["schemas"]["ConsoleOpsJobRunResponse"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    getSettings: {
+    list_audit_events_console_v1_audit_get: {
         parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            query?: {
+                entity_type?: string | null;
+                entity_id?: string | null;
+                cursor?: string | null;
+                limit?: number;
             };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Settings */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SettingsResponse"];
+                    "application/json": components["schemas"]["ConsoleAuditListResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    updateSettings: {
+    get_settings_console_v1_settings_get: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SettingsUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SettingsUpdateResponse"];
-                };
-            };
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    getOnboardingStatus: {
-        parameters: {
-            query?: {
-                /** @description Optional branch override for branch-scoped operations. */
-                branch_id?: components["parameters"]["branch_id_query"];
-            };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Onboarding status */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OnboardingStatusResponse"];
+                    "application/json": components["schemas"]["ConsoleSettingsResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
         };
     };
-    getOnboardingScorecard: {
+    update_settings_console_v1_settings_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleSettingsUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleSettingsUpdateResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_metrics_daily_console_v1_metrics_daily_get: {
         parameters: {
             query?: {
-                /** @description Optional branch override for branch-scoped operations. */
-                branch_id?: components["parameters"]["branch_id_query"];
+                date?: string | null;
+                trend_days?: number | null;
             };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Onboarding scorecard */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OnboardingScorecardResponse"];
+                    "application/json": components["schemas"]["ConsoleMetricsDailyResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    advanceOnboarding: {
+    get_telegram_health_console_v1_telegram_health_get: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleTelegramHealthResponse"];
+                };
             };
+        };
+    };
+    verify_telegram_connector_console_v1_telegram_verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["OnboardingAdvanceRequest"];
+                "application/json": components["schemas"]["ConsoleTelegramVerifyRequest"];
             };
         };
         responses: {
-            /** @description Updated onboarding status */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OnboardingStatusResponse"];
+                    "application/json": components["schemas"]["ConsoleTelegramVerifyResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["OnboardingStepRequired"];
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    createConfirmation: {
+    send_telegram_test_console_v1_telegram_test_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ConfirmationCreateRequest"];
+                "application/json": components["schemas"]["ConsoleTelegramTestRequest"];
             };
         };
         responses: {
-            /** @description Confirmation created */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConfirmationResponse"];
+                    "application/json": components["schemas"]["ConsoleTelegramTestResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    listCalendarSpecialists: {
+    get_onboarding_status_console_v1_onboarding_status_get: {
         parameters: {
             query?: {
-                branch_id?: string;
+                branch_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleOnboardingStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_onboarding_scorecard_console_v1_onboarding_scorecard_get: {
+        parameters: {
+            query?: {
+                branch_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleOnboardingScorecardResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    advance_onboarding_console_v1_onboarding_advance_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleOnboardingAdvanceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleOnboardingStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_console_confirmation_console_v1_confirmations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleConfirmationCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleConfirmationResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_knowledge_current_console_v1_knowledge_current_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleKnowledgeCurrentResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+        };
+    };
+    validate_knowledge_console_v1_knowledge_validate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleKnowledgeValidateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleKnowledgeValidateResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_knowledge_console_v1_knowledge_publish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleKnowledgePublishRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleKnowledgePublishResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_knowledge_history_console_v1_knowledge_history_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleKnowledgeHistoryResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+        };
+    };
+    rollback_knowledge_console_v1_knowledge_rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleKnowledgeRollbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleKnowledgeRollbackResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_learning_candidates_console_v1_learning_candidates_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleLearningCandidateListResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_learning_candidate_console_v1_learning_candidates__candidate_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleLearningCandidateActionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_learning_candidate_console_v1_learning_candidates__candidate_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleLearningCandidateActionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_companies_console_v1_admin_companies_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCompanyListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_company_console_v1_admin_companies_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleCompanyCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCompanyCreateResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_clients_console_v1_admin_clients_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+                q?: string | null;
+                company_id?: string | null;
+                lifecycle?: string | null;
+                include_fleet?: string | null;
+                include_summary?: string | null;
+                fleet_lifecycle?: string | null;
+                payment_status?: string | null;
+                service_state?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleClientListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_client_console_v1_admin_clients_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleClientCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleClientCreateResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_branches_console_v1_admin_branches_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+                q?: string | null;
+                client_id?: string | null;
+                lifecycle?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleBranchListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_branch_console_v1_admin_branches_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleBranchCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleBranchCreateResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_tenants_weekly_snapshots_console_v1_admin_tenants_weekly_snapshots_get: {
+        parameters: {
+            query: {
+                client_id: string;
+                week_key?: string | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleTenantsWeeklySnapshotListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_tenants_weekly_snapshot_console_v1_admin_tenants_weekly_snapshots_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleTenantsWeeklySnapshotCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleTenantsWeeklySnapshotCreateResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audit_tenants_sensitive_access_console_v1_admin_tenants_sensitive_access_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleTenantsSensitiveAccessAuditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleTenantsSensitiveAccessAuditResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_marketing_campaigns_console_v1_admin_marketing_campaigns_get: {
+        parameters: {
+            query?: {
+                branch_id?: string | null;
+                status?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMarketingCampaignListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_marketing_campaign_console_v1_admin_marketing_campaigns_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleMarketingCampaignCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMarketingCampaignCreateResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleMarketingCampaignPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMarketingCampaignPreviewResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__execute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleMarketingCampaignExecuteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMarketingCampaignExecuteResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_marketing_campaign_diagnostics_console_v1_admin_marketing_campaigns__campaign_id__diagnostics_get: {
+        parameters: {
+            query?: {
+                sample_limit?: number | null;
+            };
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMarketingCampaignDiagnosticsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_failed_marketing_campaign_deliveries_console_v1_admin_marketing_campaigns__campaign_id__retry_failed_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleMarketingCampaignRetryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMarketingCampaignRetryResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_provider_lifecycle_console_v1_admin_provider_lifecycle_get: {
+        parameters: {
+            query?: {
+                stale_after_minutes?: number;
+                cursor?: string | null;
+                limit?: number;
+                only_problematic?: string | null;
+                company_id?: string | null;
+                client_id?: string | null;
+                branch_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleProviderLifecycleListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_integrations_console_v1_admin_integrations_get: {
+        parameters: {
+            query?: {
+                stale_after_minutes?: number;
+                cursor?: string | null;
+                limit?: number;
+                company_id?: string | null;
+                client_id?: string | null;
+                branch_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleIntegrationsListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_integration_reconcile_for_branch_console_v1_admin_integrations__branch_id__reconcile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleIntegrationBranchActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleIntegrationBranchActionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_fleet_attention_console_v1_admin_fleet_attention_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                stale_after_minutes?: number;
+                include_low?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleFleetAttentionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_admin_incidents_console_v1_admin_incidents_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleIncidentListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_company_console_v1_admin_companies__company_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleCompanyUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCompany"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_client_console_v1_admin_clients__client_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleClientUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleClient"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_client_console_v1_admin_clients__client_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleClientLifecycleActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleClient"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_client_console_v1_admin_clients__client_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                client_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleClientLifecycleActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleClient"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_branch_console_v1_admin_branches__branch_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleBranchUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleBranch"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_branch_changes_console_v1_admin_branch_changes_get: {
+        parameters: {
+            query?: {
+                branch_id?: string | null;
+                status?: string | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleBranchChangeListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_branch_change_console_v1_admin_branch_changes__change_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleBranchChangeResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draft_branch_change_console_v1_admin_branch_changes_draft_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleBranchChangeDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleBranchChangeResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    validate_branch_change_console_v1_admin_branch_changes__change_id__validate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleBranchChangeResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_branch_change_console_v1_admin_branch_changes__change_id__publish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleBranchChangePublishRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleBranchChangeResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rollback_branch_change_console_v1_admin_branch_changes__change_id__rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleBranchChangeRollbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleBranchChangeResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_branch_go_live_console_v1_admin_branches__branch_id__go_live_approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleBranchGoLiveDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleBranch"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_branch_go_live_console_v1_admin_branches__branch_id__go_live_reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleBranchGoLiveDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleBranch"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    waive_branch_go_live_console_v1_admin_branches__branch_id__go_live_waive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                branch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleBranchGoLiveWaiverRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleBranch"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_agent_console_v1_admin_agents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleAgentCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleAgentCreateResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_memberships_console_v1_admin_memberships_get: {
+        parameters: {
+            query?: {
+                agent_id?: string | null;
+                scope?: string | null;
+                company_id?: string | null;
+                client_id?: string | null;
+                branch_id?: string | null;
+                include_inactive?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleMembershipListResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_membership_console_v1_admin_memberships_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleMembershipCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleAgentMembership"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_membership_console_v1_admin_memberships__membership_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                membership_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleMembershipUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleAgentMembership"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_agent_access_console_v1_admin_agents__agent_id__disable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleAgentLifecycleActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleAgent"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enable_agent_access_console_v1_admin_agents__agent_id__enable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleAgentLifecycleActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleAgent"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rebind_agent_oidc_identity_console_v1_admin_agents__agent_id__oidc_rebind_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleAgentOidcRebindRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleAgentOidcRebindResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_capabilities_console_v1_admin_capabilities_get: {
+        parameters: {
+            query?: {
+                branch_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCapabilitiesResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_capabilities_console_v1_admin_capabilities_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleCapabilitiesPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleCapabilitiesRecord"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_onboarding_contract_console_v1_admin_onboarding_contract_get: {
+        parameters: {
+            query?: {
+                branch_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleOnboardingContractResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_onboarding_contract_console_v1_admin_onboarding_contract_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleOnboardingContractPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleOnboardingContractRecord"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_webhook_secret_console_v1_admin_webhook_secret_get: {
+        parameters: {
+            query?: {
+                branch_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleWebhookSecretResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_onboarding_autopilot_console_v1_admin_onboarding_autopilot_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleOnboardingAutopilotRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleOnboardingAutopilotResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_onboarding_blueprints_api_console_v1_admin_onboarding_blueprints_get: {
+        parameters: {
+            query?: {
+                domain_slug?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleOnboardingBlueprintListResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_reference_packs_console_v1_admin_reference_packs_get: {
+        parameters: {
+            query?: {
+                domain_slug?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleReferencePackListResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_reference_pack_console_v1_admin_reference_packs__domain_slug__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                domain_slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsoleReferencePackUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleReferencePack"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsoleErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_specialists_console_v1_calendar_specialists_get: {
+        parameters: {
+            query?: {
+                branch_id?: string | null;
                 include_inactive?: boolean;
             };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Specialists */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5411,22 +11566,21 @@ export interface operations {
                     "application/json": components["schemas"]["SpecialistsResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    createCalendarSpecialist: {
+    create_specialist_console_v1_calendar_specialists_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -5436,7 +11590,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Specialist created */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5445,23 +11599,21 @@ export interface operations {
                     "application/json": components["schemas"]["SpecialistResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["OnboardingStepRequired"];
-            422: components["responses"]["ValidationError"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    updateCalendarSpecialist: {
+    update_specialist_console_v1_calendar_specialists__specialist_id__patch: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path: {
                 specialist_id: string;
             };
@@ -5473,7 +11625,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Specialist updated */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5482,23 +11634,21 @@ export interface operations {
                     "application/json": components["schemas"]["SpecialistResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["OnboardingStepRequired"];
-            422: components["responses"]["ValidationError"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    enableCalendarSpecialist: {
+    enable_specialist_console_v1_calendar_specialists__specialist_id__enable_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path: {
                 specialist_id: string;
             };
@@ -5506,7 +11656,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Specialist enabled */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5515,23 +11665,21 @@ export interface operations {
                     "application/json": components["schemas"]["SpecialistResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["OnboardingStepRequired"];
-            422: components["responses"]["ValidationError"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    disableCalendarSpecialist: {
+    disable_specialist_console_v1_calendar_specialists__specialist_id__disable_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path: {
                 specialist_id: string;
             };
@@ -5539,7 +11687,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Specialist disabled */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5548,33 +11696,31 @@ export interface operations {
                     "application/json": components["schemas"]["SpecialistResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["OnboardingStepRequired"];
-            422: components["responses"]["ValidationError"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    getCalendarSlots: {
+    get_slots_console_v1_calendar_slots_get: {
         parameters: {
             query: {
                 specialist_id: string;
                 date: string;
                 duration?: number;
             };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Slots */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5583,34 +11729,33 @@ export interface operations {
                     "application/json": components["schemas"]["SlotsResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    listCalendarBookings: {
+    list_bookings_console_v1_calendar_bookings_get: {
         parameters: {
             query?: {
-                specialist_id?: string;
-                date_from?: string;
-                date_to?: string;
-                status?: string;
+                specialist_id?: string | null;
+                date_from?: string | null;
+                date_to?: string | null;
+                status?: string | null;
                 limit?: number;
             };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Bookings */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5619,21 +11764,21 @@ export interface operations {
                     "application/json": components["schemas"]["BookingsListResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    createCalendarBooking: {
+    create_booking_console_v1_calendar_bookings_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -5643,7 +11788,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Booking created */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5652,25 +11797,23 @@ export interface operations {
                     "application/json": components["schemas"]["BookingActionResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    cancelCalendarBooking: {
+    cancel_booking_console_v1_calendar_bookings__booking_id__cancel_post: {
         parameters: {
             query?: {
-                reason?: string;
+                reason?: string | null;
             };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
+            header?: never;
             path: {
                 booking_id: string;
             };
@@ -5678,7 +11821,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Booking cancelled */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5687,40 +11830,108 @@ export interface operations {
                     "application/json": components["schemas"]["BookingActionResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    startCalendarGoogleConnect: {
+    update_booking_status_console_v1_calendar_bookings__booking_id__status_post: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
+            header?: never;
+            path: {
+                booking_id: string;
             };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookingStatusUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookingActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_booking_no_show_followup_console_v1_calendar_bookings__booking_id__no_show_followup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                booking_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookingNoShowFollowUpRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookingActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    google_connect_console_v1_calendar_google_connect_get: {
+        parameters: {
+            query?: never;
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Redirect to Google OAuth consent screen */
-            307: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": unknown;
+                };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
         };
     };
-    handleCalendarGoogleCallback: {
+    google_callback_console_v1_calendar_google_callback_get: {
         parameters: {
             query: {
                 code: string;
@@ -5732,1570 +11943,58 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Redirect to Console settings with callback status */
-            307: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": unknown;
+                };
             };
-            422: components["responses"]["ValidationError"];
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
-    getCalendarGoogleStatus: {
+    google_status_console_v1_calendar_google_status_get: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Integration status */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GoogleStatusResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    getKnowledgeCurrent: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Current knowledge */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KnowledgeCurrentResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    validateKnowledge: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KnowledgeValidationRequest"];
-            };
-        };
-        responses: {
-            /** @description Validation result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KnowledgeValidationResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["OnboardingStepRequired"];
-        };
-    };
-    publishKnowledge: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KnowledgePublishRequest"];
-            };
-        };
-        responses: {
-            /** @description Publish result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KnowledgePublishResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["OnboardingStepRequired"];
-        };
-    };
-    listKnowledgeHistory: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Knowledge versions */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KnowledgeHistoryResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    rollbackKnowledge: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KnowledgeRollbackRequest"];
-            };
-        };
-        responses: {
-            /** @description Rollback result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KnowledgeRollbackResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    listLearningCandidates: {
-        parameters: {
-            query?: {
-                status?: "pending" | "approved" | "rejected";
-                limit?: number;
-                cursor?: string;
-            };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Learning candidates */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LearningCandidateListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-        };
-    };
-    approveLearningCandidate: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path: {
-                candidate_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Approval result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LearningCandidateActionResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    rejectLearningCandidate: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path: {
-                candidate_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Reject result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LearningCandidateActionResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    listAuditEvents: {
-        parameters: {
-            query?: {
-                entity_type?: "case" | "conversation" | "settings" | "agent" | "branch" | "client" | "integration";
-                entity_id?: string;
-                /** @description Pagination cursor (opaque) */
-                cursor?: components["parameters"]["cursor"];
-                limit?: components["parameters"]["limit"];
-            };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-                /** @description Branch selection when identity is branch-scoped or multiple branches exist. */
-                "X-Branch-Id"?: components["parameters"]["branch_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Audit events */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AuditListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    listAdminCompanies: {
-        parameters: {
-            query?: {
-                /** @description Pagination cursor (opaque) */
-                cursor?: components["parameters"]["cursor"];
-                limit?: components["parameters"]["limit"];
-                q?: string;
-            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Company list */
+            /** @description Successful Response */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CompanyListResponse"];
+                    "application/json": unknown;
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
         };
     };
-    createAdminCompany: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CompanyCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Company created */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CompanyCreateResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    updateAdminCompany: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                company_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CompanyUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Company updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Company"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    listAdminClients: {
-        parameters: {
-            query?: {
-                /** @description Pagination cursor (opaque) */
-                cursor?: components["parameters"]["cursor"];
-                limit?: components["parameters"]["limit"];
-                q?: string;
-                company_id?: string;
-                /** @description Tenant lifecycle filter (`active` by default). */
-                lifecycle?: "active" | "archived" | "all";
-                /** @description Include fleet/commercial derived fields on each client item. */
-                include_fleet?: "true" | "false";
-                /** @description Include full-scope fleet summary for the current filter set. */
-                include_summary?: "true" | "false";
-                /** @description Filter by derived fleet lifecycle state. */
-                fleet_lifecycle?: "lead" | "contracting" | "onboarding" | "go_live_ready" | "active" | "paused" | "archived" | "all";
-                /** @description Filter by latest onboarding contract payment status. */
-                payment_status?: "pending" | "confirmed" | "rejected" | "unknown" | "all";
-                /** @description Filter by derived service health state. */
-                service_state?: "ok" | "degraded" | "attention" | "all";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Client list */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ClientListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    createAdminClient: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ClientCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Client created */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ClientCreateResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["OnboardingStepRequired"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    updateAdminClient: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                client_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ClientUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Client updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Client"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    archiveAdminClient: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                client_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ClientLifecycleActionRequest"];
-            };
-        };
-        responses: {
-            /** @description Client archived */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Client"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    restoreAdminClient: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                client_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ClientLifecycleActionRequest"];
-            };
-        };
-        responses: {
-            /** @description Client restored */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Client"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    listAdminBranches: {
-        parameters: {
-            query?: {
-                /** @description Pagination cursor (opaque) */
-                cursor?: components["parameters"]["cursor"];
-                limit?: components["parameters"]["limit"];
-                q?: string;
-                client_id?: string;
-                /** @description Tenant lifecycle filter (`active` by default). */
-                lifecycle?: "active" | "archived" | "all";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Branch list */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BranchListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    createAdminBranch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BranchCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Branch created */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BranchCreateResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["OnboardingStepRequired"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    patchAdminBranch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                branch_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BranchUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Branch updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Branch"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["ConfirmationRequired"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    approveAdminBranchGoLive: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                branch_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BranchGoLiveDecisionRequest"];
-            };
-        };
-        responses: {
-            /** @description Go-live approved */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Branch"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    rejectAdminBranchGoLive: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                branch_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BranchGoLiveDecisionRequest"];
-            };
-        };
-        responses: {
-            /** @description Go-live rejected */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Branch"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    waiveAdminBranchGoLive: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                branch_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BranchGoLiveWaiverRequest"];
-            };
-        };
-        responses: {
-            /** @description Go-live waiver applied */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Branch"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    listAdminBranchChanges: {
-        parameters: {
-            query?: {
-                branch_id?: string;
-                status?: "draft" | "validated" | "publish_failed" | "published" | "rolled_back";
-                cursor?: string;
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Branch changes list */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BranchChangeListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    draftAdminBranchChange: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BranchChangeDraftRequest"];
-            };
-        };
-        responses: {
-            /** @description Branch change drafted */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BranchChangeResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    getAdminBranchChange: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                change_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Branch change details */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BranchChangeResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    validateAdminBranchChange: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                change_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Branch change validated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BranchChangeResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    publishAdminBranchChange: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                change_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BranchChangePublishRequest"];
-            };
-        };
-        responses: {
-            /** @description Branch change published */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BranchChangeResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    rollbackAdminBranchChange: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                change_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BranchChangeRollbackRequest"];
-            };
-        };
-        responses: {
-            /** @description Branch change rolled back */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BranchChangeResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    listAdminIntegrations: {
-        parameters: {
-            query?: {
-                /** @description Mark branch as stale when no inbound for this many minutes. */
-                stale_after_minutes?: number;
-                /** @description ISO timestamp cursor for pagination. */
-                cursor?: string;
-                /** @description Maximum number of branches in response page. */
-                limit?: number;
-                /** @description Optional company scope filter. */
-                company_id?: string;
-                /** @description Optional client scope filter. */
-                client_id?: string;
-                /** @description Optional branch scope filter. */
-                branch_id?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Integrations registry */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IntegrationsListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    listAdminProviderLifecycle: {
-        parameters: {
-            query?: {
-                /** @description Mark branch as stale when no inbound for this many minutes. */
-                stale_after_minutes?: number;
-                /** @description ISO timestamp cursor for pagination. */
-                cursor?: string;
-                /** @description Maximum number of branches in response page. */
-                limit?: number;
-                /** @description Return only branches that require an operation. */
-                only_problematic?: boolean;
-                /** @description Optional company scope filter. */
-                company_id?: string;
-                /** @description Optional client scope filter. */
-                client_id?: string;
-                /** @description Optional branch scope filter. */
-                branch_id?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Provider lifecycle registry */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProviderLifecycleListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    runAdminIntegrationReconcileForBranch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                branch_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["IntegrationBranchActionRequest"];
-            };
-        };
-        responses: {
-            /** @description Integration reconcile result */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IntegrationBranchActionResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    listFleetAttention: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of top risk clients in response. */
-                limit?: number;
-                /** @description Mark branch inbound as stale after this many minutes. */
-                stale_after_minutes?: number;
-                /** @description Include low-risk clients (`true`/`false`). */
-                include_low?: "true" | "false" | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Fleet attention response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FleetAttentionResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    listAdminIncidents: {
-        parameters: {
-            query?: {
-                /** @description Maximum number of incidents in response. */
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Fleet incident list */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IncidentListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    createAdminAgent: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AgentCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Agent created */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentCreateResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    listAdminMemberships: {
-        parameters: {
-            query?: {
-                agent_id?: string;
-                scope?: "company" | "client" | "branch";
-                company_id?: string;
-                client_id?: string;
-                branch_id?: string;
-                include_inactive?: "true" | "false";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Membership list */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MembershipListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    createAdminMembership: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MembershipCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Membership created */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentMembership"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    updateAdminMembership: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                membership_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MembershipUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Membership updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentMembership"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    disableAdminAgent: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AgentLifecycleActionRequest"];
-            };
-        };
-        responses: {
-            /** @description Agent disabled */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Agent"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    enableAdminAgent: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AgentLifecycleActionRequest"];
-            };
-        };
-        responses: {
-            /** @description Agent enabled */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Agent"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    rebindAdminAgentOidc: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AgentOidcRebindRequest"];
-            };
-        };
-        responses: {
-            /** @description OIDC identity rebound */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgentOidcRebindResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    getAdminCapabilities: {
-        parameters: {
-            query?: {
-                /** @description Optional branch override for branch-scoped operations. */
-                branch_id?: components["parameters"]["branch_id_query"];
-            };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Capabilities response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CapabilitiesResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    patchAdminCapabilities: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CapabilitiesPatchRequest"];
-            };
-        };
-        responses: {
-            /** @description Updated capabilities record */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CapabilitiesRecord"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    getAdminOnboardingContract: {
-        parameters: {
-            query?: {
-                /** @description Optional branch override for branch-scoped operations. */
-                branch_id?: components["parameters"]["branch_id_query"];
-            };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Onboarding contract response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OnboardingContractResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    patchAdminOnboardingContract: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OnboardingContractPatchRequest"];
-            };
-        };
-        responses: {
-            /** @description Updated onboarding contract record */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OnboardingContractRecord"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    getAdminWebhookSecret: {
-        parameters: {
-            query?: {
-                /** @description Optional branch override for branch-scoped operations. */
-                branch_id?: components["parameters"]["branch_id_query"];
-            };
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Webhook secret response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WebhookSecretResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    runAdminOnboardingAutopilot: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Client selection when identity maps to multiple clients. */
-                "X-Client-Id"?: components["parameters"]["client_id_header"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OnboardingAutopilotRequest"];
-            };
-        };
-        responses: {
-            /** @description Autopilot completed */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OnboardingAutopilotResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    listAdminReferencePacks: {
-        parameters: {
-            query?: {
-                domain_slug?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Reference packs list */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReferencePackListResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    upsertAdminReferencePack: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                domain_slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReferencePackUpsertRequest"];
-            };
-        };
-        responses: {
-            /** @description Reference pack upserted */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReferencePack"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
+    listAdminBranchChanges: operations["list_branch_changes_console_v1_admin_branch_changes_get"];
+    listAdminBranches: operations["list_branches_console_v1_admin_branches_get"];
+    listAdminClients: operations["list_clients_console_v1_admin_clients_get"];
+    listAdminCompanies: operations["list_companies_console_v1_admin_companies_get"];
+    listAdminIntegrations: operations["list_integrations_console_v1_admin_integrations_get"];
+    listAdminMemberships: operations["list_memberships_console_v1_admin_memberships_get"];
+    listAdminProviderLifecycle: operations["list_provider_lifecycle_console_v1_admin_provider_lifecycle_get"];
+    listAdminReferencePacks: operations["list_reference_packs_console_v1_admin_reference_packs_get"];
+    listAuditEvents: operations["list_audit_events_console_v1_audit_get"];
+    listCases: operations["list_cases_console_v1_cases_get"];
+    listFleetAttention: operations["list_fleet_attention_console_v1_admin_fleet_attention_get"];
+    listInboxMacros: operations["list_inbox_macros_console_v1_inbox_macros_get"];
+    listLearningCandidates: operations["list_learning_candidates_console_v1_learning_candidates_get"];
+    listOpsJobs: operations["list_ops_jobs_console_v1_ops_jobs_get"];
 }

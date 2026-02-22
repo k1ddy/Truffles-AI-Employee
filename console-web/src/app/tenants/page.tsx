@@ -3,20 +3,34 @@
 import { useEffect, useMemo, useState } from "react";
 import { InfiniteData, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import type { components } from "@/types/api.generated";
 import AccessDenied from "@/components/AccessDenied";
 import ProvisioningWizard from "@/components/ProvisioningWizard";
 import TenantsActionQueuePanel, { type TenantsActionQueueItem } from "@/components/TenantsActionQueuePanel";
-import { adminApi, auditApi, authApi, canAccessConsole, confirmationsApi, opsApi } from "@/lib/api-client";
+import TenantsScopedErrorSummary from "@/components/TenantsScopedErrorSummary";
+import TenantsSensitiveIdCell, { type TenantsSensitiveAction } from "@/components/TenantsSensitiveIdCell";
+import TenantsTopControls, { type TenantsFilterOption } from "@/components/TenantsTopControls";
+import {
+    adminApi,
+    auditApi,
+    authApi,
+    canAccessConsole,
+    confirmationsApi,
+    opsApi,
+    type TenantsOperationalSnapshotPayload,
+    type TenantsWeeklySnapshotRecord,
+} from "@/lib/api-client";
 import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
 import {
+    readConsoleContextScopeFromStorage,
     setConsoleBranchContext,
     setConsoleClientContext,
     setConsoleCompanyContext,
 } from "@/lib/console-context-storage";
 import { useInlineErrorSummary } from "@/lib/use-inline-error-summary";
+import { useTenantsPageFilters } from "./use-tenants-page-filters";
 
 type CompanyEditorState = {
     id: string;
@@ -116,7 +130,7 @@ type FleetLifecycleFilter = "all" | "lead" | "contracting" | "onboarding" | "go_
 type FleetPaymentFilter = "all" | "pending" | "confirmed" | "rejected" | "unknown";
 type FleetServiceFilter = "all" | "ok" | "degraded" | "attention";
 type FleetAttentionLevel = "high" | "medium" | "low";
-type TenantsWorkspaceMode = "all" | "portfolio" | "onboarding" | "changes" | "decommission";
+type TenantsWorkspaceMode = "portfolio" | "onboarding" | "changes" | "decommission";
 type TenantsViewPreset = "operator" | "platform";
 
 type ActionQueueIntent =
@@ -190,7 +204,6 @@ type TenantsOperationalSnapshot = {
 };
 
 const LIFECYCLE_AUDIT_STORAGE_KEY = "tenants:client-lifecycle-audit:v2";
-const WEEKLY_SNAPSHOT_STORAGE_KEY = "tenants:operational-weekly-snapshots:v1";
 const MAX_LIFECYCLE_AUDIT_ENTRIES_PER_CLIENT = 20;
 const MAX_WEEKLY_SNAPSHOTS = 12;
 
@@ -373,6 +386,10 @@ function formatDateTimeLabel(value: string | undefined): string {
     return parsed.toLocaleString("ru-RU");
 }
 
+function resolveErrorScopeFromWorkspace(workspaceMode: TenantsWorkspaceMode): string {
+    return workspaceMode;
+}
+
 function formatReferenceScopeReason(value?: string | null): string {
     if (!value) {
         return "не задан";
@@ -401,16 +418,19 @@ function formatOptionalPercent(value: number | null | undefined): string {
     return `${Number(value.toFixed(1))}%`;
 }
 
-function toWeekKey(dateValue: string): string {
+function toIsoWeekKey(dateValue: string): string {
     const parsed = new Date(dateValue);
     if (Number.isNaN(parsed.getTime())) {
         return "invalid-week";
     }
-    const yearStart = new Date(Date.UTC(parsed.getUTCFullYear(), 0, 1));
-    const current = new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
-    const dayOfYear = Math.floor((current.getTime() - yearStart.getTime()) / 86400000) + 1;
-    const week = Math.ceil(dayOfYear / 7);
-    return `${parsed.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+    const target = new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+    const weekday = target.getUTCDay() || 7;
+    target.setUTCDate(target.getUTCDate() + 4 - weekday);
+
+    const isoYear = target.getUTCFullYear();
+    const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+    const week = Math.ceil((((target.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    return `${isoYear}-W${String(week).padStart(2, "0")}`;
 }
 
 function lifecycleStateFromStatus(status: string | undefined): string {
@@ -472,19 +492,25 @@ function safeParseLifecycleAuditMap(rawValue: string | null): ClientLifecycleAud
     }
 }
 
-function safeParseWeeklySnapshots(rawValue: string | null): TenantsOperationalSnapshot[] {
-    if (!rawValue) {
-        return [];
+function mapWeeklySnapshotRecordToViewModel(
+    record: TenantsWeeklySnapshotRecord,
+): TenantsOperationalSnapshot | null {
+    if (!record?.id || !record?.created_at || !record?.week_key) {
+        return null;
     }
-    try {
-        const parsed = JSON.parse(rawValue) as TenantsOperationalSnapshot[];
-        if (!Array.isArray(parsed)) {
-            return [];
-        }
-        return parsed.filter((item) => item && typeof item === "object").slice(0, MAX_WEEKLY_SNAPSHOTS);
-    } catch {
-        return [];
+    if (!record.snapshot || typeof record.snapshot !== "object") {
+        return null;
     }
+    const report = record.snapshot as Partial<TenantsOperationalSnapshot["report"]>;
+    if (!report.generatedAt || !report.kpi || typeof report.kpi !== "object") {
+        return null;
+    }
+    return {
+        id: record.id,
+        weekKey: record.week_key,
+        createdAt: record.created_at,
+        report: report as TenantsOperationalSnapshot["report"],
+    };
 }
 
 function mergeLifecycleAuditEntries(
@@ -583,6 +609,24 @@ function toCsvCell(value: string | number): string {
         return `"${raw.replaceAll("\"", "\"\"")}"`;
     }
     return raw;
+}
+
+function toFilterOptions(
+    values: Array<{ id: string | null | undefined; label: string | null | undefined }>,
+): TenantsFilterOption[] {
+    const unique = new Map<string, string>();
+    values.forEach((item) => {
+        if (!item.id) {
+            return;
+        }
+        const normalizedLabel = (item.label ?? "").trim();
+        if (!unique.has(item.id)) {
+            unique.set(item.id, normalizedLabel || item.id);
+        }
+    });
+    return [...unique.entries()]
+        .map(([id, label]) => ({ id, label }))
+        .sort((left, right) => left.label.localeCompare(right.label, "ru"));
 }
 
 function pushLifecycleAuditEntry(
@@ -806,10 +850,16 @@ function buildOperationalKpiDrilldown(
 export default function TenantsPage() {
     const { data: session } = useSession();
     const router = useRouter();
+    const searchParams = useSearchParams();
     const queryClient = useQueryClient();
     const { errors: inlineErrors, reportError, reportInlineError, clearErrors } = useInlineErrorSummary();
-    const reportValidationError = (message: string, code = "VALIDATION_ERROR") => {
-        reportInlineError({ code, message });
+    const reportValidationError = (
+        message: string,
+        code = "VALIDATION_ERROR",
+        scope?: string,
+    ) => {
+        const resolvedScope = scope ?? resolveErrorScopeFromWorkspace(workspaceMode);
+        reportInlineError({ code, message, scope: resolvedScope });
         toast.error(message);
     };
     const reportProvisioningError = (error: unknown, operation: string, endpoint: string) =>
@@ -817,12 +867,13 @@ export default function TenantsPage() {
             includeProvisioningGuidance: true,
             operation,
             endpoint,
+            scope: "onboarding",
         });
     const [clientQuery, setClientQuery] = useState("");
     const [branchQuery, setBranchQuery] = useState("");
     const [companyQuery, setCompanyQuery] = useState("");
     const [tenantLifecycle, setTenantLifecycle] = useState<TenantLifecycleMode>("active");
-    const [workspaceMode, setWorkspaceMode] = useState<TenantsWorkspaceMode>("all");
+    const [workspaceMode, setWorkspaceMode] = useState<TenantsWorkspaceMode>("portfolio");
     const [viewPreset, setViewPreset] = useState<TenantsViewPreset>("operator");
     const [fleetLifecycleFilter, setFleetLifecycleFilter] = useState<FleetLifecycleFilter>("all");
     const [fleetPaymentFilter, setFleetPaymentFilter] = useState<FleetPaymentFilter>("all");
@@ -875,6 +926,26 @@ export default function TenantsPage() {
     const selectedClientId = meData?.client?.id ?? null;
     const selectedCompanyId = meData?.selected_company_id ?? meData?.client?.company_id ?? null;
     const selectedBranchId = meData?.selected_branch_id ?? null;
+    const {
+        pageFilterCompanyId,
+        pageFilterClientId,
+        pageFilterBranchId,
+        hasPageFilters,
+        setPageFilterCompany,
+        setPageFilterClient,
+        setPageFilterBranch,
+        applyScopeToPageFilters,
+        clearPageFilters,
+    } = useTenantsPageFilters({
+        searchParams,
+        router,
+        initialContext: {
+            companyId: selectedCompanyId,
+            clientId: selectedClientId,
+            branchId: selectedBranchId,
+        },
+        canInitialize: Boolean(meData),
+    });
     const knownCompanies = useMemo(
         () => meData?.companies ?? [],
         [meData?.companies],
@@ -883,13 +954,13 @@ export default function TenantsPage() {
         () => meData?.branches ?? [],
         [meData?.branches],
     );
-    const selectedCompanyName = useMemo(() => {
+    const selectedCompanyNameFromContext = useMemo(() => {
         if (!selectedCompanyId) {
             return null;
         }
         return knownCompanies.find((company) => company.id === selectedCompanyId)?.name ?? null;
     }, [knownCompanies, selectedCompanyId]);
-    const selectedBranchName = useMemo(() => {
+    const selectedBranchNameFromContext = useMemo(() => {
         if (!selectedBranchId) {
             return null;
         }
@@ -905,7 +976,6 @@ export default function TenantsPage() {
 
     useEffect(() => {
         setClientLifecycleAuditById(safeParseLifecycleAuditMap(readBrowserStorage(LIFECYCLE_AUDIT_STORAGE_KEY)));
-        setWeeklySnapshots(safeParseWeeklySnapshots(readBrowserStorage(WEEKLY_SNAPSHOT_STORAGE_KEY)));
     }, []);
 
     useEffect(() => {
@@ -914,13 +984,6 @@ export default function TenantsPage() {
             JSON.stringify(clientLifecycleAuditById),
         );
     }, [clientLifecycleAuditById]);
-
-    useEffect(() => {
-        writeBrowserStorage(
-            WEEKLY_SNAPSHOT_STORAGE_KEY,
-            JSON.stringify(weeklySnapshots.slice(0, MAX_WEEKLY_SNAPSHOTS)),
-        );
-    }, [weeklySnapshots]);
 
     const companiesQuery = useInfiniteQuery<
         components["schemas"]["CompanyListResponse"],
@@ -944,6 +1007,58 @@ export default function TenantsPage() {
             lastPage.has_more ? lastPage.cursor ?? undefined : undefined,
         enabled: tenantsEnabled,
     });
+    const tenantsPortfolioQuery = useQuery({
+        queryKey: [
+            "tenants-portfolio",
+            clientQueryValue,
+            pageFilterCompanyId,
+            tenantLifecycle,
+            fleetLifecycleFilter,
+            fleetPaymentFilter,
+            fleetServiceFilter,
+        ],
+        queryFn: async () => {
+            const response = await adminApi.getTenantsPortfolio({
+                limit: 20,
+                q: clientQueryValue,
+                company_id: pageFilterCompanyId ?? undefined,
+                lifecycle: tenantLifecycle,
+                attention_limit: 12,
+                stale_after_minutes: 60,
+                include_low: "false",
+            });
+            return response.data;
+        },
+        enabled: tenantsEnabled,
+        staleTime: 30000,
+    });
+    const tenantsCompanyCockpitQuery = useQuery({
+        queryKey: [
+            "tenants-company-cockpit",
+            pageFilterCompanyId,
+            pageFilterClientId,
+            clientQueryValue,
+            branchQueryValue,
+            tenantLifecycle,
+        ],
+        queryFn: async () => {
+            if (!pageFilterCompanyId) {
+                return null;
+            }
+            const response = await adminApi.getTenantsCompanyCockpit({
+                company_id: pageFilterCompanyId,
+                client_id: pageFilterClientId ?? undefined,
+                lifecycle: tenantLifecycle,
+                client_limit: 20,
+                branch_limit: 20,
+                client_q: clientQueryValue,
+                branch_q: branchQueryValue,
+            });
+            return response.data;
+        },
+        enabled: tenantsEnabled && !!pageFilterCompanyId,
+        staleTime: 30000,
+    });
 
     const clientsQuery = useInfiniteQuery<
         components["schemas"]["ClientListResponse"],
@@ -963,7 +1078,7 @@ export default function TenantsPage() {
         queryKey: [
             "tenants-clients",
             clientQueryValue,
-            selectedCompanyId,
+            pageFilterCompanyId,
             tenantLifecycle,
             fleetLifecycleFilter,
             fleetPaymentFilter,
@@ -975,7 +1090,7 @@ export default function TenantsPage() {
                 cursor,
                 limit: 20,
                 q: clientQueryValue,
-                company_id: selectedCompanyId ?? undefined,
+                company_id: pageFilterCompanyId ?? undefined,
                 lifecycle: tenantLifecycle,
                 include_fleet: "true",
                 include_summary: cursor ? undefined : "true",
@@ -995,17 +1110,17 @@ export default function TenantsPage() {
         components["schemas"]["BranchListResponse"],
         Error,
         InfiniteData<components["schemas"]["BranchListResponse"], string | undefined>,
-        ["tenants-branches", string | undefined, string | null, TenantLifecycleMode],
+        ["tenants-branches", string | undefined, string | null, string | null, TenantLifecycleMode],
         string | undefined
     >({
-        queryKey: ["tenants-branches", branchQueryValue, selectedClientId, tenantLifecycle],
+        queryKey: ["tenants-branches", branchQueryValue, pageFilterClientId, pageFilterBranchId, tenantLifecycle],
         queryFn: async ({ pageParam }) => {
             const cursor = typeof pageParam === "string" ? pageParam : undefined;
             const response = await adminApi.listBranches({
                 cursor,
                 limit: 20,
                 q: branchQueryValue,
-                client_id: selectedClientId ?? undefined,
+                client_id: pageFilterClientId ?? undefined,
                 lifecycle: tenantLifecycle,
             });
             return response.data;
@@ -1025,7 +1140,7 @@ export default function TenantsPage() {
             });
             return response.data;
         },
-        enabled: tenantsEnabled && tenantLifecycle === "active",
+        enabled: tenantsEnabled && tenantLifecycle === "active" && tenantsPortfolioQuery.isError,
     });
     const branchChangesQuery = useQuery({
         queryKey: ["tenants-branch-changes", branchEditor?.id],
@@ -1052,42 +1167,182 @@ export default function TenantsPage() {
         enabled: tenantsEnabled && tenantLifecycle === "active",
     });
     const selectedClientAuditQuery = useQuery({
-        queryKey: ["tenants-client-lifecycle-audit-api", selectedClientId],
+        queryKey: ["tenants-client-lifecycle-audit-api", pageFilterClientId],
         queryFn: async () => {
-            if (!selectedClientId) {
+            if (!pageFilterClientId) {
                 return [];
             }
             const response = await auditApi.list({
                 entity_type: "client",
-                entity_id: selectedClientId,
+                entity_id: pageFilterClientId,
                 limit: 50,
             });
             return response.data.items ?? [];
         },
-        enabled: tenantsEnabled && !!selectedClientId,
+        enabled: tenantsEnabled && !!pageFilterClientId,
         staleTime: 30000,
     });
+    const weeklySnapshotsServerQuery = useQuery({
+        queryKey: ["tenants-weekly-snapshots", pageFilterClientId],
+        queryFn: async () => {
+            if (!pageFilterClientId) {
+                return [] as TenantsOperationalSnapshot[];
+            }
+            const response = await adminApi.listTenantsWeeklySnapshots({
+                client_id: pageFilterClientId,
+                limit: MAX_WEEKLY_SNAPSHOTS,
+            });
+            return (response.data.items ?? [])
+                .map((item) => mapWeeklySnapshotRecordToViewModel(item))
+                .filter((item): item is TenantsOperationalSnapshot => item !== null);
+        },
+        enabled: tenantsEnabled && !!pageFilterClientId,
+        staleTime: 30000,
+    });
+    useEffect(() => {
+        if (!pageFilterClientId) {
+            setWeeklySnapshots([]);
+            return;
+        }
+        if (!weeklySnapshotsServerQuery.data) {
+            return;
+        }
+        setWeeklySnapshots(weeklySnapshotsServerQuery.data);
+    }, [pageFilterClientId, weeklySnapshotsServerQuery.data]);
 
     const companies = useMemo(
         () => companiesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
         [companiesQuery.data],
     );
-    const clients = useMemo(
-        () => clientsQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
-        [clientsQuery.data],
-    );
+    const clients = useMemo(() => {
+        const cockpitItems = tenantsCompanyCockpitQuery.data?.clients.items ?? [];
+        if (pageFilterCompanyId && (cockpitItems.length > 0 || tenantsCompanyCockpitQuery.isSuccess)) {
+            return cockpitItems;
+        }
+        const portfolioItems = tenantsPortfolioQuery.data?.clients.items ?? [];
+        if (portfolioItems.length > 0 || tenantsPortfolioQuery.isSuccess) {
+            return portfolioItems;
+        }
+        return clientsQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [];
+    }, [
+        clientsQuery.data,
+        pageFilterCompanyId,
+        tenantsCompanyCockpitQuery.data?.clients.items,
+        tenantsCompanyCockpitQuery.isSuccess,
+        tenantsPortfolioQuery.data?.clients.items,
+        tenantsPortfolioQuery.isSuccess,
+    ]);
     const clientsSummary = useMemo(
-        () => clientsQuery.data?.pages[0]?.summary ?? null,
-        [clientsQuery.data],
+        () => tenantsPortfolioQuery.data?.clients.summary ?? clientsQuery.data?.pages[0]?.summary ?? null,
+        [clientsQuery.data, tenantsPortfolioQuery.data?.clients.summary],
     );
     const onboardingThroughput = useMemo(
         () => clientsSummary?.onboarding_throughput ?? null,
         [clientsSummary],
     );
     const branches = useMemo(
-        () => branchesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [],
-        [branchesQuery.data],
+        () => {
+            const cockpitItems = tenantsCompanyCockpitQuery.data?.branches.items ?? null;
+            const items = cockpitItems ?? (branchesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? []);
+            if (!pageFilterBranchId) {
+                return items;
+            }
+            return items.filter((branch) => branch.id === pageFilterBranchId);
+        },
+        [branchesQuery.data, pageFilterBranchId, tenantsCompanyCockpitQuery.data?.branches.items],
     );
+    const clientsUsingServerContract = pageFilterCompanyId
+        ? tenantsCompanyCockpitQuery.isSuccess
+        : tenantsPortfolioQuery.isSuccess;
+    const branchesUsingServerContract = tenantsCompanyCockpitQuery.isSuccess;
+    const selectedCompanyName = useMemo(() => {
+        if (!selectedCompanyId) {
+            return null;
+        }
+        return (
+            companies.find((company) => company.id === selectedCompanyId)?.name
+            ?? selectedCompanyNameFromContext
+            ?? null
+        );
+    }, [companies, selectedCompanyId, selectedCompanyNameFromContext]);
+    const selectedClientName = useMemo(() => {
+        if (!selectedClientId) {
+            return null;
+        }
+        if (meData?.client?.id === selectedClientId && meData.client?.name) {
+            return meData.client.name;
+        }
+        return clients.find((client) => client.id === selectedClientId)?.name ?? null;
+    }, [clients, meData?.client?.id, meData?.client?.name, selectedClientId]);
+    const selectedBranchName = useMemo(() => {
+        if (!selectedBranchId) {
+            return null;
+        }
+        return (
+            branches.find((branch) => branch.id === selectedBranchId)?.name
+            ?? selectedBranchNameFromContext
+            ?? null
+        );
+    }, [branches, selectedBranchId, selectedBranchNameFromContext]);
+    const pageFilterCompanyOptions = useMemo(
+        () => toFilterOptions([
+            ...knownCompanies.map((company) => ({
+                id: company.id,
+                label: company.name ?? company.id ?? "",
+            })),
+            ...companies.map((company) => ({
+                id: company.id,
+                label: company.name ?? company.id ?? "",
+            })),
+            {
+                id: selectedCompanyId,
+                label: selectedCompanyNameFromContext ?? selectedCompanyId ?? "",
+            },
+        ]),
+        [knownCompanies, companies, selectedCompanyId, selectedCompanyNameFromContext],
+    );
+    const pageFilterClientOptions = useMemo(
+        () => toFilterOptions([
+            ...clients.map((client) => ({
+                id: client.id,
+                label: client.name ?? client.slug ?? client.id ?? "",
+            })),
+            {
+                id: meData?.client?.id ?? null,
+                label: meData?.client?.name ?? meData?.client?.id ?? "",
+            },
+            {
+                id: selectedClientId,
+                label: selectedClientName ?? selectedClientId ?? "",
+            },
+        ]),
+        [clients, meData?.client?.id, meData?.client?.name, selectedClientId, selectedClientName],
+    );
+    const pageFilterBranchOptions = useMemo(() => {
+        const branchItems = branches.map((branch) => ({
+            id: branch.id,
+            label: branch.name ?? branch.slug ?? branch.id ?? "",
+        }));
+        return toFilterOptions([
+            ...knownBranches.map((branch) => ({
+                id: branch.id,
+                label: branch.name ?? branch.id ?? "",
+            })),
+            ...branchItems,
+            {
+                id: selectedBranchId,
+                label: selectedBranchNameFromContext ?? selectedBranchId ?? "",
+            },
+        ]);
+    }, [branches, knownBranches, selectedBranchId, selectedBranchNameFromContext]);
+    const activeErrorScope = useMemo(
+        () => resolveErrorScopeFromWorkspace(workspaceMode),
+        [workspaceMode],
+    );
+    const visibleInlineErrors = useMemo(() => {
+        return inlineErrors.filter((error) => error.scope === "global" || error.scope === activeErrorScope);
+    }, [activeErrorScope, inlineErrors]);
+    const activeErrorScopeLabel = activeErrorScope;
     const latestPublishedBranchChange = useMemo(() => {
         const items = branchChangesQuery.data?.items ?? [];
         return (
@@ -1125,9 +1380,19 @@ export default function TenantsPage() {
             .filter((item) => item.length > 0);
     }, [previewChange]);
     const fleetAttention = useMemo(
-        () => fleetAttentionQuery.data ?? null,
-        [fleetAttentionQuery.data],
+        () => tenantsPortfolioQuery.data?.fleet_attention ?? fleetAttentionQuery.data ?? null,
+        [fleetAttentionQuery.data, tenantsPortfolioQuery.data?.fleet_attention],
     );
+    const fleetAttentionLoading = tenantsPortfolioQuery.isLoading || fleetAttentionQuery.isLoading;
+    const fleetAttentionErrored = !fleetAttention && (tenantsPortfolioQuery.isError || fleetAttentionQuery.isError);
+    const clientsLoading = tenantsPortfolioQuery.isLoading || clientsQuery.isLoading || tenantsCompanyCockpitQuery.isLoading;
+    const clientsErrored = clients.length === 0 && (
+        tenantsPortfolioQuery.isError
+        || clientsQuery.isError
+        || tenantsCompanyCockpitQuery.isError
+    );
+    const branchesLoading = branchesQuery.isLoading || tenantsCompanyCockpitQuery.isLoading;
+    const branchesErrored = branches.length === 0 && (branchesQuery.isError || tenantsCompanyCockpitQuery.isError);
     const recentBranchChangesForKpi = useMemo(
         () => recentBranchChangesKpiQuery.data?.items ?? [],
         [recentBranchChangesKpiQuery.data],
@@ -1228,7 +1493,7 @@ export default function TenantsPage() {
             },
         };
     }, [operationalKpiDrilldown, operationalKpi.sourceWindow, fleetAttention?.summary]);
-    const operationalReport = useMemo(() => ({
+    const operationalReport = useMemo<TenantsOperationalSnapshotPayload>(() => ({
         generatedAt: new Date().toISOString(),
         sourceWindow: operationalKpi.sourceWindow,
         workspaceMode,
@@ -1261,6 +1526,24 @@ export default function TenantsPage() {
         queryClient.invalidateQueries({ queryKey: ["tenants-branch-changes-recent-kpi"] });
         queryClient.invalidateQueries({ queryKey: ["tenants-client-lifecycle-audit-api"] });
     };
+    const auditSensitiveAccess = async (input: {
+        branchId: string;
+        field: "instance_id";
+        action: TenantsSensitiveAction;
+        contextScope?: string;
+    }) => {
+        try {
+            await adminApi.auditTenantsSensitiveAccess({
+                branch_id: input.branchId,
+                field: input.field,
+                action: input.action,
+                context: input.contextScope,
+            });
+        } catch (error) {
+            reportError(error, { scope: "changes" });
+            throw error;
+        }
+    };
 
     const setCompanyContext = (companyId?: string | null) => {
         setConsoleCompanyContext(companyId);
@@ -1275,6 +1558,25 @@ export default function TenantsPage() {
     const setBranchContext = (branchId?: string | null) => {
         setConsoleBranchContext(branchId);
         refreshContext();
+    };
+    const clearContextLens = () => {
+        setCompanyContext(null);
+    };
+    const setClientContextAndPageFilters = (clientId?: string | null, companyId?: string | null) => {
+        setClientContext(clientId, companyId);
+        applyScopeToPageFilters({
+            companyId: companyId ?? null,
+            clientId: clientId ?? null,
+            branchId: null,
+        });
+    };
+    const setBranchContextAndPageFilters = (branchId?: string | null) => {
+        setBranchContext(branchId);
+        setPageFilterBranch(branchId ?? null);
+    };
+    const applyContextToPageFilters = () => {
+        const scope = readConsoleContextScopeFromStorage();
+        applyScopeToPageFilters(scope);
     };
 
     const handleQuickCreateCompany = async () => {
@@ -1326,6 +1628,7 @@ export default function TenantsPage() {
             const response = await adminApi.createClient({
                 slug,
                 company_id: companyId,
+                status: null,
             });
             const clientId = response.data.client?.id;
             if (!clientId) {
@@ -1338,7 +1641,7 @@ export default function TenantsPage() {
                 companyId,
                 clientId,
             }));
-            setClientContext(clientId, companyId);
+            setClientContextAndPageFilters(clientId, companyId);
             refreshTenants();
             toast.success("Клиент создан");
         } catch (error) {
@@ -1389,13 +1692,14 @@ export default function TenantsPage() {
                 phone: phone || undefined,
                 instance_id: instanceId || undefined,
                 is_active: Boolean(phone && instanceId),
+                bootstrap_accounts: [],
             });
             const branchId = response.data.branch?.id;
             if (!branchId) {
                 reportValidationError("Филиал создан, но branch_id не вернулся");
                 return;
             }
-            setBranchContext(branchId);
+            setBranchContextAndPageFilters(branchId);
             refreshTenants();
             toast.success("Филиал создан и выбран в контексте");
         } catch (error) {
@@ -1409,13 +1713,13 @@ export default function TenantsPage() {
         if (!clientId) {
             return;
         }
-        setClientContext(clientId, companyId);
+        setClientContextAndPageFilters(clientId, companyId);
         router.push(target);
     };
 
     const runActionQueueIntent = (item: ActionQueueItem) => {
         if (item.intent === "set_context") {
-            setClientContext(item.clientId, item.companyId);
+            setClientContextAndPageFilters(item.clientId, item.companyId);
             return;
         }
         if (item.intent === "open_cases") {
@@ -1516,22 +1820,43 @@ export default function TenantsPage() {
         toast.success("Отчёт CSV выгружен");
     };
 
-    const saveWeeklySnapshot = () => {
+    const saveWeeklySnapshot = async () => {
+        if (!pageFilterClientId) {
+            reportValidationError("Сначала выберите клиента в page filters", "VALIDATION_ERROR", "portfolio");
+            return;
+        }
         const now = new Date().toISOString();
-        const weekKey = toWeekKey(now);
-        setWeeklySnapshots((previous) => {
-            const next: TenantsOperationalSnapshot = {
-                id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-                    ? crypto.randomUUID()
-                    : `${Date.now()}`,
-                weekKey,
-                createdAt: now,
-                report: operationalReport,
-            };
-            const withoutWeek = previous.filter((item) => item.weekKey !== weekKey);
-            return [next, ...withoutWeek].slice(0, MAX_WEEKLY_SNAPSHOTS);
-        });
-        toast.success(`Weekly snapshot сохранён (${weekKey})`);
+        const weekKey = toIsoWeekKey(now);
+        const localSnapshot: TenantsOperationalSnapshot = {
+            id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                ? crypto.randomUUID()
+                : `${Date.now()}`,
+            weekKey,
+            createdAt: now,
+            report: operationalReport,
+        };
+        const applySnapshot = (snapshot: TenantsOperationalSnapshot) => {
+            setWeeklySnapshots((previous) => {
+                const withoutWeek = previous.filter((item) => item.weekKey !== snapshot.weekKey);
+                return [snapshot, ...withoutWeek].slice(0, MAX_WEEKLY_SNAPSHOTS);
+            });
+        };
+        try {
+            const response = await adminApi.saveTenantsWeeklySnapshot({
+                client_id: pageFilterClientId,
+                week_key: weekKey,
+                snapshot: operationalReport,
+            });
+            const mappedSnapshot = mapWeeklySnapshotRecordToViewModel(response.data.item);
+            applySnapshot(mappedSnapshot ?? localSnapshot);
+                queryClient.invalidateQueries({
+                    queryKey: ["tenants-weekly-snapshots", pageFilterClientId],
+                });
+            toast.success(`Weekly snapshot сохранён (${weekKey})`);
+        } catch (error) {
+            reportError(error, { scope: "portfolio" });
+            toast.error(`Не удалось сохранить weekly snapshot (${weekKey})`);
+        }
     };
 
     const copyAlertHookPayload = async () => {
@@ -1545,8 +1870,8 @@ export default function TenantsPage() {
     };
 
     const runMetricsSnapshotHook = async (mode: "dry_run" | "execute") => {
-        if (!selectedClientId) {
-            reportValidationError("Сначала выберите клиента в контексте");
+        if (!pageFilterClientId) {
+            reportValidationError("Сначала выберите клиента в page filters");
             return;
         }
         setRunningMetricsSnapshotMode(mode);
@@ -1554,12 +1879,12 @@ export default function TenantsPage() {
             const response = await opsApi.runJob({
                 job_type: "metrics_snapshot",
                 mode,
-                params: { days: 7 },
+                params: ({ days: 7 } as unknown as Record<string, never>),
             });
             setLastMetricsSnapshotJob(response.data.job);
             toast.success(mode === "dry_run" ? "Snapshot dry-run выполнен" : "Snapshot execute выполнен");
         } catch (error) {
-            reportError(error);
+            reportError(error, { scope: resolveErrorScopeFromWorkspace(workspaceMode) });
         } finally {
             setRunningMetricsSnapshotMode(null);
         }
@@ -1657,7 +1982,7 @@ export default function TenantsPage() {
             payload.name = name;
         }
         if (companyEditor.billingInfo.trim() !== companyEditor.originalBillingInfo.trim()) {
-            payload.billing_info = billing.value ?? {};
+            payload.billing_info = (billing.value ?? {}) as Record<string, never>;
         }
         if (Object.keys(payload).length === 0) {
             toast("Нет изменений");
@@ -2100,10 +2425,10 @@ export default function TenantsPage() {
             .slice(0, 8);
     }, [tenantLifecycle, fleetAttention, operationalKpi, clientsSummary]);
 
-    const showPortfolio = workspaceMode === "all" || workspaceMode === "portfolio";
-    const showOnboarding = workspaceMode === "all" || workspaceMode === "onboarding";
-    const showChangeManagement = workspaceMode === "all" || workspaceMode === "changes";
-    const showDecommission = workspaceMode === "all" || workspaceMode === "decommission";
+    const showPortfolio = workspaceMode === "portfolio";
+    const showOnboarding = workspaceMode === "onboarding";
+    const showChangeManagement = workspaceMode === "changes";
+    const showDecommission = workspaceMode === "decommission";
     const showClientsSection = showPortfolio || showDecommission;
     const decommissionFocused = workspaceMode === "decommission";
 
@@ -2132,113 +2457,45 @@ export default function TenantsPage() {
     return (
         <div className="max-w-5xl mx-auto p-6" data-testid="tenants-page">
             <div className="flex flex-col gap-2 mb-6">
-                <h1 className="text-2xl font-bold" data-testid="tenants-title">Тенанты</h1>
-                <div className="text-xs text-muted-foreground">
-                    Контекст: {selectedCompanyName ?? "—"} / {meData?.client?.name ?? "—"} / {selectedBranchName ?? "—"}
-                    {isPlatformPreset ? (
-                        <span>
-                            {" · IDs: "}
-                            {selectedCompanyId ?? "—"} / {selectedClientId ?? "—"} / {selectedBranchId ?? "—"}
-                        </span>
-                    ) : null}
-                </div>
-                {inlineErrors.length > 0 ? (
-                    <section className="rounded-lg border border-red-300/60 bg-red-50 p-3" data-testid="tenants-error-summary">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-sm font-semibold text-red-900">Ошибки последних операций</div>
-                            <button className="btn-ghost" onClick={clearErrors}>Очистить</button>
-                        </div>
-                        <div className="mt-1 text-xs text-red-900/80">
-                            Исправьте отмеченные поля и повторите действие. Для API ошибок используйте `trace` из записи ниже.
-                        </div>
-                        <div className="mt-2 space-y-2">
-                            {inlineErrors.map((error) => (
-                                <div key={error.id} className="rounded-md border border-red-200/80 bg-background/90 p-2 text-xs">
-                                    <div className="font-mono text-red-900">{error.code}</div>
-                                    <div className="mt-1 text-foreground">{error.message}</div>
-                                    <div className="mt-1 text-muted-foreground">
-                                        {new Date(error.capturedAt).toLocaleString("ru-RU")}
-                                        {error.traceId ? ` · trace: ${error.traceId}` : ""}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </section>
-                ) : null}
-                <div className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-workspace-modes">
-                    <div className="text-xs text-muted-foreground mb-2">Рабочая зона Tenants:</div>
-                    <div className="flex flex-wrap items-center gap-2">
-                        <button
-                            className={workspaceMode === "all" ? "btn-primary" : "btn-ghost"}
-                            onClick={() => setWorkspaceMode("all")}
-                            data-testid="tenants-mode-all"
-                        >
-                            Все зоны
-                        </button>
-                        <button
-                            className={workspaceMode === "portfolio" ? "btn-primary" : "btn-ghost"}
-                            onClick={() => setWorkspaceMode("portfolio")}
-                            data-testid="tenants-mode-portfolio"
-                        >
-                            Портфель
-                        </button>
-                        <button
-                            className={workspaceMode === "onboarding" ? "btn-primary" : "btn-ghost"}
-                            onClick={() => setWorkspaceMode("onboarding")}
-                            data-testid="tenants-mode-onboarding"
-                        >
-                            Онбординг
-                        </button>
-                        <button
-                            className={workspaceMode === "changes" ? "btn-primary" : "btn-ghost"}
-                            onClick={() => setWorkspaceMode("changes")}
-                            data-testid="tenants-mode-changes"
-                        >
-                            Изменения
-                        </button>
-                        <button
-                            className={workspaceMode === "decommission" ? "btn-primary" : "btn-ghost"}
-                            onClick={() => setWorkspaceMode("decommission")}
-                            data-testid="tenants-mode-decommission"
-                        >
-                            Decommission
-                        </button>
-                    </div>
-                    <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="tenants-view-preset">
-                        <span className="text-xs text-muted-foreground">Профиль интерфейса:</span>
-                        <button
-                            className={viewPreset === "operator" ? "btn-primary" : "btn-ghost"}
-                            onClick={() => setViewPreset("operator")}
-                            data-testid="tenants-view-preset-operator"
-                        >
-                            Operator
-                        </button>
-                        <button
-                            className={viewPreset === "platform" ? "btn-primary" : "btn-ghost"}
-                            onClick={() => setViewPreset("platform")}
-                            disabled={!canSwitchViewPreset}
-                            data-testid="tenants-view-preset-platform"
-                        >
-                            Platform
-                        </button>
-                    </div>
-                </div>
-                <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="tenants-workspace-guide">
-                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground mb-2">
-                        Операционный guide
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                        Портфель: риск-панель и состав клиентов. Онбординг: запуск нового филиала. Изменения:
-                        controlled change + draft/validate/publish. Decommission: архив/восстановление с подтверждением.
-                    </div>
-                    <div className="mt-2 text-xs text-muted-foreground">
-                        Перед Go-Live проверьте: `instance_id`, `phone`, `timezone`, `telegram_chat_id`, `knowledge_tag`,
-                        `payment_status`, активный reference pack.
-                    </div>
-                    <div className="mt-2 text-xs text-muted-foreground">
-                        Порядок работы: `Action Queue`, затем контекст клиента, затем профильная зона, затем подтверждение результата через trace/audit.
-                    </div>
-                </div>
+                <TenantsTopControls
+                    isPlatformPreset={isPlatformPreset}
+                    contextCompanyName={selectedCompanyName}
+                    contextClientName={selectedClientName}
+                    contextBranchName={selectedBranchName}
+                    contextCompanyId={selectedCompanyId}
+                    contextClientId={selectedClientId}
+                    contextBranchId={selectedBranchId}
+                    onClearBranchContext={() => setBranchContext(null)}
+                    onClearClientContext={() => {
+                        const scope = readConsoleContextScopeFromStorage();
+                        setClientContext(null, scope.companyId || null);
+                    }}
+                    onClearContext={clearContextLens}
+                    pageFilterCompanyId={pageFilterCompanyId}
+                    pageFilterClientId={pageFilterClientId}
+                    pageFilterBranchId={pageFilterBranchId}
+                    pageFilterCompanyOptions={pageFilterCompanyOptions}
+                    pageFilterClientOptions={pageFilterClientOptions}
+                    pageFilterBranchOptions={pageFilterBranchOptions}
+                    hasPageFilters={hasPageFilters}
+                    onPageFilterCompanyChange={setPageFilterCompany}
+                    onPageFilterClientChange={setPageFilterClient}
+                    onPageFilterBranchChange={setPageFilterBranch}
+                    onApplyContextToPageFilters={applyContextToPageFilters}
+                    onClearPageFilters={clearPageFilters}
+                    workspaceMode={workspaceMode}
+                    onWorkspaceModeChange={setWorkspaceMode}
+                    viewPreset={viewPreset}
+                    onViewPresetChange={setViewPreset}
+                    canSwitchViewPreset={canSwitchViewPreset}
+                />
+                <TenantsScopedErrorSummary
+                    errors={visibleInlineErrors}
+                    scopeLabel={activeErrorScopeLabel}
+                    showScopeClear
+                    onClearScope={() => clearErrors(activeErrorScope)}
+                    onClearAll={() => clearErrors()}
+                />
                 {canWriteTenants ? (
                     <section className="rounded-lg border border-border/60 bg-card p-4" data-testid="tenants-quick-create">
                         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2363,14 +2620,24 @@ export default function TenantsPage() {
                 ) : null}
                 <TenantsActionQueuePanel
                     items={actionQueue}
-                    refreshing={fleetAttentionQuery.isFetching || recentBranchChangesKpiQuery.isFetching || clientsQuery.isFetching}
+                    refreshing={
+                        tenantsPortfolioQuery.isFetching
+                        || tenantsCompanyCockpitQuery.isFetching
+                        || fleetAttentionQuery.isFetching
+                        || recentBranchChangesKpiQuery.isFetching
+                        || clientsQuery.isFetching
+                    }
                     onRefresh={() => {
+                        tenantsPortfolioQuery.refetch();
+                        if (pageFilterCompanyId) {
+                            tenantsCompanyCockpitQuery.refetch();
+                        }
                         fleetAttentionQuery.refetch();
                         recentBranchChangesKpiQuery.refetch();
                         clientsQuery.refetch();
                     }}
                     onRunIntent={runActionQueueIntent}
-                    onSetClientContext={setClientContext}
+                    onSetClientContext={setClientContextAndPageFilters}
                 />
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                     <span className="text-xs text-muted-foreground">Режим списка:</span>
@@ -2409,13 +2676,25 @@ export default function TenantsPage() {
                                 <button
                                     className="btn-ghost"
                                     onClick={() => {
+                                        tenantsPortfolioQuery.refetch();
+                                        if (pageFilterCompanyId) {
+                                            tenantsCompanyCockpitQuery.refetch();
+                                        }
                                         fleetAttentionQuery.refetch();
                                         recentBranchChangesKpiQuery.refetch();
                                         selectedClientAuditQuery.refetch();
+                                        if (pageFilterClientId) {
+                                            weeklySnapshotsServerQuery.refetch();
+                                        }
                                     }}
-                                    disabled={fleetAttentionQuery.isFetching || recentBranchChangesKpiQuery.isFetching}
+                                    disabled={
+                                        tenantsPortfolioQuery.isFetching
+                                        || tenantsCompanyCockpitQuery.isFetching
+                                        || fleetAttentionQuery.isFetching
+                                        || recentBranchChangesKpiQuery.isFetching
+                                    }
                                 >
-                                    {fleetAttentionQuery.isFetching || recentBranchChangesKpiQuery.isFetching ? "Обновление..." : "Обновить KPI"}
+                                    {tenantsPortfolioQuery.isFetching || recentBranchChangesKpiQuery.isFetching ? "Обновление..." : "Обновить KPI"}
                                 </button>
                                 <button
                                     className="btn-ghost"
@@ -2435,6 +2714,8 @@ export default function TenantsPage() {
                                     className="btn-ghost"
                                     onClick={saveWeeklySnapshot}
                                     data-testid="tenants-kpi-save-weekly-snapshot"
+                                    disabled={!pageFilterClientId}
+                                    title={pageFilterClientId ? undefined : "Выберите клиента в page filters"}
                                 >
                                     Weekly snapshot
                                 </button>
@@ -2507,19 +2788,19 @@ export default function TenantsPage() {
                                 </div>
                                 <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                                     <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                                        <div className="text-[11px] text-muted-foreground">Median time to go-live</div>
+                                        <div className="text-[11px] text-foreground/80">Median time to go-live</div>
                                         <div className="text-base font-semibold">{formatOptionalHours(onboardingThroughput.time_to_go_live_median_hours)}</div>
                                     </div>
                                     <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                                        <div className="text-[11px] text-muted-foreground">Blocker age p95</div>
+                                        <div className="text-[11px] text-foreground/80">Blocker age p95</div>
                                         <div className="text-base font-semibold">{formatOptionalHours(onboardingThroughput.blocker_age_p95_hours)}</div>
                                     </div>
                                     <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                                        <div className="text-[11px] text-muted-foreground">First-pass go-live rate</div>
+                                        <div className="text-[11px] text-foreground/80">First-pass go-live rate</div>
                                         <div className="text-base font-semibold">{formatOptionalPercent(onboardingThroughput.first_pass_go_live_rate_pct)}</div>
                                     </div>
                                     <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                                        <div className="text-[11px] text-muted-foreground">Incident reopen &lt;24h</div>
+                                        <div className="text-[11px] text-foreground/80">Incident reopen &lt;24h</div>
                                         <div className="text-base font-semibold">{formatOptionalPercent(onboardingThroughput.incident_reopen_rate_24h_pct)}</div>
                                     </div>
                                 </div>
@@ -2610,7 +2891,15 @@ export default function TenantsPage() {
                                 <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                                     Weekly snapshots
                                 </div>
-                                {weeklySnapshots.length === 0 ? (
+                                {!pageFilterClientId ? (
+                                    <div className="text-xs text-muted-foreground">
+                                        Выберите клиента в page filters, чтобы загрузить weekly snapshots.
+                                    </div>
+                                ) : weeklySnapshotsServerQuery.isFetching ? (
+                                    <div className="text-xs text-muted-foreground">
+                                        Загрузка weekly snapshots...
+                                    </div>
+                                ) : weeklySnapshots.length === 0 ? (
                                     <div className="text-xs text-muted-foreground">
                                         Снимков пока нет. Сохраните первый weekly snapshot.
                                     </div>
@@ -2656,10 +2945,13 @@ export default function TenantsPage() {
                             </div>
                             <button
                                 className="btn-ghost"
-                                onClick={() => fleetAttentionQuery.refetch()}
-                                disabled={fleetAttentionQuery.isFetching}
+                                onClick={() => {
+                                    tenantsPortfolioQuery.refetch();
+                                    fleetAttentionQuery.refetch();
+                                }}
+                                disabled={tenantsPortfolioQuery.isFetching || fleetAttentionQuery.isFetching}
                             >
-                                {fleetAttentionQuery.isFetching ? "Обновление..." : "Обновить"}
+                                {tenantsPortfolioQuery.isFetching || fleetAttentionQuery.isFetching ? "Обновление..." : "Обновить"}
                             </button>
                         </div>
 
@@ -2672,9 +2964,9 @@ export default function TenantsPage() {
                         ) : null}
 
                         <div className="space-y-3">
-                            {fleetAttentionQuery.isLoading ? (
+                            {fleetAttentionLoading ? (
                                 <div className="text-sm text-muted-foreground">Загрузка панели рисков...</div>
-                            ) : fleetAttentionQuery.isError ? (
+                            ) : fleetAttentionErrored ? (
                                 <div className="text-sm text-muted-foreground">Не удалось загрузить панель рисков.</div>
                             ) : !fleetAttention?.items?.length ? (
                                 <div className="text-sm text-muted-foreground">Клиенты со средним/высоким риском не найдены.</div>
@@ -2716,7 +3008,7 @@ export default function TenantsPage() {
                                         <div className="mt-2 flex flex-wrap items-center gap-2">
                                             <button
                                                 className="btn-ghost"
-                                                onClick={() => setClientContext(item.client_id, item.company_id)}
+                                                onClick={() => setClientContextAndPageFilters(item.client_id, item.company_id)}
                                             >
                                                 В контекст
                                             </button>
@@ -2920,7 +3212,7 @@ export default function TenantsPage() {
                                 {decommissionFocused ? "Клиенты (Decommission)" : "Клиенты"}
                             </h2>
                             <p className="text-sm text-muted-foreground">
-                                {clientsQuery.isLoading ? "—" : `${clients.length} всего`}
+                                {clientsLoading ? "—" : `${clients.length} всего`}
                             </p>
                             {decommissionFocused ? (
                                 <div className="mt-1 text-xs text-muted-foreground">
@@ -2932,9 +3224,9 @@ export default function TenantsPage() {
                                     портфель: клиентов {clientsSummary.total_clients} · активные {clientsSummary.active_clients} · онбординг {clientsSummary.onboarding_clients} · пауза {clientsSummary.paused_clients} · архив {clientsSummary.archived_clients} · деградация {clientsSummary.degraded_clients}
                                 </div>
                             ) : null}
-                            {selectedCompanyId ? (
+                            {pageFilterCompanyId ? (
                                 <div className="mt-1 text-xs text-muted-foreground">
-                                    фильтр по компании из контекста: {selectedCompanyId}
+                                    page filter company_id: {pageFilterCompanyId}
                                 </div>
                             ) : null}
                         </div>
@@ -2949,6 +3241,7 @@ export default function TenantsPage() {
                                 className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
                                 value={fleetLifecycleFilter}
                                 onChange={(event) => setFleetLifecycleFilter(event.target.value as FleetLifecycleFilter)}
+                                aria-label="Фильтр этапа клиента"
                             >
                                 <option value="all">Этап: все</option>
                                 <option value="lead">лид</option>
@@ -2963,6 +3256,7 @@ export default function TenantsPage() {
                                 className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
                                 value={fleetPaymentFilter}
                                 onChange={(event) => setFleetPaymentFilter(event.target.value as FleetPaymentFilter)}
+                                aria-label="Фильтр статуса оплаты"
                             >
                                 <option value="all">Оплата: все</option>
                                 <option value="pending">ожидает</option>
@@ -2974,6 +3268,7 @@ export default function TenantsPage() {
                                 className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
                                 value={fleetServiceFilter}
                                 onChange={(event) => setFleetServiceFilter(event.target.value as FleetServiceFilter)}
+                                aria-label="Фильтр сервисного статуса"
                             >
                                 <option value="all">Сервис: все</option>
                                 <option value="ok">стабильно</option>
@@ -2983,9 +3278,9 @@ export default function TenantsPage() {
                         </div>
                     </div>
                     <div className="space-y-3">
-                        {clientsQuery.isLoading ? (
+                        {clientsLoading ? (
                             <div className="text-sm text-muted-foreground">Загрузка клиентов...</div>
-                        ) : clientsQuery.isError ? (
+                        ) : clientsErrored ? (
                             <div className="text-sm text-muted-foreground">Не удалось загрузить клиентов.</div>
                         ) : clients.length === 0 ? (
                             <div className="text-sm text-muted-foreground">Клиенты не найдены.</div>
@@ -3002,7 +3297,7 @@ export default function TenantsPage() {
                                 const sessionLifecycleAudit = clientIdKey
                                     ? (clientLifecycleAuditById[clientIdKey] ?? [])
                                     : [];
-                                const apiLifecycleAudit = clientIdKey && clientIdKey === selectedClientId
+                                const apiLifecycleAudit = clientIdKey && clientIdKey === pageFilterClientId
                                     ? selectedClientApiAuditEntries
                                     : [];
                                 const lifecycleAuditHistory = mergeLifecycleAuditEntries(
@@ -3042,7 +3337,7 @@ export default function TenantsPage() {
                                             <div className="text-xs text-muted-foreground">
                                                 reference scope: {client.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(client.reference_branch_reason)}
                                             </div>
-                                            {lifecycleAuditHistory.length > 0 || clientIdKey === selectedClientId ? (
+                                            {lifecycleAuditHistory.length > 0 || clientIdKey === pageFilterClientId ? (
                                                 <div className="mt-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs" data-testid="tenants-client-lifecycle-audit">
                                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                                         <div className="font-medium">
@@ -3082,7 +3377,7 @@ export default function TenantsPage() {
                                                             >
                                                                 error
                                                             </button>
-                                                            {clientIdKey === selectedClientId ? (
+                                                            {clientIdKey === pageFilterClientId ? (
                                                                 <button
                                                                     className="btn-ghost"
                                                                     onClick={() => selectedClientAuditQuery.refetch()}
@@ -3095,7 +3390,7 @@ export default function TenantsPage() {
                                                         </div>
                                                     </div>
                                                     <div className="mt-1 text-muted-foreground">
-                                                        источник: session cache + API audit{clientIdKey === selectedClientId ? "" : " (API audit доступен в текущем client context)"}
+                                                        источник: session cache + API audit{clientIdKey === pageFilterClientId ? "" : " (API audit доступен в текущем page filter client)"}
                                                     </div>
                                                     <div className="mt-1 space-y-2" data-testid="tenants-client-lifecycle-audit-history">
                                                         {filteredLifecycleAuditHistory.length === 0 ? (
@@ -3156,7 +3451,7 @@ export default function TenantsPage() {
                                             ) : null}
                                             <button
                                                 className="btn-ghost"
-                                                onClick={() => setClientContext(client.id, client.company_id)}
+                                                onClick={() => setClientContextAndPageFilters(client.id, client.company_id)}
                                                 disabled={client.id === selectedClientId || lifecyclePending}
                                             >
                                                 В контекст
@@ -3196,6 +3491,7 @@ export default function TenantsPage() {
                                                                 )
                                                             }
                                                             disabled={!canWriteTenants || savingClient || companyLocked}
+                                                            aria-label="Компания клиента"
                                                         >
                                                             <option value="">Без компании</option>
                                                             {knownCompanies.map((company) => (
@@ -3234,7 +3530,7 @@ export default function TenantsPage() {
                             })
                         )}
                     </div>
-                    {clientsQuery.hasNextPage ? (
+                    {!clientsUsingServerContract && clientsQuery.hasNextPage ? (
                         <div className="flex justify-center pt-3">
                             <button
                                 className="btn-ghost"
@@ -3254,11 +3550,11 @@ export default function TenantsPage() {
                         <div>
                             <h2 className="text-lg font-semibold">Филиалы</h2>
                             <p className="text-sm text-muted-foreground">
-                                {branchesQuery.isLoading ? "—" : `${branches.length} всего`}
+                                {branchesLoading ? "—" : `${branches.length} всего`}
                             </p>
-                            {selectedClientId ? (
+                            {pageFilterClientId ? (
                                 <div className="mt-1 text-xs text-muted-foreground">
-                                    фильтр по клиенту из контекста: {selectedClientId}
+                                    page filter client_id: {pageFilterClientId}
                                 </div>
                             ) : null}
                         </div>
@@ -3270,9 +3566,9 @@ export default function TenantsPage() {
                         />
                     </div>
                     <div className="space-y-3">
-                        {branchesQuery.isLoading ? (
+                        {branchesLoading ? (
                             <div className="text-sm text-muted-foreground">Загрузка филиалов...</div>
-                        ) : branchesQuery.isError ? (
+                        ) : branchesErrored ? (
                             <div className="text-sm text-muted-foreground">Не удалось загрузить филиалы.</div>
                         ) : branches.length === 0 ? (
                             <div className="text-sm text-muted-foreground">Филиалы не найдены.</div>
@@ -3293,9 +3589,12 @@ export default function TenantsPage() {
                                             {isPlatformPreset ? (
                                                 <div className="text-xs text-muted-foreground">{branch.id}</div>
                                             ) : null}
-                                            <div className="text-xs text-muted-foreground">
-                                                {branch.instance_id ? `instance_id: ${branch.instance_id}` : "instance_id: —"}
-                                            </div>
+                                            <TenantsSensitiveIdCell
+                                                branchId={branch.id}
+                                                instanceId={branch.instance_id}
+                                                contextScope={workspaceMode}
+                                                onAudit={auditSensitiveAccess}
+                                            />
                                             <div className="text-xs text-muted-foreground">
                                                 {branch.onboarding_state ? `этап онбординга: ${branch.onboarding_state}` : "этап онбординга: —"}
                                             </div>
@@ -3313,7 +3612,7 @@ export default function TenantsPage() {
                                             ) : null}
                                             <button
                                                 className="btn-ghost"
-                                                onClick={() => setBranchContext(branch.id)}
+                                                onClick={() => setBranchContextAndPageFilters(branch.id)}
                                                 disabled={branch.id === selectedBranchId}
                                             >
                                                 В контекст
@@ -3622,7 +3921,7 @@ export default function TenantsPage() {
                             })
                         )}
                     </div>
-                    {branchesQuery.hasNextPage ? (
+                    {!branchesUsingServerContract && branchesQuery.hasNextPage ? (
                         <div className="flex justify-center pt-3">
                             <button
                                 className="btn-ghost"

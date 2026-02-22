@@ -1071,6 +1071,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const queryClient = useQueryClient();
     const isInboxPage = pathname === "/" || pathname.startsWith("/cases");
     const contentWidthClass = isInboxPage ? "max-w-[1440px]" : "max-w-6xl";
+    const contentFrameClass = isInboxPage ? "h-full min-h-0" : "";
     const signOutTriggered = useRef(false);
 
     const { data, isLoading, isFetching, error, refetch } = useQuery({
@@ -1604,7 +1605,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                             </div>
                             {data && (
                                 <div className="w-full lg:w-auto lg:flex-1">
-                                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground md:hidden">
+                                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-1.5 text-xs text-foreground/80 md:hidden">
                                         Контекст:{" "}
                                         <span className="font-semibold text-foreground">
                                             {data.client?.company_name ?? "Компания"}
@@ -1617,7 +1618,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                         <span className="font-semibold text-foreground">
                                             {findBranchName(data.branches, data.selected_branch_id, !data.branch_selection_required)}
                                         </span>
-                                        <Link href="/company-workspace" className="ml-2 underline">
+                                        <Link href="/company-workspace" className="ml-2 font-medium text-primary underline underline-offset-2">
                                             изменить
                                         </Link>
                                         {role === "platform_admin" && (
@@ -1782,8 +1783,8 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                         </nav>
                     </header>
 
-                    <main className="flex-1 px-6 py-6">
-                        <div className={`mx-auto w-full ${contentWidthClass}`}>
+                    <main className="flex-1 min-h-0 px-6 py-6">
+                        <div className={`mx-auto w-full ${contentWidthClass} ${contentFrameClass}`}>
                             {status === "loading" && (
                                 <div className="card-surface p-8">
                                     <p className="text-sm text-muted-foreground">Загрузка профиля...</p>
@@ -1820,7 +1821,11 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                                     </div>
                                 </div>
                             )}
-                            {!isLoading && !error && data && !showGate && children}
+                            {!isLoading && !error && data && !showGate && (
+                                <div className={isInboxPage ? "flex h-full min-h-0 flex-col" : undefined}>
+                                    {children}
+                                </div>
+                            )}
                         </div>
                     </main>
                 </div>

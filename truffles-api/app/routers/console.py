@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from sqlalchemy import and_, case, func, or_, text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -42,9 +43,11 @@ from app.models import (
     LearnedResponse,
     MarketingCampaign,
     MarketingCampaignDelivery,
+    MarketingCampaignRecipient,
     Message,
     OutboxMessage,
     ReferencePack,
+    TenantsWeeklySnapshot,
     User,
 )
 from app.models import (
@@ -141,14 +144,18 @@ from app.schemas.console import (
     ConsoleManagerMessageRequest,
     ConsoleManagerMessageResponse,
     ConsoleMarketingCampaign,
+    ConsoleMarketingCampaignAudienceResponse,
     ConsoleMarketingCampaignCreateRequest,
     ConsoleMarketingCampaignCreateResponse,
     ConsoleMarketingCampaignDiagnosticsResponse,
     ConsoleMarketingCampaignExecuteRequest,
     ConsoleMarketingCampaignExecuteResponse,
+    ConsoleMarketingCampaignLifecycleActionRequest,
     ConsoleMarketingCampaignListResponse,
+    ConsoleMarketingCampaignPreflightResponse,
     ConsoleMarketingCampaignPreviewRequest,
     ConsoleMarketingCampaignPreviewResponse,
+    ConsoleMarketingCampaignRecipient,
     ConsoleMarketingCampaignRetryRequest,
     ConsoleMarketingCampaignRetryResponse,
     ConsoleMarketingDeliverySample,
@@ -241,6 +248,15 @@ from app.schemas.console import (
     ConsoleTelegramTrail,
     ConsoleTelegramVerifyRequest,
     ConsoleTelegramVerifyResponse,
+    ConsoleTenantsCompanyCockpitResponse,
+    ConsoleTenantsPortfolioResponse,
+    ConsoleTenantsSensitiveAccessAuditRequest,
+    ConsoleTenantsSensitiveAccessAuditResponse,
+    ConsoleTenantsWeeklySnapshotCreateRequest,
+    ConsoleTenantsWeeklySnapshotCreateResponse,
+    ConsoleTenantsWeeklySnapshotListResponse,
+    ConsoleTenantsWeeklySnapshotPayload,
+    ConsoleTenantsWeeklySnapshotRecord,
     ConsoleWebhookSecretResponse,
 )
 from app.schemas.console import (
@@ -309,6 +325,8 @@ from app.services.console_owner_admin import (
 )
 from app.services.escalation_service import resolve_telegram_routing
 from app.services.human_lock_service import (
+    HUMAN_LOCK_SCOPE_CONVERSATION,
+    HUMAN_LOCK_SCOPE_REMOTE,
     get_active_human_lock,
     normalize_phone_to_jid,
     release_human_lock,
@@ -336,6 +354,26 @@ from app.services.learning_service import evaluate_candidate_eligibility, get_le
 from app.services.manager_message_service import (
     notify_client_manager_status,
     process_console_media_upload,
+)
+from app.services.marketing import (
+    MARKETING_SEGMENT_CODES,
+    MARKETING_STATUS_APPROVED,
+    MARKETING_STATUS_DRAFT,
+    MARKETING_STATUS_IN_REVIEW,
+    MARKETING_STATUS_PAUSED,
+    MARKETING_STATUS_VALUES,
+    build_marketing_campaign_preflight,
+    fetch_marketing_audience_preview,
+    mark_campaign_approved,
+    mark_campaign_paused,
+    mark_campaign_resume,
+    mark_campaign_under_review,
+    materialize_marketing_campaign_audience,
+    normalize_marketing_status,
+    refresh_marketing_campaign_lifecycle,
+    resolve_marketing_campaign_status,
+    retry_failed_marketing_deliveries,
+    run_marketing_campaign_execute,
 )
 from app.services.metrics_daily_service import (
     get_metrics_daily_backfill_max_days,
@@ -376,6 +414,7 @@ from app.services.pack_compiler_service import (
     extract_compiled_artifacts,
     parse_compiled_at,
 )
+from app.services.provider_error_policy import classify_provider_error
 from app.services.reference_branch_selection import (
     ReferenceBranchSignal,
     select_reference_branch_ids,
@@ -1174,6 +1213,10 @@ def _is_env_enabled(value: Optional[str], *, default: bool = False) -> bool:
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _is_human_lock_v2_enabled() -> bool:
+    return _is_env_enabled(os.environ.get("HUMAN_LOCK_V2_ENABLED"), default=True)
+
+
 def _coerce_utc_datetime(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -1203,7 +1246,58 @@ def _build_human_lock_status_payload(
         remaining_seconds=remaining_seconds,
         source=lock.source,
         reason=lock.reason,
+        locked_by_name=getattr(lock, "locked_by_name", None),
+        lock_scope=getattr(lock, "lock_scope", None),
     )
+
+
+def _build_case_human_lock_snapshot(
+    db: Session,
+    *,
+    client_id: UUID,
+    conversation: Conversation | None,
+) -> dict:
+    if not conversation:
+        return {
+            "human_lock_active": False,
+            "human_lock_until": None,
+            "human_lock_remaining_seconds": None,
+            "human_lock_source": None,
+            "human_lock_reason": None,
+            "human_lock_by": None,
+        }
+
+    now_utc = datetime.now(timezone.utc)
+    remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
+    lock = get_active_human_lock(
+        db,
+        client_id=client_id,
+        remote_jid=remote_jid,
+        conversation_id=conversation.id,
+        now=now_utc,
+    )
+    if not lock:
+        return {
+            "human_lock_active": False,
+            "human_lock_until": None,
+            "human_lock_remaining_seconds": None,
+            "human_lock_source": None,
+            "human_lock_reason": None,
+            "human_lock_by": None,
+        }
+
+    lock_until = _coerce_utc_datetime(lock.lock_until)
+    remaining_seconds = (
+        max(0, int((lock_until - now_utc).total_seconds())) if lock_until else None
+    )
+    return {
+        "human_lock_active": True,
+        "human_lock_until": lock_until.isoformat() if lock_until else None,
+        "human_lock_remaining_seconds": remaining_seconds,
+        "human_lock_source": lock.source,
+        "human_lock_reason": lock.reason,
+        "human_lock_by": lock.locked_by_name,
+    }
 
 
 def _build_console_outbox_text_payload(
@@ -1601,6 +1695,17 @@ def _validate_limit(limit: int) -> None:
         raise ConsoleAPIError(400, "INVALID_PARAM", "limit must be between 1 and 100")
 
 
+def _request_with_query_params(request: Request, params: dict[str, object | None]) -> Request:
+    scope = dict(request.scope)
+    normalized: dict[str, str] = {}
+    for key, value in params.items():
+        if value is None:
+            continue
+        normalized[key] = str(value)
+    scope["query_string"] = urlencode(normalized).encode("utf-8")
+    return Request(scope, receive=request.receive)
+
+
 def _parse_uuid_param(name: str, value: Optional[str]) -> Optional[UUID]:
     if value is None:
         return None
@@ -1756,6 +1861,13 @@ _OUTBOX_ARCHIVED_REASON_PREFIX = "archived_pending:"
 _OUTBOX_CALENDAR_SYNC_REASON_PREFIX = "calendar_sync_failed:"
 _OUTBOX_SYSTEM_EVENT_TYPES = {"calendar.sync_inbound", "calendar.sync_outbound"}
 _DEFAULT_RUNTIME_REDIS_URL = "redis://truffles_redis_1:6379/0"
+_TENANTS_WEEKLY_SNAPSHOT_EVENT_TYPE = "tenants_weekly_snapshot_saved"
+_TENANTS_WEEKLY_SNAPSHOT_ENTITY_TYPE = "tenant_snapshot"
+_TENANTS_WEEKLY_SNAPSHOT_TABLE_NAME = "tenants_weekly_snapshots"
+_TENANTS_WEEKLY_SNAPSHOT_WEEK_KEY_PATTERN = re.compile(r"^\d{4}-W\d{2}$")
+_TENANTS_SENSITIVE_ACCESS_EVENT_TYPE = "tenants_sensitive_id_accessed"
+_TENANTS_SENSITIVE_FIELDS = {"instance_id"}
+_TENANTS_SENSITIVE_ACTIONS = {"reveal", "copy"}
 
 
 @dataclass
@@ -1792,6 +1904,153 @@ def _parse_tenant_lifecycle_param(value: Optional[str]) -> str:
     if normalized not in _TENANT_LIFECYCLE_MODES:
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid lifecycle")
     return normalized
+
+
+def _normalize_tenants_weekly_snapshot_week_key(value: str) -> str:
+    normalized = (value or "").strip()
+    if not normalized:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "week_key required")
+    if not _TENANTS_WEEKLY_SNAPSHOT_WEEK_KEY_PATTERN.match(normalized):
+        raise ConsoleAPIError(400, "INVALID_PARAM", "week_key must match YYYY-Wnn")
+    year_part, week_part = normalized.split("-W")
+    try:
+        iso_year = int(year_part)
+        iso_week = int(week_part)
+        # Validate that week exists in the given ISO year.
+        datetime.fromisocalendar(iso_year, iso_week, 1)
+    except ValueError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "week_key must be valid ISO week") from exc
+    return f"{iso_year:04d}-W{iso_week:02d}"
+
+
+def _normalize_tenants_weekly_snapshot_payload(
+    value: Optional[dict | ConsoleTenantsWeeklySnapshotPayload],
+) -> dict:
+    if isinstance(value, ConsoleTenantsWeeklySnapshotPayload):
+        return value.model_dump(mode="json")
+    if not isinstance(value, dict):
+        raise ConsoleAPIError(400, "INVALID_PARAM", "snapshot must be object")
+    try:
+        normalized = ConsoleTenantsWeeklySnapshotPayload.model_validate(value)
+    except ValidationError as exc:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "snapshot schema invalid") from exc
+    return normalized.model_dump(mode="json")
+
+
+def _normalize_tenants_sensitive_access_field(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized not in _TENANTS_SENSITIVE_FIELDS:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported sensitive field")
+    return normalized
+
+
+def _normalize_tenants_sensitive_access_action(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized not in _TENANTS_SENSITIVE_ACTIONS:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported action")
+    return normalized
+
+
+def _serialize_tenants_weekly_snapshot_record(event: AuditEvent) -> ConsoleTenantsWeeklySnapshotRecord:
+    payload = event.payload if isinstance(event.payload, dict) else {}
+    week_key = payload.get("week_key")
+    snapshot_payload = payload.get("snapshot")
+    snapshot_schema_version = payload.get("snapshot_schema_version")
+    try:
+        snapshot = ConsoleTenantsWeeklySnapshotPayload.model_validate(snapshot_payload)
+    except ValidationError:
+        snapshot = ConsoleTenantsWeeklySnapshotPayload(
+            generatedAt=event.created_at.isoformat(),
+            sourceWindow=0,
+            workspaceMode="portfolio",
+            lifecycleMode="active",
+            kpi={
+                "onboardingCoverage": 0,
+                "goLiveReadiness": 0,
+                "serviceStability": 0,
+                "decommissionShare": 0,
+                "changeFailure": 0,
+                "rollbackShare": 0,
+                "blockedSignals": 0,
+            },
+            drilldown=[],
+            attentionSummary={
+                "activeClientsTotal": 0,
+                "highRiskClients": 0,
+                "mediumRiskClients": 0,
+                "outboxFailed24hTotal": 0,
+                "pendingHandoversTotal": 0,
+            },
+        )
+    return ConsoleTenantsWeeklySnapshotRecord(
+        id=event.id,
+        created_at=event.created_at.isoformat(),
+        client_id=event.client_id,
+        week_key=week_key if isinstance(week_key, str) else "",
+        snapshot=snapshot,
+        snapshot_schema_version=snapshot_schema_version if isinstance(snapshot_schema_version, str) else "v1",
+        actor_name=event.actor_name,
+    )
+
+
+def _serialize_tenants_weekly_snapshot_row(
+    row: TenantsWeeklySnapshot,
+) -> ConsoleTenantsWeeklySnapshotRecord:
+    snapshot_payload = row.snapshot if isinstance(row.snapshot, dict) else {}
+    try:
+        snapshot = ConsoleTenantsWeeklySnapshotPayload.model_validate(snapshot_payload)
+    except ValidationError:
+        snapshot = ConsoleTenantsWeeklySnapshotPayload(
+            generatedAt=row.updated_at.isoformat(),
+            sourceWindow=0,
+            workspaceMode="portfolio",
+            lifecycleMode="active",
+            kpi={
+                "onboardingCoverage": 0,
+                "goLiveReadiness": 0,
+                "serviceStability": 0,
+                "decommissionShare": 0,
+                "changeFailure": 0,
+                "rollbackShare": 0,
+                "blockedSignals": 0,
+            },
+            drilldown=[],
+            attentionSummary={
+                "activeClientsTotal": 0,
+                "highRiskClients": 0,
+                "mediumRiskClients": 0,
+                "outboxFailed24hTotal": 0,
+                "pendingHandoversTotal": 0,
+            },
+        )
+
+    return ConsoleTenantsWeeklySnapshotRecord(
+        id=row.id,
+        created_at=row.updated_at.isoformat(),
+        client_id=row.client_id,
+        week_key=row.week_key,
+        snapshot=snapshot,
+        snapshot_schema_version=(row.snapshot_schema_version or "v1").strip() or "v1",
+        actor_name=row.actor_name,
+    )
+
+
+def _build_weekly_snapshot_schema_versions(
+    items: list[ConsoleTenantsWeeklySnapshotRecord],
+) -> dict[str, int]:
+    versions: dict[str, int] = {}
+    for item in items:
+        version = (item.snapshot_schema_version or "").strip() or "unknown"
+        versions[version] = versions.get(version, 0) + 1
+    return versions
+
+
+def _is_tenants_weekly_snapshot_table_missing_error(exc: ProgrammingError) -> bool:
+    message = str(exc.orig if getattr(exc, "orig", None) is not None else exc).lower()
+    return (
+        _TENANTS_WEEKLY_SNAPSHOT_TABLE_NAME in message
+        and "does not exist" in message
+    )
 
 
 def _normalize_client_lifecycle_reason(reason: str) -> str:
@@ -1987,6 +2246,8 @@ _MARKETING_SAMPLE_LIMIT_MAX = 20
 _MARKETING_EXECUTE_MAX_LIMIT = 500
 _MARKETING_RETRY_LIMIT_DEFAULT = 100
 _MARKETING_RETRY_LIMIT_MAX = 500
+_MARKETING_AUDIENCE_LIMIT_DEFAULT = 100
+_MARKETING_AUDIENCE_LIMIT_MAX = 500
 
 
 def _require_marketing_access(context: ConsoleAuthContext, *, action: str) -> None:
@@ -1999,15 +2260,26 @@ def _require_marketing_access(context: ConsoleAuthContext, *, action: str) -> No
 
 
 def _serialize_marketing_campaign(campaign: MarketingCampaign) -> ConsoleMarketingCampaign:
+    segment_code = campaign.segment_code if campaign.segment_code in MARKETING_SEGMENT_CODES else "reactivation_30_120"
+    status_value = resolve_marketing_campaign_status(campaign)
     return ConsoleMarketingCampaign(
         id=campaign.id,
         client_id=campaign.client_id,
         branch_id=campaign.branch_id,
         name=campaign.name,
         message_text=campaign.message_text,
-        status=campaign.status,
+        status=status_value,
+        status_v2=status_value,
+        segment_code=segment_code,
         audience_mode=campaign.audience_mode,
         preview_total=int(campaign.preview_total or 0),
+        preflight_valid=bool(campaign.preflight_valid),
+        preflight_snapshot=campaign.preflight_snapshot if isinstance(campaign.preflight_snapshot, dict) else None,
+        approved_by=campaign.approved_by,
+        approved_at=campaign.approved_at.isoformat() if campaign.approved_at else None,
+        requested_review_at=campaign.requested_review_at.isoformat() if campaign.requested_review_at else None,
+        run_started_at=campaign.run_started_at.isoformat() if campaign.run_started_at else None,
+        run_completed_at=campaign.run_completed_at.isoformat() if campaign.run_completed_at else None,
         last_preview_at=campaign.last_preview_at.isoformat() if campaign.last_preview_at else None,
         executed_at=campaign.executed_at.isoformat() if campaign.executed_at else None,
         created_at=campaign.created_at.isoformat() if campaign.created_at else None,
@@ -2068,6 +2340,18 @@ def _normalize_marketing_retry_limit(limit: Optional[int]) -> int:
     return limit
 
 
+def _normalize_marketing_audience_limit(limit: Optional[int]) -> int:
+    if limit is None:
+        return _MARKETING_AUDIENCE_LIMIT_DEFAULT
+    if limit < 1 or limit > _MARKETING_AUDIENCE_LIMIT_MAX:
+        raise ConsoleAPIError(
+            400,
+            "INVALID_PARAM",
+            f"limit must be between 1 and {_MARKETING_AUDIENCE_LIMIT_MAX}",
+        )
+    return limit
+
+
 def _resolve_marketing_campaign(
     context: ConsoleAuthContext,
     db: Session,
@@ -2118,6 +2402,28 @@ def _serialize_marketing_delivery_sample(
         outbox_status=outbox_status,
         last_error=last_error,
         updated_at=delivery.updated_at.isoformat() if delivery.updated_at else None,
+    )
+
+
+def _serialize_marketing_recipient(
+    recipient: MarketingCampaignRecipient,
+) -> ConsoleMarketingCampaignRecipient:
+    reason_codes = recipient.reason_codes if isinstance(recipient.reason_codes, list) else []
+    suppression_reasons = (
+        recipient.suppression_reasons if isinstance(recipient.suppression_reasons, list) else []
+    )
+    segment_code = recipient.segment_code if recipient.segment_code in MARKETING_SEGMENT_CODES else "reactivation_30_120"
+    return ConsoleMarketingCampaignRecipient(
+        id=recipient.id,
+        campaign_id=recipient.campaign_id,
+        recipient_jid=recipient.recipient_jid,
+        user_id=recipient.user_id,
+        conversation_id=recipient.conversation_id,
+        segment_code=segment_code,
+        reason_codes=[str(value) for value in reason_codes],
+        suppressed=bool(recipient.suppressed),
+        suppression_reasons=[str(value) for value in suppression_reasons],
+        updated_at=recipient.updated_at.isoformat() if recipient.updated_at else None,
     )
 
 
@@ -5850,6 +6156,7 @@ async def list_cases(
     phone: Optional[str] = None,
     has_delivery_error: bool = False,
     has_pending_outbox: bool = False,
+    has_human_lock: bool = False,
     last_activity_since: Optional[str] = None,
     sort_by: Optional[str] = None,
     date_from: Optional[str] = None,
@@ -5870,6 +6177,7 @@ async def list_cases(
             "phone",
             "has_delivery_error",
             "has_pending_outbox",
+            "has_human_lock",
             "last_activity_since",
             "sort_by",
             "date_from",
@@ -5893,6 +6201,11 @@ async def list_cases(
         "has_pending_outbox",
         request.query_params.get("has_pending_outbox"),
         default=has_pending_outbox,
+    )
+    has_human_lock = _parse_bool_param(
+        "has_human_lock",
+        request.query_params.get("has_human_lock"),
+        default=has_human_lock,
     )
     last_activity_since_dt = _parse_datetime_param("last_activity_since", last_activity_since)
     sort_by_value = _parse_sort_param("sort_by", request.query_params.get("sort_by"))
@@ -5995,6 +6308,19 @@ async def list_cases(
             )
             .exists()
         )
+    if has_human_lock:
+        now_utc = datetime.now(timezone.utc)
+        count_query = count_query.filter(
+            db.query(ConversationHumanLock.id)
+            .filter(
+                ConversationHumanLock.client_id == context.client.id,
+                ConversationHumanLock.conversation_id == Conversation.id,
+                ConversationHumanLock.lock_scope == HUMAN_LOCK_SCOPE_CONVERSATION,
+                ConversationHumanLock.active.is_(True),
+                ConversationHumanLock.lock_until > now_utc,
+            )
+            .exists()
+        )
     if last_activity_since_dt:
         count_query = count_query.filter(
             db.query(Message.id)
@@ -6007,6 +6333,7 @@ async def list_cases(
         )
     # Full count for queue visibility (before cursor pagination).
     total_count = count_query.order_by(None).count()
+    now_utc = datetime.now(timezone.utc)
 
     latest_message_subq = (
         db.query(
@@ -6073,6 +6400,30 @@ async def list_cases(
         .subquery()
     )
 
+    human_lock_subq = (
+        db.query(
+            ConversationHumanLock.conversation_id.label("conversation_id"),
+            ConversationHumanLock.lock_until.label("lock_until"),
+            ConversationHumanLock.source.label("source"),
+            ConversationHumanLock.reason.label("reason"),
+            ConversationHumanLock.locked_by_name.label("locked_by_name"),
+            func.row_number()
+            .over(
+                partition_by=ConversationHumanLock.conversation_id,
+                order_by=ConversationHumanLock.lock_until.desc(),
+            )
+            .label("rn"),
+        )
+        .filter(
+            ConversationHumanLock.client_id == context.client.id,
+            ConversationHumanLock.lock_scope == HUMAN_LOCK_SCOPE_CONVERSATION,
+            ConversationHumanLock.active.is_(True),
+            ConversationHumanLock.lock_until > now_utc,
+            ConversationHumanLock.conversation_id.isnot(None),
+        )
+        .subquery()
+    )
+
     query = base_query.outerjoin(
         latest_message_subq,
         and_(
@@ -6083,6 +6434,13 @@ async def list_cases(
     query = query.outerjoin(last_inbound_subq, last_inbound_subq.c.conversation_id == Conversation.id)
     query = query.outerjoin(last_outbound_subq, last_outbound_subq.c.conversation_id == Conversation.id)
     query = query.outerjoin(outbox_subq, outbox_subq.c.conversation_id == Conversation.id)
+    query = query.outerjoin(
+        human_lock_subq,
+        and_(
+            human_lock_subq.c.conversation_id == Conversation.id,
+            human_lock_subq.c.rn == 1,
+        ),
+    )
 
     if has_delivery_error:
         query = query.filter(outbox_subq.c.failed_count > 0)
@@ -6092,6 +6450,8 @@ async def list_cases(
 
     if last_activity_since_dt:
         query = query.filter(latest_message_subq.c.created_at >= last_activity_since_dt)
+    if has_human_lock:
+        query = query.filter(human_lock_subq.c.lock_until.is_not(None))
 
     # Sorting & Pagination (Cursor based on selected sort)
     sort_expr = Handover.created_at
@@ -6125,6 +6485,10 @@ async def list_cases(
         last_outbound_subq.c.last_outbound_at,
         outbox_subq.c.pending_count,
         outbox_subq.c.failed_count,
+        human_lock_subq.c.lock_until,
+        human_lock_subq.c.source,
+        human_lock_subq.c.reason,
+        human_lock_subq.c.locked_by_name,
     ).limit(limit + 1).all()
     
     has_more = len(items) > limit
@@ -6142,6 +6506,10 @@ async def list_cases(
             _last_outbound_at,
             _pending_count,
             _failed_count,
+            _lock_until,
+            _lock_source,
+            _lock_reason,
+            _lock_by_name,
         ) = items[-1]
         cursor_value = _resolve_case_sort_cursor(
             sort_by=sort_by_value,
@@ -6185,6 +6553,14 @@ async def list_cases(
                 ),
                 has_delivery_error=bool(failed_count and failed_count > 0),
                 has_pending_outbox=bool(pending_count and pending_count > 0),
+                human_lock_active=bool(lock_until),
+                human_lock_until=lock_until.isoformat() if lock_until else None,
+                human_lock_remaining_seconds=(
+                    max(0, int((lock_until - now_utc).total_seconds())) if lock_until else None
+                ),
+                human_lock_source=lock_source,
+                human_lock_reason=lock_reason,
+                human_lock_by=lock_by_name,
             )
             for (
                 handover,
@@ -6198,6 +6574,10 @@ async def list_cases(
                 last_outbound_at,
                 pending_count,
                 failed_count,
+                lock_until,
+                lock_source,
+                lock_reason,
+                lock_by_name,
             ) in items
         ],
         cursor=next_cursor,
@@ -6459,6 +6839,24 @@ async def resolve_case(
         entity_id=case.id,
         branch_id=branch_id,
     )
+    remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
+    released_lock = release_human_lock(
+        db,
+        client_id=context.client.id,
+        remote_jid=remote_jid,
+        conversation_id=conversation.id,
+        now=datetime.now(timezone.utc),
+    )
+    if released_lock:
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="human_lock_release_auto",
+            entity_type="conversation",
+            entity_id=conversation.id,
+            payload={"reason": "case_resolved"},
+            branch_id=branch_id,
+        )
 
     try:
         db.commit()
@@ -6600,6 +6998,24 @@ async def return_case(
         entity_id=case.id,
         branch_id=branch_id,
     )
+    remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
+    released_lock = release_human_lock(
+        db,
+        client_id=context.client.id,
+        remote_jid=remote_jid,
+        conversation_id=conversation.id,
+        now=datetime.now(timezone.utc),
+    )
+    if released_lock:
+        record_audit_event(
+            db,
+            actor=context.agent,
+            event_type="human_lock_release_auto",
+            entity_type="conversation",
+            entity_id=conversation.id,
+            payload={"reason": "case_returned"},
+            branch_id=branch_id,
+        )
 
     try:
         db.commit()
@@ -6909,6 +7325,11 @@ async def get_case(
         )
 
     case_health = _fetch_case_health(db, conversation) if conversation else {}
+    human_lock_snapshot = _build_case_human_lock_snapshot(
+        db,
+        client_id=context.client.id,
+        conversation=conversation,
+    )
     handover_meta = case.meta if isinstance(case.meta, dict) else None
     handover_media_refs = (
         handover_meta.get("media_refs")
@@ -6953,6 +7374,7 @@ async def get_case(
         needs_reply=case_health.get("needs_reply"),
         has_delivery_error=case_health.get("has_delivery_error"),
         has_pending_outbox=case_health.get("has_pending_outbox"),
+        **human_lock_snapshot,
         telegram_trail=telegram_trail,
     )
 
@@ -6977,6 +7399,16 @@ async def send_manager_message(
     require_console_permission(context, "inbox", "write")
     idempotency_key = _get_idempotency_key(request)
     normalized_content = _normalize_required_text(body.content, "content")
+    pause_enabled = bool(getattr(body, "pause_enabled", True))
+    pause_minutes = _normalize_pause_minutes(
+        getattr(body, "pause_minutes", None),
+        default=30,
+        allow_zero=True,
+    )
+    pause_reason = _normalize_optional_text(getattr(body, "pause_reason", None)) or "manual_reply"
+    human_lock_scope = (
+        HUMAN_LOCK_SCOPE_CONVERSATION if _is_human_lock_v2_enabled() else HUMAN_LOCK_SCOPE_REMOTE
+    )
 
     # Verify access to conversation via handover
     case = db.query(Handover).filter(
@@ -7136,18 +7568,19 @@ async def send_manager_message(
                 else:
                     delivery_error = "chatflow_send_failed"
 
-            if delivery_status in {"queued", "delivered"}:
+            if delivery_status in {"queued", "delivered"} and pause_enabled and pause_minutes > 0:
                 upsert_human_lock(
                     db,
                     client_id=context.client.id,
                     remote_jid=remote_jid,
-                    lock_until=now_utc + timedelta(minutes=30),
+                    lock_until=now_utc + timedelta(minutes=pause_minutes),
                     conversation_id=conversation.id,
                     branch_id=conversation.branch_id,
                     locked_by_id=context.agent.id,
                     locked_by_name=context.agent.name,
                     source="console_message",
-                    reason="manual_reply",
+                    reason=pause_reason,
+                    lock_scope=human_lock_scope,
                 )
     except Exception as exc:
         logger.error("WhatsApp delivery error: %s", exc)
@@ -7231,16 +7664,19 @@ async def send_outreach_message(
     pause_minutes = _normalize_pause_minutes(body.pause_bot_minutes, default=30, allow_zero=True)
     pause_reason = _normalize_optional_text(body.pause_reason)
     idempotency_key = _get_idempotency_key(request)
+    human_lock_scope = (
+        HUMAN_LOCK_SCOPE_CONVERSATION if _is_human_lock_v2_enabled() else HUMAN_LOCK_SCOPE_REMOTE
+    )
 
-    conversation: Conversation | None = None
-    branch_id = body.branch_id
-    if body.conversation_id:
-        conversation = _resolve_console_conversation_or_404(
-            db,
-            client_id=context.client.id,
-            conversation_id=body.conversation_id,
-        )
-        branch_id = conversation.branch_id
+    if not body.conversation_id:
+        raise ConsoleAPIError(400, "CONVERSATION_REQUIRED", "conversation_id is required for outreach")
+
+    conversation: Conversation | None = _resolve_console_conversation_or_404(
+        db,
+        client_id=context.client.id,
+        conversation_id=body.conversation_id,
+    )
+    branch_id = conversation.branch_id
     if branch_id is not None:
         _require_branch_access(context, branch_id, message="Access to this branch denied")
     elif conversation is None:
@@ -7390,6 +7826,7 @@ async def send_outreach_message(
                 locked_by_name=context.agent.name,
                 source="console_outreach",
                 reason=pause_reason or "manual_pause",
+                lock_scope=human_lock_scope,
             )
             lock_until = _coerce_utc_datetime(lock.lock_until)
     except Exception as exc:
@@ -7453,6 +7890,7 @@ async def get_conversation_human_lock_status(
         db,
         client_id=context.client.id,
         remote_jid=remote_jid,
+        conversation_id=conversation.id,
         now=now_utc,
     )
     db.commit()
@@ -7477,6 +7915,9 @@ async def pause_conversation_human_lock(
 
     minutes = _normalize_pause_minutes(body.minutes, default=30, allow_zero=False)
     reason = _normalize_optional_text(body.reason) or "manual_pause"
+    human_lock_scope = (
+        HUMAN_LOCK_SCOPE_CONVERSATION if _is_human_lock_v2_enabled() else HUMAN_LOCK_SCOPE_REMOTE
+    )
     conversation = _resolve_console_conversation_or_404(
         db,
         client_id=context.client.id,
@@ -7503,6 +7944,7 @@ async def pause_conversation_human_lock(
         locked_by_name=context.agent.name,
         source="console_pause",
         reason=reason,
+        lock_scope=human_lock_scope,
     )
     record_audit_event(
         db,
@@ -7549,6 +7991,7 @@ async def release_conversation_human_lock(
         db,
         client_id=context.client.id,
         remote_jid=remote_jid,
+        conversation_id=conversation.id,
         now=now_utc,
     )
     record_audit_event(
@@ -7579,6 +8022,9 @@ async def send_manager_media(
     request: Request,
     file: UploadFile = File(...),
     caption: Optional[str] = Form(None),
+    pause_enabled: Optional[bool] = Form(True),
+    pause_minutes: Optional[int] = Form(30),
+    pause_reason: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ) -> ConsoleManagerMessageResponse:
     """Send a media message from the manager to the customer via WhatsApp."""
@@ -7592,6 +8038,12 @@ async def send_manager_media(
     idempotency_key = _get_idempotency_key(request)
     normalized_caption = _normalize_media_caption(caption)
     media_type = _resolve_console_media_type(file.filename, file.content_type)
+    pause_enabled = bool(pause_enabled)
+    pause_minutes = _normalize_pause_minutes(pause_minutes, default=30, allow_zero=True)
+    pause_reason = _normalize_optional_text(pause_reason) or "manual_reply"
+    human_lock_scope = (
+        HUMAN_LOCK_SCOPE_CONVERSATION if _is_human_lock_v2_enabled() else HUMAN_LOCK_SCOPE_REMOTE
+    )
 
     case = db.query(Handover).filter(
         Handover.conversation_id == conversation_id,
@@ -7657,6 +8109,23 @@ async def send_manager_media(
         if idempotency and idempotency.record:
             release_idempotency(db, record=idempotency.record)
         raise
+
+    if delivery_status in {"delivered", "queued"}:
+        remote_jid = resolve_conversation_remote_jid(db, conversation=conversation)
+        if remote_jid and pause_enabled and pause_minutes > 0:
+            upsert_human_lock(
+                db,
+                client_id=context.client.id,
+                remote_jid=remote_jid,
+                lock_until=datetime.now(timezone.utc) + timedelta(minutes=pause_minutes),
+                conversation_id=conversation.id,
+                branch_id=conversation.branch_id,
+                locked_by_id=context.agent.id,
+                locked_by_name=context.agent.name,
+                source="console_media",
+                reason=pause_reason,
+                lock_scope=human_lock_scope,
+            )
 
     if delivery_status in {"delivered", "queued"} and conversation.telegram_topic_id:
         try:
@@ -12774,6 +13243,384 @@ async def list_branches(
 
 
 @router.get(
+    "/admin/tenants/portfolio",
+    response_model=ConsoleTenantsPortfolioResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_tenants_portfolio(
+    request: Request,
+    cursor: Optional[str] = None,
+    limit: int = 20,
+    q: Optional[str] = None,
+    company_id: Optional[str] = None,
+    lifecycle: Optional[str] = None,
+    attention_limit: int = 20,
+    stale_after_minutes: int = Query(
+        _INTEGRATION_DEFAULT_STALE_MINUTES,
+        ge=_INTEGRATION_MIN_STALE_MINUTES,
+        le=_INTEGRATION_MAX_STALE_MINUTES,
+    ),
+    include_low: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleTenantsPortfolioResponse:
+    _reject_unknown_query_params(
+        request,
+        {
+            "cursor",
+            "limit",
+            "q",
+            "company_id",
+            "lifecycle",
+            "attention_limit",
+            "stale_after_minutes",
+            "include_low",
+        },
+    )
+    _validate_limit(limit)
+    _validate_limit(attention_limit)
+    lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
+
+    clients_request = _request_with_query_params(
+        request,
+        {
+            "cursor": cursor,
+            "limit": limit,
+            "q": q,
+            "company_id": company_id,
+            "lifecycle": lifecycle_mode,
+            "include_fleet": "true",
+            "include_summary": "true",
+        },
+    )
+    clients_response = await list_clients(
+        request=clients_request,
+        cursor=cursor,
+        limit=limit,
+        q=q,
+        company_id=company_id,
+        lifecycle=lifecycle_mode,
+        include_fleet="true",
+        include_summary="true",
+        db=db,
+    )
+
+    attention_request = _request_with_query_params(
+        request,
+        {
+            "limit": attention_limit,
+            "stale_after_minutes": stale_after_minutes,
+            "include_low": include_low,
+        },
+    )
+    attention_response = await list_fleet_attention(
+        request=attention_request,
+        limit=attention_limit,
+        stale_after_minutes=stale_after_minutes,
+        include_low=include_low,
+        db=db,
+    )
+
+    return ConsoleTenantsPortfolioResponse(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        clients=clients_response,
+        fleet_attention=attention_response,
+    )
+
+
+@router.get(
+    "/admin/tenants/company-cockpit",
+    response_model=ConsoleTenantsCompanyCockpitResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_tenants_company_cockpit(
+    request: Request,
+    company_id: str,
+    client_id: Optional[str] = None,
+    lifecycle: Optional[str] = None,
+    client_limit: int = 20,
+    branch_limit: int = 20,
+    client_cursor: Optional[str] = None,
+    branch_cursor: Optional[str] = None,
+    client_q: Optional[str] = None,
+    branch_q: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> ConsoleTenantsCompanyCockpitResponse:
+    _reject_unknown_query_params(
+        request,
+        {
+            "company_id",
+            "client_id",
+            "lifecycle",
+            "client_limit",
+            "branch_limit",
+            "client_cursor",
+            "branch_cursor",
+            "client_q",
+            "branch_q",
+        },
+    )
+    _validate_limit(client_limit)
+    _validate_limit(branch_limit)
+    lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
+
+    company_uuid = _parse_uuid_param("company_id", company_id)
+    if company_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid company_id")
+
+    selected_client_uuid = _parse_uuid_param("client_id", client_id)
+
+    clients_request = _request_with_query_params(
+        request,
+        {
+            "cursor": client_cursor,
+            "limit": client_limit,
+            "q": client_q,
+            "company_id": str(company_uuid),
+            "lifecycle": lifecycle_mode,
+            "include_fleet": "true",
+        },
+    )
+    clients_response = await list_clients(
+        request=clients_request,
+        cursor=client_cursor,
+        limit=client_limit,
+        q=client_q,
+        company_id=str(company_uuid),
+        lifecycle=lifecycle_mode,
+        include_fleet="true",
+        db=db,
+    )
+
+    if selected_client_uuid is None and clients_response.items:
+        selected_client_uuid = clients_response.items[0].id
+
+    if selected_client_uuid is None:
+        branches_response = ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
+    else:
+        branches_request = _request_with_query_params(
+            request,
+            {
+                "cursor": branch_cursor,
+                "limit": branch_limit,
+                "q": branch_q,
+                "client_id": str(selected_client_uuid),
+                "lifecycle": lifecycle_mode,
+            },
+        )
+        branches_response = await list_branches(
+            request=branches_request,
+            cursor=branch_cursor,
+            limit=branch_limit,
+            q=branch_q,
+            client_id=str(selected_client_uuid),
+            lifecycle=lifecycle_mode,
+            db=db,
+        )
+
+    return ConsoleTenantsCompanyCockpitResponse(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        company_id=company_uuid,
+        selected_client_id=selected_client_uuid,
+        clients=clients_response,
+        branches=branches_response,
+    )
+
+
+@router.get(
+    "/admin/tenants/weekly-snapshots",
+    response_model=ConsoleTenantsWeeklySnapshotListResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def list_tenants_weekly_snapshots(
+    request: Request,
+    client_id: str,
+    week_key: Optional[str] = None,
+    cursor: Optional[str] = None,
+    limit: int = 12,
+    db: Session = Depends(get_db),
+) -> ConsoleTenantsWeeklySnapshotListResponse:
+    context = get_console_context(request, db, require_selection=False)
+    _require_platform_admin(context)
+    _reject_unknown_query_params(request, {"client_id", "week_key", "cursor", "limit"})
+    _validate_limit(limit)
+
+    client_uuid = _parse_uuid_param("client_id", client_id)
+    if client_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid client_id")
+
+    normalized_week_key = _normalize_tenants_weekly_snapshot_week_key(week_key) if week_key else None
+    cursor_date = _parse_cursor_param(cursor)
+
+    try:
+        query = db.query(TenantsWeeklySnapshot).filter(
+            TenantsWeeklySnapshot.client_id == client_uuid,
+        )
+        if normalized_week_key:
+            query = query.filter(TenantsWeeklySnapshot.week_key == normalized_week_key)
+        if cursor_date is not None:
+            query = query.filter(TenantsWeeklySnapshot.updated_at < cursor_date)
+
+        rows = (
+            query.order_by(TenantsWeeklySnapshot.updated_at.desc(), TenantsWeeklySnapshot.id.desc())
+            .limit(limit + 1)
+            .all()
+        )
+        has_more = len(rows) > limit
+        items = rows[:limit]
+        next_cursor = items[-1].updated_at.isoformat() if has_more and items else None
+        serialized_items = [_serialize_tenants_weekly_snapshot_row(item) for item in items]
+        return ConsoleTenantsWeeklySnapshotListResponse(
+            items=serialized_items,
+            cursor=next_cursor,
+            has_more=has_more,
+            storage_mode="table",
+            schema_versions=_build_weekly_snapshot_schema_versions(serialized_items),
+        )
+    except ProgrammingError as exc:
+        if not _is_tenants_weekly_snapshot_table_missing_error(exc):
+            raise
+        db.rollback()
+
+    # Read-only fallback for environments where migration is not applied yet.
+    audit_query = db.query(AuditEvent).filter(
+        AuditEvent.client_id == client_uuid,
+        AuditEvent.event_type == _TENANTS_WEEKLY_SNAPSHOT_EVENT_TYPE,
+        AuditEvent.entity_type == _TENANTS_WEEKLY_SNAPSHOT_ENTITY_TYPE,
+    )
+    if cursor_date is not None:
+        audit_query = audit_query.filter(AuditEvent.created_at < cursor_date)
+
+    candidates = (
+        audit_query.order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+        .limit(max(limit * 4, 50))
+        .all()
+    )
+    if normalized_week_key:
+        candidates = [
+            event
+            for event in candidates
+            if isinstance(event.payload, dict) and event.payload.get("week_key") == normalized_week_key
+        ]
+
+    has_more = len(candidates) > limit
+    items = candidates[:limit] if has_more else candidates
+    next_cursor = items[-1].created_at.isoformat() if has_more and items else None
+    serialized_items = [_serialize_tenants_weekly_snapshot_record(item) for item in items]
+
+    return ConsoleTenantsWeeklySnapshotListResponse(
+        items=serialized_items,
+        cursor=next_cursor,
+        has_more=has_more,
+        storage_mode="audit_fallback",
+        schema_versions=_build_weekly_snapshot_schema_versions(serialized_items),
+    )
+
+
+@router.post(
+    "/admin/tenants/weekly-snapshots",
+    response_model=ConsoleTenantsWeeklySnapshotCreateResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def save_tenants_weekly_snapshot(
+    request: Request,
+    payload: ConsoleTenantsWeeklySnapshotCreateRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleTenantsWeeklySnapshotCreateResponse:
+    context = get_console_context(request, db, require_selection=False)
+    _require_platform_admin(context)
+
+    client = db.query(Client).filter(Client.id == payload.client_id).first()
+    if client is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
+
+    normalized_week_key = _normalize_tenants_weekly_snapshot_week_key(payload.week_key)
+    normalized_snapshot = _normalize_tenants_weekly_snapshot_payload(payload.snapshot)
+    now = datetime.now(timezone.utc)
+    try:
+        existing = (
+            db.query(TenantsWeeklySnapshot)
+            .filter(
+                TenantsWeeklySnapshot.client_id == payload.client_id,
+                TenantsWeeklySnapshot.week_key == normalized_week_key,
+            )
+            .first()
+        )
+    except ProgrammingError as exc:
+        if not _is_tenants_weekly_snapshot_table_missing_error(exc):
+            raise
+        db.rollback()
+        raise ConsoleAPIError(
+            503,
+            "TENANTS_WEEKLY_SNAPSHOT_STORAGE_UNAVAILABLE",
+            "Weekly snapshots storage unavailable (read-only mode)",
+        ) from exc
+
+    if existing is None:
+        existing = TenantsWeeklySnapshot(
+            client_id=payload.client_id,
+            week_key=normalized_week_key,
+            created_at=now,
+        )
+
+    existing.snapshot = normalized_snapshot
+    existing.snapshot_schema_version = "v1"
+    existing.actor_id = context.agent.id
+    existing.actor_name = context.agent.name
+    existing.updated_at = now
+    db.add(existing)
+    db.commit()
+    db.refresh(existing)
+    return ConsoleTenantsWeeklySnapshotCreateResponse(
+        item=_serialize_tenants_weekly_snapshot_row(existing),
+    )
+
+
+@router.post(
+    "/admin/tenants/sensitive-access",
+    response_model=ConsoleTenantsSensitiveAccessAuditResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def audit_tenants_sensitive_access(
+    request: Request,
+    payload: ConsoleTenantsSensitiveAccessAuditRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleTenantsSensitiveAccessAuditResponse:
+    context = get_console_context(request, db, require_selection=False)
+    _require_platform_admin(context)
+
+    field = _normalize_tenants_sensitive_access_field(payload.field)
+    action = _normalize_tenants_sensitive_access_action(payload.action)
+    context_value = (payload.context or "").strip() or None
+    if context_value and len(context_value) > 64:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "context too long")
+
+    branch = db.query(Branch).filter(Branch.id == payload.branch_id).first()
+    if branch is None:
+        raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
+
+    event = record_audit_event(
+        db,
+        actor=context.agent,
+        event_type=_TENANTS_SENSITIVE_ACCESS_EVENT_TYPE,
+        entity_type="branch",
+        entity_id=branch.id,
+        payload={
+            "field": field,
+            "action": action,
+            "context": context_value,
+        },
+        client_id=branch.client_id,
+        branch_id=branch.id,
+    )
+    db.commit()
+    db.refresh(event)
+    return ConsoleTenantsSensitiveAccessAuditResponse(
+        ok=True,
+        audit_id=event.id,
+    )
+
+
+@router.get(
     "/admin/marketing/campaigns",
     response_model=ConsoleMarketingCampaignListResponse,
     responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
@@ -12790,15 +13637,24 @@ async def list_marketing_campaigns(
 
     branch_uuid = _parse_uuid_param("branch_id", branch_id)
     status_value = _normalize_optional_text(status)
-    if status_value and status_value not in {"draft", "ready", "executed", "paused"}:
+    if status_value and status_value not in MARKETING_STATUS_VALUES:
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid status")
+    normalized_status = normalize_marketing_status(status_value) if status_value else None
 
     query = db.query(MarketingCampaign).filter(MarketingCampaign.client_id == context.client.id)
     if branch_uuid is not None:
         _resolve_marketing_branch(context, db, branch_uuid)
         query = query.filter(MarketingCampaign.branch_id == branch_uuid)
-    if status_value:
-        query = query.filter(MarketingCampaign.status == status_value)
+    if normalized_status:
+        query = query.filter(
+            or_(
+                MarketingCampaign.status_v2 == normalized_status,
+                and_(
+                    MarketingCampaign.status_v2.is_(None),
+                    MarketingCampaign.status.in_([status_value, normalized_status]),
+                ),
+            )
+        )
 
     campaigns = query.order_by(MarketingCampaign.created_at.desc(), MarketingCampaign.id.desc()).all()
     return ConsoleMarketingCampaignListResponse(
@@ -12822,6 +13678,9 @@ async def create_marketing_campaign(
     branch = _resolve_marketing_branch(context, db, payload.branch_id)
     name = _normalize_required_text(payload.name, "name")
     message_text = _normalize_required_text(payload.message_text, "message_text")
+    segment_code = _normalize_required_text(payload.segment_code, "segment_code")
+    if segment_code not in MARKETING_SEGMENT_CODES:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported segment_code")
     if len(name) > 120:
         raise ConsoleAPIError(400, "INVALID_PARAM", "name too long")
     if len(message_text) > 2000:
@@ -12834,16 +13693,19 @@ async def create_marketing_campaign(
         created_by=context.agent.id,
         name=name,
         message_text=message_text,
-        status="draft",
+        status=MARKETING_STATUS_DRAFT,
+        status_v2=MARKETING_STATUS_DRAFT,
+        segment_code=segment_code,
         audience_mode=payload.audience_mode,
         audience_filter={},
         preview_total=0,
+        preflight_snapshot={},
+        preflight_valid=False,
         created_at=now,
         updated_at=now,
     )
     db.add(campaign)
-    db.commit()
-    db.refresh(campaign)
+    db.flush()
 
     record_audit_event(
         db,
@@ -12857,8 +13719,11 @@ async def create_marketing_campaign(
         payload={
             "campaign_name": campaign.name,
             "audience_mode": campaign.audience_mode,
+            "segment_code": campaign.segment_code,
         },
     )
+    db.commit()
+    db.refresh(campaign)
 
     return ConsoleMarketingCampaignCreateResponse(campaign=_serialize_marketing_campaign(campaign))
 
@@ -12882,44 +13747,297 @@ async def preview_marketing_campaign(
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
 
     campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
-
-    branch = _resolve_marketing_branch(context, db, campaign.branch_id)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
     sample_limit = _normalize_marketing_sample_limit(payload.sample_limit)
-    audience_query = (
-        db.query(
-            Conversation.id.label("conversation_id"),
-            Conversation.user_id.label("user_id"),
-            User.remote_jid.label("recipient_jid"),
-        )
-        .join(User, User.id == Conversation.user_id)
-        .filter(
-            Conversation.client_id == context.client.id,
-            Conversation.branch_id == branch.id,
-            Conversation.channel == "whatsapp",
-            User.remote_jid.isnot(None),
-            func.length(func.trim(User.remote_jid)) > 0,
-        )
-        .order_by(Conversation.last_message_at.desc().nullslast(), Conversation.id.desc())
-    )
-    estimated_recipients = audience_query.count()
-    sample_rows = audience_query.limit(sample_limit).all()
-
     now = datetime.now(timezone.utc)
-    campaign.preview_total = estimated_recipients
-    campaign.last_preview_at = now
-    campaign.status = "ready" if estimated_recipients > 0 else "draft"
-    campaign.updated_at = now
-    db.add(campaign)
+    preview = materialize_marketing_campaign_audience(
+        db,
+        campaign=campaign,
+        segment_code=campaign.segment_code,
+        sample_limit=sample_limit,
+        now=now,
+    )
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=campaign.branch_id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="marketing_campaign_previewed",
+        entity_type="marketing_campaign",
+        entity_id=campaign.id,
+        payload={
+            "estimated_recipients": preview["estimated_recipients"],
+            "eligible_count": preview["eligible_count"],
+            "suppressed_count": preview["suppressed_count"],
+        },
+    )
     db.commit()
 
     return ConsoleMarketingCampaignPreviewResponse(
         campaign_id=campaign.id,
         branch_id=campaign.branch_id,
         audience_mode=campaign.audience_mode,
-        estimated_recipients=estimated_recipients,
-        sample_conversation_ids=[row.conversation_id for row in sample_rows if row.conversation_id],
-        sample_recipient_jids=[row.recipient_jid for row in sample_rows if row.recipient_jid],
+        estimated_recipients=preview["estimated_recipients"],
+        eligible_count=preview["eligible_count"],
+        suppressed_count=preview["suppressed_count"],
+        sample_conversation_ids=preview["sample_conversation_ids"],
+        sample_recipient_jids=preview["sample_recipient_jids"],
     )
+
+
+@router.get(
+    "/admin/marketing/campaigns/{campaign_id}/audience",
+    response_model=ConsoleMarketingCampaignAudienceResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_marketing_campaign_audience(
+    campaign_id: str,
+    request: Request,
+    include_suppressed: bool = True,
+    limit: int = Query(_MARKETING_AUDIENCE_LIMIT_DEFAULT),
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignAudienceResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="view audience")
+    _reject_unknown_query_params(request, {"include_suppressed", "limit"})
+
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+    limit_value = _normalize_marketing_audience_limit(limit)
+
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
+    items = fetch_marketing_audience_preview(
+        db,
+        campaign_id=campaign.id,
+        include_suppressed=include_suppressed,
+        limit=limit_value,
+    )
+    total_count = (
+        db.query(func.count(MarketingCampaignRecipient.id))
+        .filter(MarketingCampaignRecipient.campaign_id == campaign.id)
+        .scalar()
+        or 0
+    )
+    suppressed_count = (
+        db.query(func.count(MarketingCampaignRecipient.id))
+        .filter(
+            MarketingCampaignRecipient.campaign_id == campaign.id,
+            MarketingCampaignRecipient.suppressed.is_(True),
+        )
+        .scalar()
+        or 0
+    )
+    return ConsoleMarketingCampaignAudienceResponse(
+        campaign_id=campaign.id,
+        total_count=int(total_count),
+        eligible_count=max(int(total_count) - int(suppressed_count), 0),
+        suppressed_count=int(suppressed_count),
+        items=[_serialize_marketing_recipient(item) for item in items],
+    )
+
+
+@router.post(
+    "/admin/marketing/campaigns/{campaign_id}/request-approval",
+    response_model=ConsoleMarketingCampaignCreateResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def request_marketing_campaign_approval(
+    campaign_id: str,
+    request: Request,
+    payload: ConsoleMarketingCampaignLifecycleActionRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignCreateResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="request approval")
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
+
+    now = datetime.now(timezone.utc)
+    try:
+        mark_campaign_under_review(campaign, now=now)
+    except ValueError:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Campaign cannot be moved to in_review")
+    db.add(campaign)
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=campaign.branch_id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="marketing_campaign_review_requested",
+        entity_type="marketing_campaign",
+        entity_id=campaign.id,
+        payload={"reason": _normalize_optional_text(payload.reason)},
+    )
+    db.commit()
+    db.refresh(campaign)
+    return ConsoleMarketingCampaignCreateResponse(campaign=_serialize_marketing_campaign(campaign))
+
+
+@router.post(
+    "/admin/marketing/campaigns/{campaign_id}/approve",
+    response_model=ConsoleMarketingCampaignCreateResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def approve_marketing_campaign(
+    campaign_id: str,
+    request: Request,
+    payload: ConsoleMarketingCampaignLifecycleActionRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignCreateResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="approve")
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
+
+    now = datetime.now(timezone.utc)
+    try:
+        mark_campaign_approved(campaign, approved_by=context.agent.id, now=now)
+    except ValueError:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Campaign cannot be approved from current state")
+    db.add(campaign)
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=campaign.branch_id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="marketing_campaign_approved",
+        entity_type="marketing_campaign",
+        entity_id=campaign.id,
+        payload={"reason": _normalize_optional_text(payload.reason)},
+    )
+    db.commit()
+    db.refresh(campaign)
+    return ConsoleMarketingCampaignCreateResponse(campaign=_serialize_marketing_campaign(campaign))
+
+
+@router.get(
+    "/admin/marketing/campaigns/{campaign_id}/preflight",
+    response_model=ConsoleMarketingCampaignPreflightResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def get_marketing_campaign_preflight(
+    campaign_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignPreflightResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="view preflight")
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
+
+    refresh_marketing_campaign_lifecycle(db, campaign=campaign)
+    snapshot = build_marketing_campaign_preflight(db, campaign=campaign)
+    db.commit()
+    outbox_health = snapshot.get("outbox_health") if isinstance(snapshot.get("outbox_health"), dict) else {}
+    return ConsoleMarketingCampaignPreflightResponse(
+        campaign_id=campaign.id,
+        generated_at=str(snapshot.get("generated_at") or datetime.now(timezone.utc).isoformat()),
+        preflight_valid=bool(snapshot.get("preflight_valid")),
+        blocked_reasons=[str(value) for value in snapshot.get("blocked_reasons", [])],
+        outbox_health_status=str(outbox_health.get("status") or "unknown"),
+        outbox_pending=int(outbox_health.get("pending") or 0),
+        outbox_failed_24h=int(outbox_health.get("failed_24h") or 0),
+        audience_total=int(snapshot.get("audience_total") or 0),
+        eligible_count=int(snapshot.get("eligible_count") or 0),
+        suppressed_count=int(snapshot.get("suppressed_count") or 0),
+        template_gate_enabled=bool(snapshot.get("template_gate_enabled")),
+        template_state=snapshot.get("template_state"),
+        template_ok=bool(snapshot.get("template_ok", True)),
+    )
+
+
+@router.post(
+    "/admin/marketing/campaigns/{campaign_id}/pause",
+    response_model=ConsoleMarketingCampaignCreateResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def pause_marketing_campaign(
+    campaign_id: str,
+    request: Request,
+    payload: ConsoleMarketingCampaignLifecycleActionRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignCreateResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="pause")
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
+
+    try:
+        mark_campaign_paused(campaign)
+    except ValueError:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Campaign cannot be paused from current state")
+    db.add(campaign)
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=campaign.branch_id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="marketing_campaign_paused",
+        entity_type="marketing_campaign",
+        entity_id=campaign.id,
+        payload={"reason": _normalize_optional_text(payload.reason)},
+    )
+    db.commit()
+    db.refresh(campaign)
+    return ConsoleMarketingCampaignCreateResponse(campaign=_serialize_marketing_campaign(campaign))
+
+
+@router.post(
+    "/admin/marketing/campaigns/{campaign_id}/resume",
+    response_model=ConsoleMarketingCampaignCreateResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def resume_marketing_campaign(
+    campaign_id: str,
+    request: Request,
+    payload: ConsoleMarketingCampaignLifecycleActionRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignCreateResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="resume")
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
+
+    try:
+        mark_campaign_resume(campaign)
+    except ValueError:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Campaign cannot be resumed from current state")
+    db.add(campaign)
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=campaign.branch_id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="marketing_campaign_resumed",
+        entity_type="marketing_campaign",
+        entity_id=campaign.id,
+        payload={"reason": _normalize_optional_text(payload.reason)},
+    )
+    db.commit()
+    db.refresh(campaign)
+    return ConsoleMarketingCampaignCreateResponse(campaign=_serialize_marketing_campaign(campaign))
 
 
 @router.post(
@@ -12943,116 +14061,54 @@ async def execute_marketing_campaign(
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
 
     campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
-    if campaign.status == "paused":
-        raise ConsoleAPIError(409, "INVALID_STATE", "Campaign is paused")
-
-    branch = _resolve_marketing_branch(context, db, campaign.branch_id)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
     max_recipients = _normalize_marketing_max_recipients(payload.max_recipients)
-    audience_query = (
-        db.query(
-            Conversation.id.label("conversation_id"),
-            Conversation.user_id.label("user_id"),
-            User.remote_jid.label("recipient_jid"),
-        )
-        .join(User, User.id == Conversation.user_id)
-        .filter(
-            Conversation.client_id == context.client.id,
-            Conversation.branch_id == branch.id,
-            Conversation.channel == "whatsapp",
-            User.remote_jid.isnot(None),
-            func.length(func.trim(User.remote_jid)) > 0,
-        )
-        .order_by(Conversation.last_message_at.desc().nullslast(), Conversation.id.desc())
-    )
-    if max_recipients is not None:
-        audience_query = audience_query.limit(max_recipients)
-    audience_rows = audience_query.all()
 
-    existing_conversation_ids = {
-        row.conversation_id
-        for row in db.query(MarketingCampaignDelivery.conversation_id)
-        .filter(
-            MarketingCampaignDelivery.campaign_id == campaign.id,
-            MarketingCampaignDelivery.conversation_id.isnot(None),
-        )
-        .all()
-        if row.conversation_id
-    }
-
-    queued_count = 0
-    skipped_count = 0
     now = datetime.now(timezone.utc)
-    for row in audience_rows:
-        if row.conversation_id in existing_conversation_ids:
-            skipped_count += 1
-            continue
-
-        synthetic_inbound_id = f"marketing:{campaign.id}:{row.conversation_id}"
-        outbox_item = OutboxMessage(
-            client_id=context.client.id,
-            conversation_id=row.conversation_id,
-            branch_id=branch.id,
-            inbound_message_id=synthetic_inbound_id,
-            payload_json={"text": campaign.message_text},
-            meta={
-                "source": "marketing_campaign",
-                "campaign_id": str(campaign.id),
-                "campaign_name": campaign.name,
-                "audience_mode": campaign.audience_mode,
-            },
-            status="PENDING",
-            attempts=0,
-            next_attempt_at=None,
-            last_error=None,
-            created_at=now,
-            updated_at=now,
+    try:
+        result = run_marketing_campaign_execute(
+            db,
+            campaign=campaign,
+            message_text=campaign.message_text,
+            max_recipients=max_recipients,
+            now=now,
         )
-        db.add(outbox_item)
-        db.flush()
-
-        delivery = MarketingCampaignDelivery(
-            campaign_id=campaign.id,
-            client_id=context.client.id,
-            branch_id=branch.id,
-            conversation_id=row.conversation_id,
-            user_id=row.user_id,
-            recipient_jid=row.recipient_jid,
-            status="queued",
-            outbox_id=outbox_item.id,
-            error_reason=None,
-            created_at=now,
-            updated_at=now,
-        )
-        db.add(delivery)
-        queued_count += 1
-
-    campaign.status = "executed" if queued_count > 0 else "ready"
-    campaign.executed_at = now if queued_count > 0 else campaign.executed_at
-    campaign.updated_at = now
-    db.add(campaign)
-    db.commit()
+    except ValueError as exc:
+        if str(exc) == "preflight_failed":
+            snapshot = campaign.preflight_snapshot if isinstance(campaign.preflight_snapshot, dict) else {}
+            raise ConsoleAPIError(
+                409,
+                "GO_LIVE_GATE_REQUIRED",
+                "Campaign preflight failed",
+                details={
+                    "blocked_reasons": snapshot.get("blocked_reasons", []),
+                    "preflight_valid": bool(snapshot.get("preflight_valid")),
+                },
+            )
+        raise
 
     record_audit_event(
         db,
         client_id=context.client.id,
-        branch_id=branch.id,
+        branch_id=campaign.branch_id,
         actor_id=context.agent.id,
         actor_name=context.agent.name,
         event_type="marketing_campaign_executed",
         entity_type="marketing_campaign",
         entity_id=campaign.id,
         payload={
-            "queued_count": queued_count,
-            "skipped_count": skipped_count,
+            "queued_count": result["queued_count"],
+            "skipped_count": result["skipped_count"],
             "max_recipients": max_recipients,
         },
     )
+    db.commit()
 
     return ConsoleMarketingCampaignExecuteResponse(
         campaign_id=campaign.id,
-        queued_count=queued_count,
-        skipped_count=skipped_count,
-        status="queued" if queued_count > 0 else "skipped",
+        queued_count=result["queued_count"],
+        skipped_count=result["skipped_count"],
+        status="queued" if result["queued_count"] > 0 else "skipped",
     )
 
 
@@ -13077,6 +14133,7 @@ async def get_marketing_campaign_diagnostics(
     campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
     _resolve_marketing_branch(context, db, campaign.branch_id)
     sample_limit_value = _normalize_marketing_sample_limit(sample_limit)
+    refresh_marketing_campaign_lifecycle(db, campaign=campaign)
 
     rows = (
         db.query(
@@ -13091,6 +14148,9 @@ async def get_marketing_campaign_diagnostics(
     )
 
     counts = {"queued": 0, "sent": 0, "failed": 0, "replied": 0}
+    failure_classes: dict[str, int] = {}
+    retryable_failed_count = 0
+    permanent_failed_count = 0
     sample_failed: list[ConsoleMarketingDeliverySample] = []
     for delivery, outbox_status, outbox_last_error in rows:
         status_value = _effective_marketing_delivery_status(
@@ -13098,16 +14158,27 @@ async def get_marketing_campaign_diagnostics(
             outbox_status=outbox_status,
         )
         counts[status_value] += 1
-        if status_value == "failed" and len(sample_failed) < sample_limit_value:
+        if status_value != "failed":
+            continue
+        failure_text = outbox_last_error or delivery.error_reason
+        classification = classify_provider_error(failure_text)
+        reason_code = classification.incident_reason_code
+        failure_classes[reason_code] = failure_classes.get(reason_code, 0) + 1
+        if classification.retryable:
+            retryable_failed_count += 1
+        else:
+            permanent_failed_count += 1
+        if len(sample_failed) < sample_limit_value:
             sample_failed.append(
                 _serialize_marketing_delivery_sample(
                     delivery,
                     status=status_value,
                     outbox_status=outbox_status,
-                    last_error=outbox_last_error or delivery.error_reason,
+                    last_error=failure_text,
                 )
             )
 
+    db.commit()
     return ConsoleMarketingCampaignDiagnosticsResponse(
         campaign_id=campaign.id,
         queued_count=counts["queued"],
@@ -13115,6 +14186,9 @@ async def get_marketing_campaign_diagnostics(
         failed_count=counts["failed"],
         replied_count=counts["replied"],
         total_count=sum(counts.values()),
+        failure_classes=failure_classes,
+        retryable_failed_count=retryable_failed_count,
+        permanent_failed_count=permanent_failed_count,
         sample_failed=sample_failed,
     )
 
@@ -13141,53 +14215,27 @@ async def retry_failed_marketing_campaign_deliveries(
         raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
 
     campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
-    branch = _resolve_marketing_branch(context, db, campaign.branch_id)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
     retry_limit = _normalize_marketing_retry_limit(payload.limit)
-
-    failed_query = (
-        db.query(MarketingCampaignDelivery, OutboxMessage)
-        .join(OutboxMessage, OutboxMessage.id == MarketingCampaignDelivery.outbox_id)
-        .filter(
-            MarketingCampaignDelivery.campaign_id == campaign.id,
-            OutboxMessage.status == "FAILED",
-        )
+    result = retry_failed_marketing_deliveries(
+        db,
+        campaign=campaign,
+        limit=retry_limit,
     )
-    total_failed = failed_query.count()
-    rows = (
-        failed_query.order_by(
-            OutboxMessage.updated_at.desc().nullslast(),
-            OutboxMessage.id.desc(),
-        )
-        .limit(retry_limit)
-        .all()
-    )
-
-    now = datetime.now(timezone.utc)
-    retried_count = 0
-    for delivery, outbox_row in rows:
-        outbox_row.status = "PENDING"
-        outbox_row.next_attempt_at = None
-        outbox_row.last_error = None
-        outbox_row.updated_at = now
-        delivery.status = "queued"
-        delivery.error_reason = None
-        delivery.updated_at = now
-        retried_count += 1
-
-    skipped_count = max(total_failed - retried_count, 0)
 
     record_audit_event(
         db,
         client_id=context.client.id,
-        branch_id=branch.id,
+        branch_id=campaign.branch_id,
         actor_id=context.agent.id,
         actor_name=context.agent.name,
         event_type="marketing_campaign_retry_failed",
         entity_type="marketing_campaign",
         entity_id=campaign.id,
         payload={
-            "retried_count": retried_count,
-            "skipped_count": skipped_count,
+            "retried_count": result["retried_count"],
+            "skipped_count": result["skipped_count"],
+            "skipped_permanent": result["skipped_permanent"],
             "limit": retry_limit,
         },
     )
@@ -13195,8 +14243,9 @@ async def retry_failed_marketing_campaign_deliveries(
 
     return ConsoleMarketingCampaignRetryResponse(
         campaign_id=campaign.id,
-        retried_count=retried_count,
-        skipped_count=skipped_count,
+        retried_count=result["retried_count"],
+        skipped_count=result["skipped_count"],
+        skipped_permanent=result["skipped_permanent"],
     )
 
 

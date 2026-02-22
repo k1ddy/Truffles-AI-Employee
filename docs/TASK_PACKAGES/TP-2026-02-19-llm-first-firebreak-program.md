@@ -19,12 +19,29 @@
 - Часть эвристик даёт ложные сигналы и недетерминизм порядка intent-refs.
 - Бизнес-риск: неправильный ответ в критических turns -> потеря доверия/лида/записи.
 
+## Critical unresolved tails (forensic snapshot: 2026-02-20)
+1. `calendar_tool_contract_miss`:
+- Подтверждающий текст записи допускается при неуспешном tool outcome в части сценариев.
+2. Exact-time booking gaps:
+- Для запросов `Можно на 17:45?` / `Можно на 18:30?` текст уже корректный, но в части turns ломается follow-up contract (`expected_reply_type_mismatch`).
+3. Contract drift `tool executor vs verifier`:
+- `catalog.service_query` может вернуть валидный info outcome, который post-verifier помечает как `contract_invalid`.
+4. Demo-coupling в runtime-core:
+- Non-demo ветка фактически наследует demo knowledge путь через fallback adapters.
+5. Timeout purity не гарантирована end-to-end:
+- При timeout в `detect_multi_intent` сохраняется keyword fallback, что нарушает требование `clarify/handoff only`.
+6. Release gate слишком мягкий:
+- Прогон может быть `semantic_valid=true`, но содержать блокирующие strict-fail классы.
+
 ## Invariant
 - Продуктовый контракт строго сохраняется: `FACT / COLLECT / HANDOFF`.
 - Safety/LAW/contract gates не ослабляются.
 - Deterministic слой валидирует и страхует, но не подменяет смысл без high-certainty основания.
 - Никакого client-specific hardcode в runtime-core.
 - Любая core-правка проходит local-first realism + deterministic + replay evidence.
+- Runtime-core pack-agnostic: demo-specific knowledge допускается только в pack-adapter слоях.
+- `expected_reply_type` ведётся как единый контракт состояния, а не разрозненные эвристики.
+- При timeout любой semantic reroute запрещён: только `clarify/handoff` с trace reason-code.
 
 ## Scope
 - Runtime decision arbitration (`decision.py`, `info.py`, `booking.py`, `ai_service.py`).
@@ -85,6 +102,18 @@
 
 6. Evidence gap:
 - недостаёт унифицированной heatmap по реальному ущербу и распределению классов ошибок.
+
+7. Demo-neutrality gap:
+- generic/fallback runtime path зависит от demo adapter и demo knowledge imports.
+
+8. Contract schema fragmentation:
+- нет единого канонического enum/schema для `tool_decision` и success outcomes.
+
+9. Expected-reply contract fragmentation:
+- `expected_reply_type` проставляется не во всех success/failure путях tool execution.
+
+10. Release quality gate gap:
+- aggregate thresholds не блокируют critical reason-set (`expected_action_mismatch`, contract drift и др.).
 
 ## Required analysis (обязательно до/параллельно внедрению)
 1. Production error heatmap (7-14 days):
@@ -202,6 +231,93 @@
 - Нет релизов без lock/replay + multilingual battery + forensic sign-off.
 - Weekly forensic review закрывается owner sign-off с action items.
 
+### Track F — Demo-neutral runtime decoupling (P0, 3-5 days)
+1. Цель:
+- Убрать demo-specific поведение из runtime-core и восстановить pack-agnostic контракт.
+
+2. Изменения:
+- Запретить прямые импорты `demo_salon_knowledge` вне adapter-модуля для demo pack.
+- Разорвать цепочку `generic -> fallback -> demo` и ввести нейтральный generic fallback.
+- Перенести pack-specific heuristics в pack-runtime adapters/data packs.
+
+3. DoD:
+- `demo_core_import_violations == 0` (core runtime modules).
+- Non-demo pack path не вызывает demo adapter/knowledge.
+- Replay без regressions по booking/info/handoff на lock scenarios.
+
+### Track G — Unified tool contract schema (P0, 3-5 days)
+1. Цель:
+- Синхронизировать tool executor/post-verifier на единой схеме outcome.
+
+2. Изменения:
+- Ввести канонический enum/schema `tool_decision` + allowed outcomes per `tool_action`.
+- Использовать один источник схемы в executor и verifier.
+- Добавить contract tests на drift (`tool_decision_mismatch`, missing required fields, inconsistent success criteria).
+
+3. DoD:
+- `tool_decision_mismatch == 0` на lock/replay.
+- `tool_contract_invalid_rate` не растёт и снижается минимум на `25%` от lock-baseline.
+- Все `catalog.service_query` info outcomes корректно классифицируются как valid/invalid по схеме, без ad-hoc расхождений.
+
+### Track H — Expected-reply state machine unification (P0, 3-5 days)
+1. Цель:
+- Устранить `expected_reply_type` drift между context/meta/tool result.
+
+2. Изменения:
+- Определить single owner для `expected_reply_type` state transitions.
+- На все booking-critical tool outcomes (`ok/conflict/missing_slot/verifier_blocked`) проставлять next expected reply deterministically.
+- Убрать разрозненные side-effects, где expected-reply не обновляется после содержательного ответа.
+
+3. DoD:
+- `expected_reply_type_mismatch == 0` на blocking replay scenario set.
+- Все critical turns имеют согласованный `turn_expectations.reply_type` vs runtime `expected_reply_type`.
+- Добавлены deterministic regression tests минимум для: `17:45`, `18:30`, `reschedule interruption`.
+
+### Track I — Timeout purity and fail-closed routing (P0, 2-4 days)
+1. Цель:
+- Исключить keyword semantic routing на timeout paths.
+
+2. Изменения:
+- В `multi_intent/policy_core` timeout fallback возвращать только neutral degrade contract.
+- Разрешить только `clarify/handoff` при reason-code `timeout_degrade`.
+- Запретить tool-action derivation из keyword fallback при timeout.
+
+3. DoD:
+- `timeout_semantic_reroute_count == 0` в forced-timeout tests.
+- Все timeout turns пишут trace/meta с `timeout_degrade`.
+- Нет роста `timeout_fallback_rate` выше baseline `+0.5pp`.
+
+### Track J — Blocking quality gate hardening (P1, 2-3 days)
+1. Цель:
+- Закрыть "ложно-зелёные" прогоны, где aggregate pass скрывает critical failures.
+
+2. Изменения:
+- Ввести blocking reason-set для release acceptance:
+- `calendar_tool_contract_miss`
+- `expected_action_mismatch`
+- `tool_decision_mismatch`
+- критичные `judge_fail` по booking intent contract
+- Добавить gate: run invalid для release при любом reason из blocking set.
+
+3. DoD:
+- `blocking_reason_count == 0` для release replay.
+- `semantic_valid=true` недостаточно без прохождения blocking gate.
+- `brief.md` автоматически отражает blocking verdict.
+
+### Track K — Deterministic budget and anti-hardcode governance (P1, ongoing)
+1. Цель:
+- Контролировать рост lexical hardcode в semantic path.
+
+2. Изменения:
+- Ввести budget метрики на post-LLM rewrites и keyword-driven overrides.
+- Добавить static/runtime checks на regex/lexicon deltas без контрактных тестов.
+- Обязать архитектурный review для каждого расширения словарей/regex в core path.
+
+3. DoD:
+- `post_llm_semantic_rewrite_rate <= 2%` (overall), `<= 5%` (chaos battery).
+- `rewrite_reason_coverage == 100%`.
+- Любой regex/lexicon delta в core сопровождается resolver update + regression tests.
+
 ## Override whitelist (contract v1)
 Разрешённые deterministic override reason-codes:
 1. `safety_policy_block`:
@@ -224,6 +340,7 @@
 ## Timeout & Degrade policy
 1. При timeout `multi_intent_llm` или `policy_core_llm`:
 - Не выполнять keyword-driven semantic reroute.
+- Не вычислять `tool_action`/intent через lexical fallback.
 - Разрешены только `clarify` или `handoff` с reason-code `timeout_degrade`.
 2. При timeout tool executor:
 - Один контролируемый retry по policy.
@@ -244,12 +361,21 @@
 2. Rules-as-data допустимы для safety и high-precision anchors, но не как основной semantic router.
 3. Любой override должен иметь trace reason + deterministic proof.
 4. Нет "невидимого" переопределения: все arbitration events обязаны логироваться в decision_trace/meta.
+5. Pack-agnostic core: pack/domain специфичность живёт в adapters/packs, не в core routers/services.
+6. Tool outcome schema едина для executor/verifier/evaluator.
+7. Expected-reply state machine централизована и покрыта invariant tests.
+8. Timeout paths fail-closed: без keyword semantic reroute.
 
 ## Touch-list (program-level)
 - `truffles-api/app/routers/webhook/decision.py`
 - `truffles-api/app/routers/webhook/info.py`
 - `truffles-api/app/routers/webhook/booking.py`
 - `truffles-api/app/services/ai_service.py`
+- `truffles-api/app/services/tool_registry_service.py`
+- `truffles-api/app/services/pack_runtime_default.py`
+- `truffles-api/app/services/pack_runtime_generic_adapter.py`
+- `truffles-api/app/services/pack_runtime_fallback_adapter.py`
+- `truffles-api/app/services/pack_runtime_demo_adapter.py`
 - `truffles-api/tests/test_message_endpoint.py`
 - `truffles-api/tests/test_booking_chaos_dialogs.py`
 - `truffles-api/tests/test_booking_quality_response_guard.py`
@@ -286,6 +412,20 @@
 - `post_llm_semantic_rewrite_rate` (target: `<= 2%` overall, `<= 5%` chaos battery).
 - `rewrite_reason_coverage` (target: `100%` whitelist reason-code coverage).
 
+8. Demo-neutrality:
+- `demo_core_import_violations` (target: `0`).
+- `demo_path_usage_non_demo_tenants` (target: `0`).
+
+9. Contract consistency:
+- `tool_decision_mismatch_count` (target: `0` on lock/replay).
+- `blocking_reason_count` (target: `0` for release replay).
+
+10. Expected-reply integrity:
+- `expected_reply_type_mismatch` (target: `0` на blocking scenario set).
+
+11. Timeout purity:
+- `timeout_semantic_reroute_count` (target: `0`).
+
 ## Execution plan (phased)
 1. Phase 0 (Day 0-1):
 - Baseline extraction + heatmap + top-100 forensic.
@@ -297,8 +437,14 @@
 3. Phase 2 (Day 3-7):
 - LLM-first arbitration redesign + tool governance updates + expanded chaos tests.
 
-4. Phase 3 (Day 8-14):
-- Stabilization, canary rollout, regression burn-down, finalize operating runbook.
+4. Phase 3 (Day 8-10):
+- Demo-neutral decoupling + unified tool contract schema (`Track F + Track G`).
+
+5. Phase 4 (Day 10-12):
+- Expected-reply unification + timeout purity hardening (`Track H + Track I`).
+
+6. Phase 5 (Day 12-14):
+- Blocking gates + deterministic budget governance + final canary (`Track J + Track K`).
 
 ## Checks (minimum mandatory)
 - `test -f /home/zhan/truffles-main/truffles-api/.env`
@@ -307,6 +453,8 @@
 - `docker exec truffles-api sha256sum /app/app/routers/webhook/decision.py` (если используется runtime контейнер)
 - `python3 -m py_compile` for touched runtime modules.
 - `ruff check` for touched runtime/tests.
+- `rg -n "demo_salon_knowledge" truffles-api/app/routers truffles-api/app/services | rg -v "pack_runtime_demo_adapter.py"` (должно быть пусто после Track F).
+- `rg -n "tool_decision_mismatch|expected_reply_type_mismatch|expected_action_mismatch|calendar_tool_contract_miss" /tmp/booking_quality/booking-replay-42/responses.jsonl`
 - `PROJECT_NAME=truffles-api-test-firebreak PYTEST_ARGS='/app/tests/test_booking_info_interrupt_contract.py' scripts/test_api_container.sh`
 - `pytest -q truffles-api/tests/test_message_endpoint.py`
 - `pytest -q truffles-api/tests/test_booking_chaos_dialogs.py`
@@ -314,6 +462,7 @@
 - `pytest -q truffles-api/tests/test_demo_salon_eval.py`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --mode llm --count 10 --min-turns 10 --max-turns 15 --include-media --scenario-coverage booking,info,interrupt,handoff --tool-hooks auto --judge-mode all --fail-on-thresholds --run-id booking-lock-42`
 - `TEST_MODE=1 python3 ops/diagnose.py llm-quality --scenarios-file /tmp/booking_quality/booking-lock-42/scenarios.json --baseline-summary /tmp/booking_quality/booking-lock-42/summary.json --count 10 --tool-hooks auto --reset-before-dialog --judge-mode all --fail-on-thresholds --fail-on-regression --max-failures 20`
+- `jq '.quality_status' /tmp/booking_quality/booking-replay-42/summary.json` (в dry-run обязателен `comparison_blocked=true`).
 
 ## Evidence package (for each wave)
 - `summary.json`, `brief.md`, `responses.jsonl`, `trace_bundle.jsonl`
@@ -332,10 +481,14 @@
 - Любой override без whitelist reason-code.
 - Рост `hard_fail_rate` выше `+0.2pp` от baseline.
 - Рост `post_llm_semantic_rewrite_rate` выше порога.
+- Любой `blocking_reason` в release replay (`calendar_tool_contract_miss`, `expected_action_mismatch`, `tool_decision_mismatch`, critical `judge_fail`).
+- `expected_reply_type_mismatch` в blocking scenario set.
+- Dry-run evidence, поданный как quality acceptance.
 4. Progressive rollout with kill-switches:
 - semantic arbitration mode
 - strict explicit routing mode
 - fallback policy mode
+- timeout purity mode
 5. Stop-the-line on regression breach.
 
 ## Rollback
@@ -354,6 +507,8 @@
 - Риск latency pressure (timeouts) как скрытого источника semantic деградации.
 - Риск data-pack quality gaps, маскирующих core regressions.
 - Риск процессного дрейфа (неконсистентные сценарии/базлайны).
+- Риск migration debt при выносе demo-specific логики из core.
+- Риск временного роста clarify/handoff при включении timeout fail-closed без донастройки prompts.
 
 ## Ownership
 - Top Architect: архитектурные решения, invariant контроль, final go/no-go.

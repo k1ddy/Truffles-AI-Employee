@@ -34,6 +34,28 @@ async function gotoConsoleRoot(page: import('@playwright/test').Page) {
     await page.goto(resolvedBaseURL, { waitUntil: 'domcontentloaded' });
 }
 
+async function ensureAuthenticatedConsole(page: import('@playwright/test').Page) {
+    await gotoConsoleRoot(page);
+    const loginButton = page.getByTestId('login-button');
+    const logoutButton = page.getByTestId('logout-button');
+
+    await expect
+        .poll(
+            async () =>
+                (await loginButton.isVisible().catch(() => false))
+                || (await logoutButton.isVisible().catch(() => false)),
+            { timeout: 20000 }
+        )
+        .toBe(true);
+
+    const hasLogout = await logoutButton.isVisible().catch(() => false);
+    const hasLogin = await loginButton.isVisible().catch(() => false);
+    if (!hasLogout && hasLogin) {
+        await loginThroughKeycloak(page);
+        await gotoConsoleRoot(page);
+    }
+}
+
 async function startKeycloakLogin(page: import('@playwright/test').Page) {
     await page.goto(buildSignInUrl(baseURL), { waitUntil: 'domcontentloaded' });
     let providerForm = page.locator('form[action*="keycloak"]').first();
@@ -158,31 +180,68 @@ async function selectBranchIfNeeded(page: import('@playwright/test').Page) {
     }
 }
 
-test('setup auth @smoke', async ({ page }) => {
-    await loginThroughKeycloak(page);
-    await expect(page.getByTestId('logout-button')).toBeVisible({ timeout: 20000 });
-    await selectCompanyIfNeeded(page);
-    await selectClientIfNeeded(page);
-    await selectBranchIfNeeded(page);
+async function waitForConsoleReadyState(page: import('@playwright/test').Page, timeoutMs = 20000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
     const selectionGate = page.locator('[data-testid="company-select"], [data-testid="client-select"], [data-testid="branch-select"]');
     const contextGate = page.locator('[data-testid="context-company-select"], [data-testid="context-client-select"], [data-testid="context-branch-select"]');
     const contextBar = page.getByTestId('context-bar');
     const inboxView = page.getByTestId('inbox-view');
     const consoleHeader = page.getByTestId('console-header');
-    await expect
-        .poll(
-            async () => {
-                if (await page.getByTestId('cases-title').isVisible().catch(() => false)) return true;
-                if (await selectionGate.isVisible().catch(() => false)) return true;
-                if (await contextGate.isVisible().catch(() => false)) return true;
-                if (await contextBar.isVisible().catch(() => false)) return true;
-                if (await inboxView.isVisible().catch(() => false)) return true;
-                if (await consoleHeader.isVisible().catch(() => false)) return true;
-                return false;
-            },
-            { timeout: 20000 }
-        )
-        .toBe(true);
+    const casesTitle = page.getByTestId('cases-title');
+
+    while (Date.now() < deadline) {
+        if (await casesTitle.isVisible().catch(() => false)) return true;
+        if (await selectionGate.isVisible().catch(() => false)) return true;
+        if (await contextGate.isVisible().catch(() => false)) return true;
+        if (await contextBar.isVisible().catch(() => false)) return true;
+        if (await inboxView.isVisible().catch(() => false)) return true;
+        if (await consoleHeader.isVisible().catch(() => false)) return true;
+        await page.waitForTimeout(300);
+    }
+    return false;
+}
+
+test('setup auth @smoke', async ({ page }) => {
+    const pageErrors: string[] = [];
+    const consoleErrors: string[] = [];
+    page.on('pageerror', (error) => {
+        pageErrors.push(`${error.name}: ${error.message}\n${error.stack ?? ''}`);
+    });
+    page.on('console', (message) => {
+        if (message.type() === 'error') {
+            consoleErrors.push(message.text());
+        }
+    });
+
+    await loginThroughKeycloak(page);
+    await ensureAuthenticatedConsole(page);
+    let ready = false;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        ready = await waitForConsoleReadyState(page, 20000);
+        if (ready) {
+            break;
+        }
+        const hasChunkLoadError = pageErrors.some((entry) => entry.includes('ChunkLoadError'));
+        if (hasChunkLoadError && attempt < 2) {
+            pageErrors.length = 0;
+            consoleErrors.length = 0;
+            await gotoConsoleRoot(page);
+            await ensureAuthenticatedConsole(page);
+        }
+    }
+
+    if (!ready) {
+        const diagnostics = [
+            `final_url=${page.url()}`,
+            pageErrors.length ? `page_errors:\n${pageErrors.join('\n---\n')}` : 'page_errors: none',
+            consoleErrors.length ? `console_errors:\n${consoleErrors.join('\n')}` : 'console_errors: none',
+        ].join('\n\n');
+        throw new Error(`auth.setup readiness failed\n\n${diagnostics}`);
+    }
+
+    await selectCompanyIfNeeded(page);
+    await selectClientIfNeeded(page);
+    await selectBranchIfNeeded(page);
 
     fs.mkdirSync(path.dirname(authFile), { recursive: true });
     await page.context().storageState({ path: authFile });

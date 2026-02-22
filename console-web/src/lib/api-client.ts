@@ -40,6 +40,7 @@ export const ErrorCodes = {
     CLIENT_SELECTION_REQUIRED: "CLIENT_SELECTION_REQUIRED",
     COMPANY_SELECTION_REQUIRED: "COMPANY_SELECTION_REQUIRED",
     BRANCH_SELECTION_REQUIRED: "BRANCH_SELECTION_REQUIRED",
+    CONVERSATION_REQUIRED: "CONVERSATION_REQUIRED",
     TENANT_MISMATCH: "TENANT_MISMATCH",
     BRANCH_ACCESS_DENIED: "BRANCH_ACCESS_DENIED",
     NOT_FOUND: "NOT_FOUND",
@@ -96,7 +97,7 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
     },
     outreach: {
         read: ["platform_admin", "owner", "admin", "manager", "support", "viewer", "specialist"],
-        write: ["platform_admin", "owner", "admin", "manager", "support", "viewer", "specialist"],
+        write: ["platform_admin", "owner", "admin", "manager"],
     },
     knowledge: {
         read: ["platform_admin", "owner", "admin", "manager", "viewer"],
@@ -152,12 +153,29 @@ export const ConsoleRBAC: Record<ConsoleSection, Record<ConsoleAction, ConsoleRo
     },
 };
 
+const ConsoleRoleSet = new Set<ConsoleRole>([
+    "platform_admin",
+    "owner",
+    "admin",
+    "manager",
+    "support",
+    "specialist",
+    "viewer",
+]);
+
+export function isConsoleRole(role: string): role is ConsoleRole {
+    return ConsoleRoleSet.has(role as ConsoleRole);
+}
+
 export function canAccessConsole(
-    role: ConsoleRole | null | undefined,
+    role: string | null | undefined,
     section: ConsoleSection,
     action: ConsoleAction,
 ): boolean {
     if (!role) {
+        return false;
+    }
+    if (!isConsoleRole(role)) {
         return false;
     }
     return ConsoleRBAC[section][action].includes(role);
@@ -219,6 +237,11 @@ const errorConfigs: Record<ErrorCode, ErrorConfig> = {
     BRANCH_SELECTION_REQUIRED: {
         http_status: 400,
         ui_behavior: { action: "toast", toast: true, toast_type: "warning" },
+        retryable: false,
+    },
+    CONVERSATION_REQUIRED: {
+        http_status: 400,
+        ui_behavior: { action: "toast", toast: true, toast_type: "error" },
         retryable: false,
     },
     TENANT_MISMATCH: {
@@ -832,9 +855,31 @@ export type KnowledgeRollbackResponse = {
 export type LearningCandidate = components["schemas"]["LearningCandidate"];
 export type LearningCandidateListResponse = components["schemas"]["LearningCandidateListResponse"];
 export type LearningCandidateActionResponse = components["schemas"]["LearningCandidateActionResponse"];
-export type MarketingCampaignStatus = "draft" | "ready" | "executed" | "paused";
+export type MarketingCampaignStatus =
+    | "draft"
+    | "ready"
+    | "executed"
+    | "paused"
+    | "in_review"
+    | "approved"
+    | "scheduled"
+    | "running"
+    | "completed"
+    | "cancelled"
+    | "failed";
+export type MarketingCampaignStatusV2 =
+    | "draft"
+    | "in_review"
+    | "approved"
+    | "scheduled"
+    | "running"
+    | "paused"
+    | "completed"
+    | "cancelled"
+    | "failed";
 export type MarketingDeliveryStatus = "queued" | "sent" | "failed" | "replied";
 export type MarketingAudienceMode = "branch_active_conversations";
+export type MarketingSegmentCode = "reactivation_30_120" | "no_show_recovery_14d" | "engaged_no_booking_7d";
 export type MarketingCampaign = {
     id: string;
     client_id: string;
@@ -842,8 +887,17 @@ export type MarketingCampaign = {
     name: string;
     message_text: string;
     status: MarketingCampaignStatus;
+    status_v2: MarketingCampaignStatusV2;
+    segment_code: MarketingSegmentCode;
     audience_mode: MarketingAudienceMode;
     preview_total: number;
+    preflight_valid: boolean;
+    preflight_snapshot?: Record<string, unknown> | null;
+    approved_by?: string | null;
+    approved_at?: string | null;
+    requested_review_at?: string | null;
+    run_started_at?: string | null;
+    run_completed_at?: string | null;
     last_preview_at?: string | null;
     executed_at?: string | null;
     created_at?: string | null;
@@ -854,6 +908,7 @@ export type MarketingCampaignCreateRequest = {
     branch_id: string;
     name: string;
     message_text: string;
+    segment_code?: MarketingSegmentCode;
     audience_mode?: MarketingAudienceMode;
 };
 export type MarketingCampaignCreateResponse = { campaign: MarketingCampaign };
@@ -863,6 +918,8 @@ export type MarketingCampaignPreviewResponse = {
     branch_id: string;
     audience_mode: MarketingAudienceMode;
     estimated_recipients: number;
+    eligible_count: number;
+    suppressed_count: number;
     sample_conversation_ids: string[];
     sample_recipient_jids: string[];
 };
@@ -889,6 +946,9 @@ export type MarketingCampaignDiagnosticsResponse = {
     failed_count: number;
     replied_count: number;
     total_count: number;
+    failure_classes: Record<string, number>;
+    retryable_failed_count: number;
+    permanent_failed_count: number;
     sample_failed: MarketingDeliverySample[];
 };
 export type MarketingCampaignRetryRequest = { confirm_retry: boolean; limit?: number | null };
@@ -896,6 +956,148 @@ export type MarketingCampaignRetryResponse = {
     campaign_id: string;
     retried_count: number;
     skipped_count: number;
+    skipped_permanent: number;
+};
+export type MarketingCampaignLifecycleActionRequest = { reason?: string | null };
+export type MarketingCampaignAudienceResponse = {
+    campaign_id: string;
+    total_count: number;
+    eligible_count: number;
+    suppressed_count: number;
+    items: MarketingCampaignRecipient[];
+};
+export type MarketingCampaignRecipient = {
+    id: string;
+    campaign_id: string;
+    recipient_jid: string;
+    user_id?: string | null;
+    conversation_id?: string | null;
+    segment_code: MarketingSegmentCode;
+    reason_codes: string[];
+    suppressed: boolean;
+    suppression_reasons: string[];
+    updated_at?: string | null;
+};
+export type MarketingCampaignPreflightResponse = {
+    campaign_id: string;
+    generated_at: string;
+    preflight_valid: boolean;
+    blocked_reasons: string[];
+    outbox_health_status: string;
+    outbox_pending: number;
+    outbox_failed_24h: number;
+    audience_total: number;
+    eligible_count: number;
+    suppressed_count: number;
+    template_gate_enabled: boolean;
+    template_state?: string | null;
+    template_ok: boolean;
+};
+export type TenantsOperationalSnapshotWorkspaceMode = "portfolio" | "onboarding" | "changes" | "decommission";
+export type TenantsOperationalSnapshotLifecycleMode = "active" | "archived" | "all";
+export type TenantsOperationalSnapshotKpiId =
+    | "onboardingCoverage"
+    | "goLiveReadiness"
+    | "serviceStability"
+    | "decommissionShare"
+    | "changeFailure"
+    | "rollbackShare"
+    | "blockedSignals";
+export type TenantsOperationalSnapshotKpiStatus = "ok" | "warn" | "critical";
+export type TenantsOperationalSnapshotKpi = {
+    onboardingCoverage: number;
+    goLiveReadiness: number;
+    serviceStability: number;
+    decommissionShare: number;
+    changeFailure: number;
+    rollbackShare: number;
+    blockedSignals: number;
+};
+export type TenantsOperationalSnapshotDrilldownItem = {
+    id: TenantsOperationalSnapshotKpiId;
+    status: TenantsOperationalSnapshotKpiStatus;
+    value: number;
+    reason: string;
+};
+export type TenantsOperationalSnapshotAttentionSummary = {
+    activeClientsTotal: number;
+    highRiskClients: number;
+    mediumRiskClients: number;
+    outboxFailed24hTotal: number;
+    pendingHandoversTotal: number;
+};
+export type TenantsOperationalSnapshotPayload = {
+    generatedAt: string;
+    sourceWindow: number;
+    workspaceMode: TenantsOperationalSnapshotWorkspaceMode;
+    lifecycleMode: TenantsOperationalSnapshotLifecycleMode;
+    kpi: TenantsOperationalSnapshotKpi;
+    drilldown: TenantsOperationalSnapshotDrilldownItem[];
+    attentionSummary: TenantsOperationalSnapshotAttentionSummary;
+};
+export type TenantsWeeklySnapshotRecord = {
+    id: string;
+    created_at: string;
+    client_id: string;
+    week_key: string;
+    snapshot: TenantsOperationalSnapshotPayload;
+    actor_name?: string | null;
+};
+export type TenantsWeeklySnapshotListResponse = {
+    items: TenantsWeeklySnapshotRecord[];
+    cursor?: string | null;
+    has_more: boolean;
+};
+export type CreateTenantsWeeklySnapshotRequest = {
+    client_id: string;
+    week_key: string;
+    snapshot: TenantsOperationalSnapshotPayload;
+};
+export type CreateTenantsWeeklySnapshotResponse = {
+    item: TenantsWeeklySnapshotRecord;
+};
+export type GetTenantsPortfolioParams = {
+    cursor?: string;
+    limit?: number;
+    q?: string;
+    company_id?: string;
+    lifecycle?: "active" | "archived" | "all";
+    attention_limit?: number;
+    stale_after_minutes?: number;
+    include_low?: "true" | "false";
+};
+export type TenantsPortfolioResponse = {
+    generated_at: string;
+    clients: components["schemas"]["ClientListResponse"];
+    fleet_attention: components["schemas"]["FleetAttentionResponse"];
+};
+export type GetTenantsCompanyCockpitParams = {
+    company_id: string;
+    client_id?: string;
+    lifecycle?: "active" | "archived" | "all";
+    client_limit?: number;
+    branch_limit?: number;
+    client_cursor?: string;
+    branch_cursor?: string;
+    client_q?: string;
+    branch_q?: string;
+};
+export type TenantsCompanyCockpitResponse = {
+    generated_at: string;
+    company_id: string;
+    selected_client_id?: string | null;
+    clients: components["schemas"]["ClientListResponse"];
+    branches: components["schemas"]["BranchListResponse"];
+};
+export type AuditTenantsSensitiveAccessRequest = {
+    branch_id: string;
+    field: "instance_id";
+    action: "reveal" | "copy";
+    context?: string;
+};
+export type AuditTenantsSensitiveAccessResponse = {
+    ok: boolean;
+    audit_id: string;
 };
 
 // Query params
@@ -906,6 +1108,12 @@ export type ListLearningCandidatesParams = operations["listLearningCandidates"][
 export type ListCompaniesParams = operations["listAdminCompanies"]["parameters"]["query"];
 export type ListClientsParams = operations["listAdminClients"]["parameters"]["query"];
 export type ListBranchesParams = operations["listAdminBranches"]["parameters"]["query"];
+export type ListTenantsWeeklySnapshotsParams = {
+    client_id: string;
+    week_key?: string;
+    cursor?: string;
+    limit?: number;
+};
 export type ListFleetAttentionParams = operations["listFleetAttention"]["parameters"]["query"];
 export type ListIntegrationsParams = operations["listAdminIntegrations"]["parameters"]["query"];
 export type ListProviderLifecycleParams = operations["listAdminProviderLifecycle"]["parameters"]["query"];
@@ -1081,6 +1289,16 @@ export const adminApi = {
         apiClient.get<components["schemas"]["ClientListResponse"]>("/admin/clients", { params }),
     listBranches: (params?: ListBranchesParams) =>
         apiClient.get<components["schemas"]["BranchListResponse"]>("/admin/branches", { params }),
+    getTenantsPortfolio: (params?: GetTenantsPortfolioParams) =>
+        apiClient.get<TenantsPortfolioResponse>("/admin/tenants/portfolio", { params }),
+    getTenantsCompanyCockpit: (params: GetTenantsCompanyCockpitParams) =>
+        apiClient.get<TenantsCompanyCockpitResponse>("/admin/tenants/company-cockpit", { params }),
+    listTenantsWeeklySnapshots: (params: ListTenantsWeeklySnapshotsParams) =>
+        apiClient.get<TenantsWeeklySnapshotListResponse>("/admin/tenants/weekly-snapshots", { params }),
+    saveTenantsWeeklySnapshot: (data: CreateTenantsWeeklySnapshotRequest) =>
+        apiClient.post<CreateTenantsWeeklySnapshotResponse>("/admin/tenants/weekly-snapshots", data),
+    auditTenantsSensitiveAccess: (data: AuditTenantsSensitiveAccessRequest) =>
+        apiClient.post<AuditTenantsSensitiveAccessResponse>("/admin/tenants/sensitive-access", data),
     listFleetAttention: (params?: ListFleetAttentionParams) =>
         apiClient.get<components["schemas"]["FleetAttentionResponse"]>("/admin/fleet/attention", { params }),
     listIncidents: (params?: { limit?: number }) =>
@@ -1095,6 +1313,24 @@ export const adminApi = {
         apiClient.post<MarketingCampaignCreateResponse>("/admin/marketing/campaigns", data),
     previewMarketingCampaign: (campaignId: string, data?: MarketingCampaignPreviewRequest) =>
         apiClient.post<MarketingCampaignPreviewResponse>(`/admin/marketing/campaigns/${campaignId}/preview`, data ?? {}),
+    getMarketingCampaignAudience: (
+        campaignId: string,
+        params?: { include_suppressed?: boolean; limit?: number },
+    ) =>
+        apiClient.get<MarketingCampaignAudienceResponse>(`/admin/marketing/campaigns/${campaignId}/audience`, { params }),
+    requestMarketingCampaignApproval: (campaignId: string, data?: MarketingCampaignLifecycleActionRequest) =>
+        apiClient.post<MarketingCampaignCreateResponse>(
+            `/admin/marketing/campaigns/${campaignId}/request-approval`,
+            data ?? {},
+        ),
+    approveMarketingCampaign: (campaignId: string, data?: MarketingCampaignLifecycleActionRequest) =>
+        apiClient.post<MarketingCampaignCreateResponse>(`/admin/marketing/campaigns/${campaignId}/approve`, data ?? {}),
+    pauseMarketingCampaign: (campaignId: string, data?: MarketingCampaignLifecycleActionRequest) =>
+        apiClient.post<MarketingCampaignCreateResponse>(`/admin/marketing/campaigns/${campaignId}/pause`, data ?? {}),
+    resumeMarketingCampaign: (campaignId: string, data?: MarketingCampaignLifecycleActionRequest) =>
+        apiClient.post<MarketingCampaignCreateResponse>(`/admin/marketing/campaigns/${campaignId}/resume`, data ?? {}),
+    getMarketingCampaignPreflight: (campaignId: string) =>
+        apiClient.get<MarketingCampaignPreflightResponse>(`/admin/marketing/campaigns/${campaignId}/preflight`),
     executeMarketingCampaign: (campaignId: string, data: MarketingCampaignExecuteRequest) =>
         apiClient.post<MarketingCampaignExecuteResponse>(`/admin/marketing/campaigns/${campaignId}/execute`, data),
     getMarketingCampaignDiagnostics: (campaignId: string, params?: { sample_limit?: number }) =>

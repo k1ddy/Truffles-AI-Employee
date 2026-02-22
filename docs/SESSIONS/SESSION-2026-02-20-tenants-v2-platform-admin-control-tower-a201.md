@@ -1,0 +1,62 @@
+# SESSION 2026-02-20-tenants-v2-platform-admin-control-tower-a201 — Session 2026-02-20-tenants-v2-platform-admin-control-tower-a201
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-20-tenants-v2-platform-admin-control-tower-a201.md
+- branch: feat/2026-02-20-tenants-v2-platform-admin-control-tower-a201
+- worktree: /home/zhan/worktrees/2026-02-20-tenants-v2-platform-admin-control-tower-a201
+- base_ref: origin/main
+- scope: Tenants platform_admin v2 (context consistency, scoped errors, A11y, masked identifiers, server-backed weekly snapshots)
+- done:
+  - Session created.
+  - TP created in worktree and linked to session.
+  - Tenants page updated: unified context label resolution (company/client/branch), scoped error summary, guide contrast, filter a11y labels, masked `instance_id`.
+  - Wave-2 decomposition: extracted `TenantsScopedErrorSummary` and `TenantsSensitiveIdCell` from `tenants/page.tsx`.
+  - Provisioning wizard updated with missing a11y labels on payment/provider webhook/date/alert inputs.
+  - `useInlineErrorSummary` upgraded with `scope` support and scoped clear.
+  - `adminApi` extended with weekly snapshots endpoints/types.
+  - `adminApi` extended with sensitive-access audit endpoint/type.
+  - Backend implemented: `/console/v1/admin/tenants/weekly-snapshots` GET/POST, schema contracts, helper normalization/serialization.
+  - Backend implemented: `/console/v1/admin/tenants/sensitive-access` POST with strict allowlist and audit event `tenants_sensitive_id_accessed`.
+  - Tenants weekly snapshots switched to server-backed flow with local fallback.
+  - Added live Tenants accessibility evidence suite: `console-web/e2e/tenants-a11y.spec.ts` (desktop/mobile screenshots + axe JSON artifacts).
+  - Captured report: `docs/REPORTS/2026-02-20-tenants-a11y-evidence-a201.md`.
+  - Closed remaining a11y/code items for Tenants lane:
+    - Added missing `aria-label` to onboarding contract/purchased capability `select` and provider-binding `date` controls in `ProvisioningWizard`.
+    - Increased contrast for `tenants-workspace-guide`, throughput helper labels, and mobile context strip/link in `ConsoleShell`.
+    - Added e2e scenario: `instance_id` reveal/copy must call `/api/proxy/admin/tenants/sensitive-access` with `field=instance_id`.
+    - Added CI gate: `A11Y_FAIL_ON_THRESHOLDS=1` run for `e2e/tenants-a11y.spec.ts` in `console-e2e` job.
+  - Tests/checks passed:
+    - `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_admin_provisioning.py` (63 passed)
+    - `npm run lint -- --file src/app/tenants/page.tsx --file src/components/TenantsScopedErrorSummary.tsx --file src/components/TenantsSensitiveIdCell.tsx --file src/lib/api-client.ts` (pass)
+    - `npx tsc --noEmit` (pass)
+    - `PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz E2E_USE_STORAGE_STATE=1 E2E_USERNAME=admin E2E_PASSWORD=admin npx playwright test e2e/tenants-a11y.spec.ts --project=chromium --workers=1 --reporter=list` (2 passed)
+    - `PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz E2E_USE_STORAGE_STATE=1 E2E_USERNAME=admin E2E_PASSWORD=admin npx playwright test e2e/platform-admin.spec.ts --project=chromium --workers=1 --reporter=list --grep "audit instance_id reveal"` (1 passed)
+    - `npm run lint` (pass)
+    - `npx tsc --noEmit` (pass)
+    - `scripts/session_check.sh` (Session OK)
+  - Known gap:
+    - Strict `A11Y_FAIL_ON_THRESHOLDS=1` on live `console.truffles.kz` still fails (`critical=2`, `serious=1`) because live build has not yet received this branch changes.
+- next:
+  - Finish remaining TP scope in follow-up waves: e2e+axe evidence pack, report doc.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v2-platform-admin-control-tower-a201.md
+  - console-web/src/app/tenants/page.tsx
+  - console-web/src/components/ProvisioningWizard.tsx
+  - console-web/src/lib/use-inline-error-summary.ts
+  - console-web/src/lib/api-client.ts
+  - truffles-api/app/routers/console.py
+  - truffles-api/app/schemas/console.py
+  - truffles-api/tests/test_console_tenants_list.py
+  - console-web/src/components/TenantsScopedErrorSummary.tsx
+  - console-web/src/components/TenantsSensitiveIdCell.tsx
+  - console-web/e2e/tenants-a11y.spec.ts
+  - docs/REPORTS/2026-02-20-tenants-a11y-evidence-a201.md
+  - .github/workflows/ci.yml
+  - console-web/e2e/platform-admin.spec.ts
+  - console-web/src/components/ConsoleShell.tsx
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-desktop.png
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-mobile.png
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-desktop-axe.json
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-mobile-axe.json
+- last_updated: 2026-02-20

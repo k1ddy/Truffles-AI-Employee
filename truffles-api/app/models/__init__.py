@@ -23,12 +23,17 @@ from app.models.knowledge_version import KnowledgeVersion
 from app.models.learned_response import LearnedResponse
 from app.models.marketing_campaign import MarketingCampaign
 from app.models.marketing_campaign_delivery import MarketingCampaignDelivery
+from app.models.marketing_campaign_recipient import MarketingCampaignRecipient
+from app.models.marketing_consent import MarketingConsent
+from app.models.marketing_delivery_event import MarketingDeliveryEvent
+from app.models.marketing_suppression import MarketingSuppression
 from app.models.message import Message
 from app.models.outbox_message import OutboxMessage
 from app.models.outbox_status_event import OutboxStatusEvent
 from app.models.prompt import Prompt
 from app.models.reference_pack import ReferencePack
 from app.models.specialist import Specialist
+from app.models.tenants_weekly_snapshot import TenantsWeeklySnapshot
 from app.models.user import User
 
 __all__ = [
@@ -48,6 +53,10 @@ __all__ = [
     "Message",
     "MarketingCampaign",
     "MarketingCampaignDelivery",
+    "MarketingCampaignRecipient",
+    "MarketingConsent",
+    "MarketingSuppression",
+    "MarketingDeliveryEvent",
     "Handover",
     "InboxEvent",
     "ClientSettings",
@@ -64,4 +73,5 @@ __all__ = [
     "LearnedResponse",
     "KnowledgeVersion",
     "Specialist",
+    "TenantsWeeklySnapshot",
 ]

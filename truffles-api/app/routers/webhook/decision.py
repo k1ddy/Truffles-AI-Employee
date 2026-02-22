@@ -3087,7 +3087,7 @@ MSG_MEDIA_STYLE_REFERENCE = (
     "Чтобы ускорить, напишите услугу, дату/время и имя."
 )
 MSG_STYLE_REFERENCE_NEED_MEDIA = (
-    "Можем ориентироваться на фото/референс. Пришлите фото и кратко опишите запрос — "
+    "Да, конечно. Можем ориентироваться на фото/референс. Пришлите фото и кратко опишите запрос — "
     "я передам администратору для подтверждения."
 )
 
@@ -7678,6 +7678,7 @@ async def _handle_webhook_payload(
         expected_reply_shortcircuit=expected_reply_shortcircuit_effective,
         now=now,
         send_and_save=_send_and_save,
+        saved_message=saved_message,
     )
     if reengage_response:
         return reengage_response
@@ -9725,7 +9726,6 @@ async def _handle_webhook_payload(
         POLICY_CORE_RESCUE_MATRIX_ENABLED
         and policy_core_runtime_active
         and policy_core_mode == "degraded_fallback"
-        and policy_core_attempted
         and policy_core_timeout_degrade
     ):
         degraded_policy_core_critical = True
@@ -11531,6 +11531,30 @@ async def _handle_webhook_payload(
                     verifier_prompt = MSG_BOOKING_ASK_REFERENCE
                     verifier_action = "check_booking_prompt"
                     verifier_intent = "check_booking"
+                    time_match = (
+                        re.search(r"\b([01]?\d|2[0-3])[:.][0-5]\d\b", message_text)
+                        if isinstance(message_text, str)
+                        else None
+                    )
+                    normalized_message = (
+                        normalize_for_matching(message_text) if isinstance(message_text, str) else ""
+                    )
+                    availability_request = bool(
+                        time_match
+                        and normalized_message
+                        and not _looks_like_booking_verification_request(message_text)
+                        and not _looks_like_booking_reschedule_request(message_text)
+                        and any(
+                            marker in normalized_message
+                            for marker in ("можно", "есть", "свобод", "доступ")
+                        )
+                    )
+                    if availability_request:
+                        requested_time = time_match.group(0).replace(".", ":")
+                        verifier_prompt = f"На какую дату вам удобно, если время {requested_time}?"
+                        verifier_action = "booking_prompt"
+                        verifier_intent = "booking"
+                        verifier_slot = "datetime"
                 if verifier_slot in BOOKING_SLOT_ORDER:
                     context = _get_conversation_context(conversation)
                     booking_state = dict(booking) if isinstance(booking, dict) else {}

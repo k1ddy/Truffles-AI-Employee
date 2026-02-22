@@ -154,6 +154,17 @@ def test_detect_info_class_intents_hours_signal_for_how_long_you_work_phrase():
     assert meta.get("info_signals", {}).get("duration") is False
 
 
+def test_detect_info_class_intents_special_offers_phrase_does_not_trigger_master():
+    intents, meta = _detect_info_class_intents(
+        "У вас есть специальные предложения?",
+        intent_decomp_set=set(),
+        client_slug="demo_salon",
+    )
+
+    assert "master" not in intents
+    assert meta.get("info_signals", {}).get("master") is False
+
+
 def test_compose_multi_truth_reply_how_long_you_work_drops_duration_component():
     reply, meta = demo_salon_knowledge.compose_multi_truth_reply(
         "Как долго вы работаете?",

@@ -1733,6 +1733,23 @@ def _handle_consult_flow(
             )
 
         bot_response = consult_decision.response
+        normalized_message_text = (
+            legacy.normalize_for_matching(message_text) if isinstance(message_text, str) else ""
+        )
+        style_reference_offer = bool(
+            isinstance(message_text, str)
+            and message_text.strip()
+            and (
+                legacy._is_style_reference_request(message_text, has_media=False)
+                or "фото" in normalized_message_text
+                or "референс" in normalized_message_text
+            )
+        )
+        if style_reference_offer:
+            if bot_response:
+                bot_response = legacy._combine_sidecar(bot_response, legacy.MSG_STYLE_REFERENCE_NEED_MEDIA)
+            else:
+                bot_response = legacy.MSG_STYLE_REFERENCE_NEED_MEDIA
         bot_response = legacy._combine_sidecar(bot_response, intent_queue_followup)
         booking_followup = None
         if booking_goal_locked:

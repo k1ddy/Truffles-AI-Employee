@@ -1,0 +1,24 @@
+# SESSION 2026-02-21-inbox-pause-bot-a1 — Session 2026-02-21-inbox-pause-bot-a1
+
+- status: active
+- owner: Top Architect / Brain / Hands
+- task_package: docs/TASK_PACKAGES/TP-2026-02-21-inbox-human-lock-v2-a1.md
+- branch: feat/2026-02-21-inbox-human-lock-v2-a1
+- worktree: /home/zhan/worktrees/2026-02-21-inbox-pause-bot-a1
+- base_ref: origin/main
+- scope: Implement TЗ `SPECS/INBOX_HUMAN_LOCK.md` (manual messaging + human lock v2) across UI/API/trace/RBAC.
+- done:
+  - Session created.
+  - TЗ drafted (`SPECS/INBOX_HUMAN_LOCK.md`).
+  - Implemented human lock v2 across backend/UI/contracts (pause toggles, list filters, header badge, lock scope).
+  - Added RBAC tightening for outreach write + tests.
+  - Updated OpenAPI v1 + errors registry.
+  - Added tests for pause toggle and human lock status payload.
+- next:
+  - Regenerate `console-web/src/types/api.generated.ts` (openapi-typescript missing locally).
+  - Final review and capture remaining evidence.
+- evidence:
+  - docs/TASK_PACKAGES/TP-2026-02-21-inbox-human-lock-v2-a1.md
+  - SPECS/INBOX_HUMAN_LOCK.md
+  - pytest -q truffles-api/tests/test_console_outreach.py truffles-api/tests/test_console_rbac.py
+- last_updated: 2026-02-21
