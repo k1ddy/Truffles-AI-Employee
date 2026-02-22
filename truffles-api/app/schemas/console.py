@@ -97,6 +97,8 @@ class ConsoleClient(BaseModel):
 
 class ConsoleBranch(BaseModel):
     id: UUID
+    client_id: Optional[UUID] = None
+    company_id: Optional[UUID] = None
     slug: str
     name: str
     is_active: bool

@@ -51,7 +51,7 @@ export default function TenantsActionQueuePanel<T extends TenantsActionQueueItem
         <section className="rounded-lg border border-border/60 bg-card p-3" data-testid="tenants-action-queue">
             <div className="flex items-start justify-between gap-3">
                 <div>
-                    <h2 className="text-sm font-semibold">Action Queue</h2>
+                    <h2 className="text-sm font-semibold">Очередь действий</h2>
                     <p className="text-xs text-muted-foreground">
                         Приоритетные действия для текущего среза активных тенантов.
                     </p>

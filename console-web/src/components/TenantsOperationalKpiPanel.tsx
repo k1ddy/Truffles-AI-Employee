@@ -246,7 +246,7 @@ export default function TenantsOperationalKpiPanel({
                             Скорость онбординга
                         </div>
                         <div className="text-xs text-muted-foreground">
-                            окно: {onboardingThroughput.window_hours ?? "—"}ч · approvals: {onboardingThroughput.approved_branches_total ?? "—"} · first-pass: {onboardingThroughput.first_pass_approved_branches ?? "—"}
+                            окно: {onboardingThroughput.window_hours ?? "—"}ч · подтверждено филиалов: {onboardingThroughput.approved_branches_total ?? "—"} · запуск с первого раза: {onboardingThroughput.first_pass_approved_branches ?? "—"}
                         </div>
                     </div>
                     <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -272,7 +272,7 @@ export default function TenantsOperationalKpiPanel({
 
             <div className="mt-4 rounded-lg border border-border/60 bg-background p-3" data-testid="tenants-kpi-drilldown">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Threshold drill-down
+                    Разбор по порогам
                 </div>
                 <div className="space-y-2">
                     {kpiDrilldown.map((item) => (
@@ -294,7 +294,7 @@ export default function TenantsOperationalKpiPanel({
                                 {item.reason}
                             </div>
                             <div className="mt-1 text-xs text-muted-foreground">
-                                threshold: {item.thresholdLabel}
+                                порог: {item.thresholdLabel}
                             </div>
                             <div className="mt-2">
                                 <button
@@ -316,7 +316,7 @@ export default function TenantsOperationalKpiPanel({
                         Интеграция алертов
                     </div>
                     <div className="text-xs text-muted-foreground">
-                        <span data-testid="tenants-kpi-alert-severity">severity: {alertSeverity}</span> · breaches: {alertBreachesCount}
+                        <span data-testid="tenants-kpi-alert-severity">уровень: {alertSeverity}</span> · нарушений: {alertBreachesCount}
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                         <button
@@ -324,7 +324,7 @@ export default function TenantsOperationalKpiPanel({
                             onClick={onCopyAlertPayload}
                             data-testid="tenants-kpi-alert-copy"
                         >
-                            Скопировать payload
+                            Скопировать данные алерта
                         </button>
                         <button
                             className="btn-ghost"

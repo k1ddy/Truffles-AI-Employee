@@ -2365,6 +2365,14 @@ paths:
           - type: string
           - type: 'null'
           title: Q
+      - name: company_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Company Id
       - name: client_id
         in: query
         required: false
@@ -6301,6 +6309,18 @@ components:
           type: string
           format: uuid
           title: Id
+        client_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Client Id
+        company_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Company Id
         slug:
           type: string
           title: Slug
@@ -9219,6 +9239,20 @@ components:
           - cancelled
           - failed
           title: Status
+        status_v2:
+          type: string
+          enum:
+          - draft
+          - in_review
+          - approved
+          - scheduled
+          - running
+          - paused
+          - completed
+          - cancelled
+          - failed
+          title: Status V2
+          default: draft
         segment_code:
           type: string
           enum:
@@ -9366,35 +9400,6 @@ components:
       required:
       - campaign
       title: ConsoleMarketingCampaignCreateResponse
-    ConsoleMarketingCampaignUpdateRequest:
-      properties:
-        name:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Name
-        message_text:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Message Text
-        segment_code:
-          anyOf:
-          - type: string
-            enum:
-            - reactivation_30_120
-            - no_show_recovery_14d
-            - engaged_no_booking_7d
-          - type: 'null'
-          title: Segment Code
-        reason:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Reason
-      additionalProperties: false
-      type: object
-      title: ConsoleMarketingCampaignUpdateRequest
     ConsoleMarketingCampaignDiagnosticsResponse:
       properties:
         campaign_id:
@@ -9416,6 +9421,20 @@ components:
         total_count:
           type: integer
           title: Total Count
+        failure_classes:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Failure Classes
+          default: {}
+        retryable_failed_count:
+          type: integer
+          title: Retryable Failed Count
+          default: 0
+        permanent_failed_count:
+          type: integer
+          title: Permanent Failed Count
+          default: 0
         sample_failed:
           items:
             $ref: '#/components/schemas/ConsoleMarketingDeliverySample'
@@ -9545,6 +9564,19 @@ components:
           anyOf:
           - $ref: '#/components/schemas/ConsoleMarketingAudienceFunnel'
           - type: 'null'
+        template_gate_enabled:
+          type: boolean
+          title: Template Gate Enabled
+          default: false
+        template_state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Template State
+        template_ok:
+          type: boolean
+          title: Template Ok
+          default: true
       type: object
       required:
       - campaign_id
@@ -9708,6 +9740,35 @@ components:
       - retried_count
       - skipped_count
       title: ConsoleMarketingCampaignRetryResponse
+    ConsoleMarketingCampaignUpdateRequest:
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        message_text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message Text
+        segment_code:
+          anyOf:
+          - type: string
+            enum:
+            - reactivation_30_120
+            - no_show_recovery_14d
+            - engaged_no_booking_7d
+          - type: 'null'
+          title: Segment Code
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      additionalProperties: false
+      type: object
+      title: ConsoleMarketingCampaignUpdateRequest
     ConsoleMarketingDeliverySample:
       properties:
         delivery_id:
@@ -9715,8 +9776,10 @@ components:
           format: uuid
           title: Delivery Id
         conversation_id:
-          type: string
-          format: uuid
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
           title: Conversation Id
         recipient_jid:
           anyOf:
@@ -11837,7 +11900,6 @@ components:
       required:
       - destination
       - content
-      - conversation_id
       title: ConsoleOutreachMessageRequest
     ConsoleOutreachMessageResponse:
       properties:
@@ -13719,6 +13781,18 @@ components:
         has_more:
           type: boolean
           title: Has More
+        storage_mode:
+          type: string
+          enum:
+          - table
+          - audit_fallback
+          title: Storage Mode
+          default: table
+        schema_versions:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Schema Versions
       type: object
       required:
       - items
@@ -13785,6 +13859,10 @@ components:
           title: Week Key
         snapshot:
           $ref: '#/components/schemas/ConsoleTenantsWeeklySnapshotPayload'
+        snapshot_schema_version:
+          type: string
+          title: Snapshot Schema Version
+          default: v1
         actor_name:
           anyOf:
           - type: string

@@ -24,9 +24,9 @@ import { writeConsoleContextScopeToStorage } from "@/lib/console-context-storage
 import type { components } from "@/types/api.generated";
 
 type SessionData = ReturnType<typeof useSession>["data"];
-type FleetAttentionItem = components["schemas"]["FleetAttentionItem"];
-type FleetClient = components["schemas"]["Client"];
-type FleetBranch = components["schemas"]["Branch"];
+type FleetAttentionItem = components["schemas"]["ConsoleFleetAttentionItem"];
+type FleetClient = components["schemas"]["ConsoleClient"];
+type FleetBranch = components["schemas"]["ConsoleBranch"];
 type GuidedHours = {
     days: string;
     open: string;

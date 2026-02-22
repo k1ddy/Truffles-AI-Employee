@@ -294,7 +294,7 @@ export function useUpdateSettings() {
     const { handleError } = useErrorHandler();
 
     return useMutation({
-        mutationFn: async (data: components["schemas"]["SettingsUpdateRequest"]) => {
+        mutationFn: async (data: components["schemas"]["ConsoleSettingsUpdateRequest"]) => {
             const { data: response } = await settingsApi.update(data);
             return response;
         },

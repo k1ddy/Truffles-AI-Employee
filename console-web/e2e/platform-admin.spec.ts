@@ -7,10 +7,11 @@ const stayOnBaseOrigin = /localhost|127\.0\.0\.1/.test(baseURL);
 let resolvedBaseURL = baseURL;
 const loginUser = process.env.E2E_USERNAME ?? 'admin';
 const loginPassword = process.env.E2E_PASSWORD ?? 'admin';
-const isLocalBaseURL = /localhost|127\.0\.0\.1/.test(baseURL);
-const quarantineLocal = !!process.env.CI && isLocalBaseURL;
-
-test.skip(quarantineLocal, 'Quarantine local CI platform-admin suite while stabilizing console-e2e.');
+const TENANTS_FIXTURE_COMPANY_ID = '11111111-1111-4111-8111-111111111111';
+const TENANTS_FIXTURE_CLIENT_ID = '22222222-2222-4222-8222-222222222222';
+const TENANTS_FIXTURE_BRANCH_ID = '33333333-3333-4333-8333-333333333333';
+const TENANTS_FIXTURE_AGENT_ID = '44444444-4444-4444-8444-444444444444';
+const TENANTS_FIXTURE_NOW = '2026-02-22T12:00:00.000Z';
 
 function buildSignInUrl(origin: string, callbackOrigin = origin) {
     return `${origin}/api/auth/signin?callbackUrl=${encodeURIComponent(callbackOrigin)}`;
@@ -22,6 +23,242 @@ function resolvePreferredOrigin(actionOrigin: string) {
 
 function urlPathPattern(path: string) {
     return new RegExp(`${path.replace(/\//g, '\\/')}(\\?|$)`);
+}
+
+function toJsonResponse(route: import('@playwright/test').Route, payload: unknown) {
+    return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(payload),
+    });
+}
+
+function buildTenantsFixtureBundle() {
+    const company = {
+        id: TENANTS_FIXTURE_COMPANY_ID,
+        name: 'Demo Holding',
+        billing_info: {},
+    };
+    const client = {
+        id: TENANTS_FIXTURE_CLIENT_ID,
+        slug: 'demo_salon',
+        name: 'Demo Salon',
+        status: 'active',
+        company_id: TENANTS_FIXTURE_COMPANY_ID,
+        company_name: 'Demo Holding',
+        lifecycle_state: 'active',
+        payment_status: 'confirmed',
+        commercial_state: 'payment_confirmed',
+        service_state: 'ok',
+        owner_name: 'Owner',
+        next_action: 'monitor_sla_and_quality',
+        total_branches: 1,
+        active_branches: 1,
+        degraded_branches: 0,
+        go_live_ready_branches: 1,
+        reference_branch_ids: [TENANTS_FIXTURE_BRANCH_ID],
+        reference_branch_reason: 'active_live_signals',
+    };
+    const branch = {
+        id: TENANTS_FIXTURE_BRANCH_ID,
+        client_id: TENANTS_FIXTURE_CLIENT_ID,
+        company_id: TENANTS_FIXTURE_COMPANY_ID,
+        slug: 'almaty_downtown',
+        name: 'Almaty Downtown',
+        is_active: true,
+        instance_id: 'instance-demo-01',
+        telegram_chat_id: '-100100200300',
+        phone: '+77001234567',
+        knowledge_tag: 'demo_salon',
+        timezone: 'Asia/Almaty',
+        go_live_state: 'approved',
+        go_live_waiver_active: false,
+        go_live_allowed: true,
+    };
+    const fleetSummary = {
+        total_companies: 1,
+        total_clients: 1,
+        active_clients: 1,
+        onboarding_clients: 0,
+        archived_clients: 0,
+        paused_clients: 0,
+        go_live_ready_clients: 0,
+        degraded_clients: 0,
+        payment_pending_clients: 0,
+        payment_confirmed_clients: 1,
+        lifecycle_counts: {
+            lead: 0,
+            contracting: 0,
+            onboarding: 0,
+            go_live_ready: 0,
+            active: 1,
+            paused: 0,
+            archived: 0,
+        },
+        payment_counts: {
+            pending: 0,
+            confirmed: 1,
+            rejected: 0,
+            unknown: 0,
+        },
+        service_counts: {
+            ok: 1,
+            degraded: 0,
+            attention: 0,
+        },
+        onboarding_throughput: {
+            window_hours: 720,
+            approved_branches_total: 1,
+            first_pass_approved_branches: 1,
+            time_to_go_live_median_hours: 12.0,
+            blocker_age_p95_hours: 4.0,
+            first_pass_go_live_rate_pct: 100.0,
+            incident_reopen_rate_24h_pct: 0.0,
+        },
+    };
+    const attention = {
+        generated_at: TENANTS_FIXTURE_NOW,
+        stale_after_minutes: 60,
+        summary: {
+            active_clients_total: 1,
+            clients_with_attention: 0,
+            high_risk_clients: 0,
+            medium_risk_clients: 0,
+            low_risk_clients: 0,
+            stale_branches_total: 0,
+            integration_error_branches_total: 0,
+            integration_warn_branches_total: 0,
+            outbox_failed_24h_total: 0,
+            pending_handovers_total: 0,
+        },
+        items: [],
+    };
+    return {
+        company,
+        client,
+        branch,
+        fleetSummary,
+        attention,
+    };
+}
+
+async function mockTenantsDeterministicApis(
+    page: import('@playwright/test').Page,
+    counters?: { portfolioCalls?: number; cockpitCalls?: number },
+) {
+    const fixture = buildTenantsFixtureBundle();
+    await page.route('**/api/proxy/me', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        const headers = route.request().headers();
+        const selectedCompanyId = headers['x-company-id'] || '';
+        const selectedClientId = headers['x-client-id'] || '';
+        const selectedBranchId = headers['x-branch-id'] || '';
+        const selectedClient = selectedClientId === fixture.client.id ? fixture.client : null;
+        const selectedCompany = selectedCompanyId === fixture.company.id ? fixture.company.id : null;
+        const selectedBranch = selectedBranchId === fixture.branch.id ? fixture.branch.id : null;
+        await toJsonResponse(route, {
+            agent: {
+                id: TENANTS_FIXTURE_AGENT_ID,
+                name: 'Platform Admin',
+                role: 'platform_admin',
+                client_id: fixture.client.id,
+                branch_id: null,
+                is_active: true,
+            },
+            client: selectedClient,
+            branches: [fixture.branch],
+            clients: [fixture.client],
+            companies: [fixture.company],
+            company_selection_required: false,
+            selection_required: false,
+            branch_selection_required: false,
+            selected_company_id: selectedCompany,
+            selected_branch_id: selectedBranch,
+        });
+    });
+    await page.route('**/api/proxy/admin/companies**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            items: [fixture.company],
+            cursor: null,
+            has_more: false,
+        });
+    });
+    await page.route('**/api/proxy/admin/clients**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            items: [fixture.client],
+            cursor: null,
+            has_more: false,
+            summary: fixture.fleetSummary,
+        });
+    });
+    await page.route('**/api/proxy/admin/branches**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        await toJsonResponse(route, {
+            items: [fixture.branch],
+            cursor: null,
+            has_more: false,
+        });
+    });
+    await page.route('**/api/proxy/admin/tenants/portfolio**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        if (counters) {
+            counters.portfolioCalls = (counters.portfolioCalls ?? 0) + 1;
+        }
+        await toJsonResponse(route, {
+            generated_at: TENANTS_FIXTURE_NOW,
+            clients: {
+                items: [fixture.client],
+                cursor: null,
+                has_more: false,
+                summary: fixture.fleetSummary,
+            },
+            fleet_attention: fixture.attention,
+        });
+    });
+    await page.route('**/api/proxy/admin/tenants/company-cockpit**', async (route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
+        if (counters) {
+            counters.cockpitCalls = (counters.cockpitCalls ?? 0) + 1;
+        }
+        const url = new URL(route.request().url());
+        const selectedClientId = url.searchParams.get('client_id');
+        await toJsonResponse(route, {
+            generated_at: TENANTS_FIXTURE_NOW,
+            company_id: fixture.company.id,
+            selected_client_id: selectedClientId || null,
+            clients: {
+                items: [fixture.client],
+                cursor: null,
+                has_more: false,
+                summary: null,
+            },
+            branches: {
+                items: [fixture.branch],
+                cursor: null,
+                has_more: false,
+            },
+        });
+    });
 }
 
 function tenantsSection(page: import('@playwright/test').Page, title: string) {
@@ -535,6 +772,10 @@ test.describe('Platform Admin Tenants', () => {
     });
 
     test('should keep branch page-filter after apply context (Scenario B)', async ({ page }) => {
+        await mockTenantsDeterministicApis(page);
+        await gotoConsoleRoot(page);
+        await openTenants(page);
+
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
             await page.getByTestId('tenants-mode-changes').click();
@@ -542,10 +783,8 @@ test.describe('Platform Admin Tenants', () => {
 
         const branchesSection = page.getByTestId('tenants-change-management');
         await expect(branchesSection).toBeVisible();
-
-        if (!(await clickFirstEnabledContextButton(branchesSection))) {
-            test.skip(true, 'No enabled branch context button in current scope.');
-        }
+        const hasContextButton = await clickFirstEnabledContextButton(branchesSection);
+        expect(hasContextButton).toBe(true);
 
         const branchFilter = page.getByTestId('tenants-page-filter-branch');
         await expect(branchFilter).toBeVisible();
@@ -557,6 +796,10 @@ test.describe('Platform Admin Tenants', () => {
     });
 
     test('should reset only page filters and keep context chips (Scenario C)', async ({ page }) => {
+        await mockTenantsDeterministicApis(page);
+        await gotoConsoleRoot(page);
+        await openTenants(page);
+
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
             await page.getByTestId('tenants-mode-changes').click();
@@ -564,10 +807,8 @@ test.describe('Platform Admin Tenants', () => {
 
         const branchesSection = page.getByTestId('tenants-change-management');
         await expect(branchesSection).toBeVisible();
-
-        if (!(await clickFirstEnabledContextButton(branchesSection))) {
-            test.skip(true, 'No enabled branch context button in current scope.');
-        }
+        const hasContextButton = await clickFirstEnabledContextButton(branchesSection);
+        expect(hasContextButton).toBe(true);
 
         const branchChip = page.locator('[data-testid="tenants-context-lens"] span').filter({ hasText: /^филиал:/ }).first();
         await expect(branchChip).toBeVisible();
@@ -581,12 +822,13 @@ test.describe('Platform Admin Tenants', () => {
     });
 
     test('should reset only context and keep page filters (Scenario D)', async ({ page }) => {
+        await mockTenantsDeterministicApis(page);
+        await gotoConsoleRoot(page);
+        await openTenants(page);
+
         const companyFilter = page.getByTestId('tenants-page-filter-company');
         const hasCompanyFilter = await ensureFilterHasValue(companyFilter);
-        if (!hasCompanyFilter) {
-            await expect(companyFilter).toBeVisible();
-            test.skip(true, 'No selectable page filter options in current scope.');
-        }
+        expect(hasCompanyFilter).toBe(true);
         const companyFilterBeforeReset = await companyFilter.inputValue();
 
         await page.getByTestId('tenants-context-clear-all').click();
@@ -598,21 +840,10 @@ test.describe('Platform Admin Tenants', () => {
     });
 
     test('should call portfolio and cockpit endpoints on Tenants (Scenario E)', async ({ page }) => {
-        let portfolioCalls = 0;
-        let cockpitCalls = 0;
-
-        await page.route('**/api/proxy/admin/tenants/portfolio**', async (route) => {
-            if (route.request().method() === 'GET') {
-                portfolioCalls += 1;
-            }
-            await route.fallback();
-        });
-        await page.route('**/api/proxy/admin/tenants/company-cockpit**', async (route) => {
-            if (route.request().method() === 'GET') {
-                cockpitCalls += 1;
-            }
-            await route.fallback();
-        });
+        const counters = { portfolioCalls: 0, cockpitCalls: 0 };
+        await mockTenantsDeterministicApis(page, counters);
+        await gotoConsoleRoot(page);
+        await openTenants(page);
 
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
@@ -623,25 +854,19 @@ test.describe('Platform Admin Tenants', () => {
         if (await refreshKpiButton.isVisible().catch(() => false)) {
             await refreshKpiButton.click();
         }
-        for (let attempt = 0; attempt < 30 && portfolioCalls === 0; attempt += 1) {
+        for (let attempt = 0; attempt < 30 && (counters.portfolioCalls ?? 0) === 0; attempt += 1) {
             await page.waitForTimeout(500);
         }
-        if (portfolioCalls === 0) {
-            test.skip(true, 'Portfolio endpoint call was not triggered in current UI state.');
-        }
+        expect(counters.portfolioCalls).toBeGreaterThan(0);
 
         const companyFilter = page.getByTestId('tenants-page-filter-company');
         await page.getByTestId('tenants-page-filter-clear-all').click();
         const hasCompanyFilter = await ensureFilterHasValue(companyFilter);
-        if (!hasCompanyFilter) {
-            test.skip(true, 'No selectable company filter options for cockpit request.');
-        }
-        for (let attempt = 0; attempt < 30 && cockpitCalls === 0; attempt += 1) {
+        expect(hasCompanyFilter).toBe(true);
+        for (let attempt = 0; attempt < 30 && (counters.cockpitCalls ?? 0) === 0; attempt += 1) {
             await page.waitForTimeout(500);
         }
-        if (cockpitCalls === 0) {
-            test.skip(true, 'Company cockpit endpoint call was not triggered in current UI state.');
-        }
+        expect(counters.cockpitCalls).toBeGreaterThan(0);
     });
 
     test('should audit instance_id reveal and copy actions on Tenants @smoke', async ({ page }) => {
@@ -664,6 +889,9 @@ test.describe('Platform Admin Tenants', () => {
                 body: JSON.stringify({ ok: true }),
             });
         });
+        await mockTenantsDeterministicApis(page);
+        await gotoConsoleRoot(page);
+        await openTenants(page);
 
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
@@ -671,9 +899,6 @@ test.describe('Platform Admin Tenants', () => {
         }
 
         const branches = page.getByTestId('tenants-change-management');
-        if (!(await branches.isVisible().catch(() => false))) {
-            test.skip(true, 'Change management section is unavailable in current tenant scope.');
-        }
         await expect(branches).toBeVisible();
         const revealButton = page
             .getByTestId('tenants-instance-id-reveal')
@@ -683,9 +908,8 @@ test.describe('Platform Admin Tenants', () => {
             .getByTestId('tenants-instance-id-copy')
             .or(page.getByRole('button', { name: /Скопировать instance_id/i }))
             .first();
-        if (!(await revealButton.isVisible().catch(() => false)) || !(await copyButton.isVisible().catch(() => false))) {
-            test.skip(true, 'No branch with reveal/copy controls in current tenant scope.');
-        }
+        await expect(revealButton).toBeVisible();
+        await expect(copyButton).toBeVisible();
 
         await page.evaluate(() => {
             const existing = navigator.clipboard as Clipboard | undefined;

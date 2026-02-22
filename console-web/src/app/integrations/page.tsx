@@ -48,9 +48,9 @@ type TeamFilter = "all" | "gap" | "no_manager" | "no_specialist" | "understaffed
 type ViewMode = "overview" | "today";
 type SlaFilter = "all" | "overdue" | "due_soon";
 
-type AgentMembership = components["schemas"]["AgentMembership"];
-type Company = components["schemas"]["Company"];
-type ProviderLifecycleItem = components["schemas"]["ProviderLifecycleItem"];
+type AgentMembership = components["schemas"]["ConsoleAgentMembership"];
+type Company = components["schemas"]["ConsoleCompany"];
+type ProviderLifecycleItem = components["schemas"]["ConsoleProviderLifecycleItem"];
 
 type MembershipStats = {
     total: number;
@@ -403,7 +403,7 @@ function DriftIssues({ item }: { item: BranchIntegrationStatus }) {
     }
     return (
         <div className="flex flex-wrap gap-1">
-            {item.drift_issues.map((issue) => (
+            {item.drift_issues.map((issue: string) => (
                 <span
                     key={`${item.branch_id}-${issue}`}
                     className="rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-800"
