@@ -145,3 +145,25 @@
 2. Quick-create accessibility hardening.
 - Added explicit labels for all branch inputs (previously placeholder-only).
 - Added stable input IDs and `data-testid` hooks for deterministic UI/e2e assertions.
+
+## Wave 4 continuation + Wave 5 gate status (2026-02-22, UTC)
+1. `Operational KPI` section extracted from `tenants/page.tsx` into dedicated component.
+- New component: `console-web/src/components/TenantsOperationalKpiPanel.tsx`
+- Parent `page.tsx` now wires handlers/derived data via explicit props.
+- Monolith size reduced further: `4003 -> 3768` LOC.
+
+2. Additional copy/a11y hardening in top controls.
+- Increased foreground contrast for low-contrast labels/help text in:
+  - `tenants-page-filters`
+  - `tenants-context-lens`
+- Keep behavior unchanged; this is presentation-only hardening.
+
+3. A11y fail-closed lane is now enforced and reports current live blocker.
+- Command:
+  - `A11Y_FAIL_ON_THRESHOLDS=1 PLAYWRIGHT_WEB_SERVER=0 PLAYWRIGHT_BASE_URL=https://console.truffles.kz E2E_USERNAME=admin E2E_PASSWORD=admin E2E_USE_STORAGE_STATE=1 corepack pnpm -C console-web exec playwright test e2e/tenants-a11y.spec.ts --project=chromium --workers=1 --reporter=line`
+- Result:
+  - `desktop serious axe violations = 1`
+  - `mobile serious axe violations = 1`
+  - violation id: `color-contrast`
+- Interpretation:
+  - This gate currently validates deployed runtime (`console.truffles.kz`), so red status reflects live build until branch deploy.

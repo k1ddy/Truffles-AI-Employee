@@ -89,11 +89,11 @@ export default function TenantsTopControls({
                 ) : null}
             </div>
             <div className="rounded-lg border border-primary/30 bg-primary/[0.04] p-3" data-testid="tenants-page-filters">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-foreground/80">
                     Шаг 1. Фильтры страницы
                 </div>
                 <div className="grid gap-2 md:grid-cols-3">
-                    <label className="text-xs text-muted-foreground">
+                    <label className="text-xs text-foreground/80">
                         Компания
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -109,7 +109,7 @@ export default function TenantsTopControls({
                             ))}
                         </select>
                     </label>
-                    <label className="text-xs text-muted-foreground">
+                    <label className="text-xs text-foreground/80">
                         Клиент
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -125,7 +125,7 @@ export default function TenantsTopControls({
                             ))}
                         </select>
                     </label>
-                    <label className="text-xs text-muted-foreground">
+                    <label className="text-xs text-foreground/80">
                         Филиал
                         <select
                             className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -159,12 +159,12 @@ export default function TenantsTopControls({
                         Сбросить фильтры
                     </button>
                 </div>
-                <div className="mt-2 text-xs text-muted-foreground">
+                <div className="mt-2 text-xs text-foreground/70">
                     Эти фильтры применяются только к этой странице и сохраняются в URL.
                 </div>
             </div>
             <div className="rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="tenants-context-lens">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-foreground/80">
                     Шаг 2. Рабочий контур
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -199,7 +199,7 @@ export default function TenantsTopControls({
                         Сбросить контур
                     </button>
                 </div>
-                <div className="mt-2 text-xs text-muted-foreground">
+                <div className="mt-2 text-xs text-foreground/70">
                     Контур используется при переходах между разделами. Для списка на этой странице используйте кнопку «Взять из рабочего контура».
                 </div>
             </div>

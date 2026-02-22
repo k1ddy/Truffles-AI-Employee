@@ -9,6 +9,7 @@ import type { components } from "@/types/api.generated";
 import AccessDenied from "@/components/AccessDenied";
 import ProvisioningWizard from "@/components/ProvisioningWizard";
 import TenantsActionQueuePanel, { type TenantsActionQueueItem } from "@/components/TenantsActionQueuePanel";
+import TenantsOperationalKpiPanel from "@/components/TenantsOperationalKpiPanel";
 import TenantsQuickCreatePanel from "@/components/TenantsQuickCreatePanel";
 import TenantsScopedErrorSummary from "@/components/TenantsScopedErrorSummary";
 import TenantsSensitiveIdCell, { type TenantsSensitiveAction } from "@/components/TenantsSensitiveIdCell";
@@ -582,26 +583,6 @@ function formatKpiReason(value: number, rule: OperationalKpiRule, status: Operat
         return `Критично (${thresholdLabel})`;
     }
     return `Требует внимания (${thresholdLabel})`;
-}
-
-function kpiStatusBadgeClass(status: OperationalKpiStatus): string {
-    if (status === "critical") {
-        return "bg-red-100 text-red-700";
-    }
-    if (status === "warn") {
-        return "bg-amber-100 text-amber-700";
-    }
-    return "bg-emerald-100 text-emerald-700";
-}
-
-function kpiCardClass(status: OperationalKpiStatus): string {
-    if (status === "critical") {
-        return "rounded-lg border border-red-300/80 bg-red-50/30 px-3 py-2";
-    }
-    if (status === "warn") {
-        return "rounded-lg border border-amber-300/80 bg-amber-50/30 px-3 py-2";
-    }
-    return "rounded-lg border border-border/60 px-3 py-2";
 }
 
 function toCsvCell(value: string | number): string {
@@ -2556,273 +2537,57 @@ export default function TenantsPage() {
 
             <div className="grid gap-6">
                 {showPortfolio && tenantLifecycle === "active" ? (
-                    <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-operational-kpi">
-                        <div className="flex items-start justify-between gap-4 mb-4">
-                            <div>
-                                <h2 className="text-lg font-semibold">Операционные KPI</h2>
-                                <p className="text-sm text-muted-foreground">
-                                    Прокси-метрики: портфель + attention + branch changes (последние 100 изменений)
-                                </p>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2" data-testid="tenants-kpi-export-controls">
-                                <button
-                                    className="btn-ghost"
-                                    onClick={() => {
-                                        tenantsPortfolioQuery.refetch();
-                                        if (pageFilterCompanyId) {
-                                            tenantsCompanyCockpitQuery.refetch();
-                                        }
-                                        fleetAttentionQuery.refetch();
-                                        recentBranchChangesKpiQuery.refetch();
-                                        selectedClientAuditQuery.refetch();
-                                        if (pageFilterClientId) {
-                                            weeklySnapshotsServerQuery.refetch();
-                                        }
-                                    }}
-                                    disabled={
-                                        tenantsPortfolioQuery.isFetching
-                                        || tenantsCompanyCockpitQuery.isFetching
-                                        || fleetAttentionQuery.isFetching
-                                        || recentBranchChangesKpiQuery.isFetching
-                                    }
-                                >
-                                    {tenantsPortfolioQuery.isFetching || recentBranchChangesKpiQuery.isFetching ? "Обновление..." : "Обновить KPI"}
-                                </button>
-                                <button
-                                    className="btn-ghost"
-                                    onClick={() => exportOperationalReport("json")}
-                                    data-testid="tenants-kpi-export-json"
-                                >
-                                    Экспорт JSON
-                                </button>
-                                <button
-                                    className="btn-ghost"
-                                    onClick={() => exportOperationalReport("csv")}
-                                    data-testid="tenants-kpi-export-csv"
-                                >
-                                    Экспорт CSV
-                                </button>
-                                <button
-                                    className="btn-ghost"
-                                    onClick={saveWeeklySnapshot}
-                                    data-testid="tenants-kpi-save-weekly-snapshot"
-                                    disabled={!pageFilterClientId}
-                                    title={pageFilterClientId ? undefined : "Выберите клиента в фильтрах страницы"}
-                                >
-                                    Недельный снимок
-                                </button>
-                            </div>
-                        </div>
-                        <div className="mb-3 text-xs text-muted-foreground">
-                            окно расчета изменений: {operationalKpi.sourceWindow} · опубликовано: {operationalKpi.publishedChanges} ·
-                            ошибок публикации: {operationalKpi.publishFailedChanges} · откатов: {operationalKpi.rolledBackChanges} ·
-                            критичных KPI: {criticalKpiCount} · предупреждений: {warnKpiCount}
-                        </div>
-                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                            <div className={kpiCardClass(operationalKpiById.get("onboardingCoverage")?.status ?? "ok")} data-testid="tenants-kpi-onboarding-coverage">
-                                <div className="text-xs text-muted-foreground">Покрытие онбординга (прокси)</div>
-                                <div className="text-xl font-semibold">{operationalKpi.onboardingCoveragePct}%</div>
-                                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("onboardingCoverage")?.status ?? "ok")}`}>
-                                    {operationalKpiById.get("onboardingCoverage")?.status ?? "ok"}
-                                </div>
-                            </div>
-                            <div className={kpiCardClass(operationalKpiById.get("goLiveReadiness")?.status ?? "ok")} data-testid="tenants-kpi-go-live-readiness">
-                                <div className="text-xs text-muted-foreground">Готовность к запуску (прокси)</div>
-                                <div className="text-xl font-semibold">{operationalKpi.goLiveReadinessPct}%</div>
-                                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("goLiveReadiness")?.status ?? "ok")}`}>
-                                    {operationalKpiById.get("goLiveReadiness")?.status ?? "ok"}
-                                </div>
-                            </div>
-                            <div className={kpiCardClass(operationalKpiById.get("serviceStability")?.status ?? "ok")} data-testid="tenants-kpi-service-stability">
-                                <div className="text-xs text-muted-foreground">Стабильность сервиса</div>
-                                <div className="text-xl font-semibold">{operationalKpi.serviceStabilityPct}%</div>
-                                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("serviceStability")?.status ?? "ok")}`}>
-                                    {operationalKpiById.get("serviceStability")?.status ?? "ok"}
-                                </div>
-                            </div>
-                            <div className={kpiCardClass(operationalKpiById.get("decommissionShare")?.status ?? "ok")} data-testid="tenants-kpi-decommission-share">
-                                <div className="text-xs text-muted-foreground">Доля вывода из эксплуатации</div>
-                                <div className="text-xl font-semibold">{operationalKpi.decommissionSharePct}%</div>
-                                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("decommissionShare")?.status ?? "ok")}`}>
-                                    {operationalKpiById.get("decommissionShare")?.status ?? "ok"}
-                                </div>
-                            </div>
-                            <div className={kpiCardClass(operationalKpiById.get("changeFailure")?.status ?? "ok")} data-testid="tenants-kpi-change-failure">
-                                <div className="text-xs text-muted-foreground">Доля ошибок публикации (прокси)</div>
-                                <div className="text-xl font-semibold">{operationalKpi.changeFailurePct}%</div>
-                                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("changeFailure")?.status ?? "ok")}`}>
-                                    {operationalKpiById.get("changeFailure")?.status ?? "ok"}
-                                </div>
-                            </div>
-                            <div className={kpiCardClass(operationalKpiById.get("rollbackShare")?.status ?? "ok")} data-testid="tenants-kpi-rollback-share">
-                                <div className="text-xs text-muted-foreground">Доля откатов (прокси)</div>
-                                <div className="text-xl font-semibold">{operationalKpi.rollbackSharePct}%</div>
-                                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("rollbackShare")?.status ?? "ok")}`}>
-                                    {operationalKpiById.get("rollbackShare")?.status ?? "ok"}
-                                </div>
-                            </div>
-                            <div className={kpiCardClass(operationalKpiById.get("blockedSignals")?.status ?? "ok")} data-testid="tenants-kpi-blocked-signals">
-                                <div className="text-xs text-muted-foreground">Блокирующие сигналы</div>
-                                <div className="text-xl font-semibold">{operationalKpi.blockedSignalsCount}</div>
-                                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(operationalKpiById.get("blockedSignals")?.status ?? "ok")}`}>
-                                    {operationalKpiById.get("blockedSignals")?.status ?? "ok"}
-                                </div>
-                            </div>
-                        </div>
-
-                        {onboardingThroughput ? (
-                            <div className="mt-4 rounded-lg border border-border/60 bg-background p-3" data-testid="tenants-onboarding-throughput">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                                        Onboarding Throughput
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                        окно: {onboardingThroughput.window_hours}ч · approvals: {onboardingThroughput.approved_branches_total} · first-pass: {onboardingThroughput.first_pass_approved_branches}
-                                    </div>
-                                </div>
-                                <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                                        <div className="text-[11px] text-foreground/80">Median time to go-live</div>
-                                        <div className="text-base font-semibold">{formatOptionalHours(onboardingThroughput.time_to_go_live_median_hours)}</div>
-                                    </div>
-                                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                                        <div className="text-[11px] text-foreground/80">Blocker age p95</div>
-                                        <div className="text-base font-semibold">{formatOptionalHours(onboardingThroughput.blocker_age_p95_hours)}</div>
-                                    </div>
-                                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                                        <div className="text-[11px] text-foreground/80">First-pass go-live rate</div>
-                                        <div className="text-base font-semibold">{formatOptionalPercent(onboardingThroughput.first_pass_go_live_rate_pct)}</div>
-                                    </div>
-                                    <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                                        <div className="text-[11px] text-foreground/80">Incident reopen &lt;24h</div>
-                                        <div className="text-base font-semibold">{formatOptionalPercent(onboardingThroughput.incident_reopen_rate_24h_pct)}</div>
-                                    </div>
-                                </div>
-                            </div>
-                        ) : null}
-
-                        <div className="mt-4 rounded-lg border border-border/60 bg-background p-3" data-testid="tenants-kpi-drilldown">
-                            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                                Threshold drill-down
-                            </div>
-                            <div className="space-y-2">
-                                {operationalKpiDrilldown.map((item) => (
-                                    <div
-                                        key={item.id}
-                                        className="rounded-lg border border-border/60 p-2"
-                                        data-testid="tenants-kpi-drilldown-row"
-                                    >
-                                        <div className="flex flex-wrap items-center justify-between gap-2">
-                                            <div className="font-medium text-sm">{item.label}</div>
-                                            <div className="flex items-center gap-2 text-xs">
-                                                <span className={`inline-flex rounded-full px-2 py-0.5 font-semibold ${kpiStatusBadgeClass(item.status)}`}>
-                                                    {item.status}
-                                                </span>
-                                                <span className="font-medium">{item.displayValue}</span>
-                                            </div>
-                                        </div>
-                                        <div className="mt-1 text-xs text-muted-foreground">
-                                            {item.reason}
-                                        </div>
-                                        <div className="mt-1 text-xs text-muted-foreground">
-                                            threshold: {item.thresholdLabel}
-                                        </div>
-                                        <div className="mt-2">
-                                            <button
-                                                className="btn-ghost"
-                                                onClick={() => runKpiAction(item.action)}
-                                                data-testid={`tenants-kpi-action-${item.id}`}
-                                            >
-                                                {item.actionLabel}
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                            <div className="rounded-lg border border-border/60 bg-background p-3" data-testid="tenants-kpi-alert-hooks">
-                                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                                    Alert hooks
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                    <span data-testid="tenants-kpi-alert-severity">severity: {alertHookPayload.severity}</span> · breaches: {alertHookPayload.breaches.length}
-                                </div>
-                                <div className="mt-2 flex flex-wrap items-center gap-2">
-                                    <button
-                                        className="btn-ghost"
-                                        onClick={copyAlertHookPayload}
-                                        data-testid="tenants-kpi-alert-copy"
-                                    >
-                                        Скопировать payload
-                                    </button>
-                                    <button
-                                        className="btn-ghost"
-                                        onClick={() => runMetricsSnapshotHook("dry_run")}
-                                        disabled={runningMetricsSnapshotMode !== null}
-                                        data-testid="tenants-kpi-alert-dryrun"
-                                    >
-                                        {runningMetricsSnapshotMode === "dry_run" ? "Dry-run..." : "Snapshot dry-run"}
-                                    </button>
-                                    <button
-                                        className="btn-ghost"
-                                        onClick={() => runMetricsSnapshotHook("execute")}
-                                        disabled={runningMetricsSnapshotMode !== null}
-                                        data-testid="tenants-kpi-alert-execute"
-                                    >
-                                        {runningMetricsSnapshotMode === "execute" ? "Execute..." : "Snapshot execute"}
-                                    </button>
-                                </div>
-                                {lastMetricsSnapshotJob ? (
-                                    <div className="mt-2 text-xs text-muted-foreground" data-testid="tenants-kpi-alert-last-job">
-                                        job: {lastMetricsSnapshotJob.job_type} · mode: {lastMetricsSnapshotJob.mode} · status: {lastMetricsSnapshotJob.status}
-                                    </div>
-                                ) : null}
-                            </div>
-
-                            <div className="rounded-lg border border-border/60 bg-background p-3" data-testid="tenants-kpi-weekly-snapshots">
-                                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                                    Недельные снимки
-                                </div>
-                                {!pageFilterClientId ? (
-                                    <div className="text-xs text-muted-foreground">
-                                        Выберите клиента в фильтрах страницы, чтобы загрузить снимки.
-                                    </div>
-                                ) : weeklySnapshotsServerQuery.isFetching ? (
-                                    <div className="text-xs text-muted-foreground">
-                                        Загрузка недельных снимков...
-                                    </div>
-                                ) : weeklySnapshots.length === 0 ? (
-                                    <div className="text-xs text-muted-foreground">
-                                        Снимков пока нет. Сохраните первый недельный снимок.
-                                    </div>
-                                ) : (
-                                    <div className="space-y-2">
-                                        {weeklySnapshots.slice(0, 4).map((item, index) => {
-                                            const previous = weeklySnapshots[index + 1];
-                                            const delta = previous
-                                                ? item.report.kpi.changeFailure - previous.report.kpi.changeFailure
-                                                : 0;
-                                            return (
-                                                <div key={item.id} className="rounded border border-border/50 px-2 py-1 text-xs">
-                                                    <div className="font-medium">
-                                                        {item.weekKey} · {formatDateTimeLabel(item.createdAt)}
-                                                    </div>
-                                                    <div className="text-muted-foreground">
-                                                        ошибки публикации: {item.report.kpi.changeFailure}% {previous ? `(Δ ${delta >= 0 ? "+" : ""}${delta}%)` : ""}
-                                                    </div>
-                                                    <div className="text-muted-foreground">
-                                                        блокирующие сигналы: {item.report.kpi.blockedSignals} · стабильность сервиса: {item.report.kpi.serviceStability}%
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </section>
+                    <TenantsOperationalKpiPanel
+                        isRefreshing={
+                            tenantsPortfolioQuery.isFetching
+                            || tenantsCompanyCockpitQuery.isFetching
+                            || fleetAttentionQuery.isFetching
+                            || recentBranchChangesKpiQuery.isFetching
+                        }
+                        onRefresh={() => {
+                            tenantsPortfolioQuery.refetch();
+                            if (pageFilterCompanyId) {
+                                tenantsCompanyCockpitQuery.refetch();
+                            }
+                            fleetAttentionQuery.refetch();
+                            recentBranchChangesKpiQuery.refetch();
+                            selectedClientAuditQuery.refetch();
+                            if (pageFilterClientId) {
+                                weeklySnapshotsServerQuery.refetch();
+                            }
+                        }}
+                        onExportJson={() => exportOperationalReport("json")}
+                        onExportCsv={() => exportOperationalReport("csv")}
+                        onSaveWeeklySnapshot={saveWeeklySnapshot}
+                        canSaveWeeklySnapshot={Boolean(pageFilterClientId)}
+                        operationalKpi={operationalKpi}
+                        criticalKpiCount={criticalKpiCount}
+                        warnKpiCount={warnKpiCount}
+                        kpiStatuses={{
+                            onboardingCoverage: operationalKpiById.get("onboardingCoverage")?.status ?? "ok",
+                            goLiveReadiness: operationalKpiById.get("goLiveReadiness")?.status ?? "ok",
+                            serviceStability: operationalKpiById.get("serviceStability")?.status ?? "ok",
+                            decommissionShare: operationalKpiById.get("decommissionShare")?.status ?? "ok",
+                            changeFailure: operationalKpiById.get("changeFailure")?.status ?? "ok",
+                            rollbackShare: operationalKpiById.get("rollbackShare")?.status ?? "ok",
+                            blockedSignals: operationalKpiById.get("blockedSignals")?.status ?? "ok",
+                        }}
+                        kpiDrilldown={operationalKpiDrilldown}
+                        onRunKpiAction={runKpiAction}
+                        onboardingThroughput={onboardingThroughput}
+                        formatOptionalHours={formatOptionalHours}
+                        formatOptionalPercent={formatOptionalPercent}
+                        alertSeverity={alertHookPayload.severity}
+                        alertBreachesCount={alertHookPayload.breaches.length}
+                        onCopyAlertPayload={copyAlertHookPayload}
+                        onRunMetricsSnapshot={runMetricsSnapshotHook}
+                        runningMetricsSnapshotMode={runningMetricsSnapshotMode}
+                        lastMetricsSnapshotJob={lastMetricsSnapshotJob}
+                        pageFilterClientId={pageFilterClientId}
+                        weeklySnapshotsFetching={weeklySnapshotsServerQuery.isFetching}
+                        weeklySnapshots={weeklySnapshots}
+                        formatDateTimeLabel={formatDateTimeLabel}
+                    />
                 ) : null}
 
                 {showPortfolio && tenantLifecycle === "active" ? (

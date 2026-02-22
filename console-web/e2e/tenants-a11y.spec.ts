@@ -177,10 +177,17 @@ async function openTenants(page: import("@playwright/test").Page): Promise<boole
     }
     await expect(page).toHaveURL(urlPathPattern("/tenants"));
     const title = page.getByTestId("tenants-title");
+    const deniedHeading = page.getByRole("heading", { name: "Нет доступа" });
+
+    // Wait for a definitive tenants outcome to avoid flaky early skips on slow UI hydration.
+    await Promise.race([
+        title.waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined),
+        deniedHeading.waitFor({ state: "visible", timeout: 15000 }).catch(() => undefined),
+    ]);
+
     if (await title.isVisible().catch(() => false)) {
         return true;
     }
-    const deniedHeading = page.getByRole("heading", { name: "Нет доступа" });
     if (await deniedHeading.isVisible().catch(() => false)) {
         return false;
     }
