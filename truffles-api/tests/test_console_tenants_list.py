@@ -4,6 +4,7 @@ from unittest.mock import Mock
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy.exc import ProgrammingError
 from starlette.requests import Request
 
 from app.routers import console as console_router
@@ -669,7 +670,7 @@ def test_normalize_tenants_weekly_snapshot_week_key_accepts_valid_format() -> No
     assert console_router._normalize_tenants_weekly_snapshot_week_key("2026-W08") == "2026-W08"
 
 
-@pytest.mark.parametrize("value", ["", "2026-08", "2026-W8", "bad-value"])
+@pytest.mark.parametrize("value", ["", "2026-08", "2026-W8", "2026-W54", "bad-value"])
 def test_normalize_tenants_weekly_snapshot_week_key_rejects_invalid(value: str) -> None:
     with pytest.raises(ConsoleAPIError) as exc_info:
         console_router._normalize_tenants_weekly_snapshot_week_key(value)
@@ -779,18 +780,15 @@ class _ClientQuery:
         return self._client
 
 
-class _AuditSaveQuery:
-    def __init__(self, items):
-        self._items = items
+class _SnapshotSaveQuery:
+    def __init__(self, item):
+        self._item = item
 
     def filter(self, *_args, **_kwargs):
         return self
 
-    def order_by(self, *_args, **_kwargs):
-        return self
-
-    def all(self):
-        return self._items
+    def first(self):
+        return self._item
 
 
 @pytest.mark.asyncio
@@ -798,13 +796,16 @@ async def test_save_tenants_weekly_snapshot_updates_existing_week(monkeypatch) -
     client_id = uuid4()
     event_id = uuid4()
     now = datetime.now(timezone.utc)
-    existing_event = SimpleNamespace(
+    existing_snapshot = SimpleNamespace(
         id=event_id,
         created_at=now - timedelta(days=1),
+        updated_at=now - timedelta(days=1),
         client_id=client_id,
         actor_id=None,
         actor_name=None,
-        payload={"week_key": "2026-W08", "snapshot": _sample_weekly_snapshot(now, blocked_signals=3)},
+        week_key="2026-W08",
+        snapshot=_sample_weekly_snapshot(now, blocked_signals=3),
+        snapshot_schema_version="v1",
     )
     request = SimpleNamespace(query_params={})
     context = SimpleNamespace(
@@ -815,13 +816,11 @@ async def test_save_tenants_weekly_snapshot_updates_existing_week(monkeypatch) -
     db.query.side_effect = lambda model: (
         _ClientQuery(SimpleNamespace(id=client_id))
         if model is console_router.Client
-        else _AuditSaveQuery([existing_event])
+        else _SnapshotSaveQuery(existing_snapshot)
     )
     db.refresh = Mock()
 
-    record_audit_mock = Mock()
     monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
-    monkeypatch.setattr(console_router, "record_audit_event", record_audit_mock)
 
     response = await console_router.save_tenants_weekly_snapshot(
         request=request,
@@ -838,9 +837,56 @@ async def test_save_tenants_weekly_snapshot_updates_existing_week(monkeypatch) -
     assert response.item.id == event_id
     assert response.item.week_key == "2026-W08"
     assert response.item.snapshot.kpi.blockedSignals == 1
-    assert existing_event.actor_name == "Platform Admin"
-    assert record_audit_mock.call_count == 0
+    assert existing_snapshot.actor_name == "Platform Admin"
+    assert existing_snapshot.snapshot_schema_version == "v1"
     db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_save_tenants_weekly_snapshot_returns_read_only_error_when_table_missing(monkeypatch) -> None:
+    client_id = uuid4()
+    now = datetime.now(timezone.utc)
+    request = SimpleNamespace(query_params={})
+    context = SimpleNamespace(
+        role="platform_admin",
+        agent=SimpleNamespace(id=uuid4(), name="Platform Admin"),
+    )
+
+    class _BrokenSnapshotSaveQuery:
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def first(self):
+            raise ProgrammingError(
+                "SELECT",
+                {},
+                Exception('relation "tenants_weekly_snapshots" does not exist'),
+            )
+
+    db = Mock()
+    db.query.side_effect = lambda model: (
+        _ClientQuery(SimpleNamespace(id=client_id))
+        if model is console_router.Client
+        else _BrokenSnapshotSaveQuery()
+    )
+    monkeypatch.setattr(console_router, "get_console_context", lambda *_args, **_kwargs: context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.save_tenants_weekly_snapshot(
+            request=request,
+            payload=console_router.ConsoleTenantsWeeklySnapshotCreateRequest(
+                client_id=client_id,
+                week_key="2026-W08",
+                snapshot=console_router.ConsoleTenantsWeeklySnapshotPayload.model_validate(
+                    _sample_weekly_snapshot(now, blocked_signals=2),
+                ),
+            ),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == "TENANTS_WEEKLY_SNAPSHOT_STORAGE_UNAVAILABLE"
+    db.rollback.assert_called_once()
 
 
 def test_normalize_tenants_sensitive_access_field_accepts_instance_id() -> None:
