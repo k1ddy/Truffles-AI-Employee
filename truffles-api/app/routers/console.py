@@ -325,6 +325,7 @@ from app.services.console_owner_admin import (
 from app.services.console_owner_admin import (
     safe_int as _safe_int,
 )
+from app.services.conversation_service import get_or_create_conversation, get_or_create_user
 from app.services.escalation_service import resolve_telegram_routing
 from app.services.human_lock_service import (
     HUMAN_LOCK_SCOPE_CONVERSATION,
@@ -1389,6 +1390,80 @@ def _resolve_console_conversation_or_404(
     if not conversation:
         raise ConsoleAPIError(404, "NOT_FOUND", "Conversation not found")
     return conversation
+
+
+def _bootstrap_outreach_conversation_case(
+    db: Session,
+    *,
+    context: ConsoleAuthContext,
+    remote_jid: str,
+    branch_id: UUID,
+    content: str,
+) -> tuple[Conversation, Handover, bool]:
+    now_utc = datetime.now(timezone.utc)
+    user = get_or_create_user(
+        db,
+        client_id=context.client.id,
+        remote_jid=remote_jid,
+    )
+    user.last_active_at = now_utc
+    digits = _normalize_phone_digits(remote_jid.split("@", 1)[0])
+    if digits and not _normalize_phone_digits(user.phone):
+        user.phone = digits
+
+    conversation = get_or_create_conversation(
+        db,
+        client_id=context.client.id,
+        user_id=user.id,
+        channel="whatsapp",
+        branch_id=branch_id,
+    )
+    if conversation.branch_id is None:
+        conversation.branch_id = branch_id
+    conversation.last_message_at = now_utc
+
+    existing_case = (
+        db.query(Handover)
+        .filter(
+            Handover.client_id == context.client.id,
+            Handover.conversation_id == conversation.id,
+            Handover.status.in_(["pending", "active"]),
+        )
+        .order_by(Handover.created_at.desc())
+        .first()
+    )
+    if existing_case:
+        return conversation, existing_case, False
+
+    agent_id = str(getattr(context.agent, "id", "")) if getattr(context.agent, "id", None) else None
+    agent_name = _normalize_optional_text(getattr(context.agent, "name", None))
+    auto_case = Handover(
+        conversation_id=conversation.id,
+        client_id=context.client.id,
+        trigger_type="manual",
+        trigger_value="console_outreach_no_case",
+        context_summary=f"Manual outreach without existing case ({remote_jid})",
+        messages=[],
+        meta={
+            "origin": "console_outreach",
+            "auto_case": True,
+            "destination": remote_jid,
+            "branch_id": str(branch_id),
+        },
+        status="active",
+        manager_id=agent_id,
+        created_at=now_utc,
+        notified_at=now_utc,
+        first_response_at=now_utc,
+        user_message=content,
+        manager_response=content,
+        assigned_to_name=agent_name,
+        assigned_to=agent_id,
+        channel="whatsapp",
+        channel_ref=remote_jid,
+    )
+    db.add(auto_case)
+    return conversation, auto_case, True
 
 
 def _normalize_search_query(
@@ -7699,6 +7774,8 @@ async def send_outreach_message(
     )
 
     conversation: Conversation | None = None
+    auto_case: Handover | None = None
+    auto_case_created = False
     branch_id = body.branch_id
     if body.conversation_id:
         conversation = _resolve_console_conversation_or_404(
@@ -7751,40 +7828,60 @@ async def send_outreach_message(
             content=idempotency.response_body,
         )
 
+    if conversation is None:
+        conversation, auto_case, auto_case_created = _bootstrap_outreach_conversation_case(
+            db,
+            context=context,
+            remote_jid=remote_jid,
+            branch_id=branch_id,
+            content=content,
+        )
+
     message: Message | None = None
     commit_done = False
     try:
-        if conversation:
-            message = Message(
-                conversation_id=conversation.id,
-                client_id=context.client.id,
-                role="manager",
-                content=content,
-                created_at=datetime.now(timezone.utc),
-                message_metadata={
-                    "source": "console_outreach",
-                    "destination": remote_jid,
-                },
-            )
-            db.add(message)
+        message_metadata = {
+            "source": "console_outreach",
+            "destination": remote_jid,
+        }
+        if auto_case:
+            message_metadata["auto_case_id"] = str(auto_case.id)
+            message_metadata["auto_case_created"] = auto_case_created
+
+        message = Message(
+            conversation_id=conversation.id,
+            client_id=context.client.id,
+            role="manager",
+            content=content,
+            created_at=datetime.now(timezone.utc),
+            message_metadata=message_metadata,
+        )
+        db.add(message)
+        db.flush()
+        if auto_case and auto_case.trigger_message_id is None:
+            auto_case.trigger_message_id = message.id
 
         record_audit_event(
             db,
             actor=context.agent,
             event_type="outreach_sent",
-            entity_type="conversation" if conversation else "client",
-            entity_id=conversation.id if conversation else context.client.id,
+            entity_type="conversation",
+            entity_id=conversation.id,
             payload={
                 "destination": remote_jid,
                 "content_length": len(content),
-                "conversation_id": str(conversation.id) if conversation else None,
+                "conversation_id": str(conversation.id),
+                "case_id": str(auto_case.id) if auto_case else None,
+                "auto_case_created": auto_case_created if auto_case else None,
+                "mode": "no_case_auto_case" if auto_case else "conversation",
             },
             branch_id=branch_id,
         )
         db.commit()
         commit_done = True
-        if message:
-            db.refresh(message)
+        db.refresh(message)
+        if auto_case:
+            db.refresh(auto_case)
     except Exception:
         if idempotency and idempotency.record and not commit_done:
             release_idempotency(db, record=idempotency.record)
@@ -7808,7 +7905,7 @@ async def send_outreach_message(
             outbox_payload = _build_console_outbox_text_payload(
                 client_id=context.client.id,
                 branch_id=branch_id,
-                conversation_id=conversation.id if conversation else None,
+                conversation_id=conversation.id,
                 client_slug=client_slug,
                 remote_jid=remote_jid,
                 instance_id=instance_id,
@@ -7820,22 +7917,21 @@ async def send_outreach_message(
             outbox_enqueued = enqueue_outbox_message(
                 db,
                 client_id=context.client.id,
-                conversation_id=conversation.id if conversation else None,
+                conversation_id=conversation.id,
                 inbound_message_id=outbox_idempotency_key,
                 payload_json=outbox_payload,
                 branch_id=branch_id,
             )
             delivery_status = "queued"
-            if message:
-                metadata = dict(message.message_metadata or {})
-                metadata.update(
-                    {
-                        "outbox_enqueued": outbox_enqueued,
-                        "outbox_event_type": "whatsapp.send_text",
-                        "outbox_idempotency_key": outbox_idempotency_key,
-                    }
-                )
-                message.message_metadata = metadata
+            metadata = dict(message.message_metadata or {})
+            metadata.update(
+                {
+                    "outbox_enqueued": outbox_enqueued,
+                    "outbox_event_type": "whatsapp.send_text",
+                    "outbox_idempotency_key": outbox_idempotency_key,
+                }
+            )
+            message.message_metadata = metadata
         else:
             sent = send_bot_response(
                 db=db,
@@ -7856,7 +7952,7 @@ async def send_outreach_message(
                 client_id=context.client.id,
                 remote_jid=remote_jid,
                 lock_until=now_utc + timedelta(minutes=pause_minutes),
-                conversation_id=conversation.id if conversation else None,
+                conversation_id=conversation.id,
                 branch_id=branch_id,
                 locked_by_id=context.agent.id,
                 locked_by_name=context.agent.name,
@@ -7878,6 +7974,9 @@ async def send_outreach_message(
         success=delivery_status in {"queued", "delivered"},
         delivery_status=delivery_status,
         remote_jid=remote_jid,
+        conversation_id=conversation.id,
+        case_id=auto_case.id if auto_case else None,
+        case_created=auto_case_created if auto_case else None,
         outbox_enqueued=outbox_enqueued,
         lock_until=lock_until.isoformat() if lock_until else None,
         message=ConsoleMessage(

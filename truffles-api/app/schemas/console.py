@@ -1041,6 +1041,9 @@ class ConsoleOutreachMessageResponse(BaseModel):
     success: bool
     delivery_status: ConsoleOutreachDeliveryStatus
     remote_jid: Optional[str] = None
+    conversation_id: Optional[UUID] = None
+    case_id: Optional[UUID] = None
+    case_created: Optional[bool] = None
     outbox_enqueued: Optional[bool] = None
     lock_until: Optional[str] = None
     message: Optional[ConsoleMessage] = None
