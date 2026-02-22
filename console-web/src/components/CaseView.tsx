@@ -57,6 +57,8 @@ export default function CaseView({ caseId }: CaseViewProps) {
     const role = meData?.agent?.role ?? "manager";
     const canReadInbox = canAccessConsole(role, "inbox", "read");
     const canWriteInbox = canAccessConsole(role, "inbox", "write");
+    const canReadOutreach = canAccessConsole(role, "outreach", "read");
+    const canWriteOutreach = canAccessConsole(role, "outreach", "write");
     const canViewDiagnostics = role === "support" || role === "platform_admin" || role === "owner" || role === "admin";
 
     if (!canReadInbox) {
@@ -124,6 +126,8 @@ export default function CaseView({ caseId }: CaseViewProps) {
                     onLoadMoreMessages={loadMoreMessages}
                     canSend={canReply}
                     canWrite={canWriteInbox}
+                    canOutreach={canWriteOutreach}
+                    canReadOutreach={canReadOutreach}
                     draft={draft}
                     onDraftChange={setDraft}
                     composerBefore={

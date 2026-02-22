@@ -15,6 +15,7 @@ export interface InboxCaseFilters {
     query?: string;
     hasDeliveryError: boolean;
     hasPendingOutbox: boolean;
+    hasHumanLock: boolean;
     dateFrom?: string;
     dateTo?: string;
     sortBy: InboxSortBy;

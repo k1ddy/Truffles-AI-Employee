@@ -57,6 +57,7 @@ Pages
 - `docs/CONSOLE_AUDIT/pages/business-data-trust.md`
 - `docs/CONSOLE_AUDIT/pages/business-team-performance.md`
 - `docs/CONSOLE_AUDIT/pages/subscription.md`
+- `docs/CONSOLE_AUDIT/pages/marketing.md`
 - `docs/CONSOLE_AUDIT/pages/tenants.md`
 - `docs/CONSOLE_AUDIT/pages/integrations.md`
 - `docs/CONSOLE_AUDIT/pages/company-workspace.md`
