@@ -6,7 +6,7 @@
 - branch: feat/2026-02-21-tenants-v3-ux-contract-a250
 - worktree: /home/zhan/worktrees/2026-02-21-tenants-v3-ux-contract-a250
 - base_ref: origin/main
-- scope: Контракт состояния Tenants (global context vs page filters) + UX/copy fixes + branch-sync bugfix
+- scope: Контракт состояния Tenants + Wave3 snapshot hardening + частичное переключение Tenants на server contract (`portfolio/cockpit`)
 - done:
   - Дополнен действующий TP контрактами состояния, матрицей поведения, глоссарием и acceptance сценариями.
   - Исправлен `apply context` в Tenants: источник теперь `readConsoleContextScopeFromStorage`, а не stale `meData`.
@@ -24,10 +24,18 @@
     - `GET /console/v1/admin/tenants/company-cockpit`
   - Добавлены schema models и unit tests для новых wrappers/хелпера query-request адаптации.
   - Прогнаны проверки: `corepack pnpm -C console-web lint`, `corepack pnpm -C console-web build`.
+  - Wave3 snapshot storage переведён на typed server-backed модель: добавлены `TenantsWeeklySnapshot` model и миграция `037_add_tenants_weekly_snapshots.sql` с backfill из `audit_events`.
+  - `save/list weekly snapshots` в `console.py` переключены на таблицу `tenants_weekly_snapshots`; чтение из audit оставлено как read-only fallback при отсутствии миграции.
+  - Добавлена fail-closed семантика для save при неготовой БД: `503 TENANTS_WEEKLY_SNAPSHOT_STORAGE_UNAVAILABLE` вместо локального pseudo-success.
+  - Обновлён ISO week contract: backend week-key normalizer валидирует ISO неделю через `datetime.fromisocalendar`.
+  - Frontend Tenants: убран local-storage fallback для weekly snapshots и сообщение \"сохранено локально\"; сохранение теперь строго server-backed.
+  - Frontend Tenants подключён к `GET /admin/tenants/portfolio` и `GET /admin/tenants/company-cockpit` как приоритетным read-моделям для clients/branches/fleet attention.
+  - Обновлены `console-web/src/lib/api-client.ts` типы/методы для `tenants/portfolio` и `tenants/company-cockpit`.
+  - Прогнаны проверки: `ruff check ...`, `pytest -q truffles-api/tests/test_console_tenants_list.py` (`55 passed`), `corepack pnpm -C console-web lint`, `corepack pnpm -C console-web build`, `python3 truffles-api/scripts/generate_openapi.py --check`.
 - next:
-  - Подключить `portfolio/company-cockpit` endpoints в `console-web` API client и заменить часть compose-логики на server contract.
-  - Продолжить декомпозицию `tenants/page.tsx` (вынос секций portfolio/changes/onboarding в отдельные компоненты).
-  - Добить локальный localhost e2e auth-state без зависимости на `console.truffles.kz` cookie-domain.
+  - Завершить Wave3: ввести explicit миграционный отчёт/backfill verification и закрыть контракт `snapshot_schema_version` с метрикой качества данных.
+  - Продолжить Wave4 декомпозицию `tenants/page.tsx` (вынос секций portfolio/changes/onboarding в отдельные компоненты).
+  - Добавить e2e сценарии для нового server-contract path (`portfolio/cockpit`) и убрать оставшиеся soft-pass ветки.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
@@ -38,4 +46,7 @@
   - truffles-api/app/schemas/console.py
   - truffles-api/app/routers/console.py
   - truffles-api/tests/test_console_tenants_list.py
-- last_updated: 2026-02-21
+  - truffles-api/app/models/tenants_weekly_snapshot.py
+  - truffles-api/migrations/037_add_tenants_weekly_snapshots.sql
+  - console-web/src/lib/api-client.ts
+- last_updated: 2026-02-21T07:30:00Z
