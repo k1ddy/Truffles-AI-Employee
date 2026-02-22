@@ -511,6 +511,9 @@ export type OutreachMessageResponse = {
     success: boolean;
     delivery_status: OutreachDeliveryStatus;
     remote_jid?: string | null;
+    conversation_id?: string | null;
+    case_id?: string | null;
+    case_created?: boolean | null;
     outbox_enqueued?: boolean | null;
     lock_until?: string | null;
     message?: Message | null;

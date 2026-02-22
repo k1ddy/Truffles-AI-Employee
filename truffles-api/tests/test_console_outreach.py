@@ -20,6 +20,9 @@ class _FakeQuery:
     def filter(self, *_args, **_kwargs):
         return self
 
+    def order_by(self, *_args, **_kwargs):
+        return self
+
     def first(self):
         return self._result
 
@@ -41,6 +44,13 @@ class _FakeDb:
     def add(self, item):
         self._added.append(item)
 
+    def flush(self):
+        for item in self._added:
+            if getattr(item, "id", None) is None:
+                item.id = uuid4()
+            if getattr(item, "created_at", None) is None:
+                item.created_at = datetime.now(timezone.utc)
+
     def commit(self):
         self.commits += 1
         for item in self._added:
@@ -51,6 +61,83 @@ class _FakeDb:
 
     def refresh(self, _item):
         return None
+
+
+def test_bootstrap_outreach_conversation_case_creates_active_case(monkeypatch):
+    client_id = uuid4()
+    branch_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), phone=None, last_active_at=None)
+    conversation = SimpleNamespace(id=uuid4(), branch_id=branch_id, last_message_at=None)
+    context = SimpleNamespace(
+        client=SimpleNamespace(id=client_id),
+        agent=SimpleNamespace(id=uuid4(), name="Agent"),
+    )
+    db = _FakeDb(case=None)
+
+    monkeypatch.setattr(console_router, "get_or_create_user", lambda *_args, **_kwargs: user)
+    monkeypatch.setattr(
+        console_router,
+        "get_or_create_conversation",
+        lambda *_args, **_kwargs: conversation,
+    )
+
+    resolved_conversation, auto_case, created = console_router._bootstrap_outreach_conversation_case(
+        db,
+        context=context,
+        remote_jid="77771234567@s.whatsapp.net",
+        branch_id=branch_id,
+        content="Здравствуйте",
+    )
+
+    assert resolved_conversation is conversation
+    assert created is True
+    assert auto_case.conversation_id == conversation.id
+    assert auto_case.status == "active"
+    assert auto_case.trigger_type == "manual"
+    assert auto_case.trigger_value == "console_outreach_no_case"
+    assert auto_case.channel == "whatsapp"
+    assert auto_case.channel_ref == "77771234567@s.whatsapp.net"
+    assert user.phone == "77771234567"
+    assert user.last_active_at is not None
+    assert conversation.last_message_at is not None
+
+
+def test_bootstrap_outreach_conversation_case_reuses_existing_case(monkeypatch):
+    client_id = uuid4()
+    branch_id = uuid4()
+    existing_case = SimpleNamespace(
+        id=uuid4(),
+        conversation_id=uuid4(),
+        status="active",
+        created_at=datetime.now(timezone.utc),
+    )
+    user = SimpleNamespace(id=uuid4(), phone="77771234567", last_active_at=None)
+    conversation = SimpleNamespace(id=existing_case.conversation_id, branch_id=branch_id, last_message_at=None)
+    context = SimpleNamespace(
+        client=SimpleNamespace(id=client_id),
+        agent=SimpleNamespace(id=uuid4(), name="Agent"),
+    )
+    db = _FakeDb(case=existing_case)
+
+    monkeypatch.setattr(console_router, "get_or_create_user", lambda *_args, **_kwargs: user)
+    monkeypatch.setattr(
+        console_router,
+        "get_or_create_conversation",
+        lambda *_args, **_kwargs: conversation,
+    )
+
+    resolved_conversation, auto_case, created = console_router._bootstrap_outreach_conversation_case(
+        db,
+        context=context,
+        remote_jid="77771234567@s.whatsapp.net",
+        branch_id=branch_id,
+        content="Здравствуйте",
+    )
+
+    assert resolved_conversation is conversation
+    assert auto_case is existing_case
+    assert created is False
+    assert len(db._added) == 0
 
 
 @pytest.mark.asyncio
@@ -125,6 +212,18 @@ async def test_send_outreach_message_enqueues_outbox_and_sets_pause(monkeypatch)
 async def test_send_outreach_message_without_branch_uses_context_branch(monkeypatch):
     client_id = uuid4()
     branch_id = uuid4()
+    boot_conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id=client_id,
+        branch_id=branch_id,
+        user_id=uuid4(),
+    )
+    boot_case = SimpleNamespace(
+        id=uuid4(),
+        conversation_id=boot_conversation.id,
+        status="active",
+        trigger_message_id=None,
+    )
     context = SimpleNamespace(
         role="manager",
         client=SimpleNamespace(id=client_id, name="demo"),
@@ -149,6 +248,11 @@ async def test_send_outreach_message_without_branch_uses_context_branch(monkeypa
     monkeypatch.setattr(console_router, "enqueue_outbox_message", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         console_router,
+        "_bootstrap_outreach_conversation_case",
+        lambda *_args, **_kwargs: (boot_conversation, boot_case, True),
+    )
+    monkeypatch.setattr(
+        console_router,
         "upsert_human_lock",
         lambda *_args, **_kwargs: SimpleNamespace(lock_until=datetime.now(timezone.utc) + timedelta(minutes=30)),
     )
@@ -171,6 +275,9 @@ async def test_send_outreach_message_without_branch_uses_context_branch(monkeypa
 
     assert response.success is True
     assert captured["instance_branch_id"] == branch_id
+    assert response.conversation_id == boot_conversation.id
+    assert response.case_id == boot_case.id
+    assert response.case_created is True
 
 
 @pytest.mark.asyncio
@@ -216,6 +323,71 @@ async def test_send_outreach_message_rejects_branch_mismatch(monkeypatch):
 
     assert exc_info.value.code == "INVALID_PARAM"
     assert "branch_id must match conversation branch" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_send_outreach_message_no_case_reuses_existing_case(monkeypatch):
+    client_id = uuid4()
+    branch_id = uuid4()
+    existing_conversation = SimpleNamespace(
+        id=uuid4(),
+        client_id=client_id,
+        branch_id=branch_id,
+        user_id=uuid4(),
+    )
+    existing_case = SimpleNamespace(
+        id=uuid4(),
+        conversation_id=existing_conversation.id,
+        status="active",
+        trigger_message_id=uuid4(),
+    )
+    context = SimpleNamespace(
+        role="manager",
+        client=SimpleNamespace(id=client_id, name="demo"),
+        agent=SimpleNamespace(id=uuid4(), name="Agent"),
+        branches=[SimpleNamespace(id=branch_id)],
+        effective_branch_id=branch_id,
+    )
+    db = _FakeDb()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda _request, _db: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_require_branch_access", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "_resolve_branch_from_context",
+        lambda _context: SimpleNamespace(id=branch_id),
+    )
+    monkeypatch.setattr(console_router, "get_instance_id", lambda *_args, **_kwargs: "instance-1")
+    monkeypatch.setattr(console_router, "_is_env_enabled", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(console_router, "start_idempotency", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "enqueue_outbox_message", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        console_router,
+        "_bootstrap_outreach_conversation_case",
+        lambda *_args, **_kwargs: (existing_conversation, existing_case, False),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "upsert_human_lock",
+        lambda *_args, **_kwargs: SimpleNamespace(lock_until=datetime.now(timezone.utc) + timedelta(minutes=30)),
+    )
+
+    response = await console_router.send_outreach_message(
+        body=ConsoleOutreachMessageRequest(
+            destination="+7 (777) 123-45-67",
+            content="Здравствуйте",
+            pause_bot_minutes=30,
+        ),
+        request=Mock(headers={"Idempotency-Key": "idem"}),
+        db=db,
+    )
+
+    assert response.success is True
+    assert response.conversation_id == existing_conversation.id
+    assert response.case_id == existing_case.id
+    assert response.case_created is False
 
 
 @pytest.mark.asyncio

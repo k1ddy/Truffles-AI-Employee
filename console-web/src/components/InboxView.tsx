@@ -231,12 +231,19 @@ export default function InboxView({ initialCaseId }: InboxViewProps) {
                 toast.error(`Не удалось отправить сообщение${suffix}`);
                 return;
             }
-            if (response.delivery_status === "queued") {
-                toast.success("Сообщение поставлено в очередь");
-            } else {
-                toast.success("Сообщение отправлено");
-            }
+            const queued = response.delivery_status === "queued";
+            const baseMessage = queued ? "Сообщение поставлено в очередь" : "Сообщение отправлено";
+            const autoCaseMessage = response.case_created
+                ? `${baseMessage}, заявка создана`
+                : response.case_id
+                    ? `${baseMessage}, заявка обновлена`
+                    : baseMessage;
+            toast.success(autoCaseMessage);
             setStandaloneOutreachContent("");
+            if (response.case_id) {
+                setSelectedCaseId(response.case_id);
+                router.push(`/cases/${response.case_id}`);
+            }
             queryClient.invalidateQueries({ queryKey: ["cases"] });
         },
         onError: (error: unknown) => {

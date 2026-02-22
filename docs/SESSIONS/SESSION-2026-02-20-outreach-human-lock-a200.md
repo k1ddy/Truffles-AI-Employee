@@ -20,11 +20,15 @@
     - outreach outbox row delivered `SENT`.
   - Fixed post-livecheck blocker: outbox tenant context contract mismatch (`tenant_context.source`) and added regression tests.
   - Added trace retention guard for `routing:human_lock_silent` and test.
+  - Implemented human-lock trace persistence hardening in webhook guard (`decision_meta.human_lock_trace` + fallback trace append) and updated regression test (`test_message_endpoint`).
+  - Implemented no-case outreach auto-case bootstrap in console API (`conversation_id=null` now creates/reuses conversation + active case and returns `conversation_id/case_id/case_created`).
+  - Updated Inbox standalone outreach UX to auto-open returned case and adjusted smoke stub payload.
 - next:
-  - Resolve GAP: persisted `decision_trace` currently does not show `human_lock_silent` entry in DB despite locked inbound response path.
-  - Deliver auto-case bootstrap wave from dedicated TP in separate PR (backend + UI + trace + evidence).
+  - Run fresh staging/runtime live-check to confirm DB trace evidence (`human_lock_silent`) after guard hardening and attach new trace-bundle artifacts.
+  - Open/merge delivery PR for this implementation wave and update STATE with CI + runtime evidence.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-outreach-human-lock-a200.md
+  - docs/TASK_PACKAGES/TP-2026-02-22-outreach-auto-case-a200.md
   - /tmp/outreach_hlock_livecheck_18150_fix2_20260220_152809/01_outreach_response.json
   - /tmp/outreach_hlock_livecheck_18150_fix2_20260220_152809/04_locked_inbound_webhook_response.json
   - /tmp/outreach_hlock_livecheck_18150_fix2_20260220_152809/09_released_inbound_webhook_response.json
