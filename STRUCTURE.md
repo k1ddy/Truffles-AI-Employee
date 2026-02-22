@@ -123,6 +123,8 @@
 | `console-web/src/app/marketing/page.tsx` | Marketing Pro lifecycle UI (preview/approval/preflight/execute) | Frontend |
 | `console-web/src/components/TenantsScopedErrorSummary.tsx` | Scoped error summary для Tenants workspace зон | Frontend |
 | `console-web/src/components/TenantsSensitiveIdCell.tsx` | Mask/reveal/copy ячейка чувствительного `instance_id` с audit hook | Frontend |
+| `console-web/src/components/TenantsQuickCreatePanel.tsx` | Вынесенный quick-create блок Tenants (компания/клиент/филиал) с явными label-id для a11y | Frontend |
+| `console-web/src/components/TenantsOperationalKpiPanel.tsx` | Вынесенная панель операционных KPI/alert hooks/weekly snapshots для Tenants (platform_admin) | Frontend |
 | `console-web/e2e/` | Playwright smoke/login/setup тесты (storageState) | Frontend/QA |
 | `console-web/e2e/tenants-a11y.spec.ts` | Live Playwright + Axe evidence для Tenants (desktop/mobile) | Frontend/QA |
 | `console-web/eslint.config.js` | ESLint flat config для console-web | Frontend |
@@ -145,6 +147,7 @@
 | `docs/REPORTS/` | Отчёты по прогонам/изменениям | Brain/Architect |
 | `docs/REPORTS/2026-01-24-consult-quality.md` | Отчёт: consult quality + chaos‑sim | Brain/Architect |
 | `docs/REPORTS/2026-02-20-tenants-a11y-evidence-a201.md` | Отчёт: live e2e+axe evidence для Tenants (platform_admin) | Brain/Architect |
+| `docs/REPORTS/2026-02-20-tenants-v3-redesign-plan.md` | Отчёт: Tenants V3 redesign baseline + Wave3 backfill verification + Wave4/5 progress | Brain/Architect |
 | `docs/REPORTS/2026-01-25-control-plane-provisioning.png` | Скрин: Provisioning Wizard (Settings) | Brain/Architect |
 | `docs/REPORTS/2026-01-26-control-plane-inbox.png` | Скрин: Inbox 3‑pane (Phase 5) | Brain/Architect |
 | `docs/REPORTS/2026-01-27-control-plane-review.md` | Отчёт: Control Plane UX/RBAC/safety review | Brain/Architect |

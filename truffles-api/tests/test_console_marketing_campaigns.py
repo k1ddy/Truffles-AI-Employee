@@ -24,7 +24,9 @@ def test_marketing_routes_registered_in_openapi() -> None:
     app.include_router(console_router.router)
     paths = app.openapi()["paths"]
 
+    assert "/console/v1/admin/marketing/segments" in paths
     assert "/console/v1/admin/marketing/campaigns" in paths
+    assert "/console/v1/admin/marketing/campaigns/{campaign_id}" in paths
     assert "/console/v1/admin/marketing/campaigns/{campaign_id}/preview" in paths
     assert "/console/v1/admin/marketing/campaigns/{campaign_id}/audience" in paths
     assert "/console/v1/admin/marketing/campaigns/{campaign_id}/request-approval" in paths
@@ -35,6 +37,7 @@ def test_marketing_routes_registered_in_openapi() -> None:
     assert "/console/v1/admin/marketing/campaigns/{campaign_id}/execute" in paths
     assert "/console/v1/admin/marketing/campaigns/{campaign_id}/diagnostics" in paths
     assert "/console/v1/admin/marketing/campaigns/{campaign_id}/retry-failed" in paths
+    assert "patch" in paths["/console/v1/admin/marketing/campaigns/{campaign_id}"]
 
 
 def test_require_marketing_access_denies_manager() -> None:
@@ -135,7 +138,14 @@ def test_serialize_marketing_campaign_includes_dates() -> None:
         status="ready",
         segment_code=None,
         audience_mode="branch_active_conversations",
-        audience_filter={},
+        audience_filter={
+            "segment_params": {
+                "min_days_since_last_visit": 40,
+                "max_days_since_last_visit": 150,
+                "require_no_future_booking": True,
+            },
+            "segment_summary": "Клиенты без будущей записи, последний визит 40-150 дней назад.",
+        },
         preview_total=42,
         last_preview_at=now,
         executed_at=None,
@@ -148,6 +158,8 @@ def test_serialize_marketing_campaign_includes_dates() -> None:
     assert serialized.status == "approved"
     assert serialized.status_v2 == "approved"
     assert serialized.segment_code == "reactivation_30_120"
+    assert serialized.segment_params["min_days_since_last_visit"] == 40
+    assert serialized.segment_summary is not None
     assert serialized.preview_total == 42
     assert serialized.last_preview_at is not None
     assert serialized.created_at is not None
@@ -200,6 +212,47 @@ def test_serialize_marketing_recipient_fallback_segment() -> None:
     serialized = console_router._serialize_marketing_recipient(recipient)
     assert serialized.segment_code == "reactivation_30_120"
     assert serialized.reason_codes == ["segment=legacy"]
+    assert serialized.reason_hints
+    assert serialized.suppression_hints == []
+
+
+@pytest.mark.asyncio
+async def test_update_marketing_campaign_rejects_post_approval_states(monkeypatch) -> None:
+    campaign_id = uuid4()
+    branch_id = uuid4()
+    client_id = uuid4()
+    campaign = SimpleNamespace(
+        id=campaign_id,
+        branch_id=branch_id,
+        client_id=client_id,
+        status="approved",
+        status_v2="approved",
+    )
+    context = SimpleNamespace(
+        role="owner",
+        client=SimpleNamespace(id=client_id),
+        agent=SimpleNamespace(id=uuid4(), name="Tester"),
+    )
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda *args, **kwargs: context)
+    monkeypatch.setattr(console_router, "_resolve_marketing_campaign", lambda *args, **kwargs: campaign)
+    monkeypatch.setattr(console_router, "_resolve_marketing_branch", lambda *args, **kwargs: SimpleNamespace(id=branch_id))
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.update_marketing_campaign(
+            campaign_id=str(campaign_id),
+            request=Mock(),
+            payload=SimpleNamespace(
+                name="Updated campaign",
+                message_text=None,
+                segment_code=None,
+                reason=None,
+            ),
+            db=Mock(),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.code == "INVALID_STATE"
 
 
 @pytest.mark.asyncio

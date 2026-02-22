@@ -3,14 +3,26 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 from uuid import uuid4
 
+import pytest
+
 from app.services.marketing import (
     MARKETING_STATUS_COMPLETED,
     MARKETING_STATUS_FAILED,
     MARKETING_STATUS_RUNNING,
     build_marketing_campaign_preflight,
+    build_marketing_segment_summary,
     derive_marketing_terminal_status,
+    describe_marketing_reason_code,
+    describe_marketing_suppression_reason,
+    get_marketing_segment_catalog,
+    normalize_marketing_segment_params,
     normalize_marketing_status,
     refresh_marketing_campaign_lifecycle,
+)
+from app.services.marketing.service import (
+    MARKETING_SEGMENT_ENGAGED_NO_BOOKING_7D,
+    MARKETING_SEGMENT_REACTIVATION_30_120,
+    _message_has_service_or_pricing_signal,
 )
 
 
@@ -50,6 +62,8 @@ def test_build_marketing_campaign_preflight_blocks_on_template_gate(monkeypatch)
         id=uuid4(),
         status="approved",
         status_v2="approved",
+        client_id=uuid4(),
+        branch_id=uuid4(),
         audience_filter={"template_state": "pending"},
         preflight_snapshot={},
         preflight_valid=False,
@@ -59,6 +73,10 @@ def test_build_marketing_campaign_preflight_blocks_on_template_gate(monkeypatch)
         "app.services.marketing.service.build_outbox_health_snapshot",
         lambda _db, now=None: {"status": "healthy", "pending": 0, "failed_24h": 0},
     )
+    monkeypatch.setattr(
+        "app.services.marketing.service._count_recent_provider_billing_blocked_failures",
+        lambda *args, **kwargs: 0,
+    )
 
     snapshot = build_marketing_campaign_preflight(db, campaign=campaign)
 
@@ -66,6 +84,110 @@ def test_build_marketing_campaign_preflight_blocks_on_template_gate(monkeypatch)
     assert snapshot["template_ok"] is False
     assert "template_not_approved" in snapshot["blocked_reasons"]
     assert snapshot["preflight_valid"] is False
+
+
+def test_build_marketing_campaign_preflight_blocks_on_provider_billing(monkeypatch) -> None:
+    db = Mock()
+    db.query.side_effect = [_count_query(8), _count_query(1)]
+    campaign = SimpleNamespace(
+        id=uuid4(),
+        status="approved",
+        status_v2="approved",
+        client_id=uuid4(),
+        branch_id=uuid4(),
+        audience_filter={},
+        preflight_snapshot={},
+        preflight_valid=False,
+        updated_at=None,
+    )
+    monkeypatch.setattr(
+        "app.services.marketing.service.build_outbox_health_snapshot",
+        lambda _db, now=None: {"status": "healthy", "pending": 0, "failed_24h": 0},
+    )
+    monkeypatch.setattr(
+        "app.services.marketing.service._count_recent_provider_billing_blocked_failures",
+        lambda *args, **kwargs: 3,
+    )
+
+    snapshot = build_marketing_campaign_preflight(db, campaign=campaign)
+
+    assert snapshot["provider_billing_blocked"] is True
+    assert snapshot["provider_billing_blocked_count"] == 3
+    assert "provider_billing_blocked" in snapshot["blocked_reasons"]
+    assert snapshot["preflight_valid"] is False
+
+
+def test_message_has_service_or_pricing_signal_detects_intent() -> None:
+    detected, signal = _message_has_service_or_pricing_signal(
+        intent="price_query",
+        metadata={},
+    )
+    assert detected is True
+    assert signal == "intent:price_query"
+
+
+def test_message_has_service_or_pricing_signal_detects_metadata() -> None:
+    detected, signal = _message_has_service_or_pricing_signal(
+        intent="other",
+        metadata={"info_sections": ["pricing"]},
+    )
+    assert detected is True
+    assert signal == "meta:info_sections"
+
+
+def test_normalize_marketing_segment_params_reactivation_window() -> None:
+    params = normalize_marketing_segment_params(
+        MARKETING_SEGMENT_REACTIVATION_30_120,
+        {
+            "min_days_since_last_visit": 45,
+            "max_days_since_last_visit": 150,
+            "require_no_future_booking": False,
+        },
+        strict=True,
+    )
+
+    assert params["min_days_since_last_visit"] == 45
+    assert params["max_days_since_last_visit"] == 150
+    assert params["require_no_future_booking"] is False
+
+
+def test_normalize_marketing_segment_params_raises_on_invalid_window() -> None:
+    with pytest.raises(ValueError):
+        normalize_marketing_segment_params(
+            MARKETING_SEGMENT_REACTIVATION_30_120,
+            {
+                "min_days_since_last_visit": 200,
+                "max_days_since_last_visit": 100,
+            },
+            strict=True,
+        )
+
+
+def test_marketing_segment_catalog_contains_owner_labels() -> None:
+    catalog = get_marketing_segment_catalog()
+
+    assert len(catalog) >= 3
+    assert any(item["label"] == "Возврат клиентов" for item in catalog)
+
+
+def test_marketing_segment_summary_uses_effective_params() -> None:
+    summary = build_marketing_segment_summary(
+        MARKETING_SEGMENT_ENGAGED_NO_BOOKING_7D,
+        {
+            "engagement_window_days": 10,
+            "require_no_future_booking": True,
+        },
+    )
+
+    assert "10" in summary
+
+
+def test_marketing_reason_and_suppression_explainers_return_hints() -> None:
+    reason = describe_marketing_reason_code("no_show_window_count=2")
+    suppression = describe_marketing_suppression_reason("consent:opt_out")
+
+    assert "no-show" in reason.lower()
+    assert "opt-out" in suppression.lower()
 
 
 def test_refresh_marketing_campaign_lifecycle_marks_completed() -> None:

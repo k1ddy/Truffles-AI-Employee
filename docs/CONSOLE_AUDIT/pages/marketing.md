@@ -11,60 +11,61 @@ Roles
 - Read: `platform_admin`, `owner`, `admin`.
 - Write: `platform_admin`, `owner`, `admin`.
 
-Layout
-- Left panel: campaign creation + campaign list.
-- Right panel: selected campaign lifecycle controls + preflight + audience + diagnostics.
+Owner-first concept
+- Маркетинг строится вокруг бизнес-цели (возврат, no-show recovery, интерес без записи).
+- У каждого сегмента есть human-readable описание, формула и редактируемые параметры.
+- Preview/Audience показывают не только коды, но и объяснения причин inclusion/suppression.
 
-Campaign create
-- Fields: `name`, `segment_code`, `message_text`, `branch_id`.
-- Segment choices:
-  - `reactivation_30_120`
-  - `no_show_recovery_14d`
-  - `engaged_no_booking_7d`
-- Action: `Создать кампанию`.
+Segment catalog (new)
+- Endpoint: `GET /console/v1/admin/marketing/segments`.
+- Returns for each segment:
+  - `label`, `short_label`, `description`, `summary`
+  - `defaults`
+  - `editable_fields` (`int`/`bool`, min/max/step).
 
-Campaign lifecycle controls
-- Preview:
-  - `sample_limit` input.
-  - Action: `Preview аудитории`.
-- Approval:
-  - Optional audit reason.
-  - Actions: `На ревью`, `Approve`, `Pause`, `Resume`.
-- Execute:
-  - `max_recipients` input.
-  - Action: `Refresh preflight`.
-  - Action: `Confirm & Execute` (enabled only for `approved|scheduled` + valid preflight).
-- Retry:
-  - Action: `Retry failed`.
+Campaign create/update
+- Create request:
+  - `branch_id`, `name`, `message_text`, `segment_code`, `segment_params`, `audience_mode`.
+- Update request:
+  - `name`, `message_text`, `segment_code`, `segment_params`, `reason`.
+- Validation:
+  - `segment_params` валидируются на backend по выбранному `segment_code`.
+  - unsupported keys/ranges -> `INVALID_PARAM`.
+- Effect:
+  - при update preview/audience snapshot сбрасывается и требует fresh preview.
 
-Preflight panel
-- Displays:
-  - `preflight_valid`
-  - `outbox_health_status`
-  - `audience_total`
-  - `eligible_count`
-  - `suppressed_count`
-  - `blocked_reasons`
-- Blocked reasons are rendered as explicit badges; execute remains disabled when preflight is invalid.
+Preview / Preflight / Audience
+- Preview response now includes:
+  - `segment_params`, `segment_summary`, `funnel`.
+- Preflight response now includes:
+  - `segment_params`, `segment_summary`, `blocked_reasons`, provider billing block signals.
+- Audience recipient now includes:
+  - `reason_codes` + `reason_hints`
+  - `suppression_reasons` + `suppression_hints`.
 
-Audience panel
-- Controls:
-  - `include_suppressed` toggle.
-  - `limit` input.
-  - `Reload audience` action.
-- Table columns:
-  - `recipient_jid` + `segment_code`
-  - `conversation_id` / `user_id`
-  - `reason_codes`
-  - `suppression_reasons` / eligible marker
+Business meaning of segments
+- `reactivation_30_120`:
+  - клиенты без будущей записи, чей последний визит в окне `min_days_since_last_visit..max_days_since_last_visit`.
+- `no_show_recovery_14d`:
+  - клиенты с минимум `min_no_show_count` no-show в окне `no_show_window_days`, без будущей записи.
+- `engaged_no_booking_7d`:
+  - клиенты с engagement сигналами услуг/цен за `engagement_window_days`, без будущей записи.
 
-Diagnostics panel
-- Counters: `total`, `queued`, `sent`, `failed`, `replied`.
-- Failed sample list: recipient/conversation, outbox status, last error.
+How owners edit filters
+- На форме кампании (create/edit) рендерятся поля `editable_fields` из segment catalog.
+- Int-поля ограничены min/max.
+- Bool-поля задаются чекбоксом.
+- Сохранённые значения уходят в `segment_params` и используются в materialize preview.
 
-API endpoints used (Console API)
+Provider billing block behavior
+- Если `provider_billing_blocked=true`, execute остаётся заблокирован.
+- UI показывает явный блокер и указывает, что разблокировка возможна только после оплаты у провайдера.
+
+API endpoints used
+- `GET /console/v1/admin/marketing/segments`
 - `GET /console/v1/admin/marketing/campaigns`
 - `POST /console/v1/admin/marketing/campaigns`
+- `PATCH /console/v1/admin/marketing/campaigns/{campaign_id}`
 - `POST /console/v1/admin/marketing/campaigns/{campaign_id}/preview`
 - `GET /console/v1/admin/marketing/campaigns/{campaign_id}/audience`
 - `POST /console/v1/admin/marketing/campaigns/{campaign_id}/request-approval`
@@ -77,27 +78,13 @@ API endpoints used (Console API)
 - `POST /console/v1/admin/marketing/campaigns/{campaign_id}/retry-failed`
 
 Backend handlers
-- `truffles-api/app/routers/console.py`:
-  - `list_marketing_campaigns`
-  - `create_marketing_campaign`
-  - `preview_marketing_campaign`
-  - `get_marketing_campaign_audience`
-  - `request_marketing_campaign_approval`
-  - `approve_marketing_campaign`
-  - `get_marketing_campaign_preflight`
-  - `pause_marketing_campaign`
-  - `resume_marketing_campaign`
-  - `execute_marketing_campaign`
-  - `get_marketing_campaign_diagnostics`
-  - `retry_failed_marketing_campaign_deliveries`
-
-Business logic
-- `truffles-api/app/services/marketing/service.py`:
-  - audience materialization by segment rules
-  - suppression/consent/frequency/permanent-failure filtering
-  - preflight generation
-  - lifecycle transitions
-  - execute and retry safety paths
+- `truffles-api/app/routers/console.py`
+  - `get_marketing_segments_catalog`
+  - campaign lifecycle handlers.
+- `truffles-api/app/services/marketing/service.py`
+  - segment params normalization/catalog/explainers
+  - audience materialization using effective params
+  - preflight and execute guards.
 
 Data sources
 - `marketing_campaigns`

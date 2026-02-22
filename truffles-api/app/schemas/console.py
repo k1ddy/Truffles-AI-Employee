@@ -1,4 +1,4 @@
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
@@ -371,6 +371,8 @@ class ConsoleMarketingCampaign(BaseModel):
     status: ConsoleMarketingCampaignStatus
     status_v2: ConsoleMarketingCampaignStatusV2 = "draft"
     segment_code: ConsoleMarketingSegmentCode = "reactivation_30_120"
+    segment_params: dict[str, Any] = {}
+    segment_summary: Optional[str] = None
     audience_mode: ConsoleMarketingAudienceMode
     preview_total: int = 0
     preflight_valid: bool = False
@@ -391,11 +393,20 @@ class ConsoleMarketingCampaignCreateRequest(ConsoleRequestModel):
     name: StrictStr
     message_text: StrictStr
     segment_code: ConsoleMarketingSegmentCode = "reactivation_30_120"
+    segment_params: Optional[dict[str, Any]] = None
     audience_mode: ConsoleMarketingAudienceMode = "branch_active_conversations"
 
 
 class ConsoleMarketingCampaignCreateResponse(BaseModel):
     campaign: ConsoleMarketingCampaign
+
+
+class ConsoleMarketingCampaignUpdateRequest(ConsoleRequestModel):
+    name: Optional[StrictStr] = None
+    message_text: Optional[StrictStr] = None
+    segment_code: Optional[ConsoleMarketingSegmentCode] = None
+    segment_params: Optional[dict[str, Any]] = None
+    reason: Optional[StrictStr] = None
 
 
 class ConsoleMarketingCampaignListResponse(BaseModel):
@@ -406,6 +417,38 @@ class ConsoleMarketingCampaignPreviewRequest(ConsoleRequestModel):
     sample_limit: Optional[int] = 5
 
 
+class ConsoleMarketingAudienceFunnel(BaseModel):
+    candidate_count: int = 0
+    matched_count: int = 0
+    segment_excluded_count: int = 0
+    eligible_count: int = 0
+    suppressed_count: int = 0
+    suppression_reason_counts: dict[str, int] = {}
+
+
+class ConsoleMarketingSegmentEditableField(BaseModel):
+    key: str
+    label: str
+    type: Literal["int", "bool"]
+    min: Optional[int] = None
+    max: Optional[int] = None
+    step: Optional[int] = None
+
+
+class ConsoleMarketingSegmentDefinition(BaseModel):
+    code: ConsoleMarketingSegmentCode
+    label: str
+    short_label: str
+    description: str
+    defaults: dict[str, Any] = {}
+    summary: str
+    editable_fields: list[ConsoleMarketingSegmentEditableField] = []
+
+
+class ConsoleMarketingSegmentCatalogResponse(BaseModel):
+    items: list[ConsoleMarketingSegmentDefinition]
+
+
 class ConsoleMarketingCampaignPreviewResponse(BaseModel):
     campaign_id: UUID
     branch_id: UUID
@@ -413,8 +456,11 @@ class ConsoleMarketingCampaignPreviewResponse(BaseModel):
     estimated_recipients: int
     eligible_count: int = 0
     suppressed_count: int = 0
+    segment_params: dict[str, Any] = {}
+    segment_summary: Optional[str] = None
     sample_conversation_ids: list[UUID]
     sample_recipient_jids: list[str]
+    funnel: ConsoleMarketingAudienceFunnel
 
 
 class ConsoleMarketingCampaignExecuteRequest(ConsoleRequestModel):
@@ -477,8 +523,10 @@ class ConsoleMarketingCampaignRecipient(BaseModel):
     conversation_id: Optional[UUID] = None
     segment_code: ConsoleMarketingSegmentCode
     reason_codes: list[str] = []
+    reason_hints: list[str] = []
     suppressed: bool = False
     suppression_reasons: list[str] = []
+    suppression_hints: list[str] = []
     updated_at: Optional[str] = None
 
 
@@ -498,9 +546,14 @@ class ConsoleMarketingCampaignPreflightResponse(BaseModel):
     outbox_health_status: str
     outbox_pending: int = 0
     outbox_failed_24h: int = 0
+    provider_billing_blocked: bool = False
+    provider_billing_blocked_count: int = 0
     audience_total: int = 0
     eligible_count: int = 0
     suppressed_count: int = 0
+    segment_params: dict[str, Any] = {}
+    segment_summary: Optional[str] = None
+    preview_stats: Optional[ConsoleMarketingAudienceFunnel] = None
     template_gate_enabled: bool = False
     template_state: Optional[str] = None
     template_ok: bool = True

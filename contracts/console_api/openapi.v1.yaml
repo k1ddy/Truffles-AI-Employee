@@ -2771,6 +2771,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/marketing/segments:
+    get:
+      tags:
+      - console
+      summary: Get Marketing Segments Catalog
+      operationId: get_marketing_segments_catalog_console_v1_admin_marketing_segments_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleMarketingSegmentCatalogResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
   /console/v1/admin/marketing/campaigns:
     get:
       tags:
@@ -2830,6 +2855,50 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ConsoleMarketingCampaignCreateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleMarketingCampaignCreateResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/marketing/campaigns/{campaign_id}:
+    patch:
+      tags:
+      - console
+      summary: Update Marketing Campaign
+      operationId: update_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__patch
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Campaign Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleMarketingCampaignUpdateRequest'
       responses:
         '200':
           description: Successful Response
@@ -9110,6 +9179,36 @@ components:
       - success
       - message
       title: ConsoleManagerMessageResponse
+    ConsoleMarketingAudienceFunnel:
+      properties:
+        candidate_count:
+          type: integer
+          title: Candidate Count
+          default: 0
+        matched_count:
+          type: integer
+          title: Matched Count
+          default: 0
+        segment_excluded_count:
+          type: integer
+          title: Segment Excluded Count
+          default: 0
+        eligible_count:
+          type: integer
+          title: Eligible Count
+          default: 0
+        suppressed_count:
+          type: integer
+          title: Suppressed Count
+          default: 0
+        suppression_reason_counts:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Suppression Reason Counts
+          default: {}
+      type: object
+      title: ConsoleMarketingAudienceFunnel
     ConsoleMarketingCampaign:
       properties:
         id:
@@ -9145,6 +9244,20 @@ components:
           - cancelled
           - failed
           title: Status
+        status_v2:
+          type: string
+          enum:
+          - draft
+          - in_review
+          - approved
+          - scheduled
+          - running
+          - paused
+          - completed
+          - cancelled
+          - failed
+          title: Status V2
+          default: draft
         segment_code:
           type: string
           enum:
@@ -9153,6 +9266,15 @@ components:
           - engaged_no_booking_7d
           title: Segment Code
           default: reactivation_30_120
+        segment_params:
+          type: object
+          title: Segment Params
+          default: {}
+        segment_summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Segment Summary
         audience_mode:
           const: branch_active_conversations
           title: Audience Mode
@@ -9273,6 +9395,11 @@ components:
           - engaged_no_booking_7d
           title: Segment Code
           default: reactivation_30_120
+        segment_params:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Segment Params
         audience_mode:
           const: branch_active_conversations
           title: Audience Mode
@@ -9313,6 +9440,20 @@ components:
         total_count:
           type: integer
           title: Total Count
+        failure_classes:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Failure Classes
+          default: {}
+        retryable_failed_count:
+          type: integer
+          title: Retryable Failed Count
+          default: 0
+        permanent_failed_count:
+          type: integer
+          title: Permanent Failed Count
+          default: 0
         sample_failed:
           items:
             $ref: '#/components/schemas/ConsoleMarketingDeliverySample'
@@ -9418,6 +9559,14 @@ components:
           type: integer
           title: Outbox Failed 24H
           default: 0
+        provider_billing_blocked:
+          type: boolean
+          title: Provider Billing Blocked
+          default: false
+        provider_billing_blocked_count:
+          type: integer
+          title: Provider Billing Blocked Count
+          default: 0
         audience_total:
           type: integer
           title: Audience Total
@@ -9430,6 +9579,32 @@ components:
           type: integer
           title: Suppressed Count
           default: 0
+        segment_params:
+          type: object
+          title: Segment Params
+          default: {}
+        segment_summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Segment Summary
+        preview_stats:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleMarketingAudienceFunnel'
+          - type: 'null'
+        template_gate_enabled:
+          type: boolean
+          title: Template Gate Enabled
+          default: false
+        template_state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Template State
+        template_ok:
+          type: boolean
+          title: Template Ok
+          default: true
       type: object
       required:
       - campaign_id
@@ -9472,6 +9647,15 @@ components:
           type: integer
           title: Suppressed Count
           default: 0
+        segment_params:
+          type: object
+          title: Segment Params
+          default: {}
+        segment_summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Segment Summary
         sample_conversation_ids:
           items:
             type: string
@@ -9483,6 +9667,8 @@ components:
             type: string
           type: array
           title: Sample Recipient Jids
+        funnel:
+          $ref: '#/components/schemas/ConsoleMarketingAudienceFunnel'
       type: object
       required:
       - campaign_id
@@ -9491,6 +9677,7 @@ components:
       - estimated_recipients
       - sample_conversation_ids
       - sample_recipient_jids
+      - funnel
       title: ConsoleMarketingCampaignPreviewResponse
     ConsoleMarketingCampaignRecipient:
       properties:
@@ -9530,6 +9717,12 @@ components:
           type: array
           title: Reason Codes
           default: []
+        reason_hints:
+          items:
+            type: string
+          type: array
+          title: Reason Hints
+          default: []
         suppressed:
           type: boolean
           title: Suppressed
@@ -9539,6 +9732,12 @@ components:
             type: string
           type: array
           title: Suppression Reasons
+          default: []
+        suppression_hints:
+          items:
+            type: string
+          type: array
+          title: Suppression Hints
           default: []
         updated_at:
           anyOf:
@@ -9590,6 +9789,40 @@ components:
       - retried_count
       - skipped_count
       title: ConsoleMarketingCampaignRetryResponse
+    ConsoleMarketingCampaignUpdateRequest:
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        message_text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message Text
+        segment_code:
+          anyOf:
+          - type: string
+            enum:
+            - reactivation_30_120
+            - no_show_recovery_14d
+            - engaged_no_booking_7d
+          - type: 'null'
+          title: Segment Code
+        segment_params:
+          anyOf:
+          - type: object
+          - type: 'null'
+          title: Segment Params
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      additionalProperties: false
+      type: object
+      title: ConsoleMarketingCampaignUpdateRequest
     ConsoleMarketingDeliverySample:
       properties:
         delivery_id:
@@ -9597,8 +9830,10 @@ components:
           format: uuid
           title: Delivery Id
         conversation_id:
-          type: string
-          format: uuid
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
           title: Conversation Id
         recipient_jid:
           anyOf:
@@ -9633,6 +9868,91 @@ components:
       - delivery_id
       - status
       title: ConsoleMarketingDeliverySample
+    ConsoleMarketingSegmentCatalogResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ConsoleMarketingSegmentDefinition'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: ConsoleMarketingSegmentCatalogResponse
+    ConsoleMarketingSegmentDefinition:
+      properties:
+        code:
+          type: string
+          enum:
+          - reactivation_30_120
+          - no_show_recovery_14d
+          - engaged_no_booking_7d
+          title: Code
+        label:
+          type: string
+          title: Label
+        short_label:
+          type: string
+          title: Short Label
+        description:
+          type: string
+          title: Description
+        defaults:
+          type: object
+          title: Defaults
+          default: {}
+        summary:
+          type: string
+          title: Summary
+        editable_fields:
+          items:
+            $ref: '#/components/schemas/ConsoleMarketingSegmentEditableField'
+          type: array
+          title: Editable Fields
+          default: []
+      type: object
+      required:
+      - code
+      - label
+      - short_label
+      - description
+      - summary
+      title: ConsoleMarketingSegmentDefinition
+    ConsoleMarketingSegmentEditableField:
+      properties:
+        key:
+          type: string
+          title: Key
+        label:
+          type: string
+          title: Label
+        type:
+          type: string
+          enum:
+          - int
+          - bool
+          title: Type
+        min:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Min
+        max:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max
+        step:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Step
+      type: object
+      required:
+      - key
+      - label
+      - type
+      title: ConsoleMarketingSegmentEditableField
     ConsoleMeResponse:
       properties:
         agent:
@@ -11719,7 +12039,6 @@ components:
       required:
       - destination
       - content
-      - conversation_id
       title: ConsoleOutreachMessageRequest
     ConsoleOutreachMessageResponse:
       properties:
@@ -13601,6 +13920,18 @@ components:
         has_more:
           type: boolean
           title: Has More
+        storage_mode:
+          type: string
+          enum:
+          - table
+          - audit_fallback
+          title: Storage Mode
+          default: table
+        schema_versions:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Schema Versions
       type: object
       required:
       - items
@@ -13667,6 +13998,10 @@ components:
           title: Week Key
         snapshot:
           $ref: '#/components/schemas/ConsoleTenantsWeeklySnapshotPayload'
+        snapshot_schema_version:
+          type: string
+          title: Snapshot Schema Version
+          default: v1
         actor_name:
           anyOf:
           - type: string
