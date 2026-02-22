@@ -24,7 +24,7 @@
     - `GET /console/v1/admin/tenants/company-cockpit`
   - Добавлены schema models и unit tests для новых wrappers/хелпера query-request адаптации.
   - Прогнаны проверки: `corepack pnpm -C console-web lint`, `corepack pnpm -C console-web build`.
-  - Wave3 snapshot storage переведён на typed server-backed модель: добавлены `TenantsWeeklySnapshot` model и миграция `034_add_tenants_weekly_snapshots.sql` с backfill из `audit_events`.
+  - Wave3 snapshot storage переведён на typed server-backed модель: добавлены `TenantsWeeklySnapshot` model и миграция `037_add_tenants_weekly_snapshots.sql` с backfill из `audit_events`.
   - `save/list weekly snapshots` в `console.py` переключены на таблицу `tenants_weekly_snapshots`; чтение из audit оставлено как read-only fallback при отсутствии миграции.
   - Добавлена fail-closed семантика для save при неготовой БД: `503 TENANTS_WEEKLY_SNAPSHOT_STORAGE_UNAVAILABLE` вместо локального pseudo-success.
   - Обновлён ISO week contract: backend week-key normalizer валидирует ISO неделю через `datetime.fromisocalendar`.
@@ -47,6 +47,6 @@
   - truffles-api/app/routers/console.py
   - truffles-api/tests/test_console_tenants_list.py
   - truffles-api/app/models/tenants_weekly_snapshot.py
-  - truffles-api/migrations/034_add_tenants_weekly_snapshots.sql
+  - truffles-api/migrations/037_add_tenants_weekly_snapshots.sql
   - console-web/src/lib/api-client.ts
 - last_updated: 2026-02-21T07:30:00Z
