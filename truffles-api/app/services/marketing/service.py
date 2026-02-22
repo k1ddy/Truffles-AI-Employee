@@ -241,20 +241,28 @@ def normalize_marketing_segment_params(
 
 def build_marketing_segment_summary(segment_code: str, segment_params: Any) -> str:
     params = normalize_marketing_segment_params(segment_code, segment_params, strict=False)
+    future_booking_text = (
+        " Будущая запись отсутствует."
+        if bool(params.get("require_no_future_booking", True))
+        else " Клиенты с будущей записью тоже включаются."
+    )
     if segment_code == MARKETING_SEGMENT_REACTIVATION_30_120:
         return (
-            "Клиенты без будущей записи, у которых последний визит был "
+            "Клиенты, у которых последний визит был "
             f"{params['min_days_since_last_visit']}-{params['max_days_since_last_visit']} дней назад."
+            f"{future_booking_text}"
         )
     if segment_code == MARKETING_SEGMENT_NO_SHOW_RECOVERY_14D:
         return (
             "Клиенты с no-show за последние "
-            f"{params['no_show_window_days']} дней (минимум {params['min_no_show_count']}), без будущей записи."
+            f"{params['no_show_window_days']} дней (минимум {params['min_no_show_count']})."
+            f"{future_booking_text}"
         )
     if segment_code == MARKETING_SEGMENT_ENGAGED_NO_BOOKING_7D:
         return (
             "Клиенты с интересом к услугам/ценам за последние "
-            f"{params['engagement_window_days']} дней, без будущей записи."
+            f"{params['engagement_window_days']} дней."
+            f"{future_booking_text}"
         )
     return "Сегмент аудитории"
 
@@ -288,7 +296,7 @@ def get_marketing_segment_catalog() -> list[dict[str, Any]]:
             "editable_fields": [
                 {
                     "key": "min_days_since_last_visit",
-                    "label": "От, дней после визита",
+                    "label": "Минимум дней после последнего визита",
                     "type": "int",
                     "min": 1,
                     "max": 3650,
@@ -296,7 +304,7 @@ def get_marketing_segment_catalog() -> list[dict[str, Any]]:
                 },
                 {
                     "key": "max_days_since_last_visit",
-                    "label": "До, дней после визита",
+                    "label": "Максимум дней после последнего визита",
                     "type": "int",
                     "min": 1,
                     "max": 3650,
@@ -304,7 +312,7 @@ def get_marketing_segment_catalog() -> list[dict[str, Any]]:
                 },
                 {
                     "key": "require_no_future_booking",
-                    "label": "Только без будущей записи",
+                    "label": "Исключать клиентов с уже запланированной записью",
                     "type": "bool",
                 },
             ],
@@ -322,7 +330,7 @@ def get_marketing_segment_catalog() -> list[dict[str, Any]]:
             "editable_fields": [
                 {
                     "key": "no_show_window_days",
-                    "label": "Период поиска no-show, дней",
+                    "label": "Период поиска no-show (дней)",
                     "type": "int",
                     "min": 1,
                     "max": 365,
@@ -338,7 +346,7 @@ def get_marketing_segment_catalog() -> list[dict[str, Any]]:
                 },
                 {
                     "key": "require_no_future_booking",
-                    "label": "Только без будущей записи",
+                    "label": "Исключать клиентов с уже запланированной записью",
                     "type": "bool",
                 },
             ],
@@ -356,7 +364,7 @@ def get_marketing_segment_catalog() -> list[dict[str, Any]]:
             "editable_fields": [
                 {
                     "key": "engagement_window_days",
-                    "label": "Период интереса, дней",
+                    "label": "Период интереса к услугам/ценам (дней)",
                     "type": "int",
                     "min": 1,
                     "max": 90,
@@ -364,7 +372,7 @@ def get_marketing_segment_catalog() -> list[dict[str, Any]]:
                 },
                 {
                     "key": "require_no_future_booking",
-                    "label": "Только без будущей записи",
+                    "label": "Исключать клиентов с уже запланированной записью",
                     "type": "bool",
                 },
             ],
@@ -393,7 +401,7 @@ def describe_marketing_reason_code(reason_code: str) -> str:
         signal = value.split("=", 1)[1].strip()
         return f"Обнаружен сигнал интереса ({signal})."
     if value == "no_future_booking=true":
-        return "Нет будущей записи."
+        return "У клиента нет запланированной будущей записи."
     return value.replace("_", " ")
 
 
