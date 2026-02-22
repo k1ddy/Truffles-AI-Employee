@@ -23,6 +23,12 @@ Campaign create
   - `engaged_no_booking_7d`
 - Action: `Создать кампанию`.
 
+Campaign update (before approve)
+- Editable fields: `name`, `message_text`, `segment_code`.
+- Endpoint: `PATCH /console/v1/admin/marketing/campaigns/{campaign_id}`.
+- Guard: edit allowed only for `draft|in_review`.
+- Update resets preview snapshot and requires fresh preview.
+
 Campaign lifecycle controls
 - Preview:
   - `sample_limit` input.
@@ -41,11 +47,17 @@ Preflight panel
 - Displays:
   - `preflight_valid`
   - `outbox_health_status`
+  - `provider_billing_blocked`
   - `audience_total`
   - `eligible_count`
   - `suppressed_count`
   - `blocked_reasons`
 - Blocked reasons are rendered as explicit badges; execute remains disabled when preflight is invalid.
+- If provider billing is blocked, page renders a red blocking banner with CTA to `/integrations`.
+
+Preview funnel panel
+- Shows `candidate_count -> matched_count -> segment_excluded_count -> suppressed_count -> eligible_count`.
+- Includes `suppression_reason_counts` histogram for quick diagnosis when audience is empty.
 
 Audience panel
 - Controls:
@@ -65,6 +77,7 @@ Diagnostics panel
 API endpoints used (Console API)
 - `GET /console/v1/admin/marketing/campaigns`
 - `POST /console/v1/admin/marketing/campaigns`
+- `PATCH /console/v1/admin/marketing/campaigns/{campaign_id}`
 - `POST /console/v1/admin/marketing/campaigns/{campaign_id}/preview`
 - `GET /console/v1/admin/marketing/campaigns/{campaign_id}/audience`
 - `POST /console/v1/admin/marketing/campaigns/{campaign_id}/request-approval`
@@ -80,6 +93,7 @@ Backend handlers
 - `truffles-api/app/routers/console.py`:
   - `list_marketing_campaigns`
   - `create_marketing_campaign`
+  - `update_marketing_campaign`
   - `preview_marketing_campaign`
   - `get_marketing_campaign_audience`
   - `request_marketing_campaign_approval`

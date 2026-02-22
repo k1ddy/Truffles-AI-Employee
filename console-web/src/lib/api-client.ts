@@ -912,7 +912,21 @@ export type MarketingCampaignCreateRequest = {
     audience_mode?: MarketingAudienceMode;
 };
 export type MarketingCampaignCreateResponse = { campaign: MarketingCampaign };
+export type MarketingCampaignUpdateRequest = {
+    name?: string;
+    message_text?: string;
+    segment_code?: MarketingSegmentCode;
+    reason?: string | null;
+};
 export type MarketingCampaignPreviewRequest = { sample_limit?: number };
+export type MarketingAudienceFunnel = {
+    candidate_count: number;
+    matched_count: number;
+    segment_excluded_count: number;
+    eligible_count: number;
+    suppressed_count: number;
+    suppression_reason_counts: Record<string, number>;
+};
 export type MarketingCampaignPreviewResponse = {
     campaign_id: string;
     branch_id: string;
@@ -922,6 +936,7 @@ export type MarketingCampaignPreviewResponse = {
     suppressed_count: number;
     sample_conversation_ids: string[];
     sample_recipient_jids: string[];
+    funnel: MarketingAudienceFunnel;
 };
 export type MarketingCampaignExecuteRequest = { confirm_send: boolean; max_recipients?: number | null };
 export type MarketingCampaignExecuteResponse = {
@@ -986,9 +1001,12 @@ export type MarketingCampaignPreflightResponse = {
     outbox_health_status: string;
     outbox_pending: number;
     outbox_failed_24h: number;
+    provider_billing_blocked: boolean;
+    provider_billing_blocked_count: number;
     audience_total: number;
     eligible_count: number;
     suppressed_count: number;
+    preview_stats?: MarketingAudienceFunnel | null;
     template_gate_enabled: boolean;
     template_state?: string | null;
     template_ok: boolean;
@@ -1311,6 +1329,8 @@ export const adminApi = {
         apiClient.get<MarketingCampaignListResponse>("/admin/marketing/campaigns", { params }),
     createMarketingCampaign: (data: MarketingCampaignCreateRequest) =>
         apiClient.post<MarketingCampaignCreateResponse>("/admin/marketing/campaigns", data),
+    updateMarketingCampaign: (campaignId: string, data: MarketingCampaignUpdateRequest) =>
+        apiClient.patch<MarketingCampaignCreateResponse>(`/admin/marketing/campaigns/${campaignId}`, data),
     previewMarketingCampaign: (campaignId: string, data?: MarketingCampaignPreviewRequest) =>
         apiClient.post<MarketingCampaignPreviewResponse>(`/admin/marketing/campaigns/${campaignId}/preview`, data ?? {}),
     getMarketingCampaignAudience: (

@@ -398,12 +398,28 @@ class ConsoleMarketingCampaignCreateResponse(BaseModel):
     campaign: ConsoleMarketingCampaign
 
 
+class ConsoleMarketingCampaignUpdateRequest(ConsoleRequestModel):
+    name: Optional[StrictStr] = None
+    message_text: Optional[StrictStr] = None
+    segment_code: Optional[ConsoleMarketingSegmentCode] = None
+    reason: Optional[StrictStr] = None
+
+
 class ConsoleMarketingCampaignListResponse(BaseModel):
     items: list[ConsoleMarketingCampaign]
 
 
 class ConsoleMarketingCampaignPreviewRequest(ConsoleRequestModel):
     sample_limit: Optional[int] = 5
+
+
+class ConsoleMarketingAudienceFunnel(BaseModel):
+    candidate_count: int = 0
+    matched_count: int = 0
+    segment_excluded_count: int = 0
+    eligible_count: int = 0
+    suppressed_count: int = 0
+    suppression_reason_counts: dict[str, int] = {}
 
 
 class ConsoleMarketingCampaignPreviewResponse(BaseModel):
@@ -415,6 +431,7 @@ class ConsoleMarketingCampaignPreviewResponse(BaseModel):
     suppressed_count: int = 0
     sample_conversation_ids: list[UUID]
     sample_recipient_jids: list[str]
+    funnel: ConsoleMarketingAudienceFunnel
 
 
 class ConsoleMarketingCampaignExecuteRequest(ConsoleRequestModel):
@@ -498,9 +515,12 @@ class ConsoleMarketingCampaignPreflightResponse(BaseModel):
     outbox_health_status: str
     outbox_pending: int = 0
     outbox_failed_24h: int = 0
+    provider_billing_blocked: bool = False
+    provider_billing_blocked_count: int = 0
     audience_total: int = 0
     eligible_count: int = 0
     suppressed_count: int = 0
+    preview_stats: Optional[ConsoleMarketingAudienceFunnel] = None
     template_gate_enabled: bool = False
     template_state: Optional[str] = None
     template_ok: bool = True

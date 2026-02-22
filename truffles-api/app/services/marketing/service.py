@@ -17,6 +17,7 @@ from app.models import (
     MarketingConsent,
     MarketingDeliveryEvent,
     MarketingSuppression,
+    Message,
     OutboxMessage,
     User,
 )
@@ -68,6 +69,18 @@ MARKETING_FREQUENCY_CAP_DAYS = 7
 MARKETING_PERMANENT_FAILURE_LOOKBACK_DAYS = 90
 MARKETING_TEMPLATE_GATE_ENABLED_ENV = "MARKETING_TEMPLATE_GATE_ENABLED"
 MARKETING_TEMPLATE_APPROVED_STATES = {"approved", "active", "ready"}
+MARKETING_PREVIEW_ENGAGEMENT_LOOKBACK_DAYS = 7
+MARKETING_BILLING_BLOCK_LOOKBACK_HOURS = 24
+MARKETING_BILLING_BLOCK_SAMPLE_LIMIT = 500
+_SERVICE_PRICING_INTENT_SIGNALS = {
+    "pricing",
+    "price_query",
+    "catalog.service_query",
+    "service_match",
+    "services_overview",
+    "service_duration",
+    "service_clarify",
+}
 
 _CANCELLED_APPOINTMENT_STATUSES = {"CANCELLED", "CANCELED", "cancelled", "canceled"}
 _NO_SHOW_APPOINTMENT_STATUSES = {"NO_SHOW", "no_show"}
@@ -153,6 +166,101 @@ def _days_since(when: Optional[datetime], *, now: datetime) -> Optional[int]:
         return None
     delta = now - when
     return max(int(delta.total_seconds() // 86400), 0)
+
+
+def _metadata_string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return [normalized] if normalized else []
+    if isinstance(value, list):
+        values: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                normalized = item.strip().lower()
+                if normalized:
+                    values.append(normalized)
+        return values
+    return []
+
+
+def _message_has_service_or_pricing_signal(*, intent: Optional[str], metadata: Any) -> tuple[bool, Optional[str]]:
+    normalized_intent = (intent or "").strip().lower()
+    if normalized_intent in _SERVICE_PRICING_INTENT_SIGNALS:
+        return True, f"intent:{normalized_intent}"
+    if normalized_intent.startswith("pricing") or normalized_intent.startswith("service_"):
+        return True, f"intent:{normalized_intent}"
+
+    if not isinstance(metadata, dict):
+        return False, None
+
+    service_query = metadata.get("service_query")
+    if isinstance(service_query, str) and service_query.strip():
+        return True, "meta:service_query"
+
+    info_sections = _metadata_string_list(metadata.get("info_sections"))
+    if any(value == "pricing" or value.startswith("service") for value in info_sections):
+        return True, "meta:info_sections"
+
+    booking_info_intents = _metadata_string_list(metadata.get("booking_info_intents"))
+    if any(value == "pricing" or value.startswith("service") for value in booking_info_intents):
+        return True, "meta:booking_info_intents"
+
+    intents = _metadata_string_list(metadata.get("intents"))
+    if any(value == "pricing" or value.startswith("service") for value in intents):
+        return True, "meta:intents"
+
+    secondary_intents = _metadata_string_list(metadata.get("secondary_intents"))
+    if any(value == "pricing" or value.startswith("service") for value in secondary_intents):
+        return True, "meta:secondary_intents"
+
+    return False, None
+
+
+def _load_recent_service_pricing_engagement(
+    db: Session,
+    *,
+    client_id: UUID,
+    conversation_ids: set[UUID],
+    now: datetime,
+) -> dict[UUID, dict[str, Any]]:
+    if not conversation_ids:
+        return {}
+
+    cutoff = now - timedelta(days=MARKETING_PREVIEW_ENGAGEMENT_LOOKBACK_DAYS)
+    rows = (
+        db.query(
+            Message.conversation_id,
+            Message.created_at,
+            Message.intent,
+            Message.message_metadata,
+        )
+        .filter(
+            Message.client_id == client_id,
+            Message.role == "user",
+            Message.conversation_id.in_(conversation_ids),
+            Message.created_at >= cutoff,
+        )
+        .order_by(Message.created_at.desc())
+        .all()
+    )
+
+    by_conversation: dict[UUID, dict[str, Any]] = {}
+    for row in rows:
+        conversation_id = row.conversation_id
+        if conversation_id in by_conversation:
+            continue
+        has_signal, signal_source = _message_has_service_or_pricing_signal(
+            intent=row.intent,
+            metadata=row.message_metadata,
+        )
+        if not has_signal:
+            continue
+        by_conversation[conversation_id] = {
+            "engaged": True,
+            "last_engaged_at": row.created_at,
+            "signal": signal_source or "unknown",
+        }
+    return by_conversation
 
 
 def _load_candidate_conversations(
@@ -278,14 +386,13 @@ def _load_appointment_stats(
 def _matches_segment(
     *,
     segment_code: str,
-    candidate: dict[str, Any],
     stats: dict[str, Any],
+    engagement: Optional[dict[str, Any]],
     now: datetime,
 ) -> tuple[bool, list[str]]:
     last_visit_at = stats.get("last_visit_at")
     future_count = int(stats.get("future_count") or 0)
     no_show_14d_count = int(stats.get("no_show_14d_count") or 0)
-    last_message_at = candidate.get("last_message_at")
     days_since_last_visit = _days_since(last_visit_at, now=now)
     reason_codes: list[str] = []
 
@@ -320,20 +427,22 @@ def _matches_segment(
         return True, reason_codes
 
     if segment_code == MARKETING_SEGMENT_ENGAGED_NO_BOOKING_7D:
-        if not isinstance(last_message_at, datetime):
-            return False, []
-        if last_message_at < now - timedelta(days=7):
+        if not engagement or not bool(engagement.get("engaged")):
             return False, []
         if future_count > 0:
             return False, []
-        days_since_message = _days_since(last_message_at, now=now) or 0
+        last_engaged_at = engagement.get("last_engaged_at")
+        days_since_message = _days_since(last_engaged_at, now=now)
+        signal = str(engagement.get("signal") or "unknown")
         reason_codes.extend(
             [
                 "segment=engaged_no_booking_7d",
-                f"last_message_days={days_since_message}",
+                f"engagement_signal={signal}",
                 "no_future_booking=true",
             ]
         )
+        if days_since_message is not None:
+            reason_codes.append(f"engagement_days={days_since_message}")
         return True, reason_codes
 
     return False, []
@@ -479,6 +588,37 @@ def _load_permanent_failure_jids(
     return permanent
 
 
+def _count_recent_provider_billing_blocked_failures(
+    db: Session,
+    *,
+    client_id: UUID,
+    branch_id: UUID,
+    now: datetime,
+) -> int:
+    cutoff = now - timedelta(hours=MARKETING_BILLING_BLOCK_LOOKBACK_HOURS)
+    rows = (
+        db.query(OutboxMessage.last_error)
+        .join(Conversation, Conversation.id == OutboxMessage.conversation_id)
+        .filter(
+            OutboxMessage.client_id == client_id,
+            Conversation.client_id == client_id,
+            Conversation.branch_id == branch_id,
+            OutboxMessage.status == "FAILED",
+            OutboxMessage.created_at >= cutoff,
+            OutboxMessage.last_error.isnot(None),
+        )
+        .order_by(OutboxMessage.created_at.desc())
+        .limit(MARKETING_BILLING_BLOCK_SAMPLE_LIMIT)
+        .all()
+    )
+    count = 0
+    for row in rows:
+        error_text = row[0] if isinstance(row, tuple) else getattr(row, "last_error", None)
+        if classify_provider_error(error_text).kind == "billing_blocked":
+            count += 1
+    return count
+
+
 def _resolve_suppression_reasons(
     *,
     consent_status: Optional[str],
@@ -616,15 +756,23 @@ def materialize_marketing_campaign_audience(
         user_ids=user_ids,
         now=now,
     )
+    conversation_ids = {candidate["conversation_id"] for candidate in candidates if candidate.get("conversation_id")}
+    engagement_by_conversation = _load_recent_service_pricing_engagement(
+        db,
+        client_id=campaign.client_id,
+        conversation_ids=conversation_ids,
+        now=now,
+    )
 
     selected: list[dict[str, Any]] = []
     for candidate in candidates:
         user_id = candidate.get("user_id")
         stats = stats_by_user.get(user_id, {"last_visit_at": None, "future_count": 0, "no_show_14d_count": 0})
+        engagement = engagement_by_conversation.get(candidate.get("conversation_id"))
         matches, reason_codes = _matches_segment(
             segment_code=segment_code,
-            candidate=candidate,
             stats=stats,
+            engagement=engagement,
             now=now,
         )
         if not matches:
@@ -670,6 +818,7 @@ def materialize_marketing_campaign_audience(
     db.query(MarketingCampaignRecipient).filter(MarketingCampaignRecipient.campaign_id == campaign.id).delete()
 
     suppressed_count = 0
+    suppression_reason_counts: dict[str, int] = {}
     for item in selected:
         normalized_jid = _normalize_jid(item["recipient_jid"])
         suppression_reasons = _resolve_suppression_reasons(
@@ -682,6 +831,8 @@ def materialize_marketing_campaign_audience(
         suppressed = len(suppression_reasons) > 0
         if suppressed:
             suppressed_count += 1
+            for reason in set(suppression_reasons):
+                suppression_reason_counts[reason] = suppression_reason_counts.get(reason, 0) + 1
         db.add(
             MarketingCampaignRecipient(
                 campaign_id=campaign.id,
@@ -699,6 +850,17 @@ def materialize_marketing_campaign_audience(
             )
         )
 
+    candidate_count = len(candidates)
+    matched_count = len(selected)
+    segment_excluded_count = max(candidate_count - matched_count, 0)
+    preview_stats = {
+        "candidate_count": candidate_count,
+        "matched_count": matched_count,
+        "segment_excluded_count": segment_excluded_count,
+        "eligible_count": max(matched_count - suppressed_count, 0),
+        "suppressed_count": suppressed_count,
+        "suppression_reason_counts": suppression_reason_counts,
+    }
     campaign.segment_code = segment_code
     campaign.preview_total = len(selected)
     campaign.last_preview_at = now
@@ -706,8 +868,14 @@ def materialize_marketing_campaign_audience(
     campaign.preflight_snapshot = {
         "generated_at": now.isoformat(),
         "reason": "preview_refresh_required_before_execute",
-        "eligible_count": max(len(selected) - suppressed_count, 0),
+        "eligible_count": preview_stats["eligible_count"],
         "suppressed_count": suppressed_count,
+        "preview_stats": preview_stats,
+    }
+    audience_filter = campaign.audience_filter if isinstance(campaign.audience_filter, dict) else {}
+    campaign.audience_filter = {
+        **audience_filter,
+        "preview_stats": preview_stats,
     }
     campaign.updated_at = now
     db.add(campaign)
@@ -723,8 +891,12 @@ def materialize_marketing_campaign_audience(
 
     return {
         "estimated_recipients": len(selected),
+        "candidate_count": candidate_count,
+        "matched_count": matched_count,
+        "segment_excluded_count": segment_excluded_count,
         "eligible_count": max(len(selected) - suppressed_count, 0),
         "suppressed_count": suppressed_count,
+        "suppression_reason_counts": suppression_reason_counts,
         "sample_conversation_ids": [
             row.conversation_id
             for row in preview_rows
@@ -766,6 +938,13 @@ def build_marketing_campaign_preflight(
     now: Optional[datetime] = None,
 ) -> dict[str, Any]:
     now = now or datetime.now(timezone.utc)
+    previous_snapshot = campaign.preflight_snapshot if isinstance(campaign.preflight_snapshot, dict) else {}
+    audience_filter = campaign.audience_filter if isinstance(campaign.audience_filter, dict) else {}
+    preview_stats = (
+        previous_snapshot.get("preview_stats")
+        if isinstance(previous_snapshot.get("preview_stats"), dict)
+        else audience_filter.get("preview_stats")
+    )
     campaign_status = resolve_marketing_campaign_status(campaign)
     total_count = (
         db.query(func.count(MarketingCampaignRecipient.id))
@@ -785,6 +964,13 @@ def build_marketing_campaign_preflight(
     eligible_count = max(int(total_count) - int(suppressed_count), 0)
 
     outbox_snapshot = build_outbox_health_snapshot(db, now=now)
+    provider_billing_blocked_count = _count_recent_provider_billing_blocked_failures(
+        db,
+        client_id=campaign.client_id,
+        branch_id=campaign.branch_id,
+        now=now,
+    )
+    provider_billing_blocked = provider_billing_blocked_count > 0
     runtime_blocked = outbox_snapshot.get("status") == "critical"
     approval_ok = campaign_status in {MARKETING_STATUS_APPROVED, MARKETING_STATUS_SCHEDULED}
     preview_ok = int(total_count) > 0
@@ -798,6 +984,8 @@ def build_marketing_campaign_preflight(
     blocked_reasons: list[str] = []
     if runtime_blocked:
         blocked_reasons.append("runtime_health_critical")
+    if provider_billing_blocked:
+        blocked_reasons.append("provider_billing_blocked")
     if not approval_ok:
         blocked_reasons.append("campaign_not_approved")
     if not preview_ok:
@@ -818,12 +1006,16 @@ def build_marketing_campaign_preflight(
         "approval_ok": approval_ok,
         "preview_ok": preview_ok,
         "runtime_blocked": runtime_blocked,
+        "provider_billing_blocked": provider_billing_blocked,
+        "provider_billing_blocked_count": provider_billing_blocked_count,
         "template_gate_enabled": template_gate_enabled,
         "template_state": template_state,
         "template_ok": template_ok,
         "blocked_reasons": blocked_reasons,
         "preflight_valid": preflight_valid,
     }
+    if isinstance(preview_stats, dict):
+        snapshot["preview_stats"] = preview_stats
     campaign.preflight_snapshot = snapshot
     campaign.preflight_valid = preflight_valid
     campaign.updated_at = now

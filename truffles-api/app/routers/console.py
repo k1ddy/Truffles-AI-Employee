@@ -7,7 +7,7 @@ from datetime import date as dt_date
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Callable, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request as URLRequest
@@ -143,6 +143,7 @@ from app.schemas.console import (
     ConsoleMacroUpdateRequest,
     ConsoleManagerMessageRequest,
     ConsoleManagerMessageResponse,
+    ConsoleMarketingAudienceFunnel,
     ConsoleMarketingCampaign,
     ConsoleMarketingCampaignAudienceResponse,
     ConsoleMarketingCampaignCreateRequest,
@@ -158,6 +159,7 @@ from app.schemas.console import (
     ConsoleMarketingCampaignRecipient,
     ConsoleMarketingCampaignRetryRequest,
     ConsoleMarketingCampaignRetryResponse,
+    ConsoleMarketingCampaignUpdateRequest,
     ConsoleMarketingDeliverySample,
     ConsoleMembershipCreateRequest,
     ConsoleMembershipListResponse,
@@ -2248,6 +2250,10 @@ _MARKETING_RETRY_LIMIT_DEFAULT = 100
 _MARKETING_RETRY_LIMIT_MAX = 500
 _MARKETING_AUDIENCE_LIMIT_DEFAULT = 100
 _MARKETING_AUDIENCE_LIMIT_MAX = 500
+_MARKETING_EDITABLE_STATUSES = {
+    MARKETING_STATUS_DRAFT,
+    MARKETING_STATUS_IN_REVIEW,
+}
 
 
 def _require_marketing_access(context: ConsoleAuthContext, *, action: str) -> None:
@@ -2284,6 +2290,30 @@ def _serialize_marketing_campaign(campaign: MarketingCampaign) -> ConsoleMarketi
         executed_at=campaign.executed_at.isoformat() if campaign.executed_at else None,
         created_at=campaign.created_at.isoformat() if campaign.created_at else None,
         updated_at=campaign.updated_at.isoformat() if campaign.updated_at else None,
+    )
+
+
+def _serialize_marketing_audience_funnel(payload: Any) -> Optional[ConsoleMarketingAudienceFunnel]:
+    if not isinstance(payload, dict):
+        return None
+    reason_counts = payload.get("suppression_reason_counts")
+    normalized_reason_counts: dict[str, int] = {}
+    if isinstance(reason_counts, dict):
+        for reason, value in reason_counts.items():
+            normalized_reason = str(reason).strip()
+            if not normalized_reason:
+                continue
+            try:
+                normalized_reason_counts[normalized_reason] = int(value or 0)
+            except Exception:
+                normalized_reason_counts[normalized_reason] = 0
+    return ConsoleMarketingAudienceFunnel(
+        candidate_count=int(payload.get("candidate_count") or 0),
+        matched_count=int(payload.get("matched_count") or 0),
+        segment_excluded_count=int(payload.get("segment_excluded_count") or 0),
+        eligible_count=int(payload.get("eligible_count") or 0),
+        suppressed_count=int(payload.get("suppressed_count") or 0),
+        suppression_reason_counts=normalized_reason_counts,
     )
 
 
@@ -13728,6 +13758,90 @@ async def create_marketing_campaign(
     return ConsoleMarketingCampaignCreateResponse(campaign=_serialize_marketing_campaign(campaign))
 
 
+@router.patch(
+    "/admin/marketing/campaigns/{campaign_id}",
+    response_model=ConsoleMarketingCampaignCreateResponse,
+    responses={401: {"model": ConsoleErrorResponse}, 403: {"model": ConsoleErrorResponse}},
+)
+async def update_marketing_campaign(
+    campaign_id: str,
+    request: Request,
+    payload: ConsoleMarketingCampaignUpdateRequest,
+    db: Session = Depends(get_db),
+) -> ConsoleMarketingCampaignCreateResponse:
+    context = get_console_context(request, db, require_selection=True, include_inactive_tenants=False)
+    _require_marketing_access(context, action="update")
+
+    campaign_uuid = _parse_uuid_param("campaign_id", campaign_id)
+    if campaign_uuid is None:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid campaign_id")
+    campaign = _resolve_marketing_campaign(context, db, campaign_uuid)
+    _resolve_marketing_branch(context, db, campaign.branch_id)
+    current_status = resolve_marketing_campaign_status(campaign)
+    if current_status not in _MARKETING_EDITABLE_STATUSES:
+        raise ConsoleAPIError(409, "INVALID_STATE", "Campaign can be edited only before approval")
+
+    changed_fields: list[str] = []
+    if payload.name is not None:
+        normalized_name = _normalize_required_text(payload.name, "name")
+        if normalized_name != campaign.name:
+            campaign.name = normalized_name
+            changed_fields.append("name")
+
+    if payload.message_text is not None:
+        normalized_message = _normalize_required_text(payload.message_text, "message_text")
+        if normalized_message != campaign.message_text:
+            campaign.message_text = normalized_message
+            changed_fields.append("message_text")
+
+    if payload.segment_code is not None:
+        normalized_segment = _normalize_required_text(payload.segment_code, "segment_code")
+        if normalized_segment not in MARKETING_SEGMENT_CODES:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Unsupported segment_code")
+        if normalized_segment != campaign.segment_code:
+            campaign.segment_code = normalized_segment
+            changed_fields.append("segment_code")
+
+    if not changed_fields:
+        raise ConsoleAPIError(400, "INVALID_PARAM", "No campaign fields changed")
+
+    now = datetime.now(timezone.utc)
+    db.query(MarketingCampaignRecipient).filter(MarketingCampaignRecipient.campaign_id == campaign.id).delete()
+    audience_filter = campaign.audience_filter if isinstance(campaign.audience_filter, dict) else {}
+    audience_filter.pop("preview_stats", None)
+    campaign.audience_filter = audience_filter
+    campaign.preview_total = 0
+    campaign.last_preview_at = None
+    campaign.preflight_valid = False
+    campaign.preflight_snapshot = {
+        "generated_at": now.isoformat(),
+        "reason": "campaign_updated_preview_required",
+        "changed_fields": sorted(changed_fields),
+        "eligible_count": 0,
+        "suppressed_count": 0,
+    }
+    campaign.updated_at = now
+    db.add(campaign)
+
+    record_audit_event(
+        db,
+        client_id=context.client.id,
+        branch_id=campaign.branch_id,
+        actor_id=context.agent.id,
+        actor_name=context.agent.name,
+        event_type="marketing_campaign_updated",
+        entity_type="marketing_campaign",
+        entity_id=campaign.id,
+        payload={
+            "changed_fields": sorted(changed_fields),
+            "reason": _normalize_optional_text(payload.reason),
+        },
+    )
+    db.commit()
+    db.refresh(campaign)
+    return ConsoleMarketingCampaignCreateResponse(campaign=_serialize_marketing_campaign(campaign))
+
+
 @router.post(
     "/admin/marketing/campaigns/{campaign_id}/preview",
     response_model=ConsoleMarketingCampaignPreviewResponse,
@@ -13783,6 +13897,17 @@ async def preview_marketing_campaign(
         suppressed_count=preview["suppressed_count"],
         sample_conversation_ids=preview["sample_conversation_ids"],
         sample_recipient_jids=preview["sample_recipient_jids"],
+        funnel=ConsoleMarketingAudienceFunnel(
+            candidate_count=int(preview.get("candidate_count") or 0),
+            matched_count=int(preview.get("matched_count") or 0),
+            segment_excluded_count=int(preview.get("segment_excluded_count") or 0),
+            eligible_count=int(preview.get("eligible_count") or 0),
+            suppressed_count=int(preview.get("suppressed_count") or 0),
+            suppression_reason_counts={
+                str(reason): int(count or 0)
+                for reason, count in (preview.get("suppression_reason_counts") or {}).items()
+            },
+        ),
     )
 
 
@@ -13951,9 +14076,12 @@ async def get_marketing_campaign_preflight(
         outbox_health_status=str(outbox_health.get("status") or "unknown"),
         outbox_pending=int(outbox_health.get("pending") or 0),
         outbox_failed_24h=int(outbox_health.get("failed_24h") or 0),
+        provider_billing_blocked=bool(snapshot.get("provider_billing_blocked")),
+        provider_billing_blocked_count=int(snapshot.get("provider_billing_blocked_count") or 0),
         audience_total=int(snapshot.get("audience_total") or 0),
         eligible_count=int(snapshot.get("eligible_count") or 0),
         suppressed_count=int(snapshot.get("suppressed_count") or 0),
+        preview_stats=_serialize_marketing_audience_funnel(snapshot.get("preview_stats")),
         template_gate_enabled=bool(snapshot.get("template_gate_enabled")),
         template_state=snapshot.get("template_state"),
         template_ok=bool(snapshot.get("template_ok", True)),

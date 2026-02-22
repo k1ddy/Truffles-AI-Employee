@@ -2855,6 +2855,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /console/v1/admin/marketing/campaigns/{campaign_id}:
+    patch:
+      tags:
+      - console
+      summary: Update Marketing Campaign
+      operationId: update_marketing_campaign_console_v1_admin_marketing_campaigns__campaign_id__patch
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Campaign Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsoleMarketingCampaignUpdateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleMarketingCampaignCreateResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleErrorResponse'
+          description: Forbidden
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /console/v1/admin/marketing/campaigns/{campaign_id}/preview:
     post:
       tags:
@@ -9110,6 +9154,36 @@ components:
       - success
       - message
       title: ConsoleManagerMessageResponse
+    ConsoleMarketingAudienceFunnel:
+      properties:
+        candidate_count:
+          type: integer
+          title: Candidate Count
+          default: 0
+        matched_count:
+          type: integer
+          title: Matched Count
+          default: 0
+        segment_excluded_count:
+          type: integer
+          title: Segment Excluded Count
+          default: 0
+        eligible_count:
+          type: integer
+          title: Eligible Count
+          default: 0
+        suppressed_count:
+          type: integer
+          title: Suppressed Count
+          default: 0
+        suppression_reason_counts:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Suppression Reason Counts
+          default: {}
+      type: object
+      title: ConsoleMarketingAudienceFunnel
     ConsoleMarketingCampaign:
       properties:
         id:
@@ -9292,6 +9366,35 @@ components:
       required:
       - campaign
       title: ConsoleMarketingCampaignCreateResponse
+    ConsoleMarketingCampaignUpdateRequest:
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        message_text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message Text
+        segment_code:
+          anyOf:
+          - type: string
+            enum:
+            - reactivation_30_120
+            - no_show_recovery_14d
+            - engaged_no_booking_7d
+          - type: 'null'
+          title: Segment Code
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      additionalProperties: false
+      type: object
+      title: ConsoleMarketingCampaignUpdateRequest
     ConsoleMarketingCampaignDiagnosticsResponse:
       properties:
         campaign_id:
@@ -9418,6 +9521,14 @@ components:
           type: integer
           title: Outbox Failed 24H
           default: 0
+        provider_billing_blocked:
+          type: boolean
+          title: Provider Billing Blocked
+          default: false
+        provider_billing_blocked_count:
+          type: integer
+          title: Provider Billing Blocked Count
+          default: 0
         audience_total:
           type: integer
           title: Audience Total
@@ -9430,6 +9541,10 @@ components:
           type: integer
           title: Suppressed Count
           default: 0
+        preview_stats:
+          anyOf:
+          - $ref: '#/components/schemas/ConsoleMarketingAudienceFunnel'
+          - type: 'null'
       type: object
       required:
       - campaign_id
@@ -9483,6 +9598,8 @@ components:
             type: string
           type: array
           title: Sample Recipient Jids
+        funnel:
+          $ref: '#/components/schemas/ConsoleMarketingAudienceFunnel'
       type: object
       required:
       - campaign_id
@@ -9491,6 +9608,7 @@ components:
       - estimated_recipients
       - sample_conversation_ids
       - sample_recipient_jids
+      - funnel
       title: ConsoleMarketingCampaignPreviewResponse
     ConsoleMarketingCampaignRecipient:
       properties:
