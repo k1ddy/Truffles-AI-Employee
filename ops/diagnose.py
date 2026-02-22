@@ -835,6 +835,7 @@ LLM_QUALITY_BLOCKING_REASONS = (
     "calendar_tool_contract_miss",
     "expected_action_mismatch",
     "expected_reply_type_mismatch",
+    "unobserved_turn",
     "tool_decision_mismatch",
     "judge_fail",
     "post_llm_semantic_rewrite_budget_exceeded",
@@ -842,6 +843,47 @@ LLM_QUALITY_BLOCKING_REASONS = (
     "rewrite_reason_missing",
     "rewrite_reason_unknown",
     "lexicon_regex_delta_violation",
+)
+LLM_QUALITY_HQ1_CLASSES = (
+    "wrong_action",
+    "handoff_miss",
+    "non_actionable_reply",
+    "hallucinated_fact",
+    "booking_flow_break",
+)
+LLM_QUALITY_HQ1_RESCHEDULE_MARKERS = (
+    "перенес",
+    "изменить запись",
+    "изменить время",
+    "поменять время",
+    "поменять запись",
+    "отменить запись",
+    "отмена записи",
+    "менеджер",
+    "оператор",
+    "reschedule",
+)
+LLM_QUALITY_HQ1_MASTER_MARKERS = (
+    "мастер",
+    "специалист",
+)
+LLM_QUALITY_HQ1_SERVICE_OVERVIEW_MARKERS = (
+    "ассортимент",
+    "какие услуги",
+    "какие есть услуги",
+    "что вы предлагаете",
+    "что у вас есть",
+    "какие процедуры",
+)
+LLM_QUALITY_HQ1_HALLUCINATION_MARKERS = (
+    "hallucinat",
+    "fabricat",
+    "invented",
+    "made_up",
+    "выдум",
+    "придум",
+    "недостовер",
+    "ложн",
 )
 LLM_POLICY_OVERRIDE_REASON_WHITELIST = {
     "safety_policy_block",
@@ -872,6 +914,7 @@ LLM_QUALITY_REASON_LABELS = {
     "expected_reply_mismatch": "reply expectation does not match scenario expectation",
     "expected_info_section_miss": "expected info_sections missing in meta/trace",
     "missing_bot_reply": "expected response but no bot reply observed",
+    "unobserved_turn": "expected response has no observed text under duplicate/unknown transport state",
     "outbox_delivery_failed": "expected response but outbox delivery is FAILED",
     "outbox_delivery_timeout": "expected response but outbox did not deliver within wait window",
     "unexpected_bot_reply_manager": "bot replied while manager_active",
@@ -889,6 +932,11 @@ LLM_QUALITY_REASON_LABELS = {
     "rewrite_reason_missing": "post-LLM rewrite executed without explicit whitelist reason-code",
     "rewrite_reason_unknown": "post-LLM rewrite used non-whitelist reason-code",
     "lexicon_regex_delta_violation": "lexicon/regex delta without resolver + contract test delta",
+    "wrong_action": "HQ1: wrong product outcome (FACT/COLLECT/HANDOFF mismatch)",
+    "handoff_miss": "HQ1: manager/handoff intent not escalated to pending",
+    "non_actionable_reply": "HQ1: dead-end or non-actionable consultant reply",
+    "hallucinated_fact": "HQ1: hallucinated or fabricated fact in bot response",
+    "booking_flow_break": "HQ1: booking progression contract broken",
 }
 LLM_QUALITY_TAXONOMY_CATEGORIES = ("expectation", "canon", "code", "data", "unknown")
 LLM_QUALITY_REASON_TAXONOMY = {
@@ -901,6 +949,7 @@ LLM_QUALITY_REASON_TAXONOMY = {
     "expected_reply_mismatch": "expectation",
     "expected_info_section_miss": "expectation",
     "missing_bot_reply": "code",
+    "unobserved_turn": "code",
     "outbox_delivery_failed": "code",
     "outbox_delivery_timeout": "code",
     "unexpected_bot_reply_manager": "code",
@@ -918,12 +967,18 @@ LLM_QUALITY_REASON_TAXONOMY = {
     "rewrite_reason_missing": "canon",
     "rewrite_reason_unknown": "canon",
     "lexicon_regex_delta_violation": "canon",
+    "wrong_action": "expectation",
+    "handoff_miss": "expectation",
+    "non_actionable_reply": "expectation",
+    "hallucinated_fact": "expectation",
+    "booking_flow_break": "expectation",
 }
 LLM_QUALITY_HARD_FAIL_REASONS = {
     "decision_meta_missing",
     "decision_trace_missing",
     "unknown_state",
     "missing_bot_reply",
+    "unobserved_turn",
     "outbox_delivery_failed",
     "outbox_delivery_timeout",
     "false_booking_confirmation",
@@ -2141,7 +2196,15 @@ def _chaos_reply_type_fallback_ok(expected_reply_type, actual_reply, meta, conv_
             return True
         if actual_reply is None and (meta or {}).get("intent") == "catalog.service_query":
             info_sections = (meta or {}).get("info_sections")
-            if isinstance(info_sections, list) and {"pricing", "duration"} & set(info_sections):
+            normalized_sections = {
+                str(section).strip().casefold()
+                for section in (info_sections or [])
+                if isinstance(section, str) and section.strip()
+            }
+            if {"pricing", "duration", "services_overview"} & normalized_sections:
+                return True
+            tool_decision = str((meta or {}).get("tool_decision") or "").strip().casefold()
+            if tool_decision == "services_overview":
                 return True
         if (meta or {}).get("expected_reply_matched") is False:
             return True
@@ -2970,6 +3033,10 @@ def _llm_quality_should_expect_booking_progress(expected_reply_type, turn_tags, 
             intent_value == "calendar.list_slots"
             and tool_decision_value in {"missing_slot", "slot_mismatch"}
         ):
+            return False
+        if intent_value == "calendar.book_slot" and tool_decision_value == "conflict":
+            # Slot conflict is a valid recovery step (ask for another time), not a
+            # slot-fill progress requirement for this turn.
             return False
     normalized_tags = {
         str(tag).strip().lower()
@@ -4063,6 +4130,44 @@ def _llm_quality_has_bot_reply(
         return bool((outbox_text or "").strip())
     return False
 
+
+def _llm_quality_is_unobserved_turn(
+    *,
+    expected_response,
+    outbox_text,
+    outbox_payload_status,
+    outbox_summary,
+    bot_response_inferred_duplicate_ack,
+    meta,
+):
+    if not expected_response:
+        return False
+    if isinstance(outbox_text, str) and outbox_text.strip():
+        return False
+
+    delivery_state = _llm_quality_outbox_delivery_state(outbox_payload_status, outbox_summary)
+    transport_unknown = delivery_state in {"pending", "unknown"}
+
+    reply_observed = None
+    transport_status = ""
+    if isinstance(meta, dict):
+        turn_outcome = meta.get("turn_outcome")
+        if isinstance(turn_outcome, dict):
+            observability = turn_outcome.get("observability")
+            if isinstance(observability, dict):
+                reply_observed = observability.get("reply_observed")
+                transport_status = _llm_quality_normalize_tool_token(
+                    observability.get("transport_status")
+                ) or ""
+    if reply_observed is True:
+        return False
+
+    turn_outcome_unknown = transport_status in {"pending", "unknown", "failed", "duplicate"}
+    if bot_response_inferred_duplicate_ack:
+        return True
+    return transport_unknown or turn_outcome_unknown
+
+
 def _llm_quality_extract_outbox_text(payload):
     if not isinstance(payload, dict):
         return None
@@ -4571,10 +4676,165 @@ def _llm_quality_collect_blocking_reasons(failure_counts, extra_counts=None):
     return {"count": total, "reasons": counts}
 
 
+def _llm_quality_hq1_normalize_text(value):
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    normalized = value.casefold().replace("ё", "е")
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
+
+
+def _llm_quality_hq1_contains_any(text, markers):
+    normalized = _llm_quality_hq1_normalize_text(text)
+    if not normalized:
+        return False
+    return any(marker in normalized for marker in markers)
+
+
+def _llm_quality_hq1_has_hallucination_signal(judge_result):
+    if not isinstance(judge_result, dict):
+        return False
+    verdict = _llm_quality_normalize_tool_token(judge_result.get("verdict"))
+    if verdict != "fail":
+        return False
+
+    fragments = []
+    reasons = judge_result.get("reasons")
+    if isinstance(reasons, str):
+        reasons = [item.strip() for item in reasons.split(",") if item.strip()]
+    if isinstance(reasons, list):
+        fragments.extend(str(item) for item in reasons if str(item).strip())
+    summary = judge_result.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        fragments.append(summary.strip())
+    for fragment in fragments:
+        if _llm_quality_hq1_contains_any(fragment, LLM_QUALITY_HQ1_HALLUCINATION_MARKERS):
+            return True
+    return False
+
+
+def _llm_quality_collect_hq1_classes(record):
+    if not isinstance(record, dict):
+        return []
+    classes = set()
+    turn_text = _llm_quality_hq1_normalize_text(record.get("turn_text"))
+    outbox_text = _llm_quality_hq1_normalize_text(record.get("outbox_text"))
+    state = _llm_quality_normalize_tool_token(record.get("conversation_state"))
+
+    turn_tags = set()
+    for raw_tag in record.get("turn_tags") or []:
+        token = _llm_quality_normalize_tool_token(raw_tag)
+        if token:
+            turn_tags.add(token)
+
+    expectations = record.get("turn_expectations")
+    if not isinstance(expectations, dict):
+        expectations = {}
+    expected_action = _llm_quality_normalize_tool_token(expectations.get("action"))
+    expected_info_sections = set()
+    for raw_section in expectations.get("info_sections") or []:
+        token = _llm_quality_normalize_tool_token(raw_section)
+        if token:
+            expected_info_sections.add(token)
+
+    meta = record.get("decision_meta")
+    if not isinstance(meta, dict):
+        meta = {}
+    meta_action = _llm_quality_normalize_tool_token(meta.get("action"))
+    meta_intent = _llm_quality_normalize_tool_token(meta.get("intent"))
+    meta_tool_action = _llm_quality_normalize_tool_token(meta.get("tool_action"))
+    meta_tool_decision = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+
+    evaluation = record.get("evaluation")
+    strict_reasons = set()
+    if isinstance(evaluation, dict):
+        for reason in evaluation.get("strict_reasons") or []:
+            token = _llm_quality_normalize_tool_token(reason)
+            if token:
+                strict_reasons.add(token)
+
+    handoff_expected = expected_action in {"handoff", "booking_escalated"}
+    handoff_observed = meta_action in {"escalate", "booking_escalated", "booking_captured_pending"} or (
+        state in {"pending", "manager_active"}
+    )
+    reschedule_signal = bool({"reschedule", "cancel"} & turn_tags) or _llm_quality_hq1_contains_any(
+        turn_text, LLM_QUALITY_HQ1_RESCHEDULE_MARKERS
+    )
+    if (reschedule_signal or handoff_expected) and not handoff_observed:
+        if (
+            "expected_action_mismatch" in strict_reasons
+            or meta_action in {"reply", "check_booking_prompt", "booking_prompt", "collect", "fact"}
+            or meta_tool_action in {"calendar.reschedule", "calendar.get_booking", "calendar.list_slots"}
+        ):
+            classes.add("handoff_miss")
+
+    master_signal = (
+        bool({"master", "specialist"} & turn_tags)
+        or bool({"master", "specialist"} & expected_info_sections)
+        or _llm_quality_hq1_contains_any(turn_text, LLM_QUALITY_HQ1_MASTER_MARKERS)
+    )
+    routed_to_location = (
+        meta_intent in {"catalog.location", "catalog.hours", "catalog.parking"}
+        or meta_tool_action in {"catalog.location", "catalog.hours", "catalog.parking"}
+    )
+    if master_signal and (
+        routed_to_location
+        or "expected_info_section_miss" in strict_reasons
+        or "info_section_miss" in strict_reasons
+    ):
+        classes.add("wrong_action")
+
+    services_overview_signal = _llm_quality_hq1_contains_any(
+        turn_text, LLM_QUALITY_HQ1_SERVICE_OVERVIEW_MARKERS
+    )
+    generic_dead_end_reply = (
+        "не удалось подтвердить действие автоматически" in outbox_text
+        and "уточните" in outbox_text
+    )
+    contract_invalid_services = (
+        meta_tool_action == "catalog.service_query"
+        and meta_tool_decision in {"contract_invalid", "service_not_found", "not_found_fallback"}
+    )
+    if services_overview_signal and (
+        generic_dead_end_reply
+        or (
+            contract_invalid_services
+            and ("judge_fail" in strict_reasons or "expected_reply_type_mismatch" in strict_reasons)
+        )
+    ):
+        classes.add("non_actionable_reply")
+
+    booking_signal = (
+        bool({"booking", "time", "time_alt", "name", "service_choice", "confirm"} & turn_tags)
+        or meta_tool_action.startswith("calendar.")
+        or meta_intent.startswith("calendar.")
+    )
+    if booking_signal:
+        booking_flow_break = False
+        if "expected_reply_type_mismatch" in strict_reasons or "booking_slot_stall" in strict_reasons:
+            booking_flow_break = True
+        elif "expected_action_mismatch" in strict_reasons and "handoff_miss" not in classes:
+            booking_flow_break = True
+        elif "judge_fail" in strict_reasons and (
+            meta_tool_action in {"calendar.list_slots", "calendar.book_slot"}
+            or meta_intent in {"calendar.list_slots", "calendar.book_slot"}
+        ):
+            booking_flow_break = True
+        if booking_flow_break:
+            classes.add("booking_flow_break")
+
+    judge_result = record.get("judge")
+    if _llm_quality_hq1_has_hallucination_signal(judge_result):
+        classes.add("hallucinated_fact")
+
+    return [item for item in LLM_QUALITY_HQ1_CLASSES if item in classes]
+
+
 def _llm_quality_next_step_for_reason(reason):
     mapping = {
         "booking_slot_stall": "trace booking stages and verify slot extraction for this turn",
         "missing_bot_reply": "inspect outbox_summary/outbox_payload_status for blocked send",
+        "unobserved_turn": "inspect transport observability (turn_outcome + outbox state) and fail run as INVALID",
         "outbox_delivery_failed": "inspect outbox last_error/provider status and retry/backoff policy",
         "outbox_delivery_timeout": "increase poll/outbox wait for replay and verify worker/outbox process timing",
         "false_booking_confirmation": "verify booking confirmation text against appointment_id and calendar outcome",
@@ -4591,6 +4851,11 @@ def _llm_quality_next_step_for_reason(reason):
         "rewrite_reason_missing": "add explicit whitelist reason-code for every post-LLM rewrite path",
         "rewrite_reason_unknown": "replace non-whitelist reason-codes with approved override reasons",
         "lexicon_regex_delta_violation": "pair lexicon/regex changes with resolver update and contract regression tests",
+        "wrong_action": "inspect plan/final action routing and tighten intent arbitration for this turn class",
+        "handoff_miss": "ensure manager-request/reschedule intents transition to handoff+pending with trace proof",
+        "non_actionable_reply": "replace dead-end fallback with actionable FACT/COLLECT continuation",
+        "hallucinated_fact": "audit judge fail evidence and force truth-only fallback for unsupported facts",
+        "booking_flow_break": "align expected_reply progression and booking follow-up prompt state machine",
     }
     return mapping.get(reason, "inspect top failing turns in responses.jsonl and trace_bundle.jsonl")
 
@@ -4654,6 +4919,9 @@ def _llm_quality_write_brief(path, summary):
     stages = metrics.get("stages") or {}
     counts = metrics.get("counts") or {}
     top_failures = (summary or {}).get("top_failures") or []
+    hq1_bad_turn_count = int((summary or {}).get("hq1_bad_turn_count") or 0)
+    hq1_class_counts = (summary or {}).get("hq1_class_counts") or {}
+    hq1_nonzero = {k: v for k, v in hq1_class_counts.items() if int(v or 0) > 0}
     stop_reason = (summary or {}).get("stop_reason")
     scenario_source = (summary or {}).get("scenario_source") or {}
     replay_command = (summary or {}).get("replay_command")
@@ -4667,6 +4935,8 @@ def _llm_quality_write_brief(path, summary):
         f"- strict_pass_rate: `{rates.get('strict_pass_rate')}`",
         f"- hard_fail_rate: `{rates.get('hard_fail_rate')}`",
         f"- hard_fail_turns: `{counts.get('turns_hard_failed')}`",
+        f"- hq1_bad_turn_count: `{hq1_bad_turn_count}`",
+        f"- hq1_class_counts: `{hq1_nonzero}`",
         f"- expected_reply_rate: `{rates.get('expected_reply_rate')}`",
         f"- booking_slot_progress_rate: `{rates.get('booking_slot_progress_rate')}`",
         f"- controller_attempt_rate: `{(stages.get('controller') or {}).get('attempt_rate')}`",
@@ -5079,6 +5349,90 @@ def _llm_quality_webhook_secret_preflight(
     }
 
 
+def _llm_quality_clean_git_commit(value):
+    if value is None:
+        return None
+    cleaned = str(value).strip().strip('"').strip("'")
+    if not cleaned:
+        return None
+    normalized = cleaned.casefold()
+    if normalized in {"unknown", "none", "null", "n/a", "na"}:
+        return None
+    return normalized
+
+
+def _llm_quality_resolve_expected_runtime_commit(explicit_commit):
+    explicit = _llm_quality_clean_git_commit(explicit_commit)
+    if explicit:
+        return explicit, "arg", None
+
+    repo_root = _llm_quality_repo_root()
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo_root, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=8.0,
+            check=False,
+        )
+    except Exception as exc:
+        return None, "git_head", f"expected_commit_resolve_error:{exc.__class__.__name__}"
+
+    if result.returncode != 0:
+        return None, "git_head", "expected_commit_resolve_error:git_rev_parse_failed"
+
+    resolved = _llm_quality_clean_git_commit(result.stdout)
+    if not resolved:
+        return None, "git_head", "expected_commit_missing"
+    return resolved, "git_head", None
+
+
+def _llm_quality_runtime_fingerprint_preflight(*, base_url, expected_commit, timeout):
+    endpoint = f"{str(base_url or '').rstrip('/')}/admin/version"
+    effective_timeout = max(2.0, min(float(timeout or 8.0), 20.0))
+    expected_value, expected_source, expected_error = _llm_quality_resolve_expected_runtime_commit(
+        expected_commit
+    )
+    runtime_payload = None
+    runtime_error = None
+    try:
+        runtime_payload = _fetch_json(endpoint, effective_timeout)
+    except Exception as exc:
+        runtime_error = f"{exc.__class__.__name__}:{exc}"
+
+    runtime_commit = None
+    runtime_version = None
+    if isinstance(runtime_payload, dict):
+        runtime_commit = _llm_quality_clean_git_commit(runtime_payload.get("git_commit"))
+        version_raw = runtime_payload.get("version")
+        if isinstance(version_raw, str) and version_raw.strip():
+            runtime_version = version_raw.strip()
+
+    reasons = []
+    if runtime_error:
+        reasons.append("admin_version_unreachable")
+    if expected_error:
+        reasons.append(expected_error)
+    if not expected_value and "expected_commit_missing" not in reasons:
+        reasons.append("expected_commit_missing")
+    if not runtime_commit and not runtime_error:
+        reasons.append("runtime_commit_missing")
+    if expected_value and runtime_commit and expected_value != runtime_commit:
+        reasons.append("git_commit_mismatch")
+
+    return {
+        "valid": not reasons,
+        "reasons": reasons,
+        "endpoint": endpoint,
+        "timeout": effective_timeout,
+        "expected_commit": expected_value,
+        "expected_source": expected_source,
+        "runtime_commit": runtime_commit,
+        "runtime_version": runtime_version,
+        "runtime_error": runtime_error,
+    }
+
+
 def _llm_quality_is_judge_mode_enabled(mode):
     if not isinstance(mode, str):
         return False
@@ -5308,7 +5662,13 @@ def _llm_quality_build_tool_evidence_status(
     }
 
 
-def _llm_quality_build_infra_status(stats, secret_preflight, tool_evidence_status=None, openai_preflight=None):
+def _llm_quality_build_infra_status(
+    stats,
+    secret_preflight,
+    tool_evidence_status=None,
+    openai_preflight=None,
+    runtime_preflight=None,
+):
     reasons = []
     if isinstance(secret_preflight, dict) and not secret_preflight.get("valid", False):
         preflight_reasons = secret_preflight.get("reasons") or []
@@ -5336,6 +5696,13 @@ def _llm_quality_build_infra_status(stats, secret_preflight, tool_evidence_statu
             purpose = item.get("purpose") or "unknown"
             reason = item.get("reason") or "unknown"
             reasons.append(f"openai_preflight:{purpose}:{reason}")
+    if isinstance(runtime_preflight, dict) and not runtime_preflight.get("valid", False):
+        runtime_reasons = runtime_preflight.get("reasons") or []
+        if runtime_reasons:
+            for reason in runtime_reasons:
+                reasons.append(f"runtime_fingerprint_preflight:{reason}")
+        else:
+            reasons.append("runtime_fingerprint_preflight:unknown")
     if isinstance(tool_evidence_status, dict) and not tool_evidence_status.get("valid", True):
         tool_reasons = tool_evidence_status.get("reasons") or []
         if tool_reasons:
@@ -5517,6 +5884,7 @@ def _llm_quality_evaluate_turn(
     tool_signals=None,
     outbox_summary=None,
     outbox_payload_status=None,
+    bot_response_inferred_duplicate_ack=False,
     meta_error=None,
     webhook_error=None,
 ):
@@ -5597,6 +5965,15 @@ def _llm_quality_evaluate_turn(
                 expected_answered = True
         if not expected_answered:
             reasons.append("expected_info_section_miss")
+    if _llm_quality_is_unobserved_turn(
+        expected_response=expected_response,
+        outbox_text=outbox_text,
+        outbox_payload_status=outbox_payload_status,
+        outbox_summary=outbox_summary,
+        bot_response_inferred_duplicate_ack=bot_response_inferred_duplicate_ack,
+        meta=meta,
+    ):
+        reasons.append("unobserved_turn")
     if expected_response and not bot_response:
         suppress_missing_reply = False
         if isinstance(webhook_error, str) and webhook_error.strip():
@@ -6089,7 +6466,8 @@ def _parse_llm_quality_args(argv):
     )
     parser.add_argument(
         "--base-url",
-        default=os.environ.get("TRUFFLES_API_BASE_URL", "http://localhost:8000"),
+        default=os.environ.get("TRUFFLES_API_BASE_URL"),
+        help="Runtime API base URL (required: --base-url or TRUFFLES_API_BASE_URL).",
     )
     parser.add_argument(
         "--client-slug",
@@ -6221,6 +6599,11 @@ def _parse_llm_quality_args(argv):
         help="Write a compact markdown handoff summary (default: <output_dir>/brief.md).",
     )
     parser.add_argument(
+        "--expected-runtime-commit",
+        default=None,
+        help="Expected runtime git commit; defaults to local git HEAD.",
+    )
+    parser.add_argument(
         "--baseline-summary",
         default=None,
         help="Use explicit summary.json as comparison baseline (instead of ops/results/booking_quality.json).",
@@ -6284,6 +6667,12 @@ def _parse_llm_quality_args(argv):
     parser.add_argument("--dry-run", action="store_true")
     parser.set_defaults(judge_redact=True)
     args = parser.parse_args(argv)
+    if not isinstance(args.base_url, str) or not args.base_url.strip():
+        parser.error(
+            "llm-quality: --base-url is required "
+            "(pass --base-url or set TRUFFLES_API_BASE_URL)"
+        )
+    args.base_url = args.base_url.strip()
     return _llm_quality_apply_timeout_profile(args)
 
 
@@ -8531,6 +8920,28 @@ def _run_llm_quality(args):
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     run_id = args.run_id or _llm_quality_build_default_run_id(timestamp)
     base_url = args.base_url.rstrip("/")
+    runtime_preflight = _llm_quality_runtime_fingerprint_preflight(
+        base_url=base_url,
+        expected_commit=args.expected_runtime_commit,
+        timeout=args.timeout,
+    )
+    runtime_preflight_payload = {
+        "stage": "llm_quality_runtime_fingerprint_preflight",
+        "valid": runtime_preflight.get("valid"),
+        "reasons": runtime_preflight.get("reasons"),
+        "endpoint": runtime_preflight.get("endpoint"),
+        "expected_commit": runtime_preflight.get("expected_commit"),
+        "expected_source": runtime_preflight.get("expected_source"),
+        "runtime_commit": runtime_preflight.get("runtime_commit"),
+        "runtime_version": runtime_preflight.get("runtime_version"),
+        "runtime_error": runtime_preflight.get("runtime_error"),
+    }
+    print(json.dumps(runtime_preflight_payload, ensure_ascii=False))
+    if not runtime_preflight.get("valid", False):
+        raise SystemExit(
+            "llm-quality: INVALID RUN - runtime fingerprint preflight failed "
+            f"({','.join(runtime_preflight.get('reasons') or ['unknown'])})"
+        )
     client_slug = args.client_slug
     webhook_url = f"{base_url}/webhook/{client_slug}"
     output_dir = _llm_quality_prepare_output_dir(
@@ -8931,6 +9342,7 @@ def _run_llm_quality(args):
         "decision_meta_errors": 0,
         "decision_trace_errors": 0,
         "info_mismatch": 0,
+        "unobserved_turns": 0,
         "policy_core_turns": 0,
         "policy_core_degraded_turns": 0,
         "policy_core_infra_errors": 0,
@@ -9056,6 +9468,8 @@ def _run_llm_quality(args):
     taxonomy_by_reason = {}
     tool_hook_state = {}
     rewrite_governance_state = _llm_quality_init_rewrite_governance_state()
+    hq1_class_counts = {name: 0 for name in LLM_QUALITY_HQ1_CLASSES}
+    hq1_bad_turn_count = 0
 
     def _bump_state(state, expected_response, replied):
         key = state or "unknown"
@@ -9459,11 +9873,31 @@ def _run_llm_quality(args):
     max_wait = max(args.min_wait, args.max_wait)
     started_at = datetime.now(timezone.utc)
     stop_reason = None
+    stop_requested = False
+    interrupted = False
+
+    previous_sigint = signal.getsignal(signal.SIGINT)
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def _handle_stop(signum, _frame):
+        nonlocal stop_requested, interrupted, stop_reason
+        if stop_requested:
+            return
+        stop_requested = True
+        interrupted = True
+        if not stop_reason:
+            stop_reason = f"signal_{signum}"
+        print("llm-quality: stop requested, finishing current turn...", file=sys.stderr)
+
+    signal.signal(signal.SIGINT, _handle_stop)
+    signal.signal(signal.SIGTERM, _handle_stop)
 
     with open(responses_path, "w", encoding="utf-8") as responses_handle, open(
         trace_bundle_path, "w", encoding="utf-8"
     ) as trace_handle:
         for dialog_idx, dialog in enumerate(dialogs, start=1):
+            if stop_requested:
+                break
             dialog_runtime_state = {"slot_candidates": []}
             remote_jid = args.remote_jid or _llm_quality_pick_jid(
                 allowlist_jids, dialog_idx - 1, rng, jid_mode_effective, run_id=run_id
@@ -9483,6 +9917,8 @@ def _run_llm_quality(args):
                         )
 
             for turn_idx, turn in enumerate(dialog.get("turns") or [], start=1):
+                if stop_requested:
+                    break
                 stats["turns"] += 1
                 if args.dry_run:
                     wait_seconds = 0
@@ -9618,11 +10054,11 @@ def _run_llm_quality(args):
                         coverage_stats["trace_stages"].get(stage, 0) + 1
                     )
                 tool_signals = _llm_quality_extract_tool_signals(meta, trace_entries)
-                for tool_name, signal in tool_signals.items():
+                for tool_name, tool_signal in tool_signals.items():
                     coverage_stats["tools"]["events"][tool_name] = (
                         coverage_stats["tools"]["events"].get(tool_name, 0) + 1
                     )
-                    outcome = signal.get("outcome")
+                    outcome = tool_signal.get("outcome")
                     if outcome in LLM_QUALITY_TOOL_OUTCOMES:
                         coverage_stats["tools"]["outcomes"][outcome] += 1
                         by_tool = coverage_stats["tools"]["by_tool"].setdefault(
@@ -10039,6 +10475,7 @@ def _run_llm_quality(args):
                         tool_signals=tool_signals,
                         outbox_summary=outbox_summary,
                         outbox_payload_status=outbox_payload_status,
+                        bot_response_inferred_duplicate_ack=bot_response_inferred_duplicate_ack,
                         meta_error=meta_error,
                         webhook_error=response_error,
                     )
@@ -10189,6 +10626,8 @@ def _run_llm_quality(args):
                 ):
                     strict_reasons.append("judge_fail")
                 strict_reasons = list(dict.fromkeys(strict_reasons))
+                if "unobserved_turn" in strict_reasons:
+                    stats["unobserved_turns"] += 1
                 hard_reasons = [
                     reason for reason in strict_reasons if reason in LLM_QUALITY_HARD_FAIL_REASONS
                 ]
@@ -10349,6 +10788,12 @@ def _run_llm_quality(args):
                         "response": (response_body or "")[:200] if response_body else None,
                     },
                 }
+                hq1_classes = _llm_quality_collect_hq1_classes(record)
+                if hq1_classes:
+                    record["hq1_classes"] = hq1_classes
+                    hq1_bad_turn_count += 1
+                    for hq1_class in hq1_classes:
+                        hq1_class_counts[hq1_class] = hq1_class_counts.get(hq1_class, 0) + 1
                 responses_handle.write(json.dumps(record, ensure_ascii=False) + "\n")
                 trace_handle.write(
                     json.dumps(
@@ -10379,12 +10824,19 @@ def _run_llm_quality(args):
                 )
                 if stats["policy_core_infra_errors"] >= 3:
                     stop_reason = "policy_core_infra_errors"
+                    stop_requested = True
                     break
                 if args.max_failures > 0 and stats["turns_strict_failed"] >= args.max_failures:
                     stop_reason = f"max_failures_reached:{args.max_failures}"
+                    stop_requested = True
                     break
-            if stop_reason:
+            if stop_requested:
                 break
+
+    signal.signal(signal.SIGINT, previous_sigint)
+    signal.signal(signal.SIGTERM, previous_sigterm)
+    if stop_requested and not stop_reason:
+        stop_reason = "stop_requested"
 
     if stop_reason:
         print(
@@ -10436,6 +10888,7 @@ def _run_llm_quality(args):
             "decision_meta_errors": stats["decision_meta_errors"],
             "decision_trace_errors": stats["decision_trace_errors"],
             "info_mismatch": stats["info_mismatch"],
+            "unobserved_turns": stats["unobserved_turns"],
             "policy_core_turns": stats["policy_core_turns"],
             "policy_core_degraded_turns": stats["policy_core_degraded_turns"],
             "policy_core_infra_errors": stats["policy_core_infra_errors"],
@@ -10665,6 +11118,7 @@ def _run_llm_quality(args):
         base_ref=args.delta_gate_base_ref,
     )
     governance_blocking_counts = dict(rewrite_governance.get("blocking_counts") or {})
+    hq1_blocking_counts = {name: count for name, count in hq1_class_counts.items() if count > 0}
     if (
         lexicon_regex_delta_gate.get("enforced")
         and not lexicon_regex_delta_gate.get("valid", True)
@@ -10723,7 +11177,7 @@ def _run_llm_quality(args):
         threshold_breaches = []
     blocking_reasons = _llm_quality_collect_blocking_reasons(
         failure_counts,
-        extra_counts=governance_blocking_counts,
+        extra_counts={**governance_blocking_counts, **hq1_blocking_counts},
     )
     blocking_reason_count = blocking_reasons.get("count", 0)
     tool_evidence_policy = args.tool_evidence_policy
@@ -10740,6 +11194,7 @@ def _run_llm_quality(args):
         secret_preflight,
         tool_evidence_status=tool_evidence_status,
         openai_preflight=openai_preflight,
+        runtime_preflight=runtime_preflight,
     )
     comparison_enforced = bool(args.fail_on_regression)
     comparison_block_reasons = []
@@ -10816,6 +11271,9 @@ def _run_llm_quality(args):
         "judge_cache_file": judge_cache_file if judge_enabled else None,
         "judge_cache_max_entries": args.judge_cache_max_entries if judge_enabled else None,
         "judge_redact": args.judge_redact,
+        "runtime_expected_commit": runtime_preflight.get("expected_commit"),
+        "runtime_expected_commit_source": runtime_preflight.get("expected_source"),
+        "runtime_commit": runtime_preflight.get("runtime_commit"),
     }
     summary = {
         "run_id": run_id,
@@ -10837,6 +11295,9 @@ def _run_llm_quality(args):
         "baseline_canonical_reason": baseline_canonical_reason,
         "delta": delta,
         "failure_counts": failure_counts,
+        "hq1_bad_turn_count": hq1_bad_turn_count,
+        "hq1_class_counts": hq1_class_counts,
+        "unobserved_turn_count": int(failure_counts.get("unobserved_turn") or 0),
         "blocking_reasons": blocking_reasons,
         "rewrite_governance": rewrite_governance,
         "lexicon_regex_delta_gate": lexicon_regex_delta_gate,
@@ -10846,6 +11307,7 @@ def _run_llm_quality(args):
         "scenario_contract": scenario_contract,
         "tool_evidence": tool_evidence_status,
         "judge": judge_stats,
+        "runtime_fingerprint_preflight": runtime_preflight,
         "webhook_secret_preflight": secret_preflight,
         "openai_preflight": openai_preflight,
         "infra_valid": infra_status["valid"],
@@ -10857,6 +11319,9 @@ def _run_llm_quality(args):
             "semantic_reasons": semantic_status["reasons"],
             "blocking_reason_count": blocking_reason_count,
             "blocking_reasons": blocking_reasons.get("reasons", {}),
+            "hq1_bad_turn_count": hq1_bad_turn_count,
+            "hq1_class_counts": hq1_class_counts,
+            "unobserved_turn_count": int(failure_counts.get("unobserved_turn") or 0),
             "rewrite_governance_valid": rewrite_governance.get("valid", True),
             "rewrite_governance_reasons": rewrite_governance.get("reasons", []),
             "post_llm_semantic_rewrite_rate": rewrite_governance.get(
@@ -10879,6 +11344,7 @@ def _run_llm_quality(args):
         "scenario_source": scenario_source,
         "replay_command": replay_command,
         "stop_reason": stop_reason,
+        "interrupted": interrupted,
         "brief_path": brief_path,
         "taxonomy": {
             "counts": taxonomy_counts,
