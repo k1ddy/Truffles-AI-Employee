@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -185,6 +186,78 @@ def test_request_with_query_params_rewrites_query_string() -> None:
     )
 
     assert dict(derived.query_params) == {"limit": "10", "lifecycle": "active"}
+
+
+def test_invalidate_tenants_fleet_cache_scope_queues_company_prewarm(monkeypatch) -> None:
+    company_id = uuid4()
+    db = Mock()
+    db.begin_nested.return_value = nullcontext()
+    queued_company_ids: list[set[UUID]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "_queue_fleet_summary_prewarm_company_ids",
+        lambda *_args, **kwargs: queued_company_ids.append(kwargs.get("company_ids") or set()),
+    )
+
+    console_router._invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="test_invalidate",
+        company_ids={company_id},
+    )
+
+    assert queued_company_ids == [{company_id}]
+    db.execute.assert_called_once()
+
+
+def test_on_console_session_after_commit_schedules_company_prewarm(monkeypatch) -> None:
+    company_id = uuid4()
+    captured: list[set[UUID]] = []
+    session = SimpleNamespace(
+        info={
+            console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY: {company_id},
+        }
+    )
+
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_summary_prewarm_for_company_ids",
+        lambda **kwargs: captured.append(kwargs.get("company_ids") or set()),
+    )
+
+    console_router._on_console_session_after_commit(session)
+
+    assert captured == [{company_id}]
+    assert console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY not in session.info
+
+
+def test_schedule_fleet_summary_prewarm_for_company_ids_starts_refresh_task(monkeypatch) -> None:
+    company_id = uuid4()
+    first_client_id = uuid4()
+    second_client_id = uuid4()
+    db = Mock()
+    db.query.return_value.filter.return_value.all.return_value = [
+        (first_client_id, company_id),
+        (second_client_id, company_id),
+    ]
+    started_tasks: list[dict[str, object]] = []
+
+    monkeypatch.setattr(console_router, "SessionLocal", lambda: db)
+    monkeypatch.setattr(console_router, "_try_claim_fleet_cache_refresh", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        console_router,
+        "_start_fleet_summary_refresh_task",
+        lambda **kwargs: started_tasks.append(kwargs),
+    )
+
+    console_router._schedule_fleet_summary_prewarm_for_company_ids(company_ids={company_id})
+
+    assert len(started_tasks) == 1
+    task_payload = started_tasks[0]["task"]
+    assert task_payload["company_id"] == str(company_id)
+    assert task_payload["lifecycle_mode"] == "active"
+    assert set(task_payload["accessible_client_ids"]) == {str(first_client_id), str(second_client_id)}
+    db.close.assert_called_once()
 
 
 @pytest.mark.asyncio

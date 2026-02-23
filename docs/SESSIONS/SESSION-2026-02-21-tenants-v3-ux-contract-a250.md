@@ -93,10 +93,15 @@
   - Wave4 scope-aware continuation: добавлены `scope_company_id/scope_client_id` в `tenants_fleet_cache` (migration `039` + model update), summary cache upserts теперь сохраняют company scope, а invalidation path удаляет `global + affected companies` вместо полного wipe.
   - Endpoint invalidation hooks передают `company_ids` из контекста/мутатора (`update_company`, `create/update/archive/restore client`, `create/update branch`, go-live actions, `integration_reconcile/provider_ops execute`).
   - Прогнаны проверки scope-aware continuation: `pytest -q truffles-api/tests/test_console_admin_provisioning.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py truffles-api/tests/test_console_access_admin_pr2.py` (`133 passed`), `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_admin_provisioning.py truffles-api/app/models/tenants_fleet_cache.py` (pass), `python3 truffles-api/scripts/generate_openapi.py --check` (pass).
+  - Wave4 targeted incremental precompute started: `_invalidate_tenants_fleet_cache_scope` теперь ставит affected `company_ids` в post-commit queue; `after_commit` запускает async summary prewarm (`_schedule_fleet_summary_prewarm_for_company_ids`) по company scope с inflight dedupe.
+  - Добавлены contract tests для prewarm path: queue on invalidation, after_commit dispatch, и task payload composition (`test_console_tenants_list.py`).
+  - Прогнаны проверки continuation: `pytest -q truffles-api/tests/test_console_tenants_list.py -k "prewarm or invalidate_tenants_fleet_cache_scope_queues_company_prewarm or on_console_session_after_commit"` (`3 passed`), `pytest -q truffles-api/tests/test_console_admin_provisioning.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py truffles-api/tests/test_console_access_admin_pr2.py` (`136 passed`), `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py` (pass).
+  - PR continuation открыт: `https://github.com/k1ddy/Truffles-AI-Employee/pull/806`.
+  - CI stop-the-line (infra): run `https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22301196048` отменён как stuck (`core-eval` pending >10 минут без прогресса).
 - next:
-  - Открыть continuation PR со scope-aware invalidation (`migration 039` + router/model/tests) и дождаться CI.
+  - Дождаться CI по `PR #806` и merge.
   - После merge зафиксировать runtime perf snapshot после серии tenant write операций (stale-window evidence + cache hit ratio для non-affected companies).
-  - Следующий шаг Wave4/F5: targeted incremental precompute refresh (event-driven warmup для affected company scopes).
+  - Следующий шаг Wave4/F5: расширить targeted precompute на global summary/attention strategy без full cold-start.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
@@ -156,5 +161,7 @@
   - docs/REPORTS/2026-02-20-tenants-v3-redesign-plan.md
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/803
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/806
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22301196048
   - STATE.md
-- last_updated: 2026-02-23T10:05:00Z
+- last_updated: 2026-02-23T10:12:00Z
