@@ -915,6 +915,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 20m
           script: |
             set -euo pipefail
             REPO_ROOT="/home/zhan/truffles-main"
