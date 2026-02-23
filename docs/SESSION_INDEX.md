@@ -4,7 +4,10 @@
 
 | session_id | status | branch | worktree | task_package | last_updated |
 | --- | --- | --- | --- | --- | --- |
-| 2026-02-21-tenants-v3-ux-contract-a250 | active | feat/2026-02-21-tenants-v3-ux-contract-a250 | /home/zhan/worktrees/2026-02-21-tenants-v3-ux-contract-a250 | docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md | 2026-02-22T08:54:23Z |
+| 2026-02-22-marketing-ux-fixes-a1 | done | feat/2026-02-22-marketing-ux-fixes-a1 | /home/zhan/worktrees/2026-02-22-marketing-ux-fixes-a1 | docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md | 2026-02-22 |
+| 2026-02-22-marketing-owner-first-v2-a1 | done | feat/2026-02-22-marketing-owner-first-v2-a1 | /home/zhan/worktrees/2026-02-22-marketing-owner-first-v2-a1 | docs/TASK_PACKAGES/TP-2026-02-22-marketing-owner-first-v2-a1.md | 2026-02-22 |
+| 2026-02-22-deploy-clone-retry-a1 | active | feat/2026-02-22-deploy-clone-retry-a1 | /home/zhan/worktrees/2026-02-22-deploy-clone-retry-a1 | docs/TASK_PACKAGES/TP-2026-02-22-deploy-clone-retry-a1.md | 2026-02-22 |
+| 2026-02-21-tenants-v3-ux-contract-a250 | active | feat/2026-02-21-tenants-v3-ux-contract-a250 | /home/zhan/worktrees/2026-02-21-tenants-v3-ux-contract-a250 | docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md | 2026-02-22T13:57:20Z |
 | 2026-02-21-marketing-pro-v1-a300 | done | feat/2026-02-21-marketing-pro-v1-a300 | /home/zhan/worktrees/2026-02-21-marketing-pro-v1-a300 | docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md | 2026-02-21 |
 | 2026-02-21-marketing-p1p3-a1 | active | feat/2026-02-21-marketing-p1p3-a1 | /home/zhan/worktrees/2026-02-21-marketing-p1p3-a1 | docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md | 2026-02-21 |
 | 2026-02-21-inbox-pause-bot-a1 | active | feat/2026-02-21-inbox-human-lock-v2-a1 | /home/zhan/worktrees/2026-02-21-inbox-pause-bot-a1 | docs/TASK_PACKAGES/TP-2026-02-21-inbox-human-lock-v2-a1.md | 2026-02-21 |
@@ -16,7 +19,7 @@
 | 2026-02-20-tenants-create-company-audit-contract-a133 | done | feat/2026-02-20-tenants-create-company-audit-contract-a133 | /home/zhan/worktrees/2026-02-20-tenants-create-company-audit-contract-a133 | docs/TASK_PACKAGES/TP-2026-02-20-tenants-create-company-audit-contract-a133.md | 2026-02-20 |
 | 2026-02-20-provisioning-server-error-guidance-a134 | done | feat/2026-02-20-provisioning-server-error-guidance-a134 | /home/zhan/worktrees/2026-02-20-provisioning-server-error-guidance-a134 | docs/TASK_PACKAGES/TP-2026-02-20-provisioning-server-error-guidance-a134.md | 2026-02-20 |
 | 2026-02-20-outreach-inbox-ux-a200 | active | fix/2026-02-20-outreach-inbox-ux-a200 | /home/zhan/worktrees/2026-02-20-outreach-inbox-ux-a200 | docs/TASK_PACKAGES/TP-2026-02-20-outreach-inbox-ux-a200.md | 2026-02-20 |
-| 2026-02-20-outreach-human-lock-a200 | active | feat/2026-02-20-outreach-human-lock-a200 | /home/zhan/worktrees/2026-02-20-outreach-human-lock-a200 | docs/TASK_PACKAGES/TP-2026-02-20-outreach-human-lock-a200.md | 2026-02-22T12:57:29Z |
+| 2026-02-20-outreach-human-lock-a200 | active | feat/2026-02-20-outreach-human-lock-a200 | /home/zhan/worktrees/2026-02-20-outreach-human-lock-a200 | docs/TASK_PACKAGES/TP-2026-02-20-outreach-human-lock-a200.md | 2026-02-22 |
 | 2026-02-20-onboarding-wave678-a132 | done | feat/2026-02-20-onboarding-wave678-a132 | /home/zhan/worktrees/2026-02-20-onboarding-wave678-a132 | docs/TASK_PACKAGES/TP-2026-02-20-onboarding-wave678-a132.md | 2026-02-20 |
 | 2026-02-20-onboarding-followup123-a131 | active | feat/2026-02-20-onboarding-followup123-a131 | /home/zhan/worktrees/2026-02-20-onboarding-followup123-a131 | docs/TASK_PACKAGES/TP-2026-02-20-onboarding-followup123-a131.md | 2026-02-20 |
 | 2026-02-19-wave3-marketing-full-a140 | done | feat/2026-02-19-wave3-marketing-full-a140 | /home/zhan/worktrees/2026-02-19-wave-canon-context-marketing-mvp-a140 | docs/TASK_PACKAGES/TP-2026-02-19-wave3-marketing-full-a140.md | 2026-02-19 |
@@ -328,6 +331,3 @@
 | 2026-01-27-consultant-canon-a2 | active | feat/2026-01-27-consultant-canon-a2 | /home/zhan/worktrees/2026-01-27-consultant-canon-a2 | docs/TASK_PACKAGES/TP-2026-01-27-consultant-canon-alignment.md | 2026-01-29 |
 | 2026-01-27-console-ux-selection | done | feat/console-ux-selection | /home/zhan/worktrees/console-ux-selection | docs/TASK_PACKAGES/TP-2026-01-27-console-ux-selection.md | 2026-01-28 |
 | 2026-01-27-admin-login-verify-a2 | done | feat/2026-01-27-admin-login-verify-a2 | /home/zhan/worktrees/2026-01-27-admin-login-verify-a2 | docs/TASK_PACKAGES/TP-2026-01-27-admin-login-verify.md | 2026-01-27 |
-| 2026-02-22-marketing-ux-fixes-a1 | done | feat/2026-02-22-marketing-ux-fixes-a1 | /home/zhan/worktrees/2026-02-22-marketing-ux-fixes-a1 | docs/TASK_PACKAGES/TP-2026-02-21-marketing-pro-v1-a300.md | 2026-02-22 |
-| 2026-02-22-deploy-clone-retry-a1 | active | feat/2026-02-22-deploy-clone-retry-a1 | /home/zhan/worktrees/2026-02-22-deploy-clone-retry-a1 | docs/TASK_PACKAGES/TP-2026-02-22-deploy-clone-retry-a1.md | 2026-02-22 |
-| 2026-02-22-marketing-owner-first-v2-a1 | done | feat/2026-02-22-marketing-owner-first-v2-a1 | /home/zhan/worktrees/2026-02-22-marketing-owner-first-v2-a1 | docs/TASK_PACKAGES/TP-2026-02-22-marketing-owner-first-v2-a1.md | 2026-02-22 |

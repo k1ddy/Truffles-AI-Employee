@@ -59,6 +59,16 @@ export function writeConsoleContextScopeToStorage(scope: ConsoleContextScope) {
     writeLocalStorageValue(CONSOLE_BRANCH_ID_STORAGE_KEY, normalizeConsoleContextId(scope.branchId));
 }
 
+export function normalizeConsoleContextScope(
+    scope: Partial<ConsoleContextScope>,
+): ConsoleContextScope {
+    return {
+        companyId: normalizeConsoleContextId(scope.companyId),
+        clientId: normalizeConsoleContextId(scope.clientId),
+        branchId: normalizeConsoleContextId(scope.branchId),
+    };
+}
+
 export function mergeConsoleContextScope(
     base: ConsoleContextScope,
     patch: Partial<ConsoleContextScope>,
@@ -74,14 +84,18 @@ export function clearConsoleContextScope() {
     writeConsoleContextScopeToStorage(EMPTY_SCOPE);
 }
 
+export function setConsoleContextScope(scope: Partial<ConsoleContextScope>): ConsoleContextScope {
+    const normalized = normalizeConsoleContextScope(scope);
+    writeConsoleContextScopeToStorage(normalized);
+    return normalized;
+}
+
 export function setConsoleCompanyContext(companyId?: string | null): ConsoleContextScope {
-    const next: ConsoleContextScope = {
+    return setConsoleContextScope({
         companyId: normalizeConsoleContextId(companyId),
         clientId: "",
         branchId: "",
-    };
-    writeConsoleContextScopeToStorage(next);
-    return next;
+    });
 }
 
 export function setConsoleClientContext(
@@ -89,24 +103,20 @@ export function setConsoleClientContext(
     companyId?: string | null,
 ): ConsoleContextScope {
     const stored = readConsoleContextScopeFromStorage();
-    const next: ConsoleContextScope = {
+    return setConsoleContextScope({
         companyId: normalizeConsoleContextId(companyId) || stored.companyId,
         clientId: normalizeConsoleContextId(clientId),
         branchId: "",
-    };
-    writeConsoleContextScopeToStorage(next);
-    return next;
+    });
 }
 
 export function setConsoleBranchContext(branchId?: string | null): ConsoleContextScope {
     const stored = readConsoleContextScopeFromStorage();
-    const next: ConsoleContextScope = {
+    return setConsoleContextScope({
         companyId: stored.companyId,
         clientId: stored.clientId,
         branchId: normalizeConsoleContextId(branchId),
-    };
-    writeConsoleContextScopeToStorage(next);
-    return next;
+    });
 }
 
 export function resolveConsoleContextScope(

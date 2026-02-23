@@ -1064,10 +1064,14 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const { status, data: session } = useSession();
     const pathname = usePathname();
     const router = useRouter();
+    const e2eBypassAuth =
+        process.env.NEXT_PUBLIC_E2E_BYPASS_AUTH === "1" &&
+        typeof window !== "undefined" &&
+        /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
     const sessionAuth = session as SessionAuth | null;
     const sessionError = sessionAuth?.error;
     const accessToken = sessionAuth?.accessToken;
-    const hasSession = status === "authenticated" && !!accessToken && !sessionError;
+    const hasSession = (status === "authenticated" && !!accessToken && !sessionError) || e2eBypassAuth;
     const queryClient = useQueryClient();
     const isInboxPage = pathname === "/" || pathname.startsWith("/cases");
     const contentWidthClass = isInboxPage ? "max-w-[1440px]" : "max-w-6xl";
@@ -1457,11 +1461,15 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
         }
 
         const stored = readConsoleContextScopeFromStorage();
+        const availableBranchIds = new Set((data.branches ?? []).map((branch) => branch.id));
+        const canKeepStoredBranch = Boolean(stored.branchId) && availableBranchIds.has(stored.branchId);
         const nextCompanyId = data.company_selection_required
             ? ""
             : data.selected_company_id ?? data.client?.company_id ?? stored.companyId;
         const nextClientId = data.selection_required ? "" : data.client?.id ?? stored.clientId;
-        const nextBranchId = data.branch_selection_required ? "" : data.selected_branch_id ?? "";
+        const nextBranchId = data.branch_selection_required
+            ? ""
+            : data.selected_branch_id ?? (canKeepStoredBranch ? stored.branchId : "");
         if (
             nextCompanyId !== stored.companyId
             || nextClientId !== stored.clientId

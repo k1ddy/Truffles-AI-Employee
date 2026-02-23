@@ -113,6 +113,16 @@ function kpiStatusBadgeClass(status: OperationalKpiStatus) {
     return "bg-emerald-100 text-emerald-700";
 }
 
+function kpiLabelClass(status: OperationalKpiStatus) {
+    if (status === "critical") {
+        return "text-xs font-medium text-red-950";
+    }
+    if (status === "warn") {
+        return "text-xs font-medium text-amber-950";
+    }
+    return "text-xs font-medium text-emerald-950";
+}
+
 export default function TenantsOperationalKpiPanel({
     isRefreshing,
     onRefresh,
@@ -189,49 +199,49 @@ export default function TenantsOperationalKpiPanel({
             </div>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <div className={kpiCardClass(kpiStatuses.onboardingCoverage)} data-testid="tenants-kpi-onboarding-coverage">
-                    <div className="text-xs text-muted-foreground">Покрытие онбординга (прокси)</div>
+                    <div className={kpiLabelClass(kpiStatuses.onboardingCoverage)}>Покрытие онбординга (прокси)</div>
                     <div className="text-xl font-semibold">{operationalKpi.onboardingCoveragePct}%</div>
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(kpiStatuses.onboardingCoverage)}`}>
                         {kpiStatuses.onboardingCoverage}
                     </div>
                 </div>
                 <div className={kpiCardClass(kpiStatuses.goLiveReadiness)} data-testid="tenants-kpi-go-live-readiness">
-                    <div className="text-xs text-muted-foreground">Готовность к запуску (прокси)</div>
+                    <div className={kpiLabelClass(kpiStatuses.goLiveReadiness)}>Готовность к запуску (прокси)</div>
                     <div className="text-xl font-semibold">{operationalKpi.goLiveReadinessPct}%</div>
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(kpiStatuses.goLiveReadiness)}`}>
                         {kpiStatuses.goLiveReadiness}
                     </div>
                 </div>
                 <div className={kpiCardClass(kpiStatuses.serviceStability)} data-testid="tenants-kpi-service-stability">
-                    <div className="text-xs text-muted-foreground">Стабильность сервиса</div>
+                    <div className={kpiLabelClass(kpiStatuses.serviceStability)}>Стабильность сервиса</div>
                     <div className="text-xl font-semibold">{operationalKpi.serviceStabilityPct}%</div>
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(kpiStatuses.serviceStability)}`}>
                         {kpiStatuses.serviceStability}
                     </div>
                 </div>
                 <div className={kpiCardClass(kpiStatuses.decommissionShare)} data-testid="tenants-kpi-decommission-share">
-                    <div className="text-xs text-muted-foreground">Доля вывода из эксплуатации</div>
+                    <div className={kpiLabelClass(kpiStatuses.decommissionShare)}>Доля вывода из эксплуатации</div>
                     <div className="text-xl font-semibold">{operationalKpi.decommissionSharePct}%</div>
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(kpiStatuses.decommissionShare)}`}>
                         {kpiStatuses.decommissionShare}
                     </div>
                 </div>
                 <div className={kpiCardClass(kpiStatuses.changeFailure)} data-testid="tenants-kpi-change-failure">
-                    <div className="text-xs text-muted-foreground">Доля ошибок публикации (прокси)</div>
+                    <div className={kpiLabelClass(kpiStatuses.changeFailure)}>Доля ошибок публикации (прокси)</div>
                     <div className="text-xl font-semibold">{operationalKpi.changeFailurePct}%</div>
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(kpiStatuses.changeFailure)}`}>
                         {kpiStatuses.changeFailure}
                     </div>
                 </div>
                 <div className={kpiCardClass(kpiStatuses.rollbackShare)} data-testid="tenants-kpi-rollback-share">
-                    <div className="text-xs text-muted-foreground">Доля откатов (прокси)</div>
+                    <div className={kpiLabelClass(kpiStatuses.rollbackShare)}>Доля откатов (прокси)</div>
                     <div className="text-xl font-semibold">{operationalKpi.rollbackSharePct}%</div>
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(kpiStatuses.rollbackShare)}`}>
                         {kpiStatuses.rollbackShare}
                     </div>
                 </div>
                 <div className={kpiCardClass(kpiStatuses.blockedSignals)} data-testid="tenants-kpi-blocked-signals">
-                    <div className="text-xs text-muted-foreground">Блокирующие сигналы</div>
+                    <div className={kpiLabelClass(kpiStatuses.blockedSignals)}>Блокирующие сигналы</div>
                     <div className="text-xl font-semibold">{operationalKpi.blockedSignalsCount}</div>
                     <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${kpiStatusBadgeClass(kpiStatuses.blockedSignals)}`}>
                         {kpiStatuses.blockedSignals}
@@ -246,7 +256,7 @@ export default function TenantsOperationalKpiPanel({
                             Скорость онбординга
                         </div>
                         <div className="text-xs text-muted-foreground">
-                            окно: {onboardingThroughput.window_hours ?? "—"}ч · approvals: {onboardingThroughput.approved_branches_total ?? "—"} · first-pass: {onboardingThroughput.first_pass_approved_branches ?? "—"}
+                            окно: {onboardingThroughput.window_hours ?? "—"}ч · подтверждено филиалов: {onboardingThroughput.approved_branches_total ?? "—"} · запуск с первого раза: {onboardingThroughput.first_pass_approved_branches ?? "—"}
                         </div>
                     </div>
                     <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -272,7 +282,7 @@ export default function TenantsOperationalKpiPanel({
 
             <div className="mt-4 rounded-lg border border-border/60 bg-background p-3" data-testid="tenants-kpi-drilldown">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Threshold drill-down
+                    Разбор по порогам
                 </div>
                 <div className="space-y-2">
                     {kpiDrilldown.map((item) => (
@@ -294,7 +304,7 @@ export default function TenantsOperationalKpiPanel({
                                 {item.reason}
                             </div>
                             <div className="mt-1 text-xs text-muted-foreground">
-                                threshold: {item.thresholdLabel}
+                                порог: {item.thresholdLabel}
                             </div>
                             <div className="mt-2">
                                 <button
@@ -316,7 +326,7 @@ export default function TenantsOperationalKpiPanel({
                         Интеграция алертов
                     </div>
                     <div className="text-xs text-muted-foreground">
-                        <span data-testid="tenants-kpi-alert-severity">severity: {alertSeverity}</span> · breaches: {alertBreachesCount}
+                        <span data-testid="tenants-kpi-alert-severity">уровень: {alertSeverity}</span> · нарушений: {alertBreachesCount}
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                         <button
@@ -324,7 +334,7 @@ export default function TenantsOperationalKpiPanel({
                             onClick={onCopyAlertPayload}
                             data-testid="tenants-kpi-alert-copy"
                         >
-                            Скопировать payload
+                            Скопировать данные алерта
                         </button>
                         <button
                             className="btn-ghost"

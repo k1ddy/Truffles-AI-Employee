@@ -741,8 +741,12 @@ def _serialize_branch(branch: Branch) -> ConsoleBranch:
     go_live_reviewed_at = _coerce_utc(getattr(branch, "go_live_reviewed_at", None))
     go_live_waiver_until = _coerce_utc(getattr(branch, "go_live_waiver_until", None))
     go_live_waiver_active = _is_branch_go_live_waiver_active(branch)
+    branch_client = getattr(branch, "client", None)
+    company_id = getattr(branch_client, "company_id", None) if branch_client is not None else None
     return ConsoleBranch(
         id=branch.id,
+        client_id=branch.client_id,
+        company_id=company_id,
         slug=branch.slug,
         name=branch.name,
         is_active=branch.is_active,
@@ -13576,6 +13580,7 @@ async def list_branches(
     cursor: Optional[str] = None,
     limit: int = 50,
     q: Optional[str] = None,
+    company_id: Optional[str] = None,
     client_id: Optional[str] = None,
     lifecycle: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -13588,16 +13593,34 @@ async def list_branches(
         include_inactive_tenants=lifecycle_mode != "active",
     )
     _require_platform_admin(context)
-    _reject_unknown_query_params(request, {"cursor", "limit", "q", "client_id", "lifecycle"})
+    _reject_unknown_query_params(request, {"cursor", "limit", "q", "company_id", "client_id", "lifecycle"})
     _validate_limit(limit)
 
+    company_uuid = _parse_uuid_param("company_id", company_id)
     client_uuid = _parse_uuid_param("client_id", client_id)
-    query = db.query(Branch)
+    allowed_client_ids = _accessible_client_ids(context)
+    query = db.query(Branch).filter(Branch.client_id.in_(allowed_client_ids))
+    scoped_company_client_ids: set[UUID] | None = None
+    if company_uuid:
+        _require_company_access(context, company_uuid)
+        scoped_company_client_ids = {
+            client.id
+            for client in (context.accessible_clients or [])
+            if client.company_id == company_uuid
+        }
+        if context.client and context.client.company_id == company_uuid:
+            scoped_company_client_ids.add(context.client.id)
+        if not scoped_company_client_ids:
+            return ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
+        query = query.filter(Branch.client_id.in_(scoped_company_client_ids))
     if lifecycle_mode == "active":
         query = query.filter(Branch.is_active.is_(True))
     elif lifecycle_mode == "archived":
         query = query.filter(Branch.is_active.is_(False))
     if client_uuid:
+        _require_client_access(context, client_uuid)
+        if scoped_company_client_ids is not None and client_uuid not in scoped_company_client_ids:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "client_id does not belong to company_id")
         query = query.filter(Branch.client_id == client_uuid)
 
     query_value = _normalize_search_query("q", q) if q else None
@@ -13787,31 +13810,27 @@ async def get_tenants_company_cockpit(
         db=db,
     )
 
-    if selected_client_uuid is None and clients_response.items:
-        selected_client_uuid = clients_response.items[0].id
-
-    if selected_client_uuid is None:
-        branches_response = ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
-    else:
-        branches_request = _request_with_query_params(
-            request,
-            {
-                "cursor": branch_cursor,
-                "limit": branch_limit,
-                "q": branch_q,
-                "client_id": str(selected_client_uuid),
-                "lifecycle": lifecycle_mode,
-            },
-        )
-        branches_response = await list_branches(
-            request=branches_request,
-            cursor=branch_cursor,
-            limit=branch_limit,
-            q=branch_q,
-            client_id=str(selected_client_uuid),
-            lifecycle=lifecycle_mode,
-            db=db,
-        )
+    branches_request = _request_with_query_params(
+        request,
+        {
+            "cursor": branch_cursor,
+            "limit": branch_limit,
+            "q": branch_q,
+            "company_id": str(company_uuid),
+            "client_id": str(selected_client_uuid) if selected_client_uuid else None,
+            "lifecycle": lifecycle_mode,
+        },
+    )
+    branches_response = await list_branches(
+        request=branches_request,
+        cursor=branch_cursor,
+        limit=branch_limit,
+        q=branch_q,
+        company_id=str(company_uuid),
+        client_id=str(selected_client_uuid) if selected_client_uuid else None,
+        lifecycle=lifecycle_mode,
+        db=db,
+    )
 
     return ConsoleTenantsCompanyCockpitResponse(
         generated_at=datetime.now(timezone.utc).isoformat(),

@@ -210,7 +210,7 @@ async def test_get_tenants_portfolio_composes_clients_and_attention(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_get_tenants_company_cockpit_uses_selected_or_first_client(monkeypatch) -> None:
+async def test_get_tenants_company_cockpit_uses_company_scope_when_client_not_selected(monkeypatch) -> None:
     company_id = uuid4()
     first_client_id = uuid4()
     clients_response = console_router.ConsoleClientListResponse(
@@ -259,11 +259,56 @@ async def test_get_tenants_company_cockpit_uses_selected_or_first_client(monkeyp
     )
 
     assert response.company_id == company_id
-    assert response.selected_client_id == first_client_id
+    assert response.selected_client_id is None
     assert response.clients == clients_response
     assert response.branches == branches_response
     assert captured["clients"]["company_id"] == str(company_id)
-    assert captured["branches"]["client_id"] == str(first_client_id)
+    assert captured["branches"]["company_id"] == str(company_id)
+    assert captured["branches"]["client_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_tenants_company_cockpit_uses_selected_client_scope_when_requested(monkeypatch) -> None:
+    company_id = uuid4()
+    selected_client_id = uuid4()
+    clients_response = console_router.ConsoleClientListResponse(
+        items=[
+            console_router.ConsoleClient(
+                id=selected_client_id,
+                slug="alpha",
+                status="active",
+                company_id=company_id,
+            )
+        ],
+        cursor=None,
+        has_more=False,
+        summary=None,
+    )
+    branches_response = console_router.ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
+    captured: dict[str, dict[str, object]] = {}
+
+    async def _fake_list_clients(**kwargs):
+        captured["clients"] = kwargs
+        return clients_response
+
+    async def _fake_list_branches(**kwargs):
+        captured["branches"] = kwargs
+        return branches_response
+
+    monkeypatch.setattr(console_router, "list_clients", _fake_list_clients)
+    monkeypatch.setattr(console_router, "list_branches", _fake_list_branches)
+
+    response = await console_router.get_tenants_company_cockpit(
+        request=_build_request(),
+        company_id=str(company_id),
+        client_id=str(selected_client_id),
+        lifecycle="active",
+        db=Mock(),
+    )
+
+    assert response.selected_client_id == selected_client_id
+    assert captured["branches"]["company_id"] == str(company_id)
+    assert captured["branches"]["client_id"] == str(selected_client_id)
 
 @pytest.mark.asyncio
 async def test_list_clients_defaults_to_active_lifecycle(monkeypatch) -> None:
@@ -494,7 +539,11 @@ async def test_list_branches_defaults_to_active_lifecycle(monkeypatch) -> None:
 
     def _fake_context(_request, _db, **kwargs):
         captured.update(kwargs)
-        return SimpleNamespace(role="platform_admin")
+        return SimpleNamespace(
+            role="platform_admin",
+            client=None,
+            accessible_clients=[SimpleNamespace(id=uuid4(), company_id=uuid4())],
+        )
 
     monkeypatch.setattr(console_router, "get_console_context", _fake_context)
 
@@ -504,8 +553,8 @@ async def test_list_branches_defaults_to_active_lifecycle(monkeypatch) -> None:
     )
 
     assert captured["include_inactive_tenants"] is False
-    first_filter = query.filter.call_args_list[0].args[0]
-    assert str(first_filter) == "branches.is_active IS true"
+    filters = [str(call.args[0]) for call in query.filter.call_args_list]
+    assert "branches.is_active IS true" in filters
 
 
 @pytest.mark.asyncio
@@ -518,7 +567,11 @@ async def test_list_branches_archived_lifecycle_filters_inactive(monkeypatch) ->
 
     def _fake_context(_request, _db, **kwargs):
         captured.update(kwargs)
-        return SimpleNamespace(role="platform_admin")
+        return SimpleNamespace(
+            role="platform_admin",
+            client=None,
+            accessible_clients=[SimpleNamespace(id=uuid4(), company_id=uuid4())],
+        )
 
     monkeypatch.setattr(console_router, "get_console_context", _fake_context)
 
@@ -529,8 +582,42 @@ async def test_list_branches_archived_lifecycle_filters_inactive(monkeypatch) ->
     )
 
     assert captured["include_inactive_tenants"] is True
-    first_filter = query.filter.call_args_list[0].args[0]
-    assert str(first_filter) == "branches.is_active IS false"
+    filters = [str(call.args[0]) for call in query.filter.call_args_list]
+    assert "branches.is_active IS false" in filters
+
+
+@pytest.mark.asyncio
+async def test_list_branches_rejects_client_from_other_company(monkeypatch) -> None:
+    query = _build_list_query_mock()
+    db = Mock()
+    db.query.return_value = query
+    request = SimpleNamespace(query_params={})
+
+    company_id = uuid4()
+    company_client_id = uuid4()
+    foreign_client_id = uuid4()
+
+    def _fake_context(_request, _db, **_kwargs):
+        return SimpleNamespace(
+            role="platform_admin",
+            client=None,
+            accessible_clients=[
+                SimpleNamespace(id=company_client_id, company_id=company_id),
+                SimpleNamespace(id=foreign_client_id, company_id=uuid4()),
+            ],
+        )
+
+    monkeypatch.setattr(console_router, "get_console_context", _fake_context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_branches(
+            request=request,
+            company_id=str(company_id),
+            client_id=str(foreign_client_id),
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
 
 
 class _RowsQuery:

@@ -14,10 +14,10 @@ import AccessDenied from "@/components/AccessDenied";
 
 type SessionData = ReturnType<typeof useSession>["data"];
 
-type AgentBase = components["schemas"]["Agent"];
-type AgentWithIdentities = components["schemas"]["AgentWithIdentities"];
-type AgentIdentity = components["schemas"]["AgentIdentity"];
-type TelegramLinkResponse = components["schemas"]["TelegramLinkResponse"];
+type AgentBase = components["schemas"]["ConsoleAgent"];
+type AgentWithIdentities = components["schemas"]["ConsoleAgentWithIdentities"];
+type AgentIdentity = components["schemas"]["ConsoleAgentIdentity"];
+type TelegramLinkResponse = components["schemas"]["ConsoleTelegramLinkResponse"];
 
 type Specialist = {
     id: string;
@@ -54,9 +54,9 @@ type TeamMe = {
     selected_branch_id?: string | null;
 };
 
-type AgentRole = components["schemas"]["AgentCreateRequest"]["role"];
-type MembershipScope = components["schemas"]["MembershipCreateRequest"]["scope"];
-type AgentMembership = components["schemas"]["AgentMembership"];
+type AgentRole = components["schemas"]["ConsoleAgentCreateRequest"]["role"];
+type MembershipScope = components["schemas"]["ConsoleMembershipCreateRequest"]["scope"];
+type AgentMembership = components["schemas"]["ConsoleAgentMembership"];
 
 const TEAM_AGENT_ROLES: AgentRole[] = [
     "platform_admin",
@@ -471,7 +471,7 @@ function UsersPanel({
             if (!clientId) {
                 throw new Error("Выберите клиентский контекст в Tenants перед созданием учеток.");
             }
-            const payload: components["schemas"]["AgentCreateRequest"] = {
+            const payload: components["schemas"]["ConsoleAgentCreateRequest"] = {
                 client_id: clientId,
                 role: createAgentRole,
                 name: createAgentName.trim() || undefined,
@@ -505,7 +505,7 @@ function UsersPanel({
             if (!membershipAgentId) {
                 throw new Error("Выберите пользователя");
             }
-            const payload: components["schemas"]["MembershipCreateRequest"] = {
+            const payload: components["schemas"]["ConsoleMembershipCreateRequest"] = {
                 agent_id: membershipAgentId,
                 scope: membershipScope,
                 role: membershipRole,
@@ -541,7 +541,7 @@ function UsersPanel({
     });
 
     const patchMembershipMutation = useMutation({
-        mutationFn: async (payload: { membershipId: string; data: components["schemas"]["MembershipUpdateRequest"] }) =>
+        mutationFn: async (payload: { membershipId: string; data: components["schemas"]["ConsoleMembershipUpdateRequest"] }) =>
             (await adminApi.patchMembership(payload.membershipId, payload.data)).data,
         onMutate: ({ membershipId }) => {
             setMembershipTarget(membershipId);
@@ -596,7 +596,7 @@ function UsersPanel({
             toast.error("Укажите reason для rescope/disable");
             return;
         }
-        const payload: components["schemas"]["MembershipUpdateRequest"] = {
+        const payload: components["schemas"]["ConsoleMembershipUpdateRequest"] = {
             role: editingRole,
             scope: editingScope,
             is_active: editingIsActive,

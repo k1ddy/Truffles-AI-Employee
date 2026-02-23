@@ -27,9 +27,7 @@ import {
 import { readBrowserStorage, writeBrowserStorage } from "@/lib/browser-storage";
 import {
     readConsoleContextScopeFromStorage,
-    setConsoleBranchContext,
-    setConsoleClientContext,
-    setConsoleCompanyContext,
+    setConsoleContextScope,
 } from "@/lib/console-context-storage";
 import { useInlineErrorSummary } from "@/lib/use-inline-error-summary";
 import { useTenantsPageFilters } from "./use-tenants-page-filters";
@@ -125,7 +123,7 @@ type QuickCreateFormState = {
     clientId: string;
 };
 
-type BranchChangeRecord = components["schemas"]["BranchChangeRecord"];
+type BranchChangeRecord = components["schemas"]["ConsoleBranchChangeRecord"];
 
 type TenantLifecycleMode = "active" | "archived" | "all";
 type FleetLifecycleFilter = "all" | "lead" | "contracting" | "onboarding" | "go_live_ready" | "active" | "paused" | "archived";
@@ -611,6 +609,21 @@ function toFilterOptions(
         .sort((left, right) => left.label.localeCompare(right.label, "ru"));
 }
 
+function normalizeOptionalId(value: string | null | undefined): string | null {
+    const normalized = (value ?? "").trim();
+    return normalized.length > 0 ? normalized : null;
+}
+
+function readBranchClientId(branch: components["schemas"]["ConsoleBranch"]): string | null {
+    const value = (branch as components["schemas"]["ConsoleBranch"] & { client_id?: string | null }).client_id;
+    return normalizeOptionalId(value);
+}
+
+function readBranchCompanyId(branch: components["schemas"]["ConsoleBranch"]): string | null {
+    const value = (branch as components["schemas"]["ConsoleBranch"] & { company_id?: string | null }).company_id;
+    return normalizeOptionalId(value);
+}
+
 function pushLifecycleAuditEntry(
     previous: ClientLifecycleAuditMap,
     entry: ClientLifecycleAuditEntry,
@@ -646,7 +659,7 @@ function pushLifecycleAuditEntry(
 }
 
 function buildBranchChangePatch(editor: BranchEditorState): {
-    patch: components["schemas"]["BranchChangePatch"];
+    patch: components["schemas"]["ConsoleBranchChangePatch"];
     hasChanges: boolean;
     error?: string;
 } {
@@ -666,7 +679,7 @@ function buildBranchChangePatch(editor: BranchEditorState): {
             error: "slug должен быть в формате snake-case: [a-z0-9_-], без пробелов",
         };
     }
-    const patch: components["schemas"]["BranchChangePatch"] = {};
+    const patch: components["schemas"]["ConsoleBranchChangePatch"] = {};
     if (name !== editor.original.name) {
         patch.name = name;
     }
@@ -736,7 +749,7 @@ function buildBranchChangePatch(editor: BranchEditorState): {
 
 function applyBranchSnapshotToEditor(
     editor: BranchEditorState,
-    branch?: components["schemas"]["Branch"] | null,
+    branch?: components["schemas"]["ConsoleBranch"] | null,
 ): BranchEditorState {
     if (!branch) {
         return editor;
@@ -762,7 +775,7 @@ function applyBranchSnapshotToEditor(
 }
 
 function mapAuditEventToLifecycleEntry(
-    event: components["schemas"]["AuditEvent"],
+    event: components["schemas"]["ConsoleAuditEvent"],
 ): ClientLifecycleAuditEntry | null {
     const eventType = (event.event_type ?? "").trim();
     if (!eventType) {
@@ -834,13 +847,14 @@ export default function TenantsPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const queryClient = useQueryClient();
+    const controlTowerEnabled = process.env.NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER !== "0";
     const { errors: inlineErrors, reportError, reportInlineError, clearErrors } = useInlineErrorSummary();
     const reportValidationError = (
         message: string,
         code = "VALIDATION_ERROR",
         scope?: string,
     ) => {
-        const resolvedScope = scope ?? resolveErrorScopeFromWorkspace(workspaceMode);
+        const resolvedScope = scope ?? resolveErrorScopeFromWorkspace(controlTowerEnabled ? workspaceMode : "portfolio");
         reportInlineError({ code, message, scope: resolvedScope });
         toast.error(message);
     };
@@ -849,7 +863,7 @@ export default function TenantsPage() {
             includeProvisioningGuidance: true,
             operation,
             endpoint,
-            scope: resolveErrorScopeFromWorkspace(workspaceMode),
+            scope: resolveErrorScopeFromWorkspace(controlTowerEnabled ? workspaceMode : "portfolio"),
         });
     const [clientQuery, setClientQuery] = useState("");
     const [branchQuery, setBranchQuery] = useState("");
@@ -868,14 +882,14 @@ export default function TenantsPage() {
     const [savingBranch, setSavingBranch] = useState(false);
     const [publishingBranchChange, setPublishingBranchChange] = useState(false);
     const [rollingBackBranchChange, setRollingBackBranchChange] = useState(false);
-    const [branchChangePreview, setBranchChangePreview] = useState<components["schemas"]["BranchChangeResponse"] | null>(null);
+    const [branchChangePreview, setBranchChangePreview] = useState<components["schemas"]["ConsoleBranchChangeResponse"] | null>(null);
     const [clientLifecyclePendingId, setClientLifecyclePendingId] = useState<string | null>(null);
     const [clientLifecycleDraft, setClientLifecycleDraft] = useState<ClientLifecycleDraftState | null>(null);
     const [clientLifecycleAuditById, setClientLifecycleAuditById] = useState<ClientLifecycleAuditMap>({});
     const [clientLifecycleAuditFilterById, setClientLifecycleAuditFilterById] = useState<Record<string, ClientLifecycleAuditFilter>>({});
     const [weeklySnapshots, setWeeklySnapshots] = useState<TenantsOperationalSnapshot[]>([]);
     const [runningMetricsSnapshotMode, setRunningMetricsSnapshotMode] = useState<"dry_run" | "execute" | null>(null);
-    const [lastMetricsSnapshotJob, setLastMetricsSnapshotJob] = useState<components["schemas"]["OpsJobRecord"] | null>(null);
+    const [lastMetricsSnapshotJob, setLastMetricsSnapshotJob] = useState<components["schemas"]["ConsoleOpsJobRecord"] | null>(null);
     const [quickCreateForm, setQuickCreateForm] = useState<QuickCreateFormState>({
         companyName: "",
         clientSlug: "",
@@ -888,6 +902,7 @@ export default function TenantsPage() {
         clientId: "",
     });
     const [quickCreateRunning, setQuickCreateRunning] = useState<"company" | "client" | "branch" | null>(null);
+    const effectiveWorkspaceMode: TenantsWorkspaceMode = controlTowerEnabled ? workspaceMode : "portfolio";
 
     const { data: meData, isLoading: meLoading } = useQuery({
         queryKey: ["console-me"],
@@ -968,9 +983,9 @@ export default function TenantsPage() {
     }, [clientLifecycleAuditById]);
 
     const companiesQuery = useInfiniteQuery<
-        components["schemas"]["CompanyListResponse"],
+        components["schemas"]["ConsoleCompanyListResponse"],
         Error,
-        InfiniteData<components["schemas"]["CompanyListResponse"], string | undefined>,
+        InfiniteData<components["schemas"]["ConsoleCompanyListResponse"], string | undefined>,
         ["tenants-companies", string | undefined],
         string | undefined
     >({
@@ -1043,9 +1058,9 @@ export default function TenantsPage() {
     });
 
     const clientsQuery = useInfiniteQuery<
-        components["schemas"]["ClientListResponse"],
+        components["schemas"]["ConsoleClientListResponse"],
         Error,
-        InfiniteData<components["schemas"]["ClientListResponse"], string | undefined>,
+        InfiniteData<components["schemas"]["ConsoleClientListResponse"], string | undefined>,
         [
             "tenants-clients",
             string | undefined,
@@ -1089,19 +1104,20 @@ export default function TenantsPage() {
     });
 
     const branchesQuery = useInfiniteQuery<
-        components["schemas"]["BranchListResponse"],
+        components["schemas"]["ConsoleBranchListResponse"],
         Error,
-        InfiniteData<components["schemas"]["BranchListResponse"], string | undefined>,
-        ["tenants-branches", string | undefined, string | null, string | null, TenantLifecycleMode],
+        InfiniteData<components["schemas"]["ConsoleBranchListResponse"], string | undefined>,
+        ["tenants-branches", string | undefined, string | null, string | null, string | null, TenantLifecycleMode],
         string | undefined
     >({
-        queryKey: ["tenants-branches", branchQueryValue, pageFilterClientId, pageFilterBranchId, tenantLifecycle],
+        queryKey: ["tenants-branches", branchQueryValue, pageFilterCompanyId, pageFilterClientId, pageFilterBranchId, tenantLifecycle],
         queryFn: async ({ pageParam }) => {
             const cursor = typeof pageParam === "string" ? pageParam : undefined;
             const response = await adminApi.listBranches({
                 cursor,
                 limit: 20,
                 q: branchQueryValue,
+                company_id: pageFilterCompanyId ?? undefined,
                 client_id: pageFilterClientId ?? undefined,
                 lifecycle: tenantLifecycle,
             });
@@ -1222,21 +1238,70 @@ export default function TenantsPage() {
         () => clientsSummary?.onboarding_throughput ?? null,
         [clientsSummary],
     );
-    const branches = useMemo(
-        () => {
-            const cockpitItems = tenantsCompanyCockpitQuery.data?.branches.items ?? null;
-            const items = cockpitItems ?? (branchesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? []);
-            if (!pageFilterBranchId) {
-                return items;
-            }
-            return items.filter((branch) => branch.id === pageFilterBranchId);
-        },
-        [branchesQuery.data, pageFilterBranchId, tenantsCompanyCockpitQuery.data?.branches.items],
-    );
+    const branches = useMemo(() => {
+        const items = branchesQuery.data?.pages.flatMap((page) => page.items ?? []) ?? [];
+        if (!pageFilterBranchId) {
+            return items;
+        }
+        return items.filter((branch) => branch.id === pageFilterBranchId);
+    }, [branchesQuery.data, pageFilterBranchId]);
     const clientsUsingServerContract = pageFilterCompanyId
         ? tenantsCompanyCockpitQuery.isSuccess
         : tenantsPortfolioQuery.isSuccess;
-    const branchesUsingServerContract = tenantsCompanyCockpitQuery.isSuccess;
+    const clientCompanyIdById = useMemo(() => {
+        const mapping = new Map<string, string>();
+        clients.forEach((client) => {
+            if (client.id && client.company_id) {
+                mapping.set(client.id, client.company_id);
+            }
+        });
+        (meData?.clients ?? []).forEach((client) => {
+            if (client.id && client.company_id && !mapping.has(client.id)) {
+                mapping.set(client.id, client.company_id);
+            }
+        });
+        return mapping;
+    }, [clients, meData?.clients]);
+    const branchClientIdById = useMemo(() => {
+        const mapping = new Map<string, string>();
+        branches.forEach((branch) => {
+            if (branch.id) {
+                const clientId = readBranchClientId(branch);
+                if (clientId) {
+                    mapping.set(branch.id, clientId);
+                }
+            }
+        });
+        knownBranches.forEach((branch) => {
+            if (branch.id && !mapping.has(branch.id)) {
+                const clientId = readBranchClientId(branch);
+                if (clientId) {
+                    mapping.set(branch.id, clientId);
+                }
+            }
+        });
+        return mapping;
+    }, [branches, knownBranches]);
+    const branchCompanyIdById = useMemo(() => {
+        const mapping = new Map<string, string>();
+        branches.forEach((branch) => {
+            if (branch.id) {
+                const companyId = readBranchCompanyId(branch);
+                if (companyId) {
+                    mapping.set(branch.id, companyId);
+                }
+            }
+        });
+        knownBranches.forEach((branch) => {
+            if (branch.id && !mapping.has(branch.id)) {
+                const companyId = readBranchCompanyId(branch);
+                if (companyId) {
+                    mapping.set(branch.id, companyId);
+                }
+            }
+        });
+        return mapping;
+    }, [branches, knownBranches]);
     const selectedCompanyName = useMemo(() => {
         if (!selectedCompanyId) {
             return null;
@@ -1318,8 +1383,8 @@ export default function TenantsPage() {
         ]);
     }, [branches, knownBranches, selectedBranchId, selectedBranchNameFromContext]);
     const activeErrorScope = useMemo(
-        () => resolveErrorScopeFromWorkspace(workspaceMode),
-        [workspaceMode],
+        () => resolveErrorScopeFromWorkspace(effectiveWorkspaceMode),
+        [effectiveWorkspaceMode],
     );
     const visibleInlineErrors = useMemo(() => {
         return inlineErrors.filter((error) => error.scope === "global" || error.scope === activeErrorScope);
@@ -1478,7 +1543,7 @@ export default function TenantsPage() {
     const operationalReport = useMemo<TenantsOperationalSnapshotPayload>(() => ({
         generatedAt: new Date().toISOString(),
         sourceWindow: operationalKpi.sourceWindow,
-        workspaceMode,
+        workspaceMode: effectiveWorkspaceMode,
         lifecycleMode: tenantLifecycle,
         kpi: operationalKpiValues,
         drilldown: operationalKpiDrilldown.map((item) => ({
@@ -1494,7 +1559,7 @@ export default function TenantsPage() {
             outboxFailed24hTotal: fleetAttention?.summary?.outbox_failed_24h_total ?? 0,
             pendingHandoversTotal: fleetAttention?.summary?.pending_handovers_total ?? 0,
         },
-    }), [operationalKpi.sourceWindow, operationalKpiValues, operationalKpiDrilldown, fleetAttention?.summary, workspaceMode, tenantLifecycle]);
+    }), [operationalKpi.sourceWindow, operationalKpiValues, operationalKpiDrilldown, fleetAttention?.summary, effectiveWorkspaceMode, tenantLifecycle]);
 
     const refreshContext = () => {
         queryClient.invalidateQueries({ queryKey: ["console-me"] });
@@ -1527,38 +1592,104 @@ export default function TenantsPage() {
         }
     };
 
-    const setCompanyContext = (companyId?: string | null) => {
-        setConsoleCompanyContext(companyId);
+    const completeContextScope = (scope: { companyId?: string | null; clientId?: string | null; branchId?: string | null }) => {
+        const normalizedBranchId = normalizeOptionalId(scope.branchId);
+        let normalizedClientId = normalizeOptionalId(scope.clientId);
+        let normalizedCompanyId = normalizeOptionalId(scope.companyId);
+        if (normalizedBranchId) {
+            const branchClientId = branchClientIdById.get(normalizedBranchId);
+            if (!normalizedClientId && branchClientId) {
+                normalizedClientId = branchClientId;
+            }
+            if (!normalizedCompanyId) {
+                const branchCompanyId = branchCompanyIdById.get(normalizedBranchId);
+                if (branchCompanyId) {
+                    normalizedCompanyId = branchCompanyId;
+                }
+            }
+        }
+        if (!normalizedCompanyId && normalizedClientId) {
+            normalizedCompanyId = clientCompanyIdById.get(normalizedClientId) ?? null;
+        }
+        return {
+            companyId: normalizedCompanyId,
+            clientId: normalizedClientId,
+            branchId: normalizedBranchId,
+        };
+    };
+
+    const writeContextScope = (scope: { companyId?: string | null; clientId?: string | null; branchId?: string | null }) => {
+        const normalized = completeContextScope(scope);
+        setConsoleContextScope({
+            companyId: normalized.companyId ?? "",
+            clientId: normalized.clientId ?? "",
+            branchId: normalized.branchId ?? "",
+        });
         refreshContext();
+        return normalized;
+    };
+
+    const setCompanyContext = (companyId?: string | null) => {
+        writeContextScope({
+            companyId,
+            clientId: null,
+            branchId: null,
+        });
     };
 
     const setClientContext = (clientId?: string | null, companyId?: string | null) => {
-        setConsoleClientContext(clientId, companyId);
-        refreshContext();
+        const storedScope = readConsoleContextScopeFromStorage();
+        writeContextScope({
+            companyId: companyId ?? storedScope.companyId,
+            clientId,
+            branchId: null,
+        });
     };
 
     const setBranchContext = (branchId?: string | null) => {
-        setConsoleBranchContext(branchId);
-        refreshContext();
+        const storedScope = readConsoleContextScopeFromStorage();
+        writeContextScope({
+            companyId: storedScope.companyId,
+            clientId: storedScope.clientId,
+            branchId,
+        });
     };
     const clearContextLens = () => {
         setCompanyContext(null);
     };
     const setClientContextAndPageFilters = (clientId?: string | null, companyId?: string | null) => {
-        setClientContext(clientId, companyId);
-        applyScopeToPageFilters({
-            companyId: companyId ?? null,
-            clientId: clientId ?? null,
+        const nextScope = writeContextScope({
+            companyId,
+            clientId,
             branchId: null,
         });
+        applyScopeToPageFilters(nextScope);
     };
     const setBranchContextAndPageFilters = (branchId?: string | null) => {
-        setBranchContext(branchId);
-        setPageFilterBranch(branchId ?? null);
+        const storedScope = readConsoleContextScopeFromStorage();
+        const nextScope = writeContextScope({
+            companyId: pageFilterCompanyId ?? storedScope.companyId,
+            clientId: pageFilterClientId ?? storedScope.clientId,
+            branchId: branchId ?? null,
+        });
+        applyScopeToPageFilters(nextScope);
     };
     const applyContextToPageFilters = () => {
-        const scope = readConsoleContextScopeFromStorage();
-        applyScopeToPageFilters(scope);
+        const storedScope = readConsoleContextScopeFromStorage();
+        const nextScope = completeContextScope(storedScope);
+        applyScopeToPageFilters(nextScope);
+        if (
+            (nextScope.companyId ?? "") !== storedScope.companyId
+            || (nextScope.clientId ?? "") !== storedScope.clientId
+            || (nextScope.branchId ?? "") !== storedScope.branchId
+        ) {
+            setConsoleContextScope({
+                companyId: nextScope.companyId ?? "",
+                clientId: nextScope.clientId ?? "",
+                branchId: nextScope.branchId ?? "",
+            });
+            refreshContext();
+        }
     };
 
     const handleQuickCreateCompany = async () => {
@@ -1866,13 +1997,13 @@ export default function TenantsPage() {
             setLastMetricsSnapshotJob(response.data.job);
             toast.success(mode === "dry_run" ? "Пробный снимок метрик выполнен" : "Снимок метрик выполнен");
         } catch (error) {
-            reportError(error, { scope: resolveErrorScopeFromWorkspace(workspaceMode) });
+            reportError(error, { scope: resolveErrorScopeFromWorkspace(effectiveWorkspaceMode) });
         } finally {
             setRunningMetricsSnapshotMode(null);
         }
     };
 
-    const startCompanyEdit = (company: components["schemas"]["Company"]) => {
+    const startCompanyEdit = (company: components["schemas"]["ConsoleCompany"]) => {
         if (!company.id) {
             reportValidationError("Не удалось открыть компанию без ID");
             return;
@@ -1891,7 +2022,7 @@ export default function TenantsPage() {
         });
     };
 
-    const startClientEdit = (client: components["schemas"]["Client"]) => {
+    const startClientEdit = (client: components["schemas"]["ConsoleClient"]) => {
         if (!client.id) {
             reportValidationError("Не удалось открыть клиента без ID");
             return;
@@ -1910,7 +2041,7 @@ export default function TenantsPage() {
         });
     };
 
-    const startBranchEdit = (branch: components["schemas"]["Branch"]) => {
+    const startBranchEdit = (branch: components["schemas"]["ConsoleBranch"]) => {
         if (!branch.id) {
             reportValidationError("Не удалось открыть филиал без ID");
             return;
@@ -1959,7 +2090,7 @@ export default function TenantsPage() {
             reportValidationError(billing.error);
             return;
         }
-        const payload: components["schemas"]["CompanyUpdateRequest"] = {};
+        const payload: components["schemas"]["ConsoleCompanyUpdateRequest"] = {};
         if (name !== companyEditor.originalName) {
             payload.name = name;
         }
@@ -1997,7 +2128,7 @@ export default function TenantsPage() {
             reportValidationError("slug: [a-z0-9_-], без пробелов");
             return;
         }
-        const payload: components["schemas"]["ClientUpdateRequest"] = {};
+        const payload: components["schemas"]["ConsoleClientUpdateRequest"] = {};
         if (slug !== clientEditor.originalSlug) {
             payload.slug = slug;
         }
@@ -2028,7 +2159,7 @@ export default function TenantsPage() {
         }
     };
 
-    const isClientArchived = (client: components["schemas"]["Client"]) => {
+    const isClientArchived = (client: components["schemas"]["ConsoleClient"]) => {
         const lifecycleValue = (client.lifecycle_state ?? "").trim().toLowerCase();
         if (lifecycleValue) {
             return lifecycleValue === "archived";
@@ -2037,7 +2168,7 @@ export default function TenantsPage() {
     };
 
     const openClientLifecycleAction = (
-        client: components["schemas"]["Client"],
+        client: components["schemas"]["ConsoleClient"],
         mode: ClientLifecycleMode,
     ) => {
         if (!client.id) {
@@ -2407,12 +2538,12 @@ export default function TenantsPage() {
             .slice(0, 8);
     }, [tenantLifecycle, fleetAttention, operationalKpi, clientsSummary]);
 
-    const showPortfolio = workspaceMode === "portfolio";
-    const showOnboarding = workspaceMode === "onboarding";
-    const showChangeManagement = workspaceMode === "changes";
-    const showDecommission = workspaceMode === "decommission";
+    const showPortfolio = effectiveWorkspaceMode === "portfolio";
+    const showOnboarding = effectiveWorkspaceMode === "onboarding";
+    const showChangeManagement = effectiveWorkspaceMode === "changes";
+    const showDecommission = effectiveWorkspaceMode === "decommission";
     const showClientsSection = showPortfolio || showDecommission;
-    const decommissionFocused = workspaceMode === "decommission";
+    const decommissionFocused = effectiveWorkspaceMode === "decommission";
 
     if (!session) {
         return (
@@ -2439,6 +2570,11 @@ export default function TenantsPage() {
     return (
         <div className="max-w-5xl mx-auto p-6" data-testid="tenants-page">
             <div className="flex flex-col gap-2 mb-6">
+                {!controlTowerEnabled ? (
+                    <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-xs text-amber-900" data-testid="tenants-control-tower-flag-banner">
+                        `TENANTS_V3_CONTROL_TOWER=0`: включён базовый режим Tenants без расширенной control-tower панели.
+                    </div>
+                ) : null}
                 <TenantsTopControls
                     isPlatformPreset={isPlatformPreset}
                     contextCompanyName={selectedCompanyName}
@@ -2465,8 +2601,13 @@ export default function TenantsPage() {
                     onPageFilterBranchChange={setPageFilterBranch}
                     onApplyContextToPageFilters={applyContextToPageFilters}
                     onClearPageFilters={clearPageFilters}
-                    workspaceMode={workspaceMode}
-                    onWorkspaceModeChange={setWorkspaceMode}
+                    controlTowerEnabled={controlTowerEnabled}
+                    workspaceMode={effectiveWorkspaceMode}
+                    onWorkspaceModeChange={(value) => {
+                        if (controlTowerEnabled) {
+                            setWorkspaceMode(value);
+                        }
+                    }}
                     viewPreset={viewPreset}
                     onViewPresetChange={setViewPreset}
                     canSwitchViewPreset={canSwitchViewPreset}
@@ -2491,27 +2632,29 @@ export default function TenantsPage() {
                         onOpenWorkspace={() => router.push("/company-workspace")}
                     />
                 ) : null}
-                <TenantsActionQueuePanel
-                    items={actionQueue}
-                    refreshing={
-                        tenantsPortfolioQuery.isFetching
-                        || tenantsCompanyCockpitQuery.isFetching
-                        || fleetAttentionQuery.isFetching
-                        || recentBranchChangesKpiQuery.isFetching
-                        || clientsQuery.isFetching
-                    }
-                    onRefresh={() => {
-                        tenantsPortfolioQuery.refetch();
-                        if (pageFilterCompanyId) {
-                            tenantsCompanyCockpitQuery.refetch();
+                {controlTowerEnabled ? (
+                    <TenantsActionQueuePanel
+                        items={actionQueue}
+                        refreshing={
+                            tenantsPortfolioQuery.isFetching
+                            || tenantsCompanyCockpitQuery.isFetching
+                            || fleetAttentionQuery.isFetching
+                            || recentBranchChangesKpiQuery.isFetching
+                            || clientsQuery.isFetching
                         }
-                        fleetAttentionQuery.refetch();
-                        recentBranchChangesKpiQuery.refetch();
-                        clientsQuery.refetch();
-                    }}
-                    onRunIntent={runActionQueueIntent}
-                    onSetClientContext={setClientContextAndPageFilters}
-                />
+                        onRefresh={() => {
+                            tenantsPortfolioQuery.refetch();
+                            if (pageFilterCompanyId) {
+                                tenantsCompanyCockpitQuery.refetch();
+                            }
+                            fleetAttentionQuery.refetch();
+                            recentBranchChangesKpiQuery.refetch();
+                            clientsQuery.refetch();
+                        }}
+                        onRunIntent={runActionQueueIntent}
+                        onSetClientContext={setClientContextAndPageFilters}
+                    />
+                ) : null}
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                     <span className="text-xs text-muted-foreground">Режим списка:</span>
                     <button
@@ -2536,7 +2679,7 @@ export default function TenantsPage() {
             </div>
 
             <div className="grid gap-6">
-                {showPortfolio && tenantLifecycle === "active" ? (
+                {controlTowerEnabled && showPortfolio && tenantLifecycle === "active" ? (
                     <TenantsOperationalKpiPanel
                         isRefreshing={
                             tenantsPortfolioQuery.isFetching
@@ -2590,8 +2733,8 @@ export default function TenantsPage() {
                     />
                 ) : null}
 
-                {showPortfolio && tenantLifecycle === "active" ? (
-                    <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-fleet-attention">
+                {controlTowerEnabled && showPortfolio && tenantLifecycle === "active" ? (
+                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-fleet-attention">
                         <div className="flex items-start justify-between gap-4 mb-4">
                             <div>
                                 <h2 className="text-lg font-semibold">Риски и внимание</h2>
@@ -2770,7 +2913,7 @@ export default function TenantsPage() {
                                                     </label>
                                                     <details className="rounded-lg border border-border/60 bg-background p-3">
                                                         <summary className="cursor-pointer text-xs text-muted-foreground">
-                                                            Advanced JSON (expert): billing_info
+                                                            Расширенные параметры (JSON, экспертный режим): billing_info
                                                         </summary>
                                                         <label className="mt-2 block text-xs text-muted-foreground">
                                                             billing_info (JSON, опционально)
@@ -3213,7 +3356,7 @@ export default function TenantsPage() {
                             </p>
                             {pageFilterClientId ? (
                                 <div className="mt-1 text-xs text-muted-foreground">
-                                    page filter client_id: {pageFilterClientId}
+                                    выбран клиент для изменений: {selectedClientName ?? pageFilterClientId}
                                 </div>
                             ) : null}
                         </div>
@@ -3251,7 +3394,7 @@ export default function TenantsPage() {
                                             <TenantsSensitiveIdCell
                                                 branchId={branch.id}
                                                 instanceId={branch.instance_id}
-                                                contextScope={workspaceMode}
+                                                contextScope={effectiveWorkspaceMode}
                                                 onAudit={auditSensitiveAccess}
                                             />
                                             <div className="text-xs text-muted-foreground">
@@ -3448,7 +3591,7 @@ export default function TenantsPage() {
                                                         </label>
                                                     ) : null}
                                                     <div className="rounded-lg border border-border/60 bg-background p-3 text-xs" data-testid="tenants-branch-impact-preview">
-                                                        <div className="font-medium">Impact preview</div>
+                                                        <div className="font-medium">Оценка влияния</div>
                                                         <div className="mt-1 text-muted-foreground">
                                                             branch: {branchEditor.name || branchEditor.slug || branchEditor.id}
                                                         </div>
@@ -3580,7 +3723,7 @@ export default function TenantsPage() {
                             })
                         )}
                     </div>
-                    {!branchesUsingServerContract && branchesQuery.hasNextPage ? (
+                    {branchesQuery.hasNextPage ? (
                         <div className="flex justify-center pt-3">
                             <button
                                 className="btn-ghost"
@@ -3612,7 +3755,7 @@ export default function TenantsPage() {
                             </p>
                         </div>
                         <div className="rounded-lg border border-border/60 bg-background p-3 text-xs" data-testid="tenants-client-lifecycle-impact">
-                            <div className="font-medium mb-1">Impact preview</div>
+                            <div className="font-medium mb-1">Оценка влияния</div>
                             <div className="text-muted-foreground">
                                 клиент: {clientLifecycleDraft.clientLabel} · компания: {clientLifecycleDraft.companyLabel}
                             </div>

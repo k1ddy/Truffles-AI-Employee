@@ -2365,6 +2365,14 @@ paths:
           - type: string
           - type: 'null'
           title: Q
+      - name: company_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Company Id
       - name: client_id
         in: query
         required: false
@@ -6326,6 +6334,18 @@ components:
           type: string
           format: uuid
           title: Id
+        client_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Client Id
+        company_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Company Id
         slug:
           type: string
           title: Slug
