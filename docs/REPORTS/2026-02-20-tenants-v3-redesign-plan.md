@@ -267,6 +267,28 @@
 - `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_admin_provisioning.py` -> pass
 - `python3 truffles-api/scripts/generate_openapi.py --check` -> pass
 
+## Wave 4 scope-aware invalidation continuation (2026-02-23, UTC)
+1. Extended cache schema with scope metadata.
+- Added `scope_company_id` and `scope_client_id` to `tenants_fleet_cache` via migration `039`.
+- Updated ORM model `TenantsFleetCache` accordingly.
+
+2. Moved invalidation from full wipe to targeted-by-company delete.
+- `_invalidate_tenants_fleet_cache_scope` now supports `company_ids` and deletes:
+  - global rows (`scope_company_id IS NULL`)
+  - rows for affected companies only.
+- Summary cache writes now persist `scope_company_id` so company-scoped entries become addressable.
+
+3. Endpoint hooks now pass affected company scope.
+- `update_company`, `create/update/archive/restore client`,
+- `create/update branch`,
+- `branch go-live approve/reject/waive`,
+- integrations execute paths (`integration_reconcile`, `provider_ops`).
+
+4. Validation.
+- `pytest -q truffles-api/tests/test_console_admin_provisioning.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py truffles-api/tests/test_console_access_admin_pr2.py` -> `133 passed`
+- `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_admin_provisioning.py truffles-api/app/models/tenants_fleet_cache.py` -> pass
+- `python3 truffles-api/scripts/generate_openapi.py --check` -> pass
+
 ## Post-merge canary verification (2026-02-23, UTC)
 1. Authenticated perf baseline on deployed API captured (platform_admin scope).
 - Command:

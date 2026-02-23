@@ -35,7 +35,7 @@ async def test_update_company_updates_fields(monkeypatch):
     company = SimpleNamespace(id=company_id, name="Old", billing_info={"plan": "A"})
     db = Mock()
     db.query.return_value.filter.return_value.first.return_value = company
-    invalidation_reasons: list[str] = []
+    invalidation_calls: list[tuple[object, object]] = []
 
     monkeypatch.setattr(console_router, "get_console_context", lambda *args, **kwargs: _mock_context())
     monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
@@ -43,7 +43,7 @@ async def test_update_company_updates_fields(monkeypatch):
     monkeypatch.setattr(
         console_router,
         "_invalidate_tenants_fleet_cache_scope",
-        lambda *_args, **kwargs: invalidation_reasons.append(kwargs.get("reason")),
+        lambda *_args, **kwargs: invalidation_calls.append((kwargs.get("reason"), kwargs.get("company_ids"))),
     )
 
     response = await console_router.update_company(
@@ -56,7 +56,7 @@ async def test_update_company_updates_fields(monkeypatch):
     assert response.id == company_id
     assert response.name == "New"
     assert response.billing_info == {"plan": "B"}
-    assert invalidation_reasons == ["update_company"]
+    assert invalidation_calls == [("update_company", {company_id})]
     db.commit.assert_called_once()
 
 
@@ -77,6 +77,7 @@ async def test_update_client_updates_fields(monkeypatch):
     branch_exists_query = Mock()
     branch_exists_query.filter.return_value.first.return_value = None
     db.query.side_effect = [client_query, existing_query, company_query, branch_exists_query]
+    invalidation_calls: list[tuple[object, object]] = []
 
     monkeypatch.setattr(
         console_router,
@@ -89,6 +90,11 @@ async def test_update_client_updates_fields(monkeypatch):
     )
     monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
     monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "_invalidate_tenants_fleet_cache_scope",
+        lambda *_args, **kwargs: invalidation_calls.append((kwargs.get("reason"), kwargs.get("company_ids"))),
+    )
 
     response = await console_router.update_client(
         client_id,
@@ -102,6 +108,7 @@ async def test_update_client_updates_fields(monkeypatch):
     assert response.status == "active"
     assert response.company_id == company_id
     assert response.company_name == "Company"
+    assert invalidation_calls == [("update_client", {company_id})]
     db.commit.assert_called_once()
 
 
@@ -150,7 +157,7 @@ async def test_create_client_invalidates_fleet_cache(monkeypatch):
     company_query = Mock()
     company_query.filter.return_value.first.return_value = company
     db.query.side_effect = [existing_query, company_query]
-    invalidation_reasons: list[str] = []
+    invalidation_calls: list[tuple[object, object]] = []
 
     monkeypatch.setattr(
         console_router,
@@ -165,7 +172,7 @@ async def test_create_client_invalidates_fleet_cache(monkeypatch):
     monkeypatch.setattr(
         console_router,
         "_invalidate_tenants_fleet_cache_scope",
-        lambda *_args, **kwargs: invalidation_reasons.append(kwargs.get("reason")),
+        lambda *_args, **kwargs: invalidation_calls.append((kwargs.get("reason"), kwargs.get("company_ids"))),
     )
 
     response = await console_router.create_client(
@@ -181,7 +188,7 @@ async def test_create_client_invalidates_fleet_cache(monkeypatch):
     assert response.client is not None
     assert response.client.slug == "new-client"
     assert response.client.company_id == company_id
-    assert invalidation_reasons == ["create_client"]
+    assert invalidation_calls == [("create_client", {company_id})]
     db.commit.assert_called_once()
 
 
@@ -358,7 +365,7 @@ async def test_archive_client_sets_deleted_status(monkeypatch):
     company_query = Mock()
     company_query.filter.return_value.first.return_value = company
     db.query.side_effect = [client_query, company_query]
-    invalidation_reasons: list[str] = []
+    invalidation_calls: list[tuple[object, object]] = []
 
     monkeypatch.setattr(
         console_router,
@@ -383,7 +390,7 @@ async def test_archive_client_sets_deleted_status(monkeypatch):
     monkeypatch.setattr(
         console_router,
         "_invalidate_tenants_fleet_cache_scope",
-        lambda *_args, **kwargs: invalidation_reasons.append(kwargs.get("reason")),
+        lambda *_args, **kwargs: invalidation_calls.append((kwargs.get("reason"), kwargs.get("company_ids"))),
     )
 
     response = await console_router.archive_client(
@@ -396,7 +403,7 @@ async def test_archive_client_sets_deleted_status(monkeypatch):
     assert response.id == client_id
     assert response.status == "deleted"
     assert client.deleted_at is not None
-    assert invalidation_reasons == ["archive_client"]
+    assert invalidation_calls == [("archive_client", {company_id})]
     db.commit.assert_called_once()
 
 
@@ -419,7 +426,7 @@ async def test_restore_client_sets_active_status(monkeypatch):
     company_query = Mock()
     company_query.filter.return_value.first.return_value = company
     db.query.side_effect = [client_query, company_query]
-    invalidation_reasons: list[str] = []
+    invalidation_calls: list[tuple[object, object]] = []
 
     monkeypatch.setattr(
         console_router,
@@ -435,7 +442,7 @@ async def test_restore_client_sets_active_status(monkeypatch):
     monkeypatch.setattr(
         console_router,
         "_invalidate_tenants_fleet_cache_scope",
-        lambda *_args, **kwargs: invalidation_reasons.append(kwargs.get("reason")),
+        lambda *_args, **kwargs: invalidation_calls.append((kwargs.get("reason"), kwargs.get("company_ids"))),
     )
 
     response = await console_router.restore_client(
@@ -448,7 +455,7 @@ async def test_restore_client_sets_active_status(monkeypatch):
     assert response.id == client_id
     assert response.status == "active"
     assert client.deleted_at is None
-    assert invalidation_reasons == ["restore_client"]
+    assert invalidation_calls == [("restore_client", {company_id})]
     db.commit.assert_called_once()
 
 
@@ -489,14 +496,15 @@ async def test_update_branch_invalidates_fleet_cache_on_success(monkeypatch):
     )
     db = Mock()
     db.query.return_value.filter.return_value.first.return_value = branch
-    invalidation_reasons: list[str] = []
+    branch_company_id = uuid4()
+    invalidation_calls: list[tuple[object, object]] = []
 
     monkeypatch.setattr(
         console_router,
         "get_console_context",
         lambda *args, **kwargs: _mock_context(
             role="platform_admin",
-            accessible_clients=[SimpleNamespace(id=client_id, company_id=uuid4())],
+            accessible_clients=[SimpleNamespace(id=client_id, company_id=branch_company_id)],
             client_id=client_id,
         ),
     )
@@ -506,7 +514,7 @@ async def test_update_branch_invalidates_fleet_cache_on_success(monkeypatch):
     monkeypatch.setattr(
         console_router,
         "_invalidate_tenants_fleet_cache_scope",
-        lambda *_args, **kwargs: invalidation_reasons.append(kwargs.get("reason")),
+        lambda *_args, **kwargs: invalidation_calls.append((kwargs.get("reason"), kwargs.get("company_ids"))),
     )
     monkeypatch.setattr(console_router, "_serialize_branch", lambda target: target)
 
@@ -518,7 +526,7 @@ async def test_update_branch_invalidates_fleet_cache_on_success(monkeypatch):
     )
 
     assert response.name == "New Branch"
-    assert invalidation_reasons == ["update_branch"]
+    assert invalidation_calls == [("update_branch", {branch_company_id})]
     db.commit.assert_called_once()
 
 

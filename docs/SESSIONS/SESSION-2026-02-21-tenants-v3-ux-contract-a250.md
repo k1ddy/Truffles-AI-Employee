@@ -90,10 +90,13 @@
   - Wave4 event-driven continuation: добавлен write-path invalidation для `tenants_fleet_cache` (`fleet_summary`/`fleet_attention`) через `_invalidate_tenants_fleet_cache_scope` (best-effort nested transaction guard) в provisioning/go-live/integration execute endpoints.
   - Добавлены contract tests на invalidation hooks в `truffles-api/tests/test_console_admin_provisioning.py` (update_company/create_client/archive_client/restore_client/update_branch).
   - Прогнаны проверки continuation: `pytest -q truffles-api/tests/test_console_admin_provisioning.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`89 passed`), `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_admin_provisioning.py` (pass), `python3 truffles-api/scripts/generate_openapi.py --check` (pass).
+  - Wave4 scope-aware continuation: добавлены `scope_company_id/scope_client_id` в `tenants_fleet_cache` (migration `039` + model update), summary cache upserts теперь сохраняют company scope, а invalidation path удаляет `global + affected companies` вместо полного wipe.
+  - Endpoint invalidation hooks передают `company_ids` из контекста/мутатора (`update_company`, `create/update/archive/restore client`, `create/update branch`, go-live actions, `integration_reconcile/provider_ops execute`).
+  - Прогнаны проверки scope-aware continuation: `pytest -q truffles-api/tests/test_console_admin_provisioning.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py truffles-api/tests/test_console_access_admin_pr2.py` (`133 passed`), `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_admin_provisioning.py truffles-api/app/models/tenants_fleet_cache.py` (pass), `python3 truffles-api/scripts/generate_openapi.py --check` (pass).
 - next:
-  - Открыть continuation PR с event-driven cache invalidation и дождаться CI.
-  - После merge зафиксировать runtime perf snapshot после серии tenant write операций (stale-window evidence).
-  - Продолжить Wave4 targeted incremental precompute (scope-aware invalidation/refresh вместо global invalidate).
+  - Открыть continuation PR со scope-aware invalidation (`migration 039` + router/model/tests) и дождаться CI.
+  - После merge зафиксировать runtime perf snapshot после серии tenant write операций (stale-window evidence + cache hit ratio для non-affected companies).
+  - Следующий шаг Wave4/F5: targeted incremental precompute refresh (event-driven warmup для affected company scopes).
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
@@ -148,8 +151,10 @@
   - truffles-api/app/routers/console.py
   - truffles-api/tests/test_console_tenants_list.py
   - truffles-api/tests/test_console_admin_provisioning.py
+  - truffles-api/app/models/tenants_fleet_cache.py
+  - truffles-api/migrations/039_add_tenants_fleet_cache_scope_columns.sql
   - docs/REPORTS/2026-02-20-tenants-v3-redesign-plan.md
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/803
   - STATE.md
-- last_updated: 2026-02-23T09:35:00Z
+- last_updated: 2026-02-23T10:05:00Z

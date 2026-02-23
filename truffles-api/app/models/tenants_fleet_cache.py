@@ -16,6 +16,8 @@ class TenantsFleetCache(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     cache_type = Column(Text, nullable=False)
     scope_key = Column(Text, nullable=False)
+    scope_company_id = Column(UUID(as_uuid=True), nullable=True)
+    scope_client_id = Column(UUID(as_uuid=True), nullable=True)
     payload_json = Column(JSONB, nullable=False, default=dict)
     schema_version = Column(Text, nullable=False, default="v1")
     generated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
