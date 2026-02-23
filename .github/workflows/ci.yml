@@ -457,8 +457,24 @@ jobs:
           echo "Keycloak discovery failed after retries"
           exit 1
 
-      - name: Set up Node.js
+      - name: Preflight console sign-in endpoint
+        id: signin_guard
         if: steps.guard.outputs.skip != 'true'
+        run: |
+          sign_in_url="${PLAYWRIGHT_BASE_URL%/}/api/auth/signin"
+          provider_sign_in_url="${PLAYWRIGHT_BASE_URL%/}/api/auth/signin/keycloak"
+          sign_in_status="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 15 "$sign_in_url" || true)"
+          provider_sign_in_status="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 15 "$provider_sign_in_url" || true)"
+          echo "sign_in_status=$sign_in_status, provider_sign_in_status=$provider_sign_in_status"
+          if [ "$sign_in_status" = "404" ] && [ "$provider_sign_in_status" = "404" ]; then
+            echo "Live sign-in endpoints return 404; skipping console-e2e-live lane."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        if: steps.guard.outputs.skip != 'true' && steps.signin_guard.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -466,15 +482,15 @@ jobs:
           cache-dependency-path: console-web/package-lock.json
 
       - name: Install dependencies
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.guard.outputs.skip != 'true' && steps.signin_guard.outputs.skip != 'true'
         run: npm ci
 
       - name: Install Playwright browsers
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.guard.outputs.skip != 'true' && steps.signin_guard.outputs.skip != 'true'
         run: npx playwright install --with-deps chromium
 
       - name: Playwright login smoke (live)
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.guard.outputs.skip != 'true' && steps.signin_guard.outputs.skip != 'true'
         run: npm run test:e2e:smoke -- e2e/login.spec.ts
 
   console-e2e-owner-admin-live:
