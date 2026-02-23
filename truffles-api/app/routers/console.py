@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from datetime import date as dt_date
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
-from time import perf_counter
 from threading import Lock
+from time import perf_counter
 from typing import Any, Callable, Literal, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
