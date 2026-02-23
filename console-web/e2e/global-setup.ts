@@ -30,6 +30,43 @@ async function waitForConsoleApp(page: import("@playwright/test").Page) {
     );
 }
 
+type LoginTransitionState = "keycloak" | "logged-in";
+
+async function waitForLoginTransition(
+    page: import("@playwright/test").Page,
+    logoutButton: import("@playwright/test").Locator,
+    timeoutMs: number,
+): Promise<LoginTransitionState> {
+    type TransitionResult = {
+        source: LoginTransitionState;
+        state: LoginTransitionState | null;
+    };
+
+    const keycloakTransition: Promise<TransitionResult> = page
+        .waitForURL(keycloakHostPattern, { timeout: timeoutMs })
+        .then(() => ({ source: "keycloak", state: "keycloak" }))
+        .catch(() => ({ source: "keycloak", state: null }));
+
+    const loggedInTransition: Promise<TransitionResult> = logoutButton
+        .waitFor({ state: "visible", timeout: timeoutMs })
+        .then(() => ({ source: "logged-in", state: "logged-in" }))
+        .catch(() => ({ source: "logged-in", state: null }));
+
+    const first = await Promise.race([keycloakTransition, loggedInTransition]);
+    if (first.state) {
+        return first.state;
+    }
+
+    const second = await (first.source === "keycloak" ? loggedInTransition : keycloakTransition);
+    if (second.state) {
+        return second.state;
+    }
+
+    throw new Error(
+        `Login transition timed out after ${timeoutMs}ms: neither Keycloak redirect nor authenticated console state was reached`,
+    );
+}
+
 async function startKeycloakLogin(
     page: import("@playwright/test").Page,
     baseURL: string,
@@ -118,12 +155,13 @@ export default async function globalSetup(config: FullConfig) {
     const logoutButton = page.getByTestId("logout-button");
 
     if (loginState !== "logged-in") {
-        await Promise.any([
-            page.waitForURL(keycloakHostPattern, { timeout: loginTransitionTimeoutMs }),
-            logoutButton.waitFor({ state: "visible", timeout: loginTransitionTimeoutMs }),
-        ]);
+        const transitionState = await waitForLoginTransition(
+            page,
+            logoutButton,
+            loginTransitionTimeoutMs,
+        );
 
-        if (keycloakHostPattern.test(page.url())) {
+        if (transitionState === "keycloak" || keycloakHostPattern.test(page.url())) {
             await page.waitForSelector("#username", { timeout: loginTransitionTimeoutMs });
             await page.fill("#username", username);
             await page.fill("#password", password);

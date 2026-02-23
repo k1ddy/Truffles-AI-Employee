@@ -192,6 +192,7 @@ def test_invalidate_tenants_fleet_cache_scope_queues_company_prewarm(monkeypatch
     company_id = uuid4()
     db = Mock()
     db.begin_nested.return_value = nullcontext()
+    db.info = {}
     queued_company_ids: list[set[UUID]] = []
 
     monkeypatch.setattr(
@@ -208,6 +209,23 @@ def test_invalidate_tenants_fleet_cache_scope_queues_company_prewarm(monkeypatch
 
     assert queued_company_ids == [{company_id}]
     db.execute.assert_called_once()
+    assert db.info[console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY] is True
+
+
+def test_invalidate_tenants_fleet_cache_scope_marks_global_prewarm(monkeypatch) -> None:
+    db = Mock()
+    db.begin_nested.return_value = nullcontext()
+    db.info = {}
+
+    monkeypatch.setattr(console_router, "_queue_fleet_summary_prewarm_company_ids", lambda *_args, **_kwargs: None)
+
+    console_router._invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="test_invalidate_global",
+        company_ids=None,
+    )
+
+    assert db.info[console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY] is True
 
 
 def test_on_console_session_after_commit_schedules_company_prewarm(monkeypatch) -> None:
@@ -229,6 +247,26 @@ def test_on_console_session_after_commit_schedules_company_prewarm(monkeypatch) 
 
     assert captured == [{company_id}]
     assert console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY not in session.info
+
+
+def test_on_console_session_after_commit_schedules_global_prewarm(monkeypatch) -> None:
+    session = SimpleNamespace(
+        info={
+            console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY: True,
+        }
+    )
+    calls: list[bool] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_global_prewarm",
+        lambda: calls.append(True),
+    )
+
+    console_router._on_console_session_after_commit(session)
+
+    assert calls == [True]
+    assert console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY not in session.info
 
 
 def test_schedule_fleet_summary_prewarm_for_company_ids_starts_refresh_task(monkeypatch) -> None:
@@ -258,6 +296,80 @@ def test_schedule_fleet_summary_prewarm_for_company_ids_starts_refresh_task(monk
     assert task_payload["lifecycle_mode"] == "active"
     assert set(task_payload["accessible_client_ids"]) == {str(first_client_id), str(second_client_id)}
     db.close.assert_called_once()
+
+
+def test_schedule_fleet_global_prewarm_starts_summary_and_attention_tasks(monkeypatch) -> None:
+    first_client_id = uuid4()
+    second_client_id = uuid4()
+    summary_tasks: list[dict[str, object]] = []
+    attention_tasks: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "_reserve_fleet_global_prewarm_slot",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_load_global_active_client_ids",
+        lambda **_kwargs: ({first_client_id, second_client_id}, False),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_try_claim_fleet_cache_refresh",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_start_fleet_summary_refresh_task",
+        lambda **kwargs: summary_tasks.append(kwargs),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_start_fleet_attention_refresh_task",
+        lambda **kwargs: attention_tasks.append(kwargs),
+    )
+
+    console_router._schedule_fleet_global_prewarm()
+
+    assert len(summary_tasks) == 1
+    assert len(attention_tasks) == 1
+    summary_payload = summary_tasks[0]["task"]
+    attention_payload = attention_tasks[0]["task"]
+    assert set(summary_payload["accessible_client_ids"]) == {str(first_client_id), str(second_client_id)}
+    assert set(attention_payload["active_client_ids"]) == {str(first_client_id), str(second_client_id)}
+    assert attention_payload["limit"] == console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_ATTENTION_LIMIT
+
+
+def test_schedule_fleet_global_prewarm_skips_when_overflow(monkeypatch) -> None:
+    summary_tasks: list[dict[str, object]] = []
+    attention_tasks: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "_reserve_fleet_global_prewarm_slot",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_load_global_active_client_ids",
+        lambda **_kwargs: (set(), True),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_start_fleet_summary_refresh_task",
+        lambda **kwargs: summary_tasks.append(kwargs),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_start_fleet_attention_refresh_task",
+        lambda **kwargs: attention_tasks.append(kwargs),
+    )
+
+    console_router._schedule_fleet_global_prewarm()
+
+    assert summary_tasks == []
+    assert attention_tasks == []
 
 
 @pytest.mark.asyncio

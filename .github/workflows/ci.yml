@@ -1358,7 +1358,7 @@ jobs:
           fi
 
           schemathesis --config-file contracts/console_api/schemathesis.toml run contracts/console_api/openapi.v1.yaml \
-            --url https://api.truffles.kz/console/v1 \
+            --url https://api.truffles.kz \
             --include-method=GET \
             --phases examples,fuzzing,stateful \
             --exclude-path /ops/outbox \
