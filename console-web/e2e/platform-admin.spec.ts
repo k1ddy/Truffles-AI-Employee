@@ -790,6 +790,14 @@ test.describe('Platform Admin Tenants', () => {
         await expect(tenantsSection(page, 'Филиалы')).toBeVisible();
     });
 
+    test('should keep single editable context source on Tenants (Scenario F2)', async ({ page }) => {
+        await expect(page.getByTestId('tenants-context-lens')).toBeVisible();
+        await expect(page.getByTestId('context-managed-in-tenants')).toBeVisible();
+        await expect(page.getByTestId('context-company-select')).toHaveCount(0);
+        await expect(page.getByTestId('context-client-select')).toHaveCount(0);
+        await expect(page.getByTestId('context-branch-select')).toHaveCount(0);
+    });
+
     test('should show explicit field contracts in Tenants branch editor @smoke', async ({ page }) => {
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {

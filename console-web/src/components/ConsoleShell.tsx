@@ -1074,6 +1074,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
     const hasSession = (status === "authenticated" && !!accessToken && !sessionError) || e2eBypassAuth;
     const queryClient = useQueryClient();
     const isInboxPage = pathname === "/" || pathname.startsWith("/cases");
+    const isTenantsPage = pathname === "/tenants" || pathname.startsWith("/tenants/");
     const contentWidthClass = isInboxPage ? "max-w-[1440px]" : "max-w-6xl";
     const contentFrameClass = isInboxPage ? "h-full min-h-0" : "";
     const signOutTriggered = useRef(false);
@@ -1614,43 +1615,63 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
                             {data && (
                                 <div className="w-full lg:w-auto lg:flex-1">
                                     <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-1.5 text-xs text-foreground/80 md:hidden">
-                                        Контекст:{" "}
-                                        <span className="font-semibold text-foreground">
-                                            {data.client?.company_name ?? "Компания"}
-                                        </span>
-                                        {" "}·{" "}
-                                        <span className="font-semibold text-foreground">
-                                            {data.client?.name ?? "Клиент"}
-                                        </span>
-                                        {" "}·{" "}
-                                        <span className="font-semibold text-foreground">
-                                            {findBranchName(data.branches, data.selected_branch_id, !data.branch_selection_required)}
-                                        </span>
-                                        <Link href="/company-workspace" className="ml-2 font-medium text-primary underline underline-offset-2">
-                                            изменить
-                                        </Link>
-                                        {role === "platform_admin" && (
-                                            <span
-                                                className="ml-2 inline-flex rounded-full border border-sky-300/80 bg-sky-50 px-2 py-0.5 text-[10px] text-sky-900"
-                                                data-testid="context-active-scope-hint-mobile"
-                                                title="Архив и деактивированные в Тенантах."
-                                                aria-label="Режим данных: Активные"
-                                            >
-                                                Режим данных: Активные
-                                            </span>
+                                        {isTenantsPage ? (
+                                            <>
+                                                Контекст управляется в блоке «Рабочий контур» на странице «Тенанты».
+                                                <Link href="/tenants" className="ml-2 font-medium text-primary underline underline-offset-2">
+                                                    открыть
+                                                </Link>
+                                            </>
+                                        ) : (
+                                            <>
+                                                Контекст:{" "}
+                                                <span className="font-semibold text-foreground">
+                                                    {data.client?.company_name ?? "Компания"}
+                                                </span>
+                                                {" "}·{" "}
+                                                <span className="font-semibold text-foreground">
+                                                    {data.client?.name ?? "Клиент"}
+                                                </span>
+                                                {" "}·{" "}
+                                                <span className="font-semibold text-foreground">
+                                                    {findBranchName(data.branches, data.selected_branch_id, !data.branch_selection_required)}
+                                                </span>
+                                                <Link href="/company-workspace" className="ml-2 font-medium text-primary underline underline-offset-2">
+                                                    изменить
+                                                </Link>
+                                                {role === "platform_admin" && (
+                                                    <span
+                                                        className="ml-2 inline-flex rounded-full border border-sky-300/80 bg-sky-50 px-2 py-0.5 text-[10px] text-sky-900"
+                                                        data-testid="context-active-scope-hint-mobile"
+                                                        title="Архив и деактивированные в Тенантах."
+                                                        aria-label="Режим данных: Активные"
+                                                    >
+                                                        Режим данных: Активные
+                                                    </span>
+                                                )}
+                                            </>
                                         )}
                                     </div>
                                     <div className="hidden md:block">
-                                        <ContextBar
-                                            me={data}
-                                            companyId={companyId}
-                                            clients={visibleClients}
-                                            onSelectCompany={handleContextCompanyChange}
-                                            onSelectClient={handleContextClientChange}
-                                            onSelectBranch={handleContextBranchChange}
-                                            showActiveScopeHint={role === "platform_admin"}
-                                            isBusy={contextBusy}
-                                        />
+                                        {isTenantsPage ? (
+                                            <div
+                                                className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-foreground/80"
+                                                data-testid="context-managed-in-tenants"
+                                            >
+                                                Контекст на странице «Тенанты» управляется в блоке «Рабочий контур», чтобы избежать конфликтов с фильтрами страницы.
+                                            </div>
+                                        ) : (
+                                            <ContextBar
+                                                me={data}
+                                                companyId={companyId}
+                                                clients={visibleClients}
+                                                onSelectCompany={handleContextCompanyChange}
+                                                onSelectClient={handleContextClientChange}
+                                                onSelectBranch={handleContextBranchChange}
+                                                showActiveScopeHint={role === "platform_admin"}
+                                                isBusy={contextBusy}
+                                            />
+                                        )}
                                     </div>
                                     <ContextHealthStrip
                                         me={data}

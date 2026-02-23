@@ -9,7 +9,9 @@ import type { components } from "@/types/api.generated";
 import AccessDenied from "@/components/AccessDenied";
 import ProvisioningWizard from "@/components/ProvisioningWizard";
 import TenantsActionQueuePanel, { type TenantsActionQueueItem } from "@/components/TenantsActionQueuePanel";
+import TenantsFleetAttentionPanel from "@/components/TenantsFleetAttentionPanel";
 import TenantsOperationalKpiPanel from "@/components/TenantsOperationalKpiPanel";
+import TenantsPortfolioCompaniesPanel from "@/components/TenantsPortfolioCompaniesPanel";
 import TenantsQuickCreatePanel from "@/components/TenantsQuickCreatePanel";
 import TenantsScopedErrorSummary from "@/components/TenantsScopedErrorSummary";
 import TenantsSensitiveIdCell, { type TenantsSensitiveAction } from "@/components/TenantsSensitiveIdCell";
@@ -2772,240 +2774,51 @@ export default function TenantsPage() {
                 ) : null}
 
                 {controlTowerEnabled && showPortfolio && tenantLifecycle === "active" ? (
-                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-fleet-attention">
-                        <div className="flex items-start justify-between gap-4 mb-4">
-                            <div>
-                                <h2 className="text-lg font-semibold">Риски и внимание</h2>
-                                <p className="text-sm text-muted-foreground">
-                                    Операционные риски по активным клиентам (топ по score)
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                    охват: reference branches (шум тестовых веток исключен)
-                                </p>
-                            </div>
-                            <button
-                                className="btn-ghost"
-                                onClick={() => {
-                                    tenantsPortfolioQuery.refetch();
-                                    fleetAttentionQuery.refetch();
-                                }}
-                                disabled={tenantsPortfolioQuery.isFetching || fleetAttentionQuery.isFetching}
-                            >
-                                {tenantsPortfolioQuery.isFetching || fleetAttentionQuery.isFetching ? "Обновление..." : "Обновить"}
-                            </button>
-                        </div>
-
-                        {fleetAttention ? (
-                            <div className="mb-3 text-xs text-muted-foreground" data-testid="tenants-fleet-attention-summary">
-                                активных клиентов {fleetAttention.summary.active_clients_total} · с риском {fleetAttention.summary.clients_with_attention} ·
-                                высокий {fleetAttention.summary.high_risk_clients} · средний {fleetAttention.summary.medium_risk_clients} ·
-                                ошибок outbox за 24ч {fleetAttention.summary.outbox_failed_24h_total} · ожидают передачи {fleetAttention.summary.pending_handovers_total}
-                            </div>
-                        ) : null}
-
-                        <div className="space-y-3">
-                            {fleetAttentionLoading ? (
-                                <div className="text-sm text-muted-foreground">Загрузка панели рисков...</div>
-                            ) : fleetAttentionErrored ? (
-                                <div className="text-sm text-muted-foreground">Не удалось загрузить панель рисков.</div>
-                            ) : !fleetAttention?.items?.length ? (
-                                <div className="text-sm text-muted-foreground">Клиенты со средним/высоким риском не найдены.</div>
-                            ) : (
-                                fleetAttention.items.map((item) => (
-                                    <div
-                                        key={item.client_id}
-                                        className="rounded-lg border border-border/60 px-4 py-3"
-                                        data-testid="tenants-fleet-attention-row"
-                                    >
-                                        <div className="flex flex-wrap items-center justify-between gap-2">
-                                            <div className="font-medium">
-                                                {item.client_name ?? item.client_slug}
-                                            </div>
-                                            <div className="flex items-center gap-2 text-xs">
-                                                <span
-                                                    className={`inline-flex rounded-full px-2 py-0.5 font-semibold ${attentionLevelClass(item.attention_level as FleetAttentionLevel)}`}
-                                                >
-                                                    {item.attention_level}
-                                                </span>
-                                                <span className="text-muted-foreground">оценка {item.attention_score}</span>
-                                            </div>
-                                        </div>
-                                        <div className="mt-1 text-xs text-muted-foreground">
-                                            жизненный цикл {formatStateLabel(item.lifecycle_state, FLEET_LIFECYCLE_LABELS)} · сервис {formatStateLabel(item.service_state, FLEET_SERVICE_LABELS)} · владелец {item.owner_name ?? "—"} · следующее действие {item.next_action}
-                                        </div>
-                                        <div className="mt-1 text-xs text-muted-foreground">
-                                            филиалы активные {item.active_branches}/{item.total_branches} · неактуальные {item.stale_branches} · интеграционных ошибок {item.integration_error_branches} · outbox_failed_24h {item.outbox_failed_24h} · ожидают передачи {item.pending_handovers}
-                                        </div>
-                                        <div className="mt-1 text-xs text-muted-foreground">
-                                            опорные филиалы: {item.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(item.reference_branch_reason)}
-                                        </div>
-                                        <div className="mt-1 text-xs text-muted-foreground">
-                                            причины: {item.reasons?.join(", ") || "—"}
-                                        </div>
-                                        <div className="mt-1 text-xs text-muted-foreground">
-                                            действия: {item.suggested_actions?.join(", ") || "—"}
-                                        </div>
-                                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                                            <button
-                                                className="btn-ghost"
-                                                onClick={() => setClientContextAndPageFilters(item.client_id, item.company_id)}
-                                            >
-                                                В контекст
-                                            </button>
-                                            <button
-                                                className="btn-ghost"
-                                                onClick={() => openClientContextTarget("/integrations", item.client_id, item.company_id)}
-                                            >
-                                                Интеграции
-                                            </button>
-                                            <button
-                                                className="btn-ghost"
-                                                onClick={() => openClientContextTarget("/", item.client_id, item.company_id)}
-                                            >
-                                                Заявки
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    </section>
+                    <TenantsFleetAttentionPanel
+                        fleetAttention={fleetAttention}
+                        loading={fleetAttentionLoading}
+                        errored={fleetAttentionErrored}
+                        refreshing={tenantsPortfolioQuery.isFetching || fleetAttentionQuery.isFetching}
+                        onRefresh={() => {
+                            tenantsPortfolioQuery.refetch();
+                            fleetAttentionQuery.refetch();
+                        }}
+                        attentionLevelClass={attentionLevelClass}
+                        formatLifecycleLabel={(value) => formatStateLabel(value, FLEET_LIFECYCLE_LABELS)}
+                        formatServiceLabel={(value) => formatStateLabel(value, FLEET_SERVICE_LABELS)}
+                        formatReferenceScopeReason={formatReferenceScopeReason}
+                        onSetClientContext={setClientContextAndPageFilters}
+                        onOpenIntegrations={(clientId, companyId) => openClientContextTarget("/integrations", clientId, companyId)}
+                        onOpenCases={(clientId, companyId) => openClientContextTarget("/", clientId, companyId)}
+                    />
                 ) : null}
 
                 {showPortfolio ? (
-                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-portfolio-companies">
-                    <div className="flex items-center justify-between gap-4 mb-4">
-                        <div>
-                            <h2 className="text-lg font-semibold">Компании</h2>
-                            <p className="text-sm text-muted-foreground">
-                                {companiesQuery.isLoading ? "—" : `${companies.length} всего`}
-                            </p>
-                        </div>
-                        <input
-                            className="w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                            placeholder="Поиск по компаниям"
-                            value={companyQuery}
-                            onChange={(event) => setCompanyQuery(event.target.value)}
-                        />
-                    </div>
-                    <div className="space-y-3">
-                        {companiesQuery.isLoading ? (
-                            <div className="text-sm text-muted-foreground">Загрузка компаний...</div>
-                        ) : companiesQuery.isError ? (
-                            <div className="text-sm text-muted-foreground">Не удалось загрузить компании.</div>
-                        ) : companies.length === 0 ? (
-                            <div className="text-sm text-muted-foreground">Компании не найдены.</div>
-                        ) : (
-                            companies.map((company) => {
-                                const isEditing = companyEditor?.id === company.id;
-                                return (
-                                    <div
-                                        key={company.id}
-                                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3"
-                                    >
-                                        <div>
-                                            <div className="font-medium">{company.name ?? "Без названия"}</div>
-                                            {isPlatformPreset ? (
-                                                <div className="text-xs text-muted-foreground">{company.id}</div>
-                                            ) : null}
-                                        </div>
-                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                            <span>{company.id === selectedCompanyId ? "Выбрана" : ""}</span>
-                                            {canWriteTenants ? (
-                                                <button
-                                                    className="btn-ghost"
-                                                    onClick={() => startCompanyEdit(company)}
-                                                >
-                                                    Редактировать
-                                                </button>
-                                            ) : null}
-                                            <button
-                                                className="btn-ghost"
-                                                onClick={() => setCompanyContext(company.id)}
-                                                disabled={company.id === selectedCompanyId}
-                                            >
-                                                В контекст
-                                            </button>
-                                        </div>
-                                        {isEditing && companyEditor ? (
-                                            <div className="w-full mt-3 rounded-lg border border-border/60 bg-muted/30 p-3">
-                                                <div className="grid gap-3">
-                                                    <div className="rounded-lg border border-border/60 bg-background p-3 text-[11px] text-muted-foreground">
-                                                        Контракт ввода: `name` обязателен. `billing_info` опционален и принимается как JSON-объект.
-                                                        Основной сценарий: меняйте только название. JSON нужен только для расширенных атрибутов.
-                                                    </div>
-                                                    <label className="text-xs text-muted-foreground">
-                                                        Название
-                                                        <input
-                                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                            value={companyEditor.name}
-                                                            onChange={(event) =>
-                                                                setCompanyEditor((prev) =>
-                                                                    prev
-                                                                        ? { ...prev, name: event.target.value }
-                                                                        : prev
-                                                                )
-                                                            }
-                                                            disabled={!canWriteTenants || savingCompany}
-                                                        />
-                                                    </label>
-                                                    <details className="rounded-lg border border-border/60 bg-background p-3">
-                                                        <summary className="cursor-pointer text-xs text-muted-foreground">
-                                                            Расширенные параметры (JSON, экспертный режим): billing_info
-                                                        </summary>
-                                                        <label className="mt-2 block text-xs text-muted-foreground">
-                                                            billing_info (JSON, опционально)
-                                                            <textarea
-                                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
-                                                                rows={3}
-                                                                value={companyEditor.billingInfo}
-                                                                onChange={(event) =>
-                                                                    setCompanyEditor((prev) =>
-                                                                        prev
-                                                                            ? { ...prev, billingInfo: event.target.value }
-                                                                            : prev
-                                                                    )
-                                                                }
-                                                                disabled={!canWriteTenants || savingCompany}
-                                                            />
-                                                        </label>
-                                                    </details>
-                                                    <div className="flex items-center gap-2">
-                                                        <button
-                                                            className="btn-primary"
-                                                            onClick={handleSaveCompany}
-                                                            disabled={!canWriteTenants || savingCompany}
-                                                        >
-                                                            {savingCompany ? "Сохранение..." : "Сохранить"}
-                                                        </button>
-                                                        <button
-                                                            className="btn-ghost"
-                                                            onClick={() => setCompanyEditor(null)}
-                                                            disabled={savingCompany}
-                                                        >
-                                                            Отмена
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ) : null}
-                                    </div>
-                                );
-                            })
-                        )}
-                    </div>
-                    {companiesQuery.hasNextPage ? (
-                        <div className="flex justify-center pt-3">
-                            <button
-                                className="btn-ghost"
-                                onClick={() => companiesQuery.fetchNextPage()}
-                                disabled={companiesQuery.isFetchingNextPage}
-                            >
-                                {companiesQuery.isFetchingNextPage ? "Загрузка..." : "Показать еще"}
-                            </button>
-                        </div>
-                    ) : null}
-                </section>
+                    <TenantsPortfolioCompaniesPanel
+                        companies={companies}
+                        loading={companiesQuery.isLoading}
+                        errored={companiesQuery.isError}
+                        query={companyQuery}
+                        onQueryChange={setCompanyQuery}
+                        isPlatformPreset={isPlatformPreset}
+                        canWriteTenants={canWriteTenants}
+                        selectedCompanyId={selectedCompanyId}
+                        companyEditor={companyEditor}
+                        savingCompany={savingCompany}
+                        hasNextPage={Boolean(companiesQuery.hasNextPage)}
+                        isFetchingNextPage={companiesQuery.isFetchingNextPage}
+                        onFetchNextPage={() => companiesQuery.fetchNextPage()}
+                        onStartEdit={startCompanyEdit}
+                        onSetContext={setCompanyContext}
+                        onCancelEdit={() => setCompanyEditor(null)}
+                        onSaveEdit={handleSaveCompany}
+                        onChangeEditorName={(value) => {
+                            setCompanyEditor((prev) => (prev ? { ...prev, name: value } : prev));
+                        }}
+                        onChangeEditorBillingInfo={(value) => {
+                            setCompanyEditor((prev) => (prev ? { ...prev, billingInfo: value } : prev));
+                        }}
+                    />
                 ) : null}
 
                 {showDecommission ? (
