@@ -910,12 +910,22 @@ test.describe('Platform Admin Tenants', () => {
         const hasContextButton = await clickFirstEnabledContextButton(branchesSection);
         expect(hasContextButton).toBe(true);
 
+        const companyFilter = page.getByTestId('tenants-page-filter-company');
+        const clientFilter = page.getByTestId('tenants-page-filter-client');
         const branchFilter = page.getByTestId('tenants-page-filter-branch');
+        await expect(companyFilter).toBeVisible();
+        await expect(clientFilter).toBeVisible();
         await expect(branchFilter).toBeVisible();
+        await expect(companyFilter).not.toHaveValue('');
+        await expect(clientFilter).not.toHaveValue('');
         await expect(branchFilter).not.toHaveValue('');
+        const companyValueBefore = await companyFilter.inputValue();
+        const clientValueBefore = await clientFilter.inputValue();
         const branchValueBefore = await branchFilter.inputValue();
 
         await page.getByTestId('tenants-page-filter-apply-context').click();
+        await expect(companyFilter).toHaveValue(companyValueBefore);
+        await expect(clientFilter).toHaveValue(clientValueBefore);
         await expect(branchFilter).toHaveValue(branchValueBefore);
     });
 

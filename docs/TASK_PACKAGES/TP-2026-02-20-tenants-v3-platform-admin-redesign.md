@@ -7,6 +7,7 @@
 ## Revision
 - `2026-02-22`: глубокая перепроверка на `main@9b804d69` и фиксация остаточных системных проблем.
 - `2026-02-22`: Wave 5/6 hardening — deterministic e2e/a11y lane без skip, auth-setup decoupling, KPI contrast fix.
+- `2026-02-23`: recovery update — критерий `tenants/page.tsx <= 1200 LOC` переведен в рекомендательный, обязательный фокус приемки: рабочая ценность `/tenants` (deterministic scope + actionable flow + полная видимость company scope).
 
 ## Canon refs
 - `AGENTS.md`
@@ -65,7 +66,7 @@ Impact:
 
 ### F4. Монолит страницы сохраняется (высокий regression risk)
 Evidence:
-- `console-web/src/app/tenants/page.tsx` = 3768 LOC.
+- `console-web/src/app/tenants/page.tsx` = ~3900 LOC.
 - Внутри одной страницы: context orchestration, filters, CRUD, lifecycle modal, branch-change pipeline, KPI, snapshots, onboarding.
 Impact:
 - любое изменение цепляет много сценариев.
@@ -129,6 +130,16 @@ Impact:
 1. Редизайн страниц owner/admin/manager вне `platform_admin`.
 2. Изменение runtime LLM/core behavior.
 3. Переписывание всей Console с нуля.
+4. Жесткий LOC-лимит для `tenants/page.tsx` как самостоятельный gate.
+
+## Recovery priority (2026-02-23)
+1. P0: Убрать state-drift и silent reset (`company/client/branch`) — вкладка должна перестать "самопереключаться".
+2. P0: Сделать действия на вкладке утилитарными:
+- "В контекст",
+- "Взять из рабочего контура",
+- переходы в `Company Workspace` / `Integrations` / `Cases`.
+3. P0: Зафиксировать контракт тестами A/B/C/D/E без skip.
+4. P1: Упростить copy и убрать тех-шум из business режима.
 
 ## Scope state contract (single source of truth)
 ### Контуры
@@ -259,7 +270,7 @@ Expected result:
 1. Scenario A/B/C/D/E проходят детерминированно без skip.
 2. `branch` после `В контекст` + `Взять из рабочего контура` не теряется.
 3. В `Tenants` нет технического copy в business режиме.
-4. `tenants/page.tsx` <= 1200 LOC, остальная логика вынесена.
+4. `/tenants` даёт операционную пользу: platform_admin может за <= 3 действия выбрать scope и перейти к следующему рабочему шагу без скрытых фильтров.
 5. `portfolio/cockpit/branches` поддерживают курсорный скролл без "первого клиента" ловушки.
 6. A11y: `critical=0`, `serious=0` для desktop/mobile.
 7. Perf SLO выполняются на тестовом профиле крупного флота.

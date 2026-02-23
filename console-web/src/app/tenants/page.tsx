@@ -1618,6 +1618,22 @@ export default function TenantsPage() {
         };
     };
 
+    const validateScopeForBranchActions = (
+        scope: { companyId?: string | null; clientId?: string | null; branchId?: string | null },
+        actionLabel: string,
+    ) => {
+        const normalized = completeContextScope(scope);
+        if (normalized.branchId && (!normalized.clientId || !normalized.companyId)) {
+            reportValidationError(
+                `Нельзя выполнить "${actionLabel}": для филиала требуется связка company + client.`,
+                "TENANTS_SCOPE_INVALID",
+                "filters",
+            );
+            return null;
+        }
+        return normalized;
+    };
+
     const writeContextScope = (scope: { companyId?: string | null; clientId?: string | null; branchId?: string | null }) => {
         const normalized = completeContextScope(scope);
         setConsoleContextScope({
@@ -1665,18 +1681,35 @@ export default function TenantsPage() {
         });
         applyScopeToPageFilters(nextScope);
     };
-    const setBranchContextAndPageFilters = (branchId?: string | null) => {
+    const setBranchContextAndPageFilters = (
+        input?: string | { branchId?: string | null; clientId?: string | null; companyId?: string | null } | null,
+    ) => {
+        const branchPatch = typeof input === "string" || input == null ? { branchId: input ?? null } : input;
         const storedScope = readConsoleContextScopeFromStorage();
+        const nextScopeCandidate = validateScopeForBranchActions(
+            {
+                companyId: branchPatch.companyId ?? pageFilterCompanyId ?? storedScope.companyId,
+                clientId: branchPatch.clientId ?? pageFilterClientId ?? storedScope.clientId,
+                branchId: branchPatch.branchId ?? null,
+            },
+            "В контекст филиала",
+        );
+        if (!nextScopeCandidate) {
+            return;
+        }
         const nextScope = writeContextScope({
-            companyId: pageFilterCompanyId ?? storedScope.companyId,
-            clientId: pageFilterClientId ?? storedScope.clientId,
-            branchId: branchId ?? null,
+            companyId: nextScopeCandidate.companyId,
+            clientId: nextScopeCandidate.clientId,
+            branchId: nextScopeCandidate.branchId,
         });
         applyScopeToPageFilters(nextScope);
     };
     const applyContextToPageFilters = () => {
         const storedScope = readConsoleContextScopeFromStorage();
-        const nextScope = completeContextScope(storedScope);
+        const nextScope = validateScopeForBranchActions(storedScope, "Взять из рабочего контура");
+        if (!nextScope) {
+            return;
+        }
         applyScopeToPageFilters(nextScope);
         if (
             (nextScope.companyId ?? "") !== storedScope.companyId
@@ -1812,7 +1845,11 @@ export default function TenantsPage() {
                 reportValidationError("Филиал создан, но branch_id не вернулся");
                 return;
             }
-            setBranchContextAndPageFilters(branchId);
+            setBranchContextAndPageFilters({
+                branchId,
+                clientId,
+                companyId: quickCreateCompanyId,
+            });
             refreshTenants();
             toast.success("Филиал создан и выбран в контексте");
         } catch (error) {
@@ -3414,7 +3451,13 @@ export default function TenantsPage() {
                                             ) : null}
                                             <button
                                                 className="btn-ghost"
-                                                onClick={() => setBranchContextAndPageFilters(branch.id)}
+                                                onClick={() =>
+                                                    setBranchContextAndPageFilters({
+                                                        branchId: branch.id,
+                                                        clientId: readBranchClientId(branch),
+                                                        companyId: readBranchCompanyId(branch),
+                                                    })
+                                                }
                                                 disabled={branch.id === selectedBranchId}
                                             >
                                                 В контекст
