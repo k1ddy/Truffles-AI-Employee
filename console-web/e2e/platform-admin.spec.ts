@@ -929,6 +929,29 @@ test.describe('Platform Admin Tenants', () => {
         await expect(branchFilter).toHaveValue(branchValueBefore);
     });
 
+    test('should not mutate page filters when context has orphan branch scope (Scenario B2)', async ({ page }) => {
+        const companyFilter = page.getByTestId('tenants-page-filter-company');
+        const clientFilter = page.getByTestId('tenants-page-filter-client');
+        const branchFilter = page.getByTestId('tenants-page-filter-branch');
+        await expect(companyFilter).toBeVisible();
+        await expect(clientFilter).toBeVisible();
+        await expect(branchFilter).toBeVisible();
+        const companyValueBefore = await companyFilter.inputValue();
+        const clientValueBefore = await clientFilter.inputValue();
+        const branchValueBefore = await branchFilter.inputValue();
+
+        await page.evaluate(() => {
+            window.localStorage.setItem('console:company_id', '');
+            window.localStorage.setItem('console:client_id', '');
+            window.localStorage.setItem('console:branch_id', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+        });
+
+        await page.getByTestId('tenants-page-filter-apply-context').click();
+        await expect(companyFilter).toHaveValue(companyValueBefore);
+        await expect(clientFilter).toHaveValue(clientValueBefore);
+        await expect(branchFilter).toHaveValue(branchValueBefore);
+    });
+
     test('should reset only page filters and keep context chips (Scenario C)', async ({ page }) => {
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
