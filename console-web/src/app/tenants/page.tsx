@@ -9,10 +9,16 @@ import type { components } from "@/types/api.generated";
 import AccessDenied from "@/components/AccessDenied";
 import ProvisioningWizard from "@/components/ProvisioningWizard";
 import TenantsActionQueuePanel, { type TenantsActionQueueItem } from "@/components/TenantsActionQueuePanel";
+import TenantsBranchChangeManagementPanel from "@/components/TenantsBranchChangeManagementPanel";
+import TenantsClientLifecycleModal from "@/components/TenantsClientLifecycleModal";
+import TenantsClientsPanel from "@/components/TenantsClientsPanel";
+import TenantsDecommissionPanel from "@/components/TenantsDecommissionPanel";
+import TenantsFleetAttentionPanel from "@/components/TenantsFleetAttentionPanel";
 import TenantsOperationalKpiPanel from "@/components/TenantsOperationalKpiPanel";
+import TenantsPortfolioCompaniesPanel from "@/components/TenantsPortfolioCompaniesPanel";
 import TenantsQuickCreatePanel from "@/components/TenantsQuickCreatePanel";
 import TenantsScopedErrorSummary from "@/components/TenantsScopedErrorSummary";
-import TenantsSensitiveIdCell, { type TenantsSensitiveAction } from "@/components/TenantsSensitiveIdCell";
+import type { TenantsSensitiveAction } from "@/components/TenantsSensitiveIdCell";
 import TenantsTopControls, { type TenantsFilterOption } from "@/components/TenantsTopControls";
 import {
     adminApi,
@@ -2772,1168 +2778,177 @@ export default function TenantsPage() {
                 ) : null}
 
                 {controlTowerEnabled && showPortfolio && tenantLifecycle === "active" ? (
-                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-fleet-attention">
-                        <div className="flex items-start justify-between gap-4 mb-4">
-                            <div>
-                                <h2 className="text-lg font-semibold">Риски и внимание</h2>
-                                <p className="text-sm text-muted-foreground">
-                                    Операционные риски по активным клиентам (топ по score)
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                    охват: reference branches (шум тестовых веток исключен)
-                                </p>
-                            </div>
-                            <button
-                                className="btn-ghost"
-                                onClick={() => {
-                                    tenantsPortfolioQuery.refetch();
-                                    fleetAttentionQuery.refetch();
-                                }}
-                                disabled={tenantsPortfolioQuery.isFetching || fleetAttentionQuery.isFetching}
-                            >
-                                {tenantsPortfolioQuery.isFetching || fleetAttentionQuery.isFetching ? "Обновление..." : "Обновить"}
-                            </button>
-                        </div>
-
-                        {fleetAttention ? (
-                            <div className="mb-3 text-xs text-muted-foreground" data-testid="tenants-fleet-attention-summary">
-                                активных клиентов {fleetAttention.summary.active_clients_total} · с риском {fleetAttention.summary.clients_with_attention} ·
-                                высокий {fleetAttention.summary.high_risk_clients} · средний {fleetAttention.summary.medium_risk_clients} ·
-                                ошибок outbox за 24ч {fleetAttention.summary.outbox_failed_24h_total} · ожидают передачи {fleetAttention.summary.pending_handovers_total}
-                            </div>
-                        ) : null}
-
-                        <div className="space-y-3">
-                            {fleetAttentionLoading ? (
-                                <div className="text-sm text-muted-foreground">Загрузка панели рисков...</div>
-                            ) : fleetAttentionErrored ? (
-                                <div className="text-sm text-muted-foreground">Не удалось загрузить панель рисков.</div>
-                            ) : !fleetAttention?.items?.length ? (
-                                <div className="text-sm text-muted-foreground">Клиенты со средним/высоким риском не найдены.</div>
-                            ) : (
-                                fleetAttention.items.map((item) => (
-                                    <div
-                                        key={item.client_id}
-                                        className="rounded-lg border border-border/60 px-4 py-3"
-                                        data-testid="tenants-fleet-attention-row"
-                                    >
-                                        <div className="flex flex-wrap items-center justify-between gap-2">
-                                            <div className="font-medium">
-                                                {item.client_name ?? item.client_slug}
-                                            </div>
-                                            <div className="flex items-center gap-2 text-xs">
-                                                <span
-                                                    className={`inline-flex rounded-full px-2 py-0.5 font-semibold ${attentionLevelClass(item.attention_level as FleetAttentionLevel)}`}
-                                                >
-                                                    {item.attention_level}
-                                                </span>
-                                                <span className="text-muted-foreground">оценка {item.attention_score}</span>
-                                            </div>
-                                        </div>
-                                        <div className="mt-1 text-xs text-muted-foreground">
-                                            жизненный цикл {formatStateLabel(item.lifecycle_state, FLEET_LIFECYCLE_LABELS)} · сервис {formatStateLabel(item.service_state, FLEET_SERVICE_LABELS)} · владелец {item.owner_name ?? "—"} · следующее действие {item.next_action}
-                                        </div>
-                                        <div className="mt-1 text-xs text-muted-foreground">
-                                            филиалы активные {item.active_branches}/{item.total_branches} · неактуальные {item.stale_branches} · интеграционных ошибок {item.integration_error_branches} · outbox_failed_24h {item.outbox_failed_24h} · ожидают передачи {item.pending_handovers}
-                                        </div>
-                                        <div className="mt-1 text-xs text-muted-foreground">
-                                            опорные филиалы: {item.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(item.reference_branch_reason)}
-                                        </div>
-                                        <div className="mt-1 text-xs text-muted-foreground">
-                                            причины: {item.reasons?.join(", ") || "—"}
-                                        </div>
-                                        <div className="mt-1 text-xs text-muted-foreground">
-                                            действия: {item.suggested_actions?.join(", ") || "—"}
-                                        </div>
-                                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                                            <button
-                                                className="btn-ghost"
-                                                onClick={() => setClientContextAndPageFilters(item.client_id, item.company_id)}
-                                            >
-                                                В контекст
-                                            </button>
-                                            <button
-                                                className="btn-ghost"
-                                                onClick={() => openClientContextTarget("/integrations", item.client_id, item.company_id)}
-                                            >
-                                                Интеграции
-                                            </button>
-                                            <button
-                                                className="btn-ghost"
-                                                onClick={() => openClientContextTarget("/", item.client_id, item.company_id)}
-                                            >
-                                                Заявки
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    </section>
+                    <TenantsFleetAttentionPanel
+                        fleetAttention={fleetAttention}
+                        loading={fleetAttentionLoading}
+                        errored={fleetAttentionErrored}
+                        refreshing={tenantsPortfolioQuery.isFetching || fleetAttentionQuery.isFetching}
+                        onRefresh={() => {
+                            tenantsPortfolioQuery.refetch();
+                            fleetAttentionQuery.refetch();
+                        }}
+                        attentionLevelClass={attentionLevelClass}
+                        formatLifecycleLabel={(value) => formatStateLabel(value, FLEET_LIFECYCLE_LABELS)}
+                        formatServiceLabel={(value) => formatStateLabel(value, FLEET_SERVICE_LABELS)}
+                        formatReferenceScopeReason={formatReferenceScopeReason}
+                        onSetClientContext={setClientContextAndPageFilters}
+                        onOpenIntegrations={(clientId, companyId) => openClientContextTarget("/integrations", clientId, companyId)}
+                        onOpenCases={(clientId, companyId) => openClientContextTarget("/", clientId, companyId)}
+                    />
                 ) : null}
 
                 {showPortfolio ? (
-                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-portfolio-companies">
-                    <div className="flex items-center justify-between gap-4 mb-4">
-                        <div>
-                            <h2 className="text-lg font-semibold">Компании</h2>
-                            <p className="text-sm text-muted-foreground">
-                                {companiesQuery.isLoading ? "—" : `${companies.length} всего`}
-                            </p>
-                        </div>
-                        <input
-                            className="w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                            placeholder="Поиск по компаниям"
-                            value={companyQuery}
-                            onChange={(event) => setCompanyQuery(event.target.value)}
-                        />
-                    </div>
-                    <div className="space-y-3">
-                        {companiesQuery.isLoading ? (
-                            <div className="text-sm text-muted-foreground">Загрузка компаний...</div>
-                        ) : companiesQuery.isError ? (
-                            <div className="text-sm text-muted-foreground">Не удалось загрузить компании.</div>
-                        ) : companies.length === 0 ? (
-                            <div className="text-sm text-muted-foreground">Компании не найдены.</div>
-                        ) : (
-                            companies.map((company) => {
-                                const isEditing = companyEditor?.id === company.id;
-                                return (
-                                    <div
-                                        key={company.id}
-                                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3"
-                                    >
-                                        <div>
-                                            <div className="font-medium">{company.name ?? "Без названия"}</div>
-                                            {isPlatformPreset ? (
-                                                <div className="text-xs text-muted-foreground">{company.id}</div>
-                                            ) : null}
-                                        </div>
-                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                            <span>{company.id === selectedCompanyId ? "Выбрана" : ""}</span>
-                                            {canWriteTenants ? (
-                                                <button
-                                                    className="btn-ghost"
-                                                    onClick={() => startCompanyEdit(company)}
-                                                >
-                                                    Редактировать
-                                                </button>
-                                            ) : null}
-                                            <button
-                                                className="btn-ghost"
-                                                onClick={() => setCompanyContext(company.id)}
-                                                disabled={company.id === selectedCompanyId}
-                                            >
-                                                В контекст
-                                            </button>
-                                        </div>
-                                        {isEditing && companyEditor ? (
-                                            <div className="w-full mt-3 rounded-lg border border-border/60 bg-muted/30 p-3">
-                                                <div className="grid gap-3">
-                                                    <div className="rounded-lg border border-border/60 bg-background p-3 text-[11px] text-muted-foreground">
-                                                        Контракт ввода: `name` обязателен. `billing_info` опционален и принимается как JSON-объект.
-                                                        Основной сценарий: меняйте только название. JSON нужен только для расширенных атрибутов.
-                                                    </div>
-                                                    <label className="text-xs text-muted-foreground">
-                                                        Название
-                                                        <input
-                                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                            value={companyEditor.name}
-                                                            onChange={(event) =>
-                                                                setCompanyEditor((prev) =>
-                                                                    prev
-                                                                        ? { ...prev, name: event.target.value }
-                                                                        : prev
-                                                                )
-                                                            }
-                                                            disabled={!canWriteTenants || savingCompany}
-                                                        />
-                                                    </label>
-                                                    <details className="rounded-lg border border-border/60 bg-background p-3">
-                                                        <summary className="cursor-pointer text-xs text-muted-foreground">
-                                                            Расширенные параметры (JSON, экспертный режим): billing_info
-                                                        </summary>
-                                                        <label className="mt-2 block text-xs text-muted-foreground">
-                                                            billing_info (JSON, опционально)
-                                                            <textarea
-                                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono"
-                                                                rows={3}
-                                                                value={companyEditor.billingInfo}
-                                                                onChange={(event) =>
-                                                                    setCompanyEditor((prev) =>
-                                                                        prev
-                                                                            ? { ...prev, billingInfo: event.target.value }
-                                                                            : prev
-                                                                    )
-                                                                }
-                                                                disabled={!canWriteTenants || savingCompany}
-                                                            />
-                                                        </label>
-                                                    </details>
-                                                    <div className="flex items-center gap-2">
-                                                        <button
-                                                            className="btn-primary"
-                                                            onClick={handleSaveCompany}
-                                                            disabled={!canWriteTenants || savingCompany}
-                                                        >
-                                                            {savingCompany ? "Сохранение..." : "Сохранить"}
-                                                        </button>
-                                                        <button
-                                                            className="btn-ghost"
-                                                            onClick={() => setCompanyEditor(null)}
-                                                            disabled={savingCompany}
-                                                        >
-                                                            Отмена
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ) : null}
-                                    </div>
-                                );
-                            })
-                        )}
-                    </div>
-                    {companiesQuery.hasNextPage ? (
-                        <div className="flex justify-center pt-3">
-                            <button
-                                className="btn-ghost"
-                                onClick={() => companiesQuery.fetchNextPage()}
-                                disabled={companiesQuery.isFetchingNextPage}
-                            >
-                                {companiesQuery.isFetchingNextPage ? "Загрузка..." : "Показать еще"}
-                            </button>
-                        </div>
-                    ) : null}
-                </section>
+                    <TenantsPortfolioCompaniesPanel
+                        companies={companies}
+                        loading={companiesQuery.isLoading}
+                        errored={companiesQuery.isError}
+                        query={companyQuery}
+                        onQueryChange={setCompanyQuery}
+                        isPlatformPreset={isPlatformPreset}
+                        canWriteTenants={canWriteTenants}
+                        selectedCompanyId={selectedCompanyId}
+                        companyEditor={companyEditor}
+                        savingCompany={savingCompany}
+                        hasNextPage={Boolean(companiesQuery.hasNextPage)}
+                        isFetchingNextPage={companiesQuery.isFetchingNextPage}
+                        onFetchNextPage={() => companiesQuery.fetchNextPage()}
+                        onStartEdit={startCompanyEdit}
+                        onSetContext={setCompanyContext}
+                        onCancelEdit={() => setCompanyEditor(null)}
+                        onSaveEdit={handleSaveCompany}
+                        onChangeEditorName={(value) => {
+                            setCompanyEditor((prev) => (prev ? { ...prev, name: value } : prev));
+                        }}
+                        onChangeEditorBillingInfo={(value) => {
+                            setCompanyEditor((prev) => (prev ? { ...prev, billingInfo: value } : prev));
+                        }}
+                    />
                 ) : null}
 
                 {showDecommission ? (
-                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-decommission-center">
-                    <div className="flex items-center justify-between gap-4 mb-3">
-                        <div>
-                            <h2 className="text-lg font-semibold">Вывод из эксплуатации</h2>
-                            <p className="text-sm text-muted-foreground">
-                                Архивация и восстановление клиентов с прозрачным подтверждением.
-                            </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <button
-                                className={tenantLifecycle === "archived" ? "btn-primary" : "btn-ghost"}
-                                onClick={() => setTenantLifecycle("archived")}
-                            >
-                                Только архив
-                            </button>
-                            <button
-                                className={tenantLifecycle === "all" ? "btn-primary" : "btn-ghost"}
-                                onClick={() => setTenantLifecycle("all")}
-                            >
-                                Все
-                            </button>
-                            <button
-                                className={tenantLifecycle === "active" ? "btn-primary" : "btn-ghost"}
-                                onClick={() => setTenantLifecycle("active")}
-                            >
-                                Активные
-                            </button>
-                        </div>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                        Для вывода из эксплуатации используйте действия `Архивировать/Восстановить` в карточке клиента ниже.
-                    </div>
-                </section>
+                    <TenantsDecommissionPanel
+                        tenantLifecycle={tenantLifecycle}
+                        onTenantLifecycleChange={setTenantLifecycle}
+                    />
                 ) : null}
 
                 {showClientsSection ? (
-                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-clients-section">
-                    <div className="flex items-center justify-between gap-4 mb-4">
-                        <div>
-                            <h2 className="text-lg font-semibold">
-                                {decommissionFocused ? "Клиенты (вывод из эксплуатации)" : "Клиенты"}
-                            </h2>
-                            <p className="text-sm text-muted-foreground">
-                                {clientsLoading ? "—" : `${clients.length} всего`}
-                            </p>
-                            {decommissionFocused ? (
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                    Фокус на жизненном цикле клиента: архив/восстановление.
-                                </div>
-                            ) : null}
-                            {clientsSummary ? (
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                    портфель: клиентов {clientsSummary.total_clients} · активные {clientsSummary.active_clients} · онбординг {clientsSummary.onboarding_clients} · пауза {clientsSummary.paused_clients} · архив {clientsSummary.archived_clients} · деградация {clientsSummary.degraded_clients}
-                                </div>
-                            ) : null}
-                            {pageFilterCompanyId ? (
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                    фильтр по компании (ID): {pageFilterCompanyId}
-                                </div>
-                            ) : null}
-                        </div>
-                        <div className="flex flex-wrap items-center justify-end gap-2">
-                            <input
-                                className="w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                placeholder="Поиск по клиентам"
-                                value={clientQuery}
-                                onChange={(event) => setClientQuery(event.target.value)}
-                            />
-                            <select
-                                className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
-                                value={fleetLifecycleFilter}
-                                onChange={(event) => setFleetLifecycleFilter(event.target.value as FleetLifecycleFilter)}
-                                aria-label="Фильтр этапа клиента"
-                            >
-                                <option value="all">Этап: все</option>
-                                <option value="lead">лид</option>
-                                <option value="contracting">договор</option>
-                                <option value="onboarding">онбординг</option>
-                                <option value="go_live_ready">готов к запуску</option>
-                                <option value="active">активный</option>
-                                <option value="paused">пауза</option>
-                                <option value="archived">архив</option>
-                            </select>
-                            <select
-                                className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
-                                value={fleetPaymentFilter}
-                                onChange={(event) => setFleetPaymentFilter(event.target.value as FleetPaymentFilter)}
-                                aria-label="Фильтр статуса оплаты"
-                            >
-                                <option value="all">Оплата: все</option>
-                                <option value="pending">ожидает</option>
-                                <option value="confirmed">подтверждена</option>
-                                <option value="rejected">отклонена</option>
-                                <option value="unknown">не задана</option>
-                            </select>
-                            <select
-                                className="rounded-lg border border-border bg-background px-3 py-2 text-xs"
-                                value={fleetServiceFilter}
-                                onChange={(event) => setFleetServiceFilter(event.target.value as FleetServiceFilter)}
-                                aria-label="Фильтр сервисного статуса"
-                            >
-                                <option value="all">Сервис: все</option>
-                                <option value="ok">стабильно</option>
-                                <option value="degraded">деградация</option>
-                                <option value="attention">внимание</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div className="space-y-3">
-                        {clientsLoading ? (
-                            <div className="text-sm text-muted-foreground">Загрузка клиентов...</div>
-                        ) : clientsErrored ? (
-                            <div className="text-sm text-muted-foreground">Не удалось загрузить клиентов.</div>
-                        ) : clients.length === 0 ? (
-                            <div className="text-sm text-muted-foreground">Клиенты не найдены.</div>
-                        ) : (
-                            clients.map((client) => {
-                                const clientIdKey = client.id ? String(client.id) : "";
-                                const isEditing = clientEditor?.id === client.id;
-                                const isArchived = isClientArchived(client);
-                                const lifecyclePending = clientLifecyclePendingId === client.id;
-                                const lifecycleMode: ClientLifecycleMode = isArchived ? "restore" : "archive";
-                                const lifecycleAuditFilter: ClientLifecycleAuditFilter = clientIdKey
-                                    ? (clientLifecycleAuditFilterById[clientIdKey] ?? "all")
-                                    : "all";
-                                const sessionLifecycleAudit = clientIdKey
-                                    ? (clientLifecycleAuditById[clientIdKey] ?? [])
-                                    : [];
-                                const apiLifecycleAudit = clientIdKey && clientIdKey === pageFilterClientId
-                                    ? selectedClientApiAuditEntries
-                                    : [];
-                                const lifecycleAuditHistory = mergeLifecycleAuditEntries(
-                                    sessionLifecycleAudit,
-                                    apiLifecycleAudit,
-                                );
-                                const filteredLifecycleAuditHistory = lifecycleAuditHistory.filter((entry) => (
-                                    lifecycleAuditFilter === "all" || entry.status === lifecycleAuditFilter
-                                ));
-                                const companyLocked = (client.total_branches ?? 0) > 0 && !!client.company_id;
-                                return (
-                                    <div
-                                        key={client.id}
-                                        data-testid="tenants-client-row"
-                                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3"
-                                    >
-                                        <div>
-                                            <div className="font-medium">{client.name ?? client.slug ?? "Без названия"}</div>
-                                            {isPlatformPreset ? (
-                                                <div className="text-xs text-muted-foreground">{client.id}</div>
-                                            ) : null}
-                                            {client.company_name ? (
-                                                <div className="text-xs text-muted-foreground">{client.company_name}</div>
-                                            ) : null}
-                                            {client.status ? (
-                                                <div className="text-xs text-muted-foreground">статус: {client.status}</div>
-                                            ) : null}
-                                            <div className="text-xs text-muted-foreground">
-                                                жизненный цикл: {formatStateLabel(client.lifecycle_state, FLEET_LIFECYCLE_LABELS)} · оплата: {formatStateLabel(client.payment_status, FLEET_PAYMENT_LABELS)} · сервис: {formatStateLabel(client.service_state, FLEET_SERVICE_LABELS)}
-                                            </div>
-                                            <div className="text-xs text-muted-foreground">
-                                                владелец: {client.owner_name ?? "—"} · следующее действие: {client.next_action ?? "—"}
-                                            </div>
-                                            <div className="text-xs text-muted-foreground">
-                                                филиалы: активные {client.active_branches ?? 0}/{client.total_branches ?? 0} · деградация {client.degraded_branches ?? 0} · готовы к запуску {client.go_live_ready_branches ?? 0}
-                                            </div>
-                                            <div className="text-xs text-muted-foreground">
-                                                опорные филиалы: {client.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(client.reference_branch_reason)}
-                                            </div>
-                                            {lifecycleAuditHistory.length > 0 || clientIdKey === pageFilterClientId ? (
-                                                <div className="mt-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs" data-testid="tenants-client-lifecycle-audit">
-                                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                                        <div className="font-medium">
-                                                            История статуса (сессия + API)
-                                                        </div>
-                                                        <div className="flex items-center gap-1">
-                                                            <button
-                                                                className={lifecycleAuditFilter === "all" ? "btn-primary" : "btn-ghost"}
-                                                                onClick={() => {
-                                                                    if (!clientIdKey) {
-                                                                        return;
-                                                                    }
-                                                                    setClientLifecycleAuditFilterById((prev) => ({ ...prev, [clientIdKey]: "all" }));
-                                                                }}
-                                                            >
-                                                                все
-                                                            </button>
-                                                            <button
-                                                                className={lifecycleAuditFilter === "success" ? "btn-primary" : "btn-ghost"}
-                                                                onClick={() => {
-                                                                    if (!clientIdKey) {
-                                                                        return;
-                                                                    }
-                                                                    setClientLifecycleAuditFilterById((prev) => ({ ...prev, [clientIdKey]: "success" }));
-                                                                }}
-                                                            >
-                                                                успех
-                                                            </button>
-                                                            <button
-                                                                className={lifecycleAuditFilter === "error" ? "btn-primary" : "btn-ghost"}
-                                                                onClick={() => {
-                                                                    if (!clientIdKey) {
-                                                                        return;
-                                                                    }
-                                                                    setClientLifecycleAuditFilterById((prev) => ({ ...prev, [clientIdKey]: "error" }));
-                                                                }}
-                                                            >
-                                                                ошибка
-                                                            </button>
-                                                            {clientIdKey === pageFilterClientId ? (
-                                                                <button
-                                                                    className="btn-ghost"
-                                                                    onClick={() => selectedClientAuditQuery.refetch()}
-                                                                    disabled={selectedClientAuditQuery.isFetching}
-                                                                    data-testid="tenants-client-lifecycle-audit-refresh"
-                                                                >
-                                                                    {selectedClientAuditQuery.isFetching ? "Обновление..." : "Обновить данные API"}
-                                                                </button>
-                                                            ) : null}
-                                                        </div>
-                                                    </div>
-                                                    <div className="mt-1 text-muted-foreground">
-                                                        источник: кеш сессии + API-аудит{clientIdKey === pageFilterClientId ? "" : " (API-аудит доступен при текущем фильтре клиента)"}
-                                                    </div>
-                                                    <div className="mt-1 space-y-2" data-testid="tenants-client-lifecycle-audit-history">
-                                                        {filteredLifecycleAuditHistory.length === 0 ? (
-                                                            <div className="rounded border border-border/50 px-2 py-1 text-muted-foreground">
-                                                                Записей по текущему фильтру нет.
-                                                            </div>
-                                                        ) : (
-                                                            filteredLifecycleAuditHistory.map((entry, index) => (
-                                                                <div key={`${entry.happenedAt}-${index}`} className="rounded border border-border/50 px-2 py-1" data-testid="tenants-client-lifecycle-audit-item">
-                                                                    <div className="text-muted-foreground">
-                                                                        действие: {entry.mode === "archive" ? "Архивация" : "Восстановление"} · оператор: {entry.actorLabel} · время: {formatDateTimeLabel(entry.happenedAt)}
-                                                                    </div>
-                                                                    <div className="text-muted-foreground">
-                                                                        переход: {entry.previousLifecycleLabel}{" -> "}{entry.targetLifecycleLabel}
-                                                                    </div>
-                                                                    <div className="text-muted-foreground">
-                                                                        причина: {entry.reason}
-                                                                    </div>
-                                                                    <div className="text-muted-foreground">
-                                                                        источник: {entry.source}
-                                                                    </div>
-                                                                    <div className={entry.status === "success" ? "text-emerald-700" : "text-red-700"}>
-                                                                        {entry.status === "success" ? "OK" : "ERROR"}: {entry.message}
-                                                                        {isPlatformPreset && entry.traceId ? ` (trace_id: ${entry.traceId})` : ""}
-                                                                    </div>
-                                                                </div>
-                                                            ))
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            ) : null}
-                                        </div>
-                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                            <span>{client.id === selectedClientId ? "Выбран" : ""}</span>
-                                            {canWriteTenants ? (
-                                                <button
-                                                    className="btn-ghost"
-                                                    onClick={() => startClientEdit(client)}
-                                                    data-testid="tenants-client-edit"
-                                                    disabled={lifecyclePending}
-                                                >
-                                                    Редактировать
-                                                </button>
-                                            ) : null}
-                                            {canWriteTenants ? (
-                                                <button
-                                                    className="btn-ghost"
-                                                    onClick={() => openClientLifecycleAction(client, lifecycleMode)}
-                                                    data-testid="tenants-client-lifecycle-open"
-                                                    disabled={lifecyclePending}
-                                                >
-                                                    {lifecyclePending
-                                                        ? "Выполняется..."
-                                                        : lifecycleMode === "restore"
-                                                            ? "Открыть восстановление"
-                                                            : "Открыть архивирование"}
-                                                </button>
-                                            ) : null}
-                                            <button
-                                                className="btn-ghost"
-                                                onClick={() => setClientContextAndPageFilters(client.id, client.company_id)}
-                                                disabled={client.id === selectedClientId || lifecyclePending}
-                                            >
-                                                В контекст
-                                            </button>
-                                        </div>
-                                        {isEditing && clientEditor ? (
-                                            <div className="w-full mt-3 rounded-lg border border-border/60 bg-muted/30 p-3">
-                                                <div className="grid gap-3">
-                                                    <label className="text-xs text-muted-foreground">
-                                                        Slug (идентификатор)
-                                                        <input
-                                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                            value={clientEditor.slug}
-                                                            onChange={(event) =>
-                                                                setClientEditor((prev) =>
-                                                                    prev
-                                                                        ? { ...prev, slug: event.target.value }
-                                                                        : prev
-                                                                )
-                                                            }
-                                                            disabled={!canWriteTenants || savingClient}
-                                                        />
-                                                        <div className="mt-1 text-[11px] text-muted-foreground">
-                                                            Формат: `a-z0-9_-`, без пробелов.
-                                                        </div>
-                                                    </label>
-                                                    <label className="text-xs text-muted-foreground">
-                                                        Компания
-                                                        <select
-                                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                            value={clientEditor.companyId}
-                                                            onChange={(event) =>
-                                                                setClientEditor((prev) =>
-                                                                    prev
-                                                                        ? { ...prev, companyId: event.target.value }
-                                                                        : prev
-                                                                )
-                                                            }
-                                                            disabled={!canWriteTenants || savingClient || companyLocked}
-                                                            aria-label="Компания клиента"
-                                                        >
-                                                            <option value="">Без компании</option>
-                                                            {knownCompanies.map((company) => (
-                                                                <option key={company.id} value={company.id}>
-                                                                    {company.name ?? company.id}
-                                                                </option>
-                                                            ))}
-                                                        </select>
-                                                        {companyLocked ? (
-                                                            <div className="mt-1 text-[11px] text-muted-foreground">
-                                                                `company_id` зафиксирован после создания филиалов.
-                                                            </div>
-                                                        ) : null}
-                                                    </label>
-                                                    <div className="flex items-center gap-2">
-                                                        <button
-                                                            className="btn-primary"
-                                                            onClick={handleSaveClient}
-                                                            disabled={!canWriteTenants || savingClient || lifecyclePending}
-                                                        >
-                                                            {savingClient ? "Сохранение..." : "Сохранить"}
-                                                        </button>
-                                                        <button
-                                                            className="btn-ghost"
-                                                            onClick={() => setClientEditor(null)}
-                                                            disabled={savingClient || lifecyclePending}
-                                                        >
-                                                            Отмена
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ) : null}
-                                    </div>
-                                );
-                            })
-                        )}
-                    </div>
-                    {!clientsUsingServerContract && clientsQuery.hasNextPage ? (
-                        <div className="flex justify-center pt-3">
-                            <button
-                                className="btn-ghost"
-                                onClick={() => clientsQuery.fetchNextPage()}
-                                disabled={clientsQuery.isFetchingNextPage}
-                            >
-                                {clientsQuery.isFetchingNextPage ? "Загрузка..." : "Показать еще"}
-                            </button>
-                        </div>
-                    ) : null}
-                </section>
+                    <TenantsClientsPanel
+                        decommissionFocused={decommissionFocused}
+                        clientsLoading={clientsLoading}
+                        clientsErrored={clientsErrored}
+                        clients={clients}
+                        clientsSummary={clientsSummary}
+                        pageFilterCompanyId={pageFilterCompanyId}
+                        clientQuery={clientQuery}
+                        onClientQueryChange={setClientQuery}
+                        fleetLifecycleFilter={fleetLifecycleFilter}
+                        onFleetLifecycleFilterChange={setFleetLifecycleFilter}
+                        fleetPaymentFilter={fleetPaymentFilter}
+                        onFleetPaymentFilterChange={setFleetPaymentFilter}
+                        fleetServiceFilter={fleetServiceFilter}
+                        onFleetServiceFilterChange={setFleetServiceFilter}
+                        isPlatformPreset={isPlatformPreset}
+                        canWriteTenants={canWriteTenants}
+                        selectedClientId={selectedClientId}
+                        pageFilterClientId={pageFilterClientId}
+                        clientEditor={clientEditor}
+                        savingClient={savingClient}
+                        knownCompanies={knownCompanies}
+                        clientLifecyclePendingId={clientLifecyclePendingId}
+                        clientLifecycleAuditFilterById={clientLifecycleAuditFilterById}
+                        clientLifecycleAuditById={clientLifecycleAuditById}
+                        selectedClientApiAuditEntries={selectedClientApiAuditEntries}
+                        selectedClientAuditIsFetching={selectedClientAuditQuery.isFetching}
+                        onRefreshSelectedClientAudit={() => selectedClientAuditQuery.refetch()}
+                        onSetClientLifecycleAuditFilter={(clientId, filter) => {
+                            setClientLifecycleAuditFilterById((prev) => ({ ...prev, [clientId]: filter }));
+                        }}
+                        mergeLifecycleAuditEntries={mergeLifecycleAuditEntries}
+                        formatLifecycleLabel={(value) => formatStateLabel(value, FLEET_LIFECYCLE_LABELS)}
+                        formatPaymentLabel={(value) => formatStateLabel(value, FLEET_PAYMENT_LABELS)}
+                        formatServiceLabel={(value) => formatStateLabel(value, FLEET_SERVICE_LABELS)}
+                        formatReferenceScopeReason={formatReferenceScopeReason}
+                        formatDateTimeLabel={formatDateTimeLabel}
+                        isClientArchived={isClientArchived}
+                        onStartClientEdit={startClientEdit}
+                        onOpenClientLifecycleAction={openClientLifecycleAction}
+                        onSetClientContext={setClientContextAndPageFilters}
+                        onClientEditorSlugChange={(value) => {
+                            setClientEditor((prev) => (prev ? { ...prev, slug: value } : prev));
+                        }}
+                        onClientEditorCompanyChange={(value) => {
+                            setClientEditor((prev) => (prev ? { ...prev, companyId: value } : prev));
+                        }}
+                        onSaveClientEdit={handleSaveClient}
+                        onCancelClientEdit={() => setClientEditor(null)}
+                        clientsUsingServerContract={clientsUsingServerContract}
+                        clientsHasNextPage={Boolean(clientsQuery.hasNextPage)}
+                        clientsFetchingNextPage={clientsQuery.isFetchingNextPage}
+                        onFetchNextClientsPage={() => clientsQuery.fetchNextPage()}
+                    />
                 ) : null}
 
                 {showChangeManagement ? (
-                <section className="bg-card border border-border/60 rounded-lg p-5" data-testid="tenants-change-management">
-                    <div className="flex items-center justify-between gap-4 mb-4">
-                        <div>
-                            <h2 className="text-lg font-semibold">Филиалы</h2>
-                            <p className="text-sm text-muted-foreground">
-                                {branchesLoading ? "—" : `${branches.length} всего`}
-                            </p>
-                            {pageFilterClientId ? (
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                    выбран клиент для изменений: {selectedClientName ?? pageFilterClientId}
-                                </div>
-                            ) : null}
-                        </div>
-                        <input
-                            className="w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                            placeholder="Поиск по филиалам"
-                            value={branchQuery}
-                            onChange={(event) => setBranchQuery(event.target.value)}
-                        />
-                    </div>
-                    <div className="space-y-3">
-                        {branchesLoading ? (
-                            <div className="text-sm text-muted-foreground">Загрузка филиалов...</div>
-                        ) : branchesErrored ? (
-                            <div className="text-sm text-muted-foreground">Не удалось загрузить филиалы.</div>
-                        ) : branches.length === 0 ? (
-                            <div className="text-sm text-muted-foreground">Филиалы не найдены.</div>
-                        ) : (
-                            branches.map((branch) => {
-                                const isEditing = branchEditor?.id === branch.id;
-                                const confirmationNeeded = isEditing && branchEditor
-                                    ? requiresBranchConfirmation(branchEditor)
-                                    : false;
-                                return (
-                                    <div
-                                        key={branch.id}
-                                        data-testid="tenants-branch-row"
-                                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3"
-                                    >
-                                        <div>
-                                            <div className="font-medium">{branch.name ?? branch.slug ?? "Без названия"}</div>
-                                            {isPlatformPreset ? (
-                                                <div className="text-xs text-muted-foreground">{branch.id}</div>
-                                            ) : null}
-                                            <TenantsSensitiveIdCell
-                                                branchId={branch.id}
-                                                instanceId={branch.instance_id}
-                                                contextScope={effectiveWorkspaceMode}
-                                                onAudit={auditSensitiveAccess}
-                                            />
-                                            <div className="text-xs text-muted-foreground">
-                                                {branch.onboarding_state ? `этап онбординга: ${branch.onboarding_state}` : "этап онбординга: —"}
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                            <span>{branch.id === selectedBranchId ? "Выбран" : ""}</span>
-                                            {canWriteTenants ? (
-                                                <button
-                                                    className="btn-ghost"
-                                                    onClick={() => startBranchEdit(branch)}
-                                                    data-testid="tenants-branch-edit"
-                                                >
-                                                    Редактировать
-                                                </button>
-                                            ) : null}
-                                            <button
-                                                className="btn-ghost"
-                                                onClick={() =>
-                                                    setBranchContextAndPageFilters({
-                                                        branchId: branch.id,
-                                                        clientId: readBranchClientId(branch),
-                                                        companyId: readBranchCompanyId(branch),
-                                                    })
-                                                }
-                                                disabled={branch.id === selectedBranchId}
-                                            >
-                                                В контекст
-                                            </button>
-                                        </div>
-                                        {isEditing && branchEditor ? (
-                                            <div className="w-full mt-3 rounded-lg border border-border/60 bg-muted/30 p-3">
-                                                <div className="grid gap-3">
-                                                    <div className="rounded-lg border border-border/60 bg-background p-3 text-[11px] text-muted-foreground" data-testid="tenants-branch-input-contract">
-                                                        Форматы: `slug` = `a-z0-9_-`; `timezone` = IANA (`Asia/Almaty`);
-                                                        `phone` = 7-15 цифр (допускаются `+`, пробелы, `()`, `-`);
-                                                        `telegram_chat_id` = целое число (`-100...`);
-                                                        `knowledge_tag` = `a-z0-9_-` до 64.
-                                                    </div>
-                                                    <div className="grid gap-3 sm:grid-cols-2">
-                                                        <label className="text-xs text-muted-foreground">
-                                                            Название
-                                                            <input
-                                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                                value={branchEditor.name}
-                                                                onChange={(event) =>
-                                                                    setBranchEditor((prev) =>
-                                                                        prev
-                                                                            ? { ...prev, name: event.target.value }
-                                                                            : prev
-                                                                    )
-                                                                }
-                                                                disabled={!canWriteTenants || savingBranch}
-                                                            />
-                                                        </label>
-                                                        <label className="text-xs text-muted-foreground">
-                                                            Slug (идентификатор)
-                                                            <input
-                                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                                value={branchEditor.slug}
-                                                                onChange={(event) =>
-                                                                    setBranchEditor((prev) =>
-                                                                        prev
-                                                                            ? { ...prev, slug: event.target.value }
-                                                                            : prev
-                                                                    )
-                                                                }
-                                                                disabled={!canWriteTenants || savingBranch}
-                                                                placeholder="branch-slug"
-                                                            />
-                                                        </label>
-                                                        <label className="text-xs text-muted-foreground">
-                                                            Timezone (опционально)
-                                                            <input
-                                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                                value={branchEditor.timezone}
-                                                                onChange={(event) =>
-                                                                    setBranchEditor((prev) =>
-                                                                        prev
-                                                                            ? { ...prev, timezone: event.target.value }
-                                                                            : prev
-                                                                    )
-                                                                }
-                                                                disabled={!canWriteTenants || savingBranch}
-                                                                placeholder="Asia/Almaty"
-                                                            />
-                                                        </label>
-                                                        <label className="text-xs text-muted-foreground">
-                                                            Phone (опционально)
-                                                            <input
-                                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                                value={branchEditor.phone}
-                                                                onChange={(event) =>
-                                                                    setBranchEditor((prev) =>
-                                                                        prev
-                                                                            ? { ...prev, phone: event.target.value }
-                                                                            : prev
-                                                                    )
-                                                                }
-                                                                disabled={!canWriteTenants || savingBranch}
-                                                                placeholder="+7 700 000 00 00"
-                                                            />
-                                                        </label>
-                                                        <label className="text-xs text-muted-foreground">
-                                                            instance_id (опционально)
-                                                            <input
-                                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                                value={branchEditor.instanceId}
-                                                                onChange={(event) =>
-                                                                    setBranchEditor((prev) =>
-                                                                        prev
-                                                                            ? { ...prev, instanceId: event.target.value }
-                                                                            : prev
-                                                                    )
-                                                                }
-                                                                disabled={!canWriteTenants || savingBranch}
-                                                                placeholder="instance-123"
-                                                            />
-                                                        </label>
-                                                        <label className="text-xs text-muted-foreground">
-                                                            telegram_chat_id (опционально)
-                                                            <input
-                                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                                value={branchEditor.telegramChatId}
-                                                                onChange={(event) =>
-                                                                    setBranchEditor((prev) =>
-                                                                        prev
-                                                                            ? { ...prev, telegramChatId: event.target.value }
-                                                                            : prev
-                                                                    )
-                                                                }
-                                                                disabled={!canWriteTenants || savingBranch}
-                                                                placeholder="-1001234567890"
-                                                            />
-                                                        </label>
-                                                        <label className="text-xs text-muted-foreground">
-                                                            knowledge_tag (опционально)
-                                                            <input
-                                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                                value={branchEditor.knowledgeTag}
-                                                                onChange={(event) =>
-                                                                    setBranchEditor((prev) =>
-                                                                        prev
-                                                                            ? { ...prev, knowledgeTag: event.target.value }
-                                                                            : prev
-                                                                    )
-                                                                }
-                                                                disabled={!canWriteTenants || savingBranch}
-                                                                placeholder="demo_salon"
-                                                            />
-                                                        </label>
-                                                    </div>
-                                                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                                                        <input
-                                                            type="checkbox"
-                                                            className="h-4 w-4"
-                                                            checked={branchEditor.isActive}
-                                                            onChange={(event) =>
-                                                                setBranchEditor((prev) =>
-                                                                    prev
-                                                                        ? { ...prev, isActive: event.target.checked }
-                                                                        : prev
-                                                                )
-                                                            }
-                                                            disabled={!canWriteTenants || savingBranch}
-                                                        />
-                                                        Активен
-                                                    </label>
-                                                    <label className="text-xs text-muted-foreground">
-                                                        Причина изменения (аудит)
-                                                        <input
-                                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                            value={branchEditor.changeReason}
-                                                            onChange={(event) =>
-                                                                setBranchEditor((prev) =>
-                                                                    prev
-                                                                        ? { ...prev, changeReason: event.target.value }
-                                                                        : prev
-                                                                )
-                                                            }
-                                                            disabled={!canWriteTenants || savingBranch || publishingBranchChange || rollingBackBranchChange}
-                                                        />
-                                                    </label>
-                                                    {confirmationNeeded ? (
-                                                        <label className="text-xs text-muted-foreground">
-                                                            Причина подтверждения
-                                                            <input
-                                                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                                value={branchEditor.confirmReason}
-                                                                onChange={(event) =>
-                                                                    setBranchEditor((prev) =>
-                                                                        prev
-                                                                            ? { ...prev, confirmReason: event.target.value }
-                                                                            : prev
-                                                                    )
-                                                                }
-                                                                disabled={!canWriteTenants || savingBranch || publishingBranchChange || rollingBackBranchChange}
-                                                            />
-                                                        </label>
-                                                    ) : null}
-                                                    <div className="rounded-lg border border-border/60 bg-background p-3 text-xs" data-testid="tenants-branch-impact-preview">
-                                                        <div className="font-medium">Оценка влияния</div>
-                                                        <div className="mt-1 text-muted-foreground">
-                                                            branch: {branchEditor.name || branchEditor.slug || branchEditor.id}
-                                                        </div>
-                                                        <div className="text-muted-foreground">
-                                                            activation: {branchEditor.original.isActive ? "active" : "inactive"} {"-> "} {branchEditor.isActive ? "active" : "inactive"}
-                                                        </div>
-                                                        {!branchEditor.original.isActive && branchEditor.isActive && !branchEditor.instanceId.trim() ? (
-                                                            <div className="text-destructive">
-                                                                Нельзя активировать без `instance_id`.
-                                                            </div>
-                                                        ) : null}
-                                                        {confirmationNeeded ? (
-                                                            <div className="text-amber-700">
-                                                                Изменение требует подтверждения (`branch_deactivate`).
-                                                            </div>
-                                                        ) : (
-                                                            <div className="text-muted-foreground">
-                                                                Подтверждение не требуется для текущего изменения.
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <button
-                                                            className="btn-primary"
-                                                            onClick={handlePreviewBranchChange}
-                                                            data-testid="tenants-branch-change-preview"
-                                                            disabled={!canWriteTenants || savingBranch || publishingBranchChange || rollingBackBranchChange}
-                                                        >
-                                                            {savingBranch ? "Подготовка..." : "Черновик + проверка"}
-                                                        </button>
-                                                        <button
-                                                            className="btn-primary"
-                                                            onClick={handlePublishBranchChange}
-                                                            data-testid="tenants-branch-change-publish"
-                                                            disabled={!canWriteTenants || savingBranch || publishingBranchChange || rollingBackBranchChange || !branchChangePreview?.change?.id}
-                                                        >
-                                                            {publishingBranchChange ? "Применение..." : "Применить"}
-                                                        </button>
-                                                        <button
-                                                            className="btn-ghost"
-                                                            onClick={handleRollbackBranchChange}
-                                                            data-testid="tenants-branch-change-rollback"
-                                                            disabled={
-                                                                !canWriteTenants ||
-                                                                savingBranch ||
-                                                                publishingBranchChange ||
-                                                                rollingBackBranchChange ||
-                                                                !(branchChangePreview?.change?.status === "published" || latestPublishedBranchChange)
-                                                            }
-                                                        >
-                                                            {rollingBackBranchChange ? "Откат..." : "Откат"}
-                                                        </button>
-                                                        <button
-                                                            className="btn-ghost"
-                                                            onClick={() => {
-                                                                setBranchEditor(null);
-                                                                setBranchChangePreview(null);
-                                                            }}
-                                                            disabled={savingBranch || publishingBranchChange || rollingBackBranchChange}
-                                                        >
-                                                            Отмена
-                                                        </button>
-                                                    </div>
-                                                    <label className="text-xs text-muted-foreground">
-                                                        Причина отката
-                                                        <input
-                                                            className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                                            value={branchEditor.rollbackReason}
-                                                            onChange={(event) =>
-                                                                setBranchEditor((prev) =>
-                                                                    prev
-                                                                        ? { ...prev, rollbackReason: event.target.value }
-                                                                        : prev
-                                                                )
-                                                            }
-                                                            disabled={!canWriteTenants || savingBranch || publishingBranchChange || rollingBackBranchChange}
-                                                        />
-                                                    </label>
-                                                    {branchChangePreview?.change ? (
-                                                        <div className="rounded-lg border border-border/60 bg-background p-3 text-xs">
-                                                            <div className="font-medium mb-1">
-                                                                Изменение #{branchChangePreview.change.id}
-                                                            </div>
-                                                            <div className="text-muted-foreground mb-2">
-                                                                статус: {formatStateLabel(branchChangePreview.change.status, BRANCH_CHANGE_STATUS_LABELS)}
-                                                            </div>
-                                                            {previewValidationErrors.length > 0 ? (
-                                                                <div className="mb-2 text-red-600">
-                                                                    проверка: {previewValidationErrors.join("; ")}
-                                                                </div>
-                                                            ) : null}
-                                                            {previewDiffEntries.length > 0 ? (
-                                                                <div className="space-y-1">
-                                                                    {previewDiffEntries.map((entry) => (
-                                                                        <div key={entry.field} className="grid grid-cols-3 gap-2">
-                                                                            <span className="font-medium">{entry.field}</span>
-                                                                            <span className="truncate text-muted-foreground">{entry.before}</span>
-                                                                            <span className="truncate text-foreground">{entry.after}</span>
-                                                                        </div>
-                                                                    ))}
-                                                                </div>
-                                                            ) : (
-                                                                <div className="text-muted-foreground">изменений нет</div>
-                                                            )}
-                                                        </div>
-                                                    ) : null}
-                                                    <div className="rounded-lg border border-border/60 bg-background p-3 text-xs">
-                                                        <div className="font-medium mb-2">История изменений</div>
-                                                        {branchChangesQuery.isLoading ? (
-                                                            <div className="text-muted-foreground">Загрузка...</div>
-                                                        ) : !branchChangesQuery.data?.items?.length ? (
-                                                            <div className="text-muted-foreground">Пока нет изменений</div>
-                                                        ) : (
-                                                            <div className="space-y-1">
-                                                                {branchChangesQuery.data.items.slice(0, 5).map((item) => (
-                                                                    <div key={item.id} className="flex items-center justify-between gap-2">
-                                                                        <span>{formatStateLabel(item.status, BRANCH_CHANGE_STATUS_LABELS)}</span>
-                                                                        <span className="text-muted-foreground">{item.created_at ? new Date(item.created_at).toLocaleString("ru-RU") : "—"}</span>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ) : null}
-                                    </div>
-                                );
+                    <TenantsBranchChangeManagementPanel
+                        branchesLoading={branchesLoading}
+                        branchesErrored={branchesErrored}
+                        branches={branches}
+                        pageFilterClientId={pageFilterClientId}
+                        selectedClientName={selectedClientName}
+                        branchQuery={branchQuery}
+                        onBranchQueryChange={setBranchQuery}
+                        isPlatformPreset={isPlatformPreset}
+                        canWriteTenants={canWriteTenants}
+                        selectedBranchId={selectedBranchId}
+                        contextScope={effectiveWorkspaceMode}
+                        onAuditSensitiveAccess={auditSensitiveAccess}
+                        onStartBranchEdit={startBranchEdit}
+                        onSetBranchContext={(branch) =>
+                            setBranchContextAndPageFilters({
+                                branchId: branch.id,
+                                clientId: readBranchClientId(branch),
+                                companyId: readBranchCompanyId(branch),
                             })
-                        )}
-                    </div>
-                    {branchesQuery.hasNextPage ? (
-                        <div className="flex justify-center pt-3">
-                            <button
-                                className="btn-ghost"
-                                onClick={() => branchesQuery.fetchNextPage()}
-                                disabled={branchesQuery.isFetchingNextPage}
-                            >
-                                {branchesQuery.isFetchingNextPage ? "Загрузка..." : "Показать еще"}
-                            </button>
-                        </div>
-                    ) : null}
-                </section>
+                        }
+                        branchEditor={branchEditor}
+                        onPatchBranchEditor={(patch) => {
+                            setBranchEditor((prev) => (prev ? { ...prev, ...patch } : prev));
+                        }}
+                        requiresBranchConfirmation={requiresBranchConfirmation}
+                        savingBranch={savingBranch}
+                        publishingBranchChange={publishingBranchChange}
+                        rollingBackBranchChange={rollingBackBranchChange}
+                        onPreviewBranchChange={handlePreviewBranchChange}
+                        onPublishBranchChange={handlePublishBranchChange}
+                        onRollbackBranchChange={handleRollbackBranchChange}
+                        onCancelBranchEdit={() => {
+                            setBranchEditor(null);
+                            setBranchChangePreview(null);
+                        }}
+                        branchChangePreview={branchChangePreview}
+                        previewValidationErrors={previewValidationErrors}
+                        previewDiffEntries={previewDiffEntries}
+                        hasPublishedBranchChange={Boolean(latestPublishedBranchChange)}
+                        branchChangesLoading={branchChangesQuery.isLoading}
+                        branchChangesItems={branchChangesQuery.data?.items ?? []}
+                        formatBranchChangeStatus={(value) => formatStateLabel(value, BRANCH_CHANGE_STATUS_LABELS)}
+                        branchesHasNextPage={Boolean(branchesQuery.hasNextPage)}
+                        branchesFetchingNextPage={branchesQuery.isFetchingNextPage}
+                        onFetchNextBranchesPage={() => branchesQuery.fetchNextPage()}
+                    />
                 ) : null}
             </div>
 
-            {clientLifecycleDraft ? (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" data-testid="tenants-client-lifecycle-modal-overlay">
-                    <div
-                        className="card-surface w-full max-w-xl space-y-4 p-6"
-                        role="dialog"
-                        aria-modal="true"
-                        data-testid="tenants-client-lifecycle-modal"
-                    >
-                        <div>
-                            <h3 className="text-lg font-semibold">
-                                {clientLifecycleDraft.mode === "archive" ? "Архивировать клиента" : "Восстановить клиента"}
-                            </h3>
-                            <p className="text-sm text-muted-foreground">
-                                Подтвердите lifecycle-действие перед отправкой в API. Заполнение checklist обязательно.
-                            </p>
-                        </div>
-                        <div className="rounded-lg border border-border/60 bg-background p-3 text-xs" data-testid="tenants-client-lifecycle-impact">
-                            <div className="font-medium mb-1">Оценка влияния</div>
-                            <div className="text-muted-foreground">
-                                клиент: {clientLifecycleDraft.clientLabel} · компания: {clientLifecycleDraft.companyLabel}
-                            </div>
-                            <div className="text-muted-foreground">
-                                переход: {clientLifecycleDraft.currentLifecycleLabel}{" -> "}{clientLifecycleDraft.targetLifecycleLabel}
-                            </div>
-                            <div className="text-muted-foreground">
-                                филиалы: активные {clientLifecycleDraft.activeBranches}/{clientLifecycleDraft.totalBranches} · деградация {clientLifecycleDraft.degradedBranches}
-                            </div>
-                        </div>
-                        <div className="rounded-lg border border-border/60 bg-background p-3 text-xs" data-testid="tenants-client-lifecycle-checklist">
-                            <div className="font-medium mb-1">Pre-submit checklist</div>
-                            <label className="mb-2 flex items-start gap-2 text-muted-foreground">
-                                <input
-                                    type="checkbox"
-                                    className="mt-0.5 h-4 w-4"
-                                    checked={clientLifecycleDraft.checkClientScope}
-                                    data-testid="tenants-client-lifecycle-check-context"
-                                    onChange={(event) =>
-                                        setClientLifecycleDraft((prev) =>
-                                            prev
-                                                ? { ...prev, checkClientScope: event.target.checked }
-                                                : prev
-                                        )
-                                    }
-                                    disabled={Boolean(clientLifecyclePendingId)}
-                                />
-                                <span>Проверил контекст клиента/компании перед действием.</span>
-                            </label>
-                            <label className="mb-2 flex items-start gap-2 text-muted-foreground">
-                                <input
-                                    type="checkbox"
-                                    className="mt-0.5 h-4 w-4"
-                                    checked={clientLifecycleDraft.checkImpactReview}
-                                    data-testid="tenants-client-lifecycle-check-impact"
-                                    onChange={(event) =>
-                                        setClientLifecycleDraft((prev) =>
-                                            prev
-                                                ? { ...prev, checkImpactReview: event.target.checked }
-                                                : prev
-                                        )
-                                    }
-                                    disabled={Boolean(clientLifecyclePendingId)}
-                                />
-                                <span>
-                                    Проверил impact:
-                                    {clientLifecycleDraft.mode === "archive"
-                                        ? " клиент уйдет из активного списка и деактивация отразится в операционном контуре."
-                                        : " клиент вернется в активный список и потребует операционного контроля после восстановления."}
-                                </span>
-                            </label>
-                            <label className="flex items-start gap-2 text-muted-foreground">
-                                <input
-                                    type="checkbox"
-                                    className="mt-0.5 h-4 w-4"
-                                    checked={clientLifecycleDraft.checkOwnerAligned}
-                                    data-testid="tenants-client-lifecycle-check-owner"
-                                    onChange={(event) =>
-                                        setClientLifecycleDraft((prev) =>
-                                            prev
-                                                ? { ...prev, checkOwnerAligned: event.target.checked }
-                                                : prev
-                                        )
-                                    }
-                                    disabled={Boolean(clientLifecyclePendingId)}
-                                />
-                                <span>Подтвердил решение с ответственным владельцем клиента.</span>
-                            </label>
-                        </div>
-                        <label className="text-xs text-muted-foreground">
-                            Причина действия (обязательно)
-                            <input
-                                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                                value={clientLifecycleDraft.reason}
-                                data-testid="tenants-client-lifecycle-reason"
-                                onChange={(event) =>
-                                    setClientLifecycleDraft((prev) =>
-                                        prev
-                                            ? { ...prev, reason: event.target.value }
-                                            : prev
-                                    )
-                                }
-                                disabled={Boolean(clientLifecyclePendingId)}
-                            />
-                        </label>
-                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <input
-                                type="checkbox"
-                                className="h-4 w-4"
-                                checked={clientLifecycleDraft.confirmChecked}
-                                data-testid="tenants-client-lifecycle-confirm"
-                                onChange={(event) =>
-                                    setClientLifecycleDraft((prev) =>
-                                        prev
-                                            ? { ...prev, confirmChecked: event.target.checked }
-                                            : prev
-                                    )
-                                }
-                                disabled={Boolean(clientLifecyclePendingId)}
-                            />
-                            Подтверждаю выполнение действия и влияние на lifecycle клиента
-                        </label>
-                        <div className="flex flex-wrap justify-end gap-2">
-                            <button
-                                className="btn-ghost"
-                                onClick={closeClientLifecycleDraft}
-                                data-testid="tenants-client-lifecycle-cancel"
-                                disabled={Boolean(clientLifecyclePendingId)}
-                            >
-                                Отмена
-                            </button>
-                            <button
-                                className="btn-primary"
-                                onClick={handleClientLifecycleAction}
-                                data-testid="tenants-client-lifecycle-submit"
-                                disabled={
-                                    Boolean(clientLifecyclePendingId)
-                                    || !clientLifecycleDraft.reason.trim()
-                                    || !clientLifecycleDraft.confirmChecked
-                                    || !clientLifecycleDraft.checkClientScope
-                                    || !clientLifecycleDraft.checkImpactReview
-                                    || !clientLifecycleDraft.checkOwnerAligned
-                                }
-                            >
-                                {clientLifecyclePendingId
-                                    ? "Выполняется..."
-                                    : clientLifecycleDraft.mode === "archive"
-                                        ? "Подтвердить архив"
-                                        : "Подтвердить восстановление"}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            ) : null}
+            <TenantsClientLifecycleModal
+                draft={clientLifecycleDraft}
+                pending={Boolean(clientLifecyclePendingId)}
+                onClose={closeClientLifecycleDraft}
+                onSubmit={handleClientLifecycleAction}
+                onPatchDraft={(patch) => {
+                    setClientLifecycleDraft((prev) => (prev ? { ...prev, ...patch } : prev));
+                }}
+            />
 
             {showOnboarding ? (
                 <div className="mt-10" data-testid="tenants-onboarding-section">

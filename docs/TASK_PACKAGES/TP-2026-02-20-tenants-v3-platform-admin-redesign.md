@@ -9,6 +9,8 @@
 - `2026-02-22`: Wave 5/6 hardening — deterministic e2e/a11y lane без skip, auth-setup decoupling, KPI contrast fix.
 - `2026-02-23`: recovery update — критерий `tenants/page.tsx <= 1200 LOC` переведен в рекомендательный, обязательный фокус приемки: рабочая ценность `/tenants` (deterministic scope + actionable flow + полная видимость company scope).
 - `2026-02-23`: execution update — выполнены Wave 0 + ключевые пункты Wave 1/2: атомарный scope sync (`company/client/branch`), backend/frontend `branch_id` contract для `/admin/branches`, Scenario B3 (e2e), business-copy cleanup в верхних операционных блоках.
+- `2026-02-23`: post-merge verification update — PR `#802` merged (`30f30eb6`), CI green; F3 закрыт (cockpit branch slice больше не привязан к первому клиенту), F2 закрыт на UX уровне (single editable context source на `/tenants`), Wave 4 продолжен выносом `fleet attention` и `portfolio companies` в отдельные компоненты.
+- `2026-02-23`: execution continuation — Wave 4 decomposition extended (`clients/change-management/decommission/lifecycle-modal` moved to dedicated components), page-filter URL race fixed for Scenario C (`clear filters` deterministic), and Wave 4 perf track started with dedicated tenants latency histogram for `/admin/tenants/portfolio` + `/admin/tenants/company-cockpit` (`console_tenants_endpoint_latency`, label `endpoint`).
 
 ## Canon refs
 - `AGENTS.md`
@@ -31,11 +33,11 @@
 ## Execution status (FACT, по текущему коду)
 | Wave | Статус | Что подтверждено | Что не закрыто |
 |---|---|---|---|
-| Wave 1 API contract alignment | `partial` | `branch_id` добавлен в `/admin/branches` + frontend pass-through + e2e Scenario B3 (`truffles-api/app/routers/console.py`, `console-web/src/app/tenants/page.tsx`, `console-web/e2e/platform-admin.spec.ts`) | `company-cockpit` по-прежнему даёт branch-slice через selected client (см. `F3`) |
-| Wave 2 Context kernel | `done/partial` | Атомарный sync `company/client/branch`, orphan-branch guard, стабильные B/C/D сценарии (`console-web/src/app/tenants/page.tsx`, `console-web/src/components/ConsoleShell.tsx`, `console-web/e2e/platform-admin.spec.ts`) | Дублирование header context vs page filters ещё требует финальной унификации UX (см. `F2`) |
+| Wave 1 API contract alignment | `done/partial` | `branch_id` добавлен в `/admin/branches` + frontend pass-through + e2e Scenario B3; `company-cockpit` при `client_id=null` теперь остаётся в company scope (`truffles-api/app/routers/console.py`, `console-web/src/app/tenants/page.tsx`, `console-web/e2e/platform-admin.spec.ts`) | Техдолг: унифицировать/сократить дублирующий `branches` payload в `company-cockpit` и расширить perf-contract tests на большие company scopes |
+| Wave 2 Context kernel | `done` | Атомарный sync `company/client/branch`, orphan-branch guard, стабильные B/C/D + отключён конфликтующий header-edit контекста на `/tenants` (`context-managed-in-tenants`) (`console-web/src/app/tenants/page.tsx`, `console-web/src/components/ConsoleShell.tsx`, `console-web/e2e/platform-admin.spec.ts`) | Нет блокеров |
 | Wave 3 Data contract | `done/partial` | Typed weekly snapshot schema + table/fallback (`truffles-api/app/schemas/console.py:249`, `truffles-api/app/routers/console.py:13434`) | Модель аналитики и fleet-агрегации не рассчитана на очень большой объём (`F5`) |
-| Wave 4 Decomposition/perf | `partial` | Вынесены отдельные панели (`console-web/src/components/TenantsOperationalKpiPanel.tsx`) | `tenants/page.tsx` остается монолитом, основная оркестрация внутри (`F4`) |
-| Wave 5 A11y/copy | `done/partial` | `A11Y_FAIL_ON_THRESHOLDS=1` проходит в deterministic lane (desktop/mobile), KPI contrast исправлен, верхний business-copy упрощен (`console-web/src/components/TenantsOperationalKpiPanel.tsx`, `console-web/src/components/TenantsTopControls.tsx`) | Остался cleanup в отдельных deep-секциях (`F7`) |
+| Wave 4 Decomposition/perf | `done/partial` | Вынесены `OperationalKpi`, `FleetAttention`, `PortfolioCompanies`, `Clients`, `ChangeManagement`, `Decommission`, `ClientLifecycleModal` секции; page-filter race для Scenario C устранён в `use-tenants-page-filters.ts`; backend perf-track запущен через `console_tenants_endpoint_latency{endpoint=portfolio|company_cockpit}` + router instrumentation (`truffles-api/app/logging_config.py`, `truffles-api/app/routers/console.py`, `truffles-api/tests/test_console_tenants_list.py`) | Полный read-model/precompute (`F5`) и подтверждение SLO на крупном профиле ещё впереди |
+| Wave 5 A11y/copy | `done/partial` | `A11Y_FAIL_ON_THRESHOLDS=1` проходит в deterministic lane (desktop/mobile), KPI contrast исправлен, business-copy упрощён в `TopControls`/`ActionQueue`/`Fleet`/`Company edit` (`console-web/src/components/TenantsOperationalKpiPanel.tsx`, `console-web/src/components/TenantsTopControls.tsx`, `console-web/src/components/TenantsActionQueuePanel.tsx`) | Остался cleanup тех-копи в deep editor/wizard секциях (`F7`) |
 | Wave 6 E2E realism | `done` | `platform-admin.spec.ts` стабилизирован: deterministic auth/session, нет `test.skip`, сценарии A/B/C/D/E hard-fail (`console-web/e2e/platform-admin.spec.ts`, `console-web/playwright.config.ts`) | Нет |
 | Feature flag rollout | `partial` | `NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER` уже в коде (`console-web/src/app/tenants/page.tsx:850`) | Shadow/canary/full rollout + наблюдение ещё не формализованы (`Wave 6`) |
 
@@ -50,20 +52,21 @@ Impact:
 - branch фильтр может сбрасываться визуально "сам".
 - кнопки выглядят "нерабочими", потому что фактический state откатывается.
 
-### F2. Два конкурирующих источника истины для контекста
+### F2 (closed). Конфликт источников истины для контекста на `/tenants`
 Evidence:
-- Header context (`ConsoleShell`) и page-level context (`TenantsTopControls`) существуют одновременно (`console-web/src/components/ConsoleShell.tsx:851`, `console-web/src/components/TenantsTopControls.tsx:166`).
-- В header при единственной опции контрол превращается в статичный `span` (не интерактивный UX) (`console-web/src/components/ConsoleShell.tsx:871`, `console-web/src/components/ConsoleShell.tsx:913`).
+- На маршруте `/tenants` header больше не даёт editable context controls: вместо них показывается явное сообщение `context-managed-in-tenants` (`console-web/src/components/ConsoleShell.tsx`).
+- Единая editable точка контекста для `/tenants` оставлена в page-level блоке `Рабочий контур` (`console-web/src/components/TenantsTopControls.tsx`).
 Impact:
-- Пользователь не понимает, чем отличаются "контур" и "фильтры".
-- При масштабном управлении это вызывает ошибки выбора области действий.
+- Для `/tenants` устранена конкуренция контекст-контролов между header и страницей.
+- Снижен риск ошибочного изменения scope из двух UI-источников.
 
-### F3. Branch list в cockpit режиме неполный по контракту
+### F3 (closed). Branch list contract в company scope
 Evidence:
-- `company-cockpit` при отсутствии `client_id` выбирает первого клиента и отдает branches только для него (`truffles-api/app/routers/console.py:13431`).
-- UI переключается на cockpit-ветку и отключает `load more` для branches (`console-web/src/app/tenants/page.tsx:1239`, `console-web/src/app/tenants/page.tsx:3583`).
+- `company-cockpit` передаёт `client_id` только если он явно выбран; при `client_id=null` работает company scope (`truffles-api/app/routers/console.py`).
+- Основной branch list в `/tenants` работает через `/admin/branches` с явными `company_id/client_id/branch_id` фильтрами и e2e контрактом B3 (`console-web/src/app/tenants/page.tsx`, `console-web/e2e/platform-admin.spec.ts`).
 Impact:
-- для компании с большим числом клиентов/филиалов список неполный, создается ложная картина данных.
+- Ложный branch-slice "только первый клиент" больше не воспроизводится в текущем контракте `/tenants`.
+- Остаточная задача — perf/read-model для очень больших портфелей (`F5`).
 
 ### F4. Монолит страницы сохраняется (высокий regression risk)
 Evidence:
@@ -92,11 +95,12 @@ Impact:
 
 ### F7. Смешение бизнес и технического copy
 Evidence:
-- `Action Queue` в бизнес-зоне (`console-web/src/components/TenantsActionQueuePanel.tsx:54`).
-- `Threshold drill-down` (`console-web/src/components/TenantsOperationalKpiPanel.tsx:275`).
-- debug-надпись `page filter client_id` в рабочем UI (`console-web/src/app/tenants/page.tsx:3216`).
+- Business-copy упрощён в `Action Queue` -> `Приоритетные задачи` (`console-web/src/components/TenantsActionQueuePanel.tsx`).
+- KPI/alert copy очищен от тех-формулировок (`console-web/src/components/TenantsOperationalKpiPanel.tsx`).
+- Fleet/Company секции переведены на business wording (`console-web/src/components/TenantsFleetAttentionPanel.tsx`, `console-web/src/components/TenantsPortfolioCompaniesPanel.tsx`).
 Impact:
-- когнитивный шум и ошибки интерпретации оператором.
+- Когнитивный шум снижен в основных операторских секциях.
+- Остаток тех-копи локализован в deep editor/wizard flow (out-of-mainline business path).
 
 ### F8. E2E-контур не является жесткой страховкой от регрессий
 Evidence:
@@ -108,7 +112,7 @@ Impact:
 
 ## Root-cause map
 1. Нет единой state machine для `global context` и `page filters`.
-2. API `company-cockpit` смешивает summary и branch-list для "выбранного клиента", что не покрывает управление портфелем.
+2. API `company-cockpit` требует cleanup/read-model hardening для больших объёмов, но блокирующий F3 bug закрыт.
 3. Fleet аналитика рассчитывается синхронно "на лету" вместо read-model/предагрегации.
 4. Страница остается orchestration-монолитом.
 5. Тестовый контур допускает "soft skip", а не контрактную проверку.

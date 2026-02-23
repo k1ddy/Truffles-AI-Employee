@@ -199,6 +199,13 @@ HTTP_REQUEST_IN_PROGRESS = _get_or_create_metric(
     "HTTP requests currently in progress.",
     ("method",),
 )
+TENANTS_ENDPOINT_LATENCY = _get_or_create_metric(
+    Histogram,
+    "console_tenants_endpoint_latency",
+    "Latency for tenants aggregate endpoints in seconds.",
+    ("endpoint",),
+    buckets=_HISTOGRAM_BUCKETS,
+)
 
 
 def _normalize_client_slug(client_slug: str | None) -> str:
@@ -402,6 +409,14 @@ def record_http_request(method: str, path: str, status: int, duration_seconds: f
         HTTP_REQUEST_COUNT.labels(method=method, path=normalized_path, status=str(status)).inc()
     if HTTP_REQUEST_LATENCY is not None:
         HTTP_REQUEST_LATENCY.labels(method=method, path=normalized_path).observe(duration_seconds)
+
+
+def record_tenants_endpoint_latency(endpoint: str, elapsed_ms: float | None) -> None:
+    """Record latency for heavy tenants endpoints used in platform control tower."""
+    if TENANTS_ENDPOINT_LATENCY is None or elapsed_ms is None or elapsed_ms < 0:
+        return
+    normalized_endpoint = (endpoint or "unknown").strip() or "unknown"
+    TENANTS_ENDPOINT_LATENCY.labels(endpoint=normalized_endpoint).observe(elapsed_ms / 1000.0)
 
 
 def http_in_progress_inc(method: str) -> None:

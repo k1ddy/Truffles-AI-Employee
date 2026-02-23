@@ -181,6 +181,7 @@ async def test_get_tenants_portfolio_composes_clients_and_attention(monkeypatch)
         items=[],
     )
     captured: dict[str, dict[str, object]] = {}
+    latency_calls: list[tuple[str, float | None]] = []
 
     async def _fake_list_clients(**kwargs):
         captured["clients"] = kwargs
@@ -192,6 +193,11 @@ async def test_get_tenants_portfolio_composes_clients_and_attention(monkeypatch)
 
     monkeypatch.setattr(console_router, "list_clients", _fake_list_clients)
     monkeypatch.setattr(console_router, "list_fleet_attention", _fake_list_fleet_attention)
+    monkeypatch.setattr(
+        console_router,
+        "record_tenants_endpoint_latency",
+        lambda endpoint, elapsed_ms: latency_calls.append((endpoint, elapsed_ms)),
+    )
 
     response = await console_router.get_tenants_portfolio(
         request=_build_request(),
@@ -207,6 +213,10 @@ async def test_get_tenants_portfolio_composes_clients_and_attention(monkeypatch)
     assert captured["clients"]["include_fleet"] == "true"
     assert captured["clients"]["include_summary"] == "true"
     assert captured["attention"]["limit"] == 3
+    assert latency_calls
+    assert latency_calls[0][0] == "portfolio"
+    assert latency_calls[0][1] is not None
+    assert latency_calls[0][1] >= 0
 
 
 @pytest.mark.asyncio
@@ -239,6 +249,7 @@ async def test_get_tenants_company_cockpit_uses_company_scope_when_client_not_se
         has_more=False,
     )
     captured: dict[str, dict[str, object]] = {}
+    latency_calls: list[tuple[str, float | None]] = []
 
     async def _fake_list_clients(**kwargs):
         captured["clients"] = kwargs
@@ -250,6 +261,11 @@ async def test_get_tenants_company_cockpit_uses_company_scope_when_client_not_se
 
     monkeypatch.setattr(console_router, "list_clients", _fake_list_clients)
     monkeypatch.setattr(console_router, "list_branches", _fake_list_branches)
+    monkeypatch.setattr(
+        console_router,
+        "record_tenants_endpoint_latency",
+        lambda endpoint, elapsed_ms: latency_calls.append((endpoint, elapsed_ms)),
+    )
 
     response = await console_router.get_tenants_company_cockpit(
         request=_build_request(),
@@ -265,6 +281,10 @@ async def test_get_tenants_company_cockpit_uses_company_scope_when_client_not_se
     assert captured["clients"]["company_id"] == str(company_id)
     assert captured["branches"]["company_id"] == str(company_id)
     assert captured["branches"]["client_id"] is None
+    assert latency_calls
+    assert latency_calls[0][0] == "company_cockpit"
+    assert latency_calls[0][1] is not None
+    assert latency_calls[0][1] >= 0
 
 
 @pytest.mark.asyncio
