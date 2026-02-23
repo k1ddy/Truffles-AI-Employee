@@ -93,6 +93,40 @@ def test_suppresses_missed_question_when_followup_prompt_is_present():
     assert suppress is True
 
 
+def test_does_not_suppress_missed_question_for_calendar_list_slots_booking_reply():
+    fn = _load_suppress_helper()
+
+    suppress = fn(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        strict_reasons=[],
+        meta={"intent": "calendar.list_slots", "tool_decision": "ok"},
+        meta_action="reply",
+        expected_reply_type_value="service_choice",
+        booking_active=True,
+        turn_tags=["booking"],
+        outbox_text="На какую услугу хотите записаться?",
+    )
+
+    assert suppress is False
+
+
+def test_does_not_suppress_missed_question_for_calendar_get_booking_booking_reply():
+    fn = _load_suppress_helper()
+
+    suppress = fn(
+        judge_result={"verdict": "fail", "reasons": ["missed_question"]},
+        strict_reasons=[],
+        meta={"intent": "calendar.get_booking", "tool_decision": "not_found"},
+        meta_action="reply",
+        expected_reply_type_value="time",
+        booking_active=True,
+        turn_tags=["booking", "check_booking"],
+        outbox_text="Проверил: пока не вижу подтвержденной записи.",
+    )
+
+    assert suppress is False
+
+
 def test_suppresses_missed_question_for_not_found_service_fallback():
     fn = _load_suppress_helper()
 

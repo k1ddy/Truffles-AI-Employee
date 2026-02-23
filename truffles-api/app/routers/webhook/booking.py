@@ -43,6 +43,39 @@ DATETIME_DURATION_CONTEXT_MARKERS = (
     "duration",
 )
 DATETIME_DAYPART_STEMS = ("утр", "дн", "веч", "ноч", "обед")
+RELATIVE_DAY_TOKEN_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bпослезавтраш\w*|\bпослезавтра\b", re.IGNORECASE), "послезавтра"),
+    (re.compile(r"\bзавтраш\w*|\bзавтра\b", re.IGNORECASE), "завтра"),
+    (re.compile(r"\bсегодняш\w*|\bсегодня\b", re.IGNORECASE), "сегодня"),
+    (re.compile(r"\bпонедель\w*", re.IGNORECASE), "в понедельник"),
+    (re.compile(r"\bвторник\w*", re.IGNORECASE), "во вторник"),
+    (re.compile(r"\bсред\w*", re.IGNORECASE), "в среду"),
+    (re.compile(r"\bчетверг\w*", re.IGNORECASE), "в четверг"),
+    (re.compile(r"\bпятниц\w*", re.IGNORECASE), "в пятницу"),
+    (re.compile(r"\bсуббот\w*", re.IGNORECASE), "в субботу"),
+    (re.compile(r"\bвоскрес\w*", re.IGNORECASE), "в воскресенье"),
+    (re.compile(r"\bвыходн\w*", re.IGNORECASE), "в субботу"),
+)
+DAYPART_TOKEN_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(
+            r"\b(вечер\w*|вечером|к вечеру|на вечер|после работы|ближе к вечеру)\b",
+            re.IGNORECASE,
+        ),
+        "вечером",
+    ),
+    (
+        re.compile(r"\b(утро\w*|утром|с утра|на утро)\b", re.IGNORECASE),
+        "утром",
+    ),
+    (
+        re.compile(
+            r"\b(днем|днём|день|дневное|дневной|после обеда|ближе к обеду)\b",
+            re.IGNORECASE,
+        ),
+        "днем",
+    ),
+)
 _LAYOUT_SWAP_MAP = str.maketrans(
     {
         "q": "й",
@@ -460,7 +493,20 @@ def _resolve_datetime_offline(
             parsed = dateparser.parse(normalized, languages=["ru"], settings=settings)
         except Exception:
             parsed = None
+    normalized_value = _normalize_resolved_datetime_value(
+        message_text,
+        normalized_text=normalized,
+    )
     if not parsed:
+        if normalized_value and not any(char.isdigit() for char in message_text):
+            result["value"] = normalized_value
+            result["confidence"] = 0.45 if matches else 0.35
+            result["evidence"] = {
+                "normalized_text": normalized,
+                "lexicon_matches": matches,
+                "parser": "relative_fallback",
+            }
+            return result
         if matches:
             value = message_text.strip() if any(char.isdigit() for char in message_text) else normalized
             result["value"] = value
@@ -472,7 +518,10 @@ def _resolve_datetime_offline(
             }
         return result
 
-    value = message_text.strip() if any(char.isdigit() for char in message_text) else normalized
+    if any(char.isdigit() for char in message_text):
+        value = message_text.strip()
+    else:
+        value = normalized_value or normalized
     confidence = 0.6
     if matches:
         confidence += 0.2
@@ -487,6 +536,45 @@ def _resolve_datetime_offline(
         "parser": "dateparser",
     }
     return result
+
+
+def _pick_relative_day_token(text: str) -> str | None:
+    if not text:
+        return None
+    for pattern, replacement in RELATIVE_DAY_TOKEN_PATTERNS:
+        if pattern.search(text):
+            return replacement
+    return None
+
+
+def _pick_daypart_token(text: str) -> str | None:
+    if not text:
+        return None
+    for pattern, replacement in DAYPART_TOKEN_PATTERNS:
+        if pattern.search(text):
+            return replacement
+    return None
+
+
+def _normalize_resolved_datetime_value(
+    message_text: str,
+    *,
+    normalized_text: str | None = None,
+) -> str | None:
+    raw = message_text.strip() if isinstance(message_text, str) else ""
+    normalized = normalized_text.strip() if isinstance(normalized_text, str) else ""
+    source = " ".join(part for part in (raw, normalized) if part).strip()
+    if not source:
+        return None
+    day_token = _pick_relative_day_token(source)
+    daypart_token = _pick_daypart_token(source)
+    if day_token and daypart_token:
+        return f"{day_token} {daypart_token}"
+    if day_token:
+        return day_token
+    if daypart_token:
+        return daypart_token
+    return None
 
 
 def _validate_service_slot(
@@ -1019,10 +1107,6 @@ def _next_booking_prompt(
             booking["last_question"] = None
             return booking, None
         booking["last_question"] = "name"
-        datetime_value = booking.get("datetime")
-        if isinstance(datetime_value, str) and datetime_value.strip():
-            prompt = f"Отлично, время {datetime_value.strip()} подходит. {legacy.MSG_BOOKING_ASK_NAME}"
-            return booking, prompt
         return booking, legacy.MSG_BOOKING_ASK_NAME
     booking["last_question"] = None
     return booking, None
@@ -2399,6 +2483,14 @@ def _handle_booking_interrupt(
                     "info_intents": list(trace_info_intents),
                     "booking_prompt": prompt,
                 }
+                booking_prompt_suppressed = bool(
+                    isinstance(prompt, str)
+                    and prompt.strip()
+                    and isinstance(info_decision.response, str)
+                    and info_decision.response.strip()
+                )
+                if booking_prompt_suppressed:
+                    trace_payload["booking_prompt_suppressed"] = True
                 if booking_interrupt_info:
                     trace_payload["booking_interrupt_info"] = True
                 if info_sections:
@@ -2443,14 +2535,20 @@ def _handle_booking_interrupt(
                     fast_intent=False,
                 )
                 if saved_message:
+                    message_meta_updates = {
+                        **info_meta,
+                        "booking_info_interrupt": True,
+                        "booking_info_intents": booking_info_intents,
+                        "booking_interrupt_info": bool(booking_interrupt_info),
+                    }
+                    if booking_prompt_suppressed:
+                        message_meta_updates["carryover_ignored"] = True
+                        message_meta_updates[
+                            "carryover_ignored_reason"
+                        ] = "info_reply_no_stale_booking_prompt"
                     legacy._update_message_decision_metadata(
                         saved_message,
-                        {
-                            **info_meta,
-                            "booking_info_interrupt": True,
-                            "booking_info_intents": booking_info_intents,
-                            "booking_interrupt_info": bool(booking_interrupt_info),
-                        },
+                        message_meta_updates,
                     )
                 legacy._maybe_store_service_carryover(
                     conversation=conversation,
@@ -2468,7 +2566,9 @@ def _handle_booking_interrupt(
                     reason="booking_interrupt",
                 )
 
-                bot_response = legacy._combine_sidecar(prompt or "", info_decision.response or "")
+                bot_response = (info_decision.response or "").strip()
+                if not bot_response:
+                    bot_response = (prompt or "").strip()
                 style_reference_signal = bool(
                     message_text
                     and legacy._is_style_reference_request(message_text, has_media=has_media)

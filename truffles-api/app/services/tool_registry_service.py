@@ -39,6 +39,23 @@ from app.services.pack_runtime_service import (
 )
 
 _TIME_TOKEN_RE = re.compile(r"\b([01]?\d|2[0-3])[:.][0-5]\d\b")
+_DAYPART_TOKEN_RE = re.compile(
+    r"\b(утром|утро|на утро|днем|днём|день|на день|после обеда|вечером|вечер|на вечер|к вечеру)\b",
+    re.IGNORECASE,
+)
+_DATE_TOKEN_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bпослезавтраш\w*|\bпослезавтра\b", re.IGNORECASE), "послезавтра"),
+    (re.compile(r"\bзавтраш\w*|\bзавтра\b", re.IGNORECASE), "завтра"),
+    (re.compile(r"\bсегодняш\w*|\bсегодня\b", re.IGNORECASE), "сегодня"),
+    (re.compile(r"\bпонедель\w*", re.IGNORECASE), "в понедельник"),
+    (re.compile(r"\bвторник\w*", re.IGNORECASE), "во вторник"),
+    (re.compile(r"\bсред\w*", re.IGNORECASE), "в среду"),
+    (re.compile(r"\bчетверг\w*", re.IGNORECASE), "в четверг"),
+    (re.compile(r"\bпятниц\w*", re.IGNORECASE), "в пятницу"),
+    (re.compile(r"\bсуббот\w*", re.IGNORECASE), "в субботу"),
+    (re.compile(r"\bвоскрес\w*", re.IGNORECASE), "в воскресенье"),
+    (re.compile(r"\bвыходн\w*", re.IGNORECASE), "в субботу"),
+)
 _BOOKING_VERIFICATION_RE = re.compile(
     r"\b(проверь|провер|подтверд|подтвержд|check|confirm|verify)\w*",
     re.IGNORECASE,
@@ -207,6 +224,36 @@ def _parse_datetime(
         except Exception:
             parsed = None
     if not parsed:
+        daypart = _extract_daypart_token(text)
+        if daypart:
+            stripped_text = _DAYPART_TOKEN_RE.sub(" ", text)
+            stripped_text = re.sub(r"\s+", " ", stripped_text).strip()
+            if stripped_text:
+                try:
+                    import dateparser
+
+                    parsed = dateparser.parse(
+                        stripped_text,
+                        languages=["ru", "kk", "en"],
+                        settings={
+                            "PREFER_DATES_FROM": "future",
+                            "RELATIVE_BASE": reference_now,
+                            "TIMEZONE": timezone_name,
+                            "TO_TIMEZONE": timezone_name,
+                            "RETURN_AS_TIMEZONE_AWARE": True,
+                        },
+                    )
+                except Exception:
+                    parsed = None
+            if parsed is not None:
+                daypart_hours = {"morning": 10, "day": 14, "evening": 18}
+                parsed = parsed.replace(
+                    hour=daypart_hours.get(daypart, parsed.hour),
+                    minute=0,
+                    second=0,
+                    microsecond=0,
+                )
+    if not parsed:
         time_only_match = re.fullmatch(r"(?P<hour>\d{1,2})[:.](?P<minute>\d{2})", text)
         if time_only_match:
             try:
@@ -254,6 +301,63 @@ def _extract_time_token(text: str | None) -> str | None:
         return None
     token = match.group(0)
     return token.replace(".", ":")
+
+
+def _coerce_time_token(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    token = value.strip().replace(".", ":")
+    match = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", token)
+    if not match:
+        return None
+    return f"{int(match.group(1)):02d}:{match.group(2)}"
+
+
+def _extract_relative_date_token(text: str | None) -> str | None:
+    if not isinstance(text, str) or not text.strip():
+        return None
+    for pattern, replacement in _DATE_TOKEN_PATTERNS:
+        if pattern.search(text):
+            return replacement
+    return None
+
+
+def _compose_requested_booking_reference(
+    *,
+    requested_date: str | None,
+    requested_time: str | None,
+) -> str | None:
+    date_token = (
+        requested_date.strip() if isinstance(requested_date, str) and requested_date.strip() else None
+    )
+    time_token = _coerce_time_token(requested_time)
+    if date_token and time_token:
+        if date_token.casefold().startswith(("в ", "во ")):
+            return f"{date_token} на {time_token}"
+        return f"на {date_token} на {time_token}"
+    if date_token:
+        if date_token.casefold().startswith(("в ", "во ")):
+            return date_token
+        return f"на {date_token}"
+    if time_token:
+        return f"на {time_token}"
+    return None
+
+
+def _has_explicit_date_signal(value: str | None) -> bool:
+    if not isinstance(value, str):
+        return False
+    token = value.strip()
+    if not token:
+        return False
+    lowered = token.casefold()
+    if _extract_relative_date_token(lowered):
+        return True
+    if re.search(r"\d{4}-\d{2}-\d{2}", token):
+        return True
+    if re.search(r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b", token):
+        return True
+    return False
 
 
 def _looks_like_booking_verification_message(text: str | None) -> bool:
@@ -720,12 +824,25 @@ def _resolve_specialist_for_booking(
     return None, None, "specialist_not_found"
 
 
-def _format_slot_list(slots_by_specialist: dict[str, list[str]]) -> str:
+def _format_slot_list(
+    slots_by_specialist: dict[str, list[str]],
+    *,
+    focus_time: str | None = None,
+) -> str:
     parts: list[str] = []
     for specialist_name, slots in slots_by_specialist.items():
         if not slots:
             continue
-        slot_text = ", ".join(slots[:5])
+        normalized_slots = [token for token in slots if isinstance(token, str) and token]
+        visible_slots = normalized_slots[:5]
+        if (
+            focus_time
+            and focus_time in normalized_slots
+            and focus_time not in visible_slots
+        ):
+            visible_slots = normalized_slots[:4] + [focus_time]
+        dedup_visible_slots = list(dict.fromkeys(visible_slots))
+        slot_text = ", ".join(dedup_visible_slots)
         parts.append(f"{specialist_name}: {slot_text}")
     if not parts:
         return "Свободных слотов не нашлось. Могу предложить другое время."
@@ -742,7 +859,19 @@ def _list_slots(
     requested_time: str | None = None,
     requested_daypart: str | None = None,
     now: datetime | None = None,
+    contract_meta: dict[str, Any] | None = None,
 ) -> tuple[str | None, str | None]:
+    requested_date_token = (
+        date_value.strip() if isinstance(date_value, str) and date_value.strip() else None
+    )
+    if _coerce_time_token(requested_date_token):
+        requested_date_token = None
+    if isinstance(contract_meta, dict):
+        contract_meta["requested_date"] = requested_date_token
+        contract_meta["requested_time"] = _coerce_time_token(requested_time)
+        contract_meta["resolved_date"] = None
+        contract_meta["available_slots_by_specialist"] = {}
+        contract_meta["availability_claim"] = "unknown"
     if not date_value:
         return None, "missing_date"
     date_parsed = _parse_datetime(
@@ -751,7 +880,11 @@ def _list_slots(
         now=now,
     )
     if not date_parsed:
+        if isinstance(contract_meta, dict) and _has_explicit_date_signal(date_value):
+            contract_meta["slot_contract_error"] = "slot_date_resolution_miss"
         return None, "invalid_date"
+    if isinstance(contract_meta, dict):
+        contract_meta["resolved_date"] = date_parsed.date().isoformat()
 
     duration = duration_min or SchedulingService.DEFAULT_SLOT_DURATION
     service = SchedulingService(db)
@@ -791,8 +924,12 @@ def _list_slots(
         slots_by_specialist[specialist.name] = [
             slot.start.strftime("%H:%M") for slot in slots if slot.available
         ]
+    if isinstance(contract_meta, dict):
+        contract_meta["available_slots_by_specialist"] = {
+            key: list(value[:10]) for key, value in slots_by_specialist.items()
+        }
 
-    requested_token = requested_time.strip() if isinstance(requested_time, str) else ""
+    requested_token = _coerce_time_token(requested_time)
     available_times = sorted(
         {
             token
@@ -803,10 +940,14 @@ def _list_slots(
     )
     if requested_token:
         if requested_token in available_times:
+            if isinstance(contract_meta, dict):
+                contract_meta["availability_claim"] = "yes"
             return (
                 f"Да, на {requested_token} есть свободное окно. "
-                f"{_format_slot_list(slots_by_specialist)}"
+                f"{_format_slot_list(slots_by_specialist, focus_time=requested_token)}"
             ), None
+        if isinstance(contract_meta, dict):
+            contract_meta["availability_claim"] = "no"
         if available_times:
             return (
                 f"На {requested_token} свободного окна нет. "
@@ -822,6 +963,8 @@ def _list_slots(
             return f"На {daypart_label} доступны: {', '.join(daypart_times[:5])}.", None
         return f"На {daypart_label} свободных окон нет. Могу предложить другое время.", None
 
+    if isinstance(contract_meta, dict) and not available_times:
+        contract_meta["availability_claim"] = "no"
     return _format_slot_list(slots_by_specialist), None
 
 
@@ -1261,6 +1404,16 @@ def execute_tool_action(
             if not health.ready:
                 provider_health_reason = health.reason
         raw_date = tool_args.get("date") or tool_args.get("start_at")
+        inferred_date = _extract_relative_date_token(message_text)
+        if inferred_date:
+            raw_date_has_explicit_date = (
+                isinstance(raw_date, str)
+                and raw_date.strip()
+                and _has_explicit_date_signal(raw_date)
+            )
+            raw_date_is_time_only = bool(_coerce_time_token(raw_date))
+            if not raw_date_has_explicit_date or raw_date_is_time_only:
+                raw_date = inferred_date
         duration = tool_args.get("duration_min") or _resolve_service_duration(
             db, service_name=service_query, branch=branch
         )
@@ -1296,6 +1449,7 @@ def execute_tool_action(
             )
         requested_time = _extract_time_token(message_text)
         requested_daypart = None if requested_time else _extract_daypart_token(message_text)
+        slot_contract_meta: dict[str, Any] = {}
         response, error = _list_slots(
             db,
             branch=branch,
@@ -1305,6 +1459,7 @@ def execute_tool_action(
             requested_time=requested_time,
             requested_daypart=requested_daypart,
             now=now,
+            contract_meta=slot_contract_meta,
         )
         if error:
             missing_type = "datetime" if error in {"missing_date", "invalid_date"} else None
@@ -1327,17 +1482,23 @@ def execute_tool_action(
                     "tool_action": tool_action,
                     "tool_decision": "missing_slot",
                     "missing_slot": missing_type,
+                    **slot_contract_meta,
                 },
                 trace={
                     "stage": "tool_registry",
                     "decision": "missing_slot",
                     "tool_action": tool_action,
                     "missing_slot": missing_type,
+                    **slot_contract_meta,
                 },
                 expected_reply_type=expected_reply_type,
             )
         decision_meta, trace = _with_provider_health_meta(
-            {"tool_action": tool_action, "tool_decision": "ok"},
+            {
+                "tool_action": tool_action,
+                "tool_decision": "ok",
+                **slot_contract_meta,
+            },
             {"stage": "tool_registry", "decision": "ok", "tool_action": tool_action},
             reason=provider_health_reason,
         )
@@ -1355,6 +1516,11 @@ def execute_tool_action(
         appointment_id = tool_args.get("appointment_id")
         appointment_uuid = _parse_uuid(appointment_id)
         requested_time = _extract_time_token(message_text)
+        requested_date = _extract_relative_date_token(message_text)
+        requested_reference = _compose_requested_booking_reference(
+            requested_date=requested_date,
+            requested_time=requested_time,
+        )
         appointment, error = _get_booking(
             db,
             appointment_id=appointment_uuid,
@@ -1367,8 +1533,10 @@ def execute_tool_action(
                 # "На какую услугу..." that look like semantic reroute.
                 followup_prompt = None
             response_parts: list[str] = []
-            if requested_time:
-                response_parts.append(f"Проверил: пока не вижу подтверждённой записи на {requested_time}.")
+            if requested_reference:
+                response_parts.append(
+                    f"Проверил: пока не вижу подтверждённой записи {requested_reference}."
+                )
             else:
                 response_parts.append("Проверил: пока не вижу подтверждённой записи.")
             if _is_photo_offer_message(message_text):
@@ -1390,21 +1558,34 @@ def execute_tool_action(
                     "tool_action": tool_action,
                     "tool_decision": "not_found",
                     "requested_time": requested_time,
+                    "requested_date": requested_date,
                 },
                 trace={
                     "stage": "tool_registry",
                     "decision": "not_found",
                     "tool_action": tool_action,
                     "requested_time": requested_time,
+                    "requested_date": requested_date,
                 },
             )
         appointment_time = _appointment_time_token(appointment)
         if requested_time and appointment_time and requested_time != appointment_time:
+            mismatch_prefix = (
+                f"Записи {requested_reference} не вижу."
+                if requested_reference
+                else f"На {requested_time} записи не вижу."
+            )
+            booked_time_note = (
+                " Вижу подтвержденную запись"
+                f" на {appointment_time} (возможно на другую дату)."
+                if isinstance(appointment_time, str) and appointment_time.strip()
+                else ""
+            )
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
                 response_text=(
-                    f"На {requested_time} записи не вижу. "
+                    f"{mismatch_prefix}{booked_time_note} "
                     "Хотите проверить другую дату/время или оформить новую запись?"
                 ),
                 error_code="booking_time_mismatch",
@@ -1412,6 +1593,7 @@ def execute_tool_action(
                     "tool_action": tool_action,
                     "tool_decision": "time_mismatch",
                     "requested_time": requested_time,
+                    "requested_date": requested_date,
                     "appointment_time": appointment_time,
                 },
                 trace={
@@ -1419,6 +1601,7 @@ def execute_tool_action(
                     "decision": "time_mismatch",
                     "tool_action": tool_action,
                     "requested_time": requested_time,
+                    "requested_date": requested_date,
                     "appointment_time": appointment_time,
                 },
             )
@@ -1531,6 +1714,7 @@ def execute_tool_action(
                 conversation_id=conversation_id,
             )
         except AppointmentConflictError:
+            requested_time = _extract_time_token(message_text)
             conflict_text = "Этот слот уже занят. Могу предложить другое время."
             if _looks_like_booking_verification_message(message_text):
                 conflict_text = (
@@ -1538,9 +1722,6 @@ def execute_tool_action(
                     "Могу предложить другое время."
                 )
             else:
-                requested_time = _extract_time_token(message_text)
-                if not requested_time and isinstance(start_at, datetime):
-                    requested_time = start_at.strftime("%H:%M")
                 alternative_reply = None
                 if isinstance(start_at, datetime):
                     alternative_reply, _ = _list_slots(
@@ -1563,8 +1744,17 @@ def execute_tool_action(
                 ok=False,
                 response_text=conflict_text,
                 error_code="slot_unavailable",
-                decision_meta={"tool_action": tool_action, "tool_decision": "conflict"},
-                trace={"stage": "tool_registry", "decision": "conflict", "tool_action": tool_action},
+                decision_meta={
+                    "tool_action": tool_action,
+                    "tool_decision": "conflict",
+                    "requested_time": _coerce_time_token(requested_time),
+                },
+                trace={
+                    "stage": "tool_registry",
+                    "decision": "conflict",
+                    "tool_action": tool_action,
+                    "requested_time": _coerce_time_token(requested_time),
+                },
                 expected_reply_type=_normalize_expected_reply_hint(expected_reply_type),
             )
         if error:

@@ -833,6 +833,17 @@ LLM_QUALITY_REGRESSION_KEYS = (
 )
 LLM_QUALITY_BLOCKING_REASONS = (
     "calendar_tool_contract_miss",
+    "requested_date_time_like",
+    "slot_date_resolution_miss",
+    "slot_availability_contradiction",
+    "fabricated_conflict_time",
+    "booking_prompt_leak",
+    "stale_booking_carryover",
+    "timeout_degrade_booking_generic",
+    "run_completion_gap",
+    "trace_response_mismatch",
+    "weak_oracle_turn",
+    "incomplete_run_artifact",
     "expected_action_mismatch",
     "expected_reply_type_mismatch",
     "unobserved_turn",
@@ -923,6 +934,17 @@ LLM_QUALITY_REASON_LABELS = {
     "booking_slot_stall": "booking active without slot progress",
     "false_booking_confirmation": "booking confirmation text without appointment/calendar proof",
     "calendar_tool_contract_miss": "appointment path without successful calendar tool outcome",
+    "requested_date_time_like": "requested_date contains time token instead of date",
+    "slot_date_resolution_miss": "relative/explicit date signal did not resolve into calendar slot query",
+    "slot_availability_contradiction": "slot availability claim contradicts provided slot list",
+    "fabricated_conflict_time": "booking conflict mentions time not requested by user",
+    "booking_prompt_leak": "booking prompt fragment leaked into FACT/info response",
+    "stale_booking_carryover": "stale booking carryover phrase leaked into FACT/info response",
+    "timeout_degrade_booking_generic": "timeout-degrade returned generic clarify in booking context",
+    "run_completion_gap": "run stopped before all scenario turns were executed",
+    "trace_response_mismatch": "trace_bundle rows do not match responses rows",
+    "weak_oracle_turn": "scenario turn has no contract expectation (weak oracle)",
+    "incomplete_run_artifact": "required run artifact is missing (summary/brief/scenarios)",
     "judge_fail": "LLM judge marked turn as fail",
     "manager_action_failed": "manager callback failed",
     "handoff_state_mismatch": "state mismatch after manager action",
@@ -958,6 +980,17 @@ LLM_QUALITY_REASON_TAXONOMY = {
     "booking_slot_stall": "code",
     "false_booking_confirmation": "code",
     "calendar_tool_contract_miss": "code",
+    "requested_date_time_like": "expectation",
+    "slot_date_resolution_miss": "expectation",
+    "slot_availability_contradiction": "expectation",
+    "fabricated_conflict_time": "expectation",
+    "booking_prompt_leak": "expectation",
+    "stale_booking_carryover": "expectation",
+    "timeout_degrade_booking_generic": "expectation",
+    "run_completion_gap": "canon",
+    "trace_response_mismatch": "canon",
+    "weak_oracle_turn": "canon",
+    "incomplete_run_artifact": "canon",
     "judge_fail": "expectation",
     "manager_action_failed": "code",
     "handoff_state_mismatch": "code",
@@ -2867,6 +2900,182 @@ def _llm_quality_parse_slot_candidates(outbox_text: str | None) -> list[dict]:
     return candidates
 
 
+def _llm_quality_normalize_time_token(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    token = value.strip().replace(".", ":")
+    match = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", token)
+    if not match:
+        return None
+    return f"{int(match.group(1)):02d}:{match.group(2)}"
+
+
+def _llm_quality_extract_availability_claim(outbox_text: str | None) -> tuple[str, str | None]:
+    if not isinstance(outbox_text, str) or not outbox_text.strip():
+        return "unknown", None
+    text = outbox_text.casefold()
+    yes_match = re.search(
+        r"\bда,\s*на\s*([01]?\d[:.][0-5]\d)\s+есть\s+свободное\s+окно",
+        text,
+    )
+    if yes_match:
+        return "yes", _llm_quality_normalize_time_token(yes_match.group(1))
+    no_match = re.search(
+        r"\bна\s*([01]?\d[:.][0-5]\d)\s+свободного\s+окна\s+нет",
+        text,
+    )
+    if no_match:
+        return "no", _llm_quality_normalize_time_token(no_match.group(1))
+    return "unknown", None
+
+
+def _llm_quality_extract_available_slots_by_specialist(
+    meta: dict | None,
+    outbox_text: str | None,
+) -> dict[str, list[str]]:
+    from_meta = {}
+    if isinstance(meta, dict):
+        payload = meta.get("available_slots_by_specialist")
+        if isinstance(payload, dict):
+            for raw_name, raw_slots in payload.items():
+                if not isinstance(raw_name, str) or not isinstance(raw_slots, list):
+                    continue
+                slots: list[str] = []
+                for value in raw_slots:
+                    normalized = _llm_quality_normalize_time_token(str(value))
+                    if normalized:
+                        slots.append(normalized)
+                if slots:
+                    from_meta[raw_name] = slots
+    if from_meta:
+        return from_meta
+
+    from_text: dict[str, list[str]] = {}
+    for candidate in _llm_quality_parse_slot_candidates(outbox_text):
+        specialist = str(candidate.get("specialist") or "").strip()
+        slot_time = _llm_quality_normalize_time_token(str(candidate.get("time") or ""))
+        if not specialist or not slot_time:
+            continue
+        slots = from_text.setdefault(specialist, [])
+        if slot_time not in slots:
+            slots.append(slot_time)
+    if from_text:
+        return from_text
+
+    if isinstance(outbox_text, str) and outbox_text.strip():
+        text = outbox_text.casefold()
+        flat_match = re.search(r"\bдоступны:\s*([^\n]+)", text)
+        if flat_match:
+            flat_slots = []
+            for token in re.findall(r"\b([01]?\d[:.][0-5]\d)\b", flat_match.group(1)):
+                normalized = _llm_quality_normalize_time_token(token)
+                if normalized and normalized not in flat_slots:
+                    flat_slots.append(normalized)
+            if flat_slots:
+                return {"_flat": flat_slots}
+    return {}
+
+
+def _llm_quality_has_booking_prompt_leak(
+    *,
+    meta: dict | None,
+    outbox_text: str | None,
+) -> bool:
+    if not isinstance(meta, dict):
+        return False
+    intent = _llm_quality_normalize_tool_token(meta.get("intent"))
+    if intent not in {"catalog.service_query", "catalog.location"}:
+        return False
+    tool_decision = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+    if tool_decision == "services_overview":
+        # `services_overview` legitimately asks the user to choose a service;
+        # treat it as contract follow-up, not booking prompt leak.
+        return False
+    if not isinstance(outbox_text, str):
+        return False
+    lowered = outbox_text.casefold()
+    if "\n\n" not in lowered:
+        return False
+    return any(
+        marker in lowered
+        for marker in (
+            "как вас зовут",
+            "на какую дату и время вам удобно",
+            "на какую услугу хотите записаться",
+            "отлично, время подходит",
+        )
+    )
+
+
+def _llm_quality_has_stale_booking_carryover(
+    *,
+    meta: dict | None,
+    outbox_text: str | None,
+) -> bool:
+    if not isinstance(outbox_text, str) or not outbox_text.strip():
+        return False
+    lowered = outbox_text.casefold()
+    if (
+        "ещё был вопрос по записи" not in lowered
+        and "еще был вопрос по записи" not in lowered
+    ):
+        return False
+    if not isinstance(meta, dict):
+        return True
+    action_value = _llm_quality_normalize_tool_token(meta.get("action"))
+    if action_value in {"booking_prompt", "booking_confirm", "check_booking_prompt"}:
+        return False
+    intent_value = _llm_quality_effective_intent(meta)
+    if intent_value in LLM_QUALITY_CALENDAR_INTENTS:
+        return False
+    tool_action_value = _llm_quality_normalize_tool_token(meta.get("tool_action"))
+    if tool_action_value in LLM_QUALITY_CALENDAR_INTENTS:
+        return False
+    tool_decision_value = _llm_quality_normalize_tool_token(meta.get("tool_decision"))
+    if tool_decision_value == "services_overview":
+        return False
+    return True
+
+
+def _llm_quality_is_time_like_token(value: str | None) -> bool:
+    return _llm_quality_normalize_time_token(value) is not None
+
+
+def _llm_quality_is_weak_oracle_expectation(expectations: dict | None) -> bool:
+    if not isinstance(expectations, dict):
+        return True
+    has_action = bool(expectations.get("action"))
+    has_info_sections = bool(expectations.get("info_sections"))
+    has_reply_type = bool(expectations.get("reply_type"))
+    has_state = bool(expectations.get("state"))
+    has_expected_reply = isinstance(expectations.get("expected_reply"), bool)
+    return not (has_action or has_info_sections or has_reply_type or has_state or has_expected_reply)
+
+
+def _llm_quality_has_timeout_degrade_booking_generic(
+    *,
+    meta: dict | None,
+    booking_active: bool,
+    outbox_text: str | None,
+) -> bool:
+    if not booking_active or not isinstance(meta, dict) or not isinstance(outbox_text, str):
+        return False
+    policy_mode = _llm_quality_normalize_tool_token(meta.get("policy_core_mode"))
+    if policy_mode != "degraded_fallback":
+        return False
+    degrade_reason = str(meta.get("policy_core_degrade_reason") or "").casefold()
+    if "timeout" not in degrade_reason:
+        return False
+    normalized = outbox_text.casefold().strip()
+    return any(
+        marker in normalized
+        for marker in (
+            "подскажите, пожалуйста, что именно вас интересует",
+            "что именно вас интересует",
+        )
+    )
+
+
 def _llm_quality_pick_slot_candidate(
     candidates: list[dict] | None,
     *,
@@ -3143,6 +3352,25 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
     if not judge_reason_set or judge_reason_set - {"missed_question"}:
         return False
 
+    intent_value = (
+        _llm_quality_normalize_tool_token((meta or {}).get("intent"))
+        if isinstance(meta, dict)
+        else ""
+    )
+    tool_action_value = (
+        _llm_quality_normalize_tool_token((meta or {}).get("tool_action"))
+        if isinstance(meta, dict)
+        else ""
+    )
+    effective_intent = intent_value or tool_action_value
+    if (
+        booking_active
+        and meta_action == "reply"
+        and effective_intent in {"calendar.list_slots", "calendar.get_booking"}
+    ):
+        # Never suppress calendar booking misses: these are core semantic failures.
+        return False
+
     if (
         meta_action in {"booking_prompt", "booking_confirm"}
         and expected_reply_type_value in {"service_choice", "time", "name"}
@@ -3178,11 +3406,6 @@ def _llm_quality_should_suppress_missed_question_judge_fail(
     ):
         return True
 
-    intent_value = (
-        _llm_quality_normalize_tool_token((meta or {}).get("intent"))
-        if isinstance(meta, dict)
-        else ""
-    )
     response_text = str(outbox_text or "").strip().lower()
     if (
         meta_action == "reply"
@@ -4500,13 +4723,22 @@ def _llm_quality_finalize_rewrite_governance(
     denominator = max(policy_core_turns or turns_seen, 1)
     rewrite_rate = round(rewrite_turns / denominator, 4)
     keyword_override_rate = round(keyword_override_turns / denominator, 4)
+    if max_post_llm_semantic_rewrite_rate <= 0:
+        max_rewrite_turns = 0
+    else:
+        # Rewrite budget is discrete per turn; use ceiling to avoid false blocks
+        # when ratio budget lands between integer turn counts.
+        budget_raw = float(max_post_llm_semantic_rewrite_rate) * float(denominator)
+        max_rewrite_turns = int(budget_raw)
+        if budget_raw - float(max_rewrite_turns) > 1e-9:
+            max_rewrite_turns += 1
     rewrite_reason_coverage = (
         1.0 if rewrite_turns == 0 else round(rewrite_with_reason_turns / max(rewrite_turns, 1), 4)
     )
 
     blocking_counts = {}
     reasons = []
-    if rewrite_rate > max_post_llm_semantic_rewrite_rate:
+    if rewrite_turns > max_rewrite_turns:
         blocking_counts["post_llm_semantic_rewrite_budget_exceeded"] = rewrite_turns
         reasons.append("post_llm_semantic_rewrite_budget_exceeded")
     if keyword_override_rate > max_keyword_override_rate:
@@ -4533,6 +4765,7 @@ def _llm_quality_finalize_rewrite_governance(
         "post_llm_semantic_rewrite_rate": rewrite_rate,
         "keyword_override_rate": keyword_override_rate,
         "rewrite_reason_coverage": rewrite_reason_coverage,
+        "max_rewrite_turns": max_rewrite_turns,
         "max_post_llm_semantic_rewrite_rate": max_post_llm_semantic_rewrite_rate,
         "max_keyword_override_rate": max_keyword_override_rate,
         "allowed_reason_codes": sorted(LLM_POLICY_OVERRIDE_REASON_WHITELIST),
@@ -4839,6 +5072,17 @@ def _llm_quality_next_step_for_reason(reason):
         "outbox_delivery_timeout": "increase poll/outbox wait for replay and verify worker/outbox process timing",
         "false_booking_confirmation": "verify booking confirmation text against appointment_id and calendar outcome",
         "calendar_tool_contract_miss": "inspect tool_signals.calendar + appointment_status before confirming booking",
+        "requested_date_time_like": "fix runtime date normalization so requested_date stores only date/relative-date tokens",
+        "slot_date_resolution_miss": "verify relative-date normalization and carryover into calendar.list_slots start_at/date",
+        "slot_availability_contradiction": "align availability claim with rendered slot list from tool outcome",
+        "fabricated_conflict_time": "ensure conflict text uses user-requested time only (no inferred/hallucinated clock)",
+        "booking_prompt_leak": "remove stale booking prompt append from FACT/info responses in booking interrupt flow",
+        "stale_booking_carryover": "suppress booking sidecar append for info/promo FACT replies while preserving expected_reply state",
+        "timeout_degrade_booking_generic": "replace timeout generic clarify with booking-safe slot prompt when booking context is active",
+        "run_completion_gap": "stop run as INVALID and rerun from lock scenarios until all expected turns are executed",
+        "trace_response_mismatch": "fail run as INVALID and inspect trace write path for missing inbound records",
+        "weak_oracle_turn": "add at least one explicit expectation per scenario turn (action/reply_type/info/state/reply)",
+        "incomplete_run_artifact": "discard incomplete run from baseline/comparison and regenerate with full summary+brief artifacts",
         "judge_fail": "review semantic mismatch in judge summary and convert to deterministic guard/test",
         "decision_meta_missing": "check early-return traces and meta write on this path",
         "decision_trace_missing": "verify trace retention for early returns and pending paths",
@@ -5472,13 +5716,18 @@ def _llm_quality_parse_coverage_tokens(value):
     return {token for token in raw_tokens if token and token not in {"none", "off"}}
 
 
-def _llm_quality_build_scenario_contract_status(*, dialogs, scenario_coverage):
+def _llm_quality_build_scenario_contract_status(*, dialogs, scenario_coverage, allow_weak_oracle=False):
     coverage_tokens = _llm_quality_parse_coverage_tokens(scenario_coverage)
     required_tags_by_coverage = {
         "booking": ("booking", "check_booking", "confirm"),
     }
     tag_counts = {}
     dialogs_with_check_confirm_sequence = 0
+    turn_count = 0
+    weak_expectation_turns = 0
+    reply_type_coverage_turns = 0
+    action_coverage_turns = 0
+    info_coverage_turns = 0
 
     for dialog in dialogs or []:
         if not isinstance(dialog, dict):
@@ -5491,6 +5740,16 @@ def _llm_quality_build_scenario_contract_status(*, dialogs, scenario_coverage):
         for idx, turn in enumerate(turns):
             if not isinstance(turn, dict):
                 continue
+            turn_count += 1
+            expectations = _llm_quality_extract_expectations(turn)
+            if _llm_quality_is_weak_oracle_expectation(expectations):
+                weak_expectation_turns += 1
+            if expectations.get("reply_type"):
+                reply_type_coverage_turns += 1
+            if expectations.get("action"):
+                action_coverage_turns += 1
+            if expectations.get("info_sections"):
+                info_coverage_turns += 1
             raw_tags = turn.get("tags")
             if not isinstance(raw_tags, list):
                 continue
@@ -5533,6 +5792,25 @@ def _llm_quality_build_scenario_contract_status(*, dialogs, scenario_coverage):
         and dialogs_with_check_confirm_sequence <= 0
     ):
         reasons.append("check_confirm_sequence_missing")
+    if weak_expectation_turns > 0 and not allow_weak_oracle:
+        reasons.append("weak_oracle_turn")
+
+    weak_expectation_ratio = round(
+        weak_expectation_turns / max(turn_count, 1),
+        4,
+    ) if turn_count else 0.0
+    reply_type_coverage_ratio = round(
+        reply_type_coverage_turns / max(turn_count, 1),
+        4,
+    ) if turn_count else 0.0
+    action_coverage_ratio = round(
+        action_coverage_turns / max(turn_count, 1),
+        4,
+    ) if turn_count else 0.0
+    info_coverage_ratio = round(
+        info_coverage_turns / max(turn_count, 1),
+        4,
+    ) if turn_count else 0.0
 
     return {
         "valid": not reasons,
@@ -5540,6 +5818,47 @@ def _llm_quality_build_scenario_contract_status(*, dialogs, scenario_coverage):
         "coverage_tokens": sorted(coverage_tokens),
         "tag_counts": tag_counts,
         "dialogs_with_check_confirm_sequence": dialogs_with_check_confirm_sequence,
+        "turn_count": turn_count,
+        "weak_expectation_turns": weak_expectation_turns,
+        "weak_expectation_ratio": weak_expectation_ratio,
+        "reply_type_coverage": reply_type_coverage_ratio,
+        "action_coverage": action_coverage_ratio,
+        "info_coverage": info_coverage_ratio,
+        "allow_weak_oracle": bool(allow_weak_oracle),
+    }
+
+
+def _llm_quality_build_run_integrity_status(*, dialogs, stats):
+    expected_turns = 0
+    for dialog in dialogs or []:
+        if not isinstance(dialog, dict):
+            continue
+        turns = dialog.get("turns")
+        if isinstance(turns, list):
+            expected_turns += len(turns)
+    responses_turns = int((stats or {}).get("turns") or 0)
+    trace_rows_written = int((stats or {}).get("trace_rows_written") or 0)
+    missing_turns = max(expected_turns - responses_turns, 0)
+    extra_turns = max(responses_turns - expected_turns, 0)
+    trace_response_delta = abs(trace_rows_written - responses_turns)
+    completion_ratio = (
+        round(responses_turns / max(expected_turns, 1), 4) if expected_turns else None
+    )
+    reasons = []
+    if missing_turns > 0 or extra_turns > 0:
+        reasons.append("run_completion_gap")
+    if trace_response_delta > 0:
+        reasons.append("trace_response_mismatch")
+    return {
+        "valid": not reasons,
+        "reasons": reasons,
+        "expected_turns": expected_turns,
+        "responses_turns": responses_turns,
+        "trace_rows_written": trace_rows_written,
+        "missing_turns": missing_turns,
+        "extra_turns": extra_turns,
+        "completion_ratio": completion_ratio,
+        "trace_response_delta": trace_response_delta,
     }
 
 
@@ -6055,6 +6374,9 @@ def _llm_quality_evaluate_turn(
     if isinstance(calendar_signal, dict):
         calendar_outcome = _llm_quality_normalize_tool_token(calendar_signal.get("outcome"))
     intent_value = _llm_quality_effective_intent(meta if isinstance(meta, dict) else None)
+    tool_decision_value = _llm_quality_normalize_tool_token(
+        (meta or {}).get("tool_decision") if isinstance(meta, dict) else None
+    )
     meta_action_value = _llm_quality_normalize_tool_token(meta_action)
     meta_intent_value = _llm_quality_normalize_tool_token(
         (meta or {}).get("intent") if isinstance(meta, dict) else None
@@ -6062,6 +6384,73 @@ def _llm_quality_evaluate_turn(
     meta_source_value = _llm_quality_normalize_tool_token(
         (meta or {}).get("source") if isinstance(meta, dict) else None
     )
+    slot_contract_error_value = _llm_quality_normalize_tool_token(
+        (meta or {}).get("slot_contract_error") if isinstance(meta, dict) else None
+    )
+    requested_date_value = (
+        str((meta or {}).get("requested_date") or "")
+        if isinstance(meta, dict)
+        else ""
+    )
+    if (
+        intent_value in {"calendar.list_slots", "calendar.get_booking", "calendar.book_slot"}
+        and _llm_quality_is_time_like_token(requested_date_value)
+    ):
+        reasons.append("requested_date_time_like")
+    if (
+        intent_value == "calendar.list_slots"
+        and slot_contract_error_value == "slot_date_resolution_miss"
+    ):
+        reasons.append("slot_date_resolution_miss")
+
+    availability_claim_value = _llm_quality_normalize_tool_token(
+        (meta or {}).get("availability_claim") if isinstance(meta, dict) else None
+    )
+    claim_from_text, claim_time = _llm_quality_extract_availability_claim(outbox_text)
+    if availability_claim_value not in {"yes", "no"}:
+        availability_claim_value = claim_from_text
+    requested_time_from_meta = _llm_quality_normalize_time_token(
+        str((meta or {}).get("requested_time") or "")
+        if isinstance(meta, dict)
+        else None
+    )
+    requested_time_token = requested_time_from_meta or claim_time
+    slot_map = _llm_quality_extract_available_slots_by_specialist(
+        meta if isinstance(meta, dict) else None,
+        outbox_text,
+    )
+    available_slot_tokens = {
+        slot_time
+        for specialist_slots in slot_map.values()
+        for slot_time in specialist_slots
+        if isinstance(slot_time, str) and slot_time
+    }
+    if (
+        intent_value == "calendar.list_slots"
+        and availability_claim_value == "yes"
+        and requested_time_token
+        and available_slot_tokens
+        and requested_time_token not in available_slot_tokens
+    ):
+        reasons.append("slot_availability_contradiction")
+
+    if intent_value == "calendar.book_slot" and tool_decision_value == "conflict":
+        if claim_time and (
+            not requested_time_from_meta or claim_time != requested_time_from_meta
+        ):
+            reasons.append("fabricated_conflict_time")
+
+    if _llm_quality_has_booking_prompt_leak(meta=meta, outbox_text=outbox_text):
+        reasons.append("booking_prompt_leak")
+    if _llm_quality_has_stale_booking_carryover(meta=meta, outbox_text=outbox_text):
+        reasons.append("stale_booking_carryover")
+    if _llm_quality_has_timeout_degrade_booking_generic(
+        meta=meta,
+        booking_active=booking_active,
+        outbox_text=outbox_text,
+    ):
+        reasons.append("timeout_degrade_booking_generic")
+
     slot_confirmation_required = bool(
         (meta or {}).get("slot_confirmation_required")
         if isinstance(meta, dict)
@@ -6459,6 +6848,46 @@ def _llm_quality_prepare_output_dir(path, *, allow_overwrite=False):
     return output_dir
 
 
+def _llm_quality_validate_scenario_artifacts(
+    scenarios_file: str,
+    *,
+    allow_incomplete: bool,
+) -> dict:
+    scenario_path = os.path.abspath(os.path.expanduser(scenarios_file))
+    scenario_name = os.path.basename(scenario_path)
+    scenario_dir = os.path.dirname(scenario_path)
+    if scenario_name != "scenarios.json":
+        return {
+            "checked": False,
+            "scenarios_file": scenario_path,
+            "scenarios_dir": scenario_dir,
+            "required": [],
+            "missing": [],
+            "valid": True,
+            "skipped_reason": "custom_scenarios_file",
+        }
+    required = ("summary.json", "brief.md")
+    missing = [
+        artifact
+        for artifact in required
+        if not os.path.exists(os.path.join(scenario_dir, artifact))
+    ]
+    valid = not missing
+    if missing and not allow_incomplete:
+        raise SystemExit(
+            "llm-quality: INVALID RUN - incomplete scenarios-file artifacts "
+            f"(missing={','.join(missing)}; dir={scenario_dir})"
+        )
+    return {
+        "checked": True,
+        "scenarios_file": scenario_path,
+        "scenarios_dir": scenario_dir,
+        "required": list(required),
+        "missing": missing,
+        "valid": valid,
+    }
+
+
 def _parse_llm_quality_args(argv):
     parser = argparse.ArgumentParser(
         prog="ops/diagnose.py llm-quality",
@@ -6480,6 +6909,16 @@ def _parse_llm_quality_args(argv):
         "--scenarios-file",
         default=None,
         help="Reuse dialogs from an existing scenarios.json (deterministic replay).",
+    )
+    parser.add_argument(
+        "--allow-weak-oracle",
+        action="store_true",
+        help="Allow scenario turns without explicit expectations (debug only).",
+    )
+    parser.add_argument(
+        "--allow-incomplete-run-artifacts",
+        action="store_true",
+        help="Allow replay from scenarios-file even when sibling summary/brief artifacts are missing.",
     )
     parser.add_argument("--mode", choices=["template", "llm"], default="llm")
     parser.add_argument("--min-turns", type=int, default=10)
@@ -9237,7 +9676,12 @@ def _run_llm_quality(args):
     dialogs = []
     warnings = {}
     scenario_source = {"type": "generated", "path": None}
+    scenario_artifact_status = {"checked": False, "missing": [], "valid": True}
     if args.scenarios_file:
+        scenario_artifact_status = _llm_quality_validate_scenario_artifacts(
+            args.scenarios_file,
+            allow_incomplete=bool(args.allow_incomplete_run_artifacts),
+        )
         dialogs, source_warnings, error = _llm_quality_load_dialogs_from_file(args.scenarios_file)
         if error:
             raise SystemExit(f"llm-quality: scenarios-file load failed ({error})")
@@ -9282,6 +9726,7 @@ def _run_llm_quality(args):
     scenario_contract = _llm_quality_build_scenario_contract_status(
         dialogs=dialogs,
         scenario_coverage=args.scenario_coverage,
+        allow_weak_oracle=bool(args.allow_weak_oracle),
     )
     scenario_preflight_payload = {
         "stage": "llm_quality_scenario_contract_preflight",
@@ -9292,6 +9737,13 @@ def _run_llm_quality(args):
         "dialogs_with_check_confirm_sequence": scenario_contract.get(
             "dialogs_with_check_confirm_sequence"
         ),
+        "turn_count": scenario_contract.get("turn_count"),
+        "weak_expectation_turns": scenario_contract.get("weak_expectation_turns"),
+        "weak_expectation_ratio": scenario_contract.get("weak_expectation_ratio"),
+        "reply_type_coverage": scenario_contract.get("reply_type_coverage"),
+        "action_coverage": scenario_contract.get("action_coverage"),
+        "info_coverage": scenario_contract.get("info_coverage"),
+        "scenario_artifacts": scenario_artifact_status,
     }
     print(json.dumps(scenario_preflight_payload, ensure_ascii=False))
     if not scenario_contract.get("valid"):
@@ -9329,6 +9781,7 @@ def _run_llm_quality(args):
         "turns_with_response": 0,
         "turns_missing_response": 0,
         "turns_expected_missing": 0,
+        "trace_rows_written": 0,
         "turns_passed": 0,
         "turns_failed": 0,
         "turns_strict_passed": 0,
@@ -9343,6 +9796,8 @@ def _run_llm_quality(args):
         "decision_trace_errors": 0,
         "info_mismatch": 0,
         "unobserved_turns": 0,
+        "weak_oracle_turns": 0,
+        "suppressed_missed_question_count": 0,
         "policy_core_turns": 0,
         "policy_core_degraded_turns": 0,
         "policy_core_infra_errors": 0,
@@ -10334,6 +10789,9 @@ def _run_llm_quality(args):
                 if _llm_quality_is_noise(text, turn_tags):
                     coverage_stats["noise"]["noisy"] += 1
                 expectations = _llm_quality_extract_expectations(turn)
+                weak_oracle_expectation = _llm_quality_is_weak_oracle_expectation(expectations)
+                if weak_oracle_expectation:
+                    stats["weak_oracle_turns"] += 1
                 expected_action = expectations.get("action")
                 expected_info_sections = expectations.get("info_sections") or []
                 expected_reply_type = expectations.get("reply_type")
@@ -10618,6 +11076,8 @@ def _run_llm_quality(args):
                     turn_tags=turn_tags,
                     outbox_text=outbox_text,
                 )
+                if suppress_judge_fail:
+                    stats["suppressed_missed_question_count"] += 1
                 if (
                     isinstance(judge_result, dict)
                     and judge_result.get("verdict") == "fail"
@@ -10758,6 +11218,7 @@ def _run_llm_quality(args):
                     "expected_response": expected_response,
                     "expected_response_reason": expected_reason,
                     "turn_expectations": expectations,
+                    "weak_oracle_expectation": weak_oracle_expectation,
                     "info_tags": info_tags,
                     "info_answered": info_answered,
                     "info_sections": sorted(info_sections),
@@ -10822,6 +11283,7 @@ def _run_llm_quality(args):
                     )
                     + "\n"
                 )
+                stats["trace_rows_written"] += 1
                 if stats["policy_core_infra_errors"] >= 3:
                     stop_reason = "policy_core_infra_errors"
                     stop_requested = True
@@ -10852,6 +11314,10 @@ def _run_llm_quality(args):
             )
         )
 
+    run_integrity_status = _llm_quality_build_run_integrity_status(
+        dialogs=dialogs,
+        stats=stats,
+    )
     finished_at = datetime.now(timezone.utc)
     duration_s = round((finished_at - started_at).total_seconds(), 2)
     reply_rate_by_state = {}
@@ -10875,6 +11341,7 @@ def _run_llm_quality(args):
             "turns_with_response": stats["turns_with_response"],
             "turns_missing_response": stats["turns_missing_response"],
             "turns_expected_missing": stats["turns_expected_missing"],
+            "trace_rows_written": stats["trace_rows_written"],
             "turns_passed": stats["turns_passed"],
             "turns_failed": stats["turns_failed"],
             "turns_strict_passed": stats["turns_strict_passed"],
@@ -10889,6 +11356,8 @@ def _run_llm_quality(args):
             "decision_trace_errors": stats["decision_trace_errors"],
             "info_mismatch": stats["info_mismatch"],
             "unobserved_turns": stats["unobserved_turns"],
+            "weak_oracle_turns": stats["weak_oracle_turns"],
+            "suppressed_missed_question_count": stats["suppressed_missed_question_count"],
             "policy_core_turns": stats["policy_core_turns"],
             "policy_core_degraded_turns": stats["policy_core_degraded_turns"],
             "policy_core_infra_errors": stats["policy_core_infra_errors"],
@@ -10906,6 +11375,9 @@ def _run_llm_quality(args):
         "manager": manager_stats,
         "booking": booking_stats,
         "dedup": dedup_stats,
+        "suppression": {
+            "suppressed_missed_question_count": stats["suppressed_missed_question_count"],
+        },
         "rates": {},
     }
     if stats["turns"]:
@@ -11119,6 +11591,25 @@ def _run_llm_quality(args):
     )
     governance_blocking_counts = dict(rewrite_governance.get("blocking_counts") or {})
     hq1_blocking_counts = {name: count for name, count in hq1_class_counts.items() if count > 0}
+    process_blocking_counts = {}
+    if not args.allow_weak_oracle and int(stats.get("weak_oracle_turns") or 0) > 0:
+        process_blocking_counts["weak_oracle_turn"] = int(stats.get("weak_oracle_turns") or 0)
+    missing_scenario_artifacts = list((scenario_artifact_status or {}).get("missing") or [])
+    if missing_scenario_artifacts:
+        process_blocking_counts["incomplete_run_artifact"] = len(missing_scenario_artifacts)
+    run_integrity_reasons = set(run_integrity_status.get("reasons") or [])
+    if "run_completion_gap" in run_integrity_reasons:
+        process_blocking_counts["run_completion_gap"] = int(
+            max(
+                run_integrity_status.get("missing_turns") or 0,
+                run_integrity_status.get("extra_turns") or 0,
+                1,
+            )
+        )
+    if "trace_response_mismatch" in run_integrity_reasons:
+        process_blocking_counts["trace_response_mismatch"] = int(
+            max(run_integrity_status.get("trace_response_delta") or 0, 1)
+        )
     if (
         lexicon_regex_delta_gate.get("enforced")
         and not lexicon_regex_delta_gate.get("valid", True)
@@ -11177,7 +11668,11 @@ def _run_llm_quality(args):
         threshold_breaches = []
     blocking_reasons = _llm_quality_collect_blocking_reasons(
         failure_counts,
-        extra_counts={**governance_blocking_counts, **hq1_blocking_counts},
+        extra_counts={
+            **governance_blocking_counts,
+            **hq1_blocking_counts,
+            **process_blocking_counts,
+        },
     )
     blocking_reason_count = blocking_reasons.get("count", 0)
     tool_evidence_policy = args.tool_evidence_policy
@@ -11242,6 +11737,8 @@ def _run_llm_quality(args):
         "media_kind": args.media_kind,
         "scenario_coverage": args.scenario_coverage,
         "scenarios_file": args.scenarios_file,
+        "allow_weak_oracle": bool(args.allow_weak_oracle),
+        "allow_incomplete_run_artifacts": bool(args.allow_incomplete_run_artifacts),
         "seed": args.seed,
         "manager_mode": args.manager_mode,
         "pending_mode": args.pending_mode,
@@ -11298,12 +11795,19 @@ def _run_llm_quality(args):
         "hq1_bad_turn_count": hq1_bad_turn_count,
         "hq1_class_counts": hq1_class_counts,
         "unobserved_turn_count": int(failure_counts.get("unobserved_turn") or 0),
+        "weak_oracle_turn_count": int(stats.get("weak_oracle_turns") or 0),
+        "scenario_artifacts": scenario_artifact_status,
+        "suppressed_missed_question_count": int(
+            metrics.get("suppression", {}).get("suppressed_missed_question_count") or 0
+        ),
         "blocking_reasons": blocking_reasons,
+        "process_blocking_counts": process_blocking_counts,
         "rewrite_governance": rewrite_governance,
         "lexicon_regex_delta_gate": lexicon_regex_delta_gate,
         "top_failures": top_failures,
         "failures": failures,
         "coverage": coverage_stats,
+        "run_integrity": run_integrity_status,
         "scenario_contract": scenario_contract,
         "tool_evidence": tool_evidence_status,
         "judge": judge_stats,
@@ -11319,9 +11823,14 @@ def _run_llm_quality(args):
             "semantic_reasons": semantic_status["reasons"],
             "blocking_reason_count": blocking_reason_count,
             "blocking_reasons": blocking_reasons.get("reasons", {}),
+            "process_blocking_counts": process_blocking_counts,
             "hq1_bad_turn_count": hq1_bad_turn_count,
             "hq1_class_counts": hq1_class_counts,
             "unobserved_turn_count": int(failure_counts.get("unobserved_turn") or 0),
+            "weak_oracle_turn_count": int(stats.get("weak_oracle_turns") or 0),
+            "suppressed_missed_question_count": int(
+                metrics.get("suppression", {}).get("suppressed_missed_question_count") or 0
+            ),
             "rewrite_governance_valid": rewrite_governance.get("valid", True),
             "rewrite_governance_reasons": rewrite_governance.get("reasons", []),
             "post_llm_semantic_rewrite_rate": rewrite_governance.get(
@@ -11338,6 +11847,14 @@ def _run_llm_quality(args):
             "tool_evidence_reasons": tool_evidence_status.get("reasons"),
             "scenario_contract_valid": scenario_contract.get("valid"),
             "scenario_contract_reasons": scenario_contract.get("reasons"),
+            "run_integrity_valid": run_integrity_status.get("valid"),
+            "run_integrity_reasons": run_integrity_status.get("reasons"),
+            "run_completion_ratio": run_integrity_status.get("completion_ratio"),
+            "run_expected_turns": run_integrity_status.get("expected_turns"),
+            "run_responses_turns": run_integrity_status.get("responses_turns"),
+            "run_trace_rows_written": run_integrity_status.get("trace_rows_written"),
+            "scenario_artifacts_valid": bool((scenario_artifact_status or {}).get("valid", True)),
+            "scenario_artifacts_missing": list((scenario_artifact_status or {}).get("missing") or []),
             "comparison_blocked": comparison_blocked,
             "comparison_block_reasons": comparison_block_reasons,
         },

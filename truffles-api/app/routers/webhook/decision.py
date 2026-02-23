@@ -3248,7 +3248,7 @@ TIME_ONLY_ALLOWED_TOKENS = {
 }
 TIME_ONLY_ALLOWED_PREFIXES = ("час", "мин", "вечер", "утр", "дн", "ноч")
 DATE_PATTERN = re.compile(
-    r"\b(?:сегодня|завтра|послезавтра|понедель\w*|вторник\w*|сред\w*|четверг\w*|пятниц\w*|суббот\w*|воскрес\w*|утром|днем|днём|вечером)\b",
+    r"\b(?:сегодня|сегодняш\w*|завтра|завтраш\w*|послезавтра|послезавтраш\w*|понедель\w*|вторник\w*|сред\w*|четверг\w*|пятниц\w*|суббот\w*|воскрес\w*|выходн\w*|утром|днем|днём|вечером)\b",
     re.IGNORECASE,
 )
 DATE_NUMERIC_PATTERN = re.compile(r"\b\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\b")
@@ -9895,7 +9895,116 @@ async def _handle_webhook_payload(
                 bot_response=bot_response,
             )
 
-        if policy_core_timeout_degrade:
+        timeout_needs_booking_collect = bool(
+            message_text
+            and not pending_info_signal
+            and (
+                booking_verification_request
+                or expected_reply_type
+                in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
+                or memory_expected_reply_type
+                in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
+                or _looks_like_time_only_request(message_text)
+                or bool(
+                    _extract_datetime(
+                        message_text,
+                        client_slug=payload.client_slug,
+                        relative_base=now,
+                    )
+                )
+            )
+        )
+        timeout_info_fallback_reply: str | None = None
+        timeout_info_fallback_expected = None
+        if policy_core_timeout_degrade and not timeout_needs_booking_collect and message_text:
+            try:
+                from app.services.tool_registry_service import (
+                    _looks_like_services_overview_message,
+                )
+            except Exception:
+                _looks_like_services_overview_message = None
+            if (
+                _looks_like_services_overview_message
+                and _looks_like_services_overview_message(message_text)
+            ):
+                overview_reply = format_reply_from_truth(
+                    "services_overview",
+                    client_slug=payload.client_slug,
+                )
+                if isinstance(overview_reply, str) and overview_reply.strip():
+                    timeout_info_fallback_reply = overview_reply.strip()
+                    timeout_info_fallback_expected = resolve_services_overview_contract_update(
+                        tool_action="catalog.service_query",
+                        tool_decision="services_overview",
+                        current_expected_reply_type=expected_reply_type,
+                        memory_expected_reply_type=memory_expected_reply_type,
+                    )
+        if timeout_info_fallback_reply:
+            context = _get_conversation_context(conversation)
+            if timeout_info_fallback_expected:
+                context = _set_expected_reply_context(
+                    conversation=conversation,
+                    saved_message=saved_message,
+                    context=context,
+                    expected_reply_type=timeout_info_fallback_expected.expected_reply_type,
+                    reason=timeout_info_fallback_expected.reason,
+                    now=now,
+                )
+                _set_conversation_context(conversation, context)
+            _apply_policy_guard_override(
+                final_action="fact",
+                final_tool_action="catalog.service_query",
+                reason_code="timeout_degrade",
+                reason="policy_core_timeout_info_fallback",
+            )
+            _sync_policy_plan_audit(emit_trace=True)
+            _record_decision_trace(
+                conversation,
+                {
+                    "stage": "policy_core_guard",
+                    "decision": "timeout_info_fallback",
+                    "state": conversation.state,
+                    "mode": policy_core_mode,
+                    "reason": policy_core_degrade_reason,
+                    "tool_recovery": "services_overview",
+                    "info_sections": ["services_overview"],
+                },
+            )
+            _record_message_decision_meta(
+                saved_message,
+                action="reply",
+                intent="catalog.service_query",
+                source="llm_policy_core",
+                fast_intent=False,
+            )
+            if saved_message:
+                meta_updates: dict[str, Any] = {
+                    "policy_core_guard_info_query": True,
+                    "policy_core_guard_recovery": "services_overview",
+                    "info_sections": ["services_overview"],
+                }
+                if timeout_info_fallback_expected:
+                    meta_updates["expected_reply_type"] = (
+                        timeout_info_fallback_expected.expected_reply_type
+                    )
+                    meta_updates["expected_reply_reason"] = (
+                        timeout_info_fallback_expected.reason
+                    )
+                _update_message_decision_metadata(saved_message, meta_updates)
+            bot_response, sent = _send_and_save(timeout_info_fallback_reply)
+            result_message = (
+                "Policy core timeout degrade info fallback sent"
+                if sent
+                else "Policy core timeout degrade info fallback failed"
+            )
+            db.commit()
+            return WebhookResponse(
+                success=True,
+                message=result_message,
+                conversation_id=conversation.id,
+                bot_response=bot_response,
+            )
+        if policy_core_timeout_degrade and not timeout_needs_booking_collect:
             _apply_policy_guard_override(
                 final_action="collect",
                 final_tool_action="collect",
@@ -9941,6 +10050,13 @@ async def _handle_webhook_payload(
                 if not (isinstance(value, str) and value.strip()):
                     collect_slot = slot_key
                     break
+        timeout_booking_safe_fallback = bool(
+            policy_core_timeout_degrade and timeout_needs_booking_collect
+        )
+        if timeout_booking_safe_fallback and not collect_slot:
+            # Timeout-degrade in booking context must stay slot-driven,
+            # never fall back to generic clarify.
+            collect_slot = "datetime"
         original_collect_slot = collect_slot
         info_query_override = False
         if (
@@ -9948,6 +10064,7 @@ async def _handle_webhook_payload(
             and message_text
             and _looks_like_info_query(message_text, client_slug=payload.client_slug)
             and not _is_booking_request(message_text, client_slug=payload.client_slug)
+            and not timeout_booking_safe_fallback
         ):
             # Fail-closed for degraded policy-core: avoid forcing booking prompts
             # when the current user turn is an info question.
@@ -10702,6 +10819,16 @@ async def _handle_webhook_payload(
                 queue_set = True
             else:
                 followup_prompt = _format_multi_intent_followup("discounts", followup_intents)
+        suppress_booking_followup_for_info = bool(
+            followup_prompt
+            and booking_followup
+            and decision.action == "reply"
+            and expected_reply_type in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}
+        )
+        if suppress_booking_followup_for_info:
+            # Keep booking expected_reply contract in context, but avoid stale
+            # "Ещё был вопрос по записи..." carryover in FACT/info text.
+            followup_prompt = None
         if followup_prompt:
             bot_response = _combine_sidecar(bot_response, followup_prompt)
 
@@ -10789,6 +10916,8 @@ async def _handle_webhook_payload(
             }
             if followup_prompt:
                 booking_trace["booking_prompt"] = followup_prompt
+            if suppress_booking_followup_for_info:
+                booking_trace["booking_prompt_suppressed"] = True
             _record_decision_trace(conversation, booking_trace)
         _record_decision_trace(conversation, trace_payload)
         _record_message_decision_meta(
@@ -10817,6 +10946,9 @@ async def _handle_webhook_payload(
                 meta_updates["booking_info_interrupt"] = True
                 meta_updates["booking_interrupt_info"] = True
                 meta_updates["booking_info_intents"] = list(booking_info_intents)
+            if suppress_booking_followup_for_info:
+                meta_updates["carryover_ignored"] = True
+                meta_updates["carryover_ignored_reason"] = "info_reply_no_stale_booking_prompt"
             meta_updates.update(_controller_meta_updates_from_class_router(class_router_result))
             _update_message_decision_metadata(saved_message, meta_updates)
 
@@ -11297,8 +11429,21 @@ async def _handle_webhook_payload(
                 has_datetime_signal = bool(
                     isinstance(turn_datetime_hint, str) and turn_datetime_hint.strip()
                 )
+                turn_has_explicit_date_signal = bool(
+                    isinstance(message_text, str)
+                    and (
+                        DATE_PATTERN.search(message_text)
+                        or DATE_NUMERIC_PATTERN.search(message_text)
+                        or DATE_MONTH_PATTERN.search(message_text)
+                    )
+                )
+                time_only_turn_signal = _looks_like_time_only_request(message_text)
                 if has_datetime_signal:
-                    start_at_value = merged_slots_for_tool.get("datetime")
+                    start_at_value = None
+                    if turn_has_explicit_date_signal:
+                        start_at_value = turn_datetime_hint.strip()
+                    if not (isinstance(start_at_value, str) and start_at_value.strip()):
+                        start_at_value = merged_slots_for_tool.get("datetime")
                     if (
                         (not isinstance(start_at_value, str) or not start_at_value.strip())
                         and isinstance(turn_datetime_hint, str)
@@ -11328,7 +11473,7 @@ async def _handle_webhook_payload(
                     allow_datetime_carryover = bool(
                         expected_reply_type == EXPECTED_REPLY_TIME
                         or booking_last_question == "datetime"
-                        or _looks_like_time_only_request(message_text)
+                        or time_only_turn_signal
                     )
                     if isinstance(booking, dict):
                         booking_datetime = booking.get("datetime")
@@ -11346,7 +11491,9 @@ async def _handle_webhook_payload(
                         merged_datetime = merged_slots_for_tool.get("datetime")
                         if isinstance(merged_datetime, str) and merged_datetime.strip():
                             preserved_datetime = merged_datetime.strip()
-                    if preserved_datetime and expected_reply_type != EXPECTED_REPLY_NAME:
+                    if preserved_datetime and (
+                        expected_reply_type != EXPECTED_REPLY_NAME or time_only_turn_signal
+                    ):
                         # Keep validated booking context date while collecting/confirming time.
                         policy_tool_args["start_at"] = preserved_datetime
                 if (
@@ -12254,6 +12401,34 @@ async def _handle_webhook_payload(
                     policy_tool_action == "calendar.get_booking"
                     and tool_decision in {"not_found", "time_mismatch", "contract_invalid"}
                 )
+                available_slots_by_specialist = (
+                    (tool_result.decision_meta or {}).get("available_slots_by_specialist")
+                    if isinstance(tool_result.decision_meta, dict)
+                    else None
+                )
+                no_slots_outcome = False
+                if policy_tool_action == "calendar.list_slots" and tool_decision in {
+                    "ok",
+                    "specialist_missing",
+                }:
+                    if isinstance(available_slots_by_specialist, dict):
+                        no_slots_outcome = not any(
+                            isinstance(slots, list)
+                            and any(isinstance(token, str) and token for token in slots)
+                            for slots in available_slots_by_specialist.values()
+                        )
+                    availability_claim_value = str(
+                        (tool_result.decision_meta or {}).get("availability_claim") or ""
+                    ).strip().casefold()
+                    if availability_claim_value == "no":
+                        no_slots_outcome = True
+                if (
+                    no_slots_outcome
+                    and policy_tool_action == "calendar.list_slots"
+                    and booking_followup_expected == EXPECTED_REPLY_NAME
+                ):
+                    booking_followup_expected = EXPECTED_REPLY_TIME
+                    booking_followup_reason = "calendar_list_slots_no_availability"
                 suppress_redundant_followup_prompt = bool(
                     (
                         (
@@ -12261,9 +12436,10 @@ async def _handle_webhook_payload(
                             and tool_decision in {"ok", "specialist_missing"}
                         )
                         or conflict_reprompt_datetime
+                        or no_slots_outcome
                     )
                     and isinstance(tool_response_text, str)
-                    and "?" in tool_response_text
+                    and ("?" in tool_response_text or no_slots_outcome)
                 )
                 if (
                     (
@@ -12524,7 +12700,14 @@ async def _handle_webhook_payload(
                         )
                 bot_response = tool_response_text or MSG_FACT_GUARD_CLARIFY
                 if style_reference_text_signal and not has_media:
-                    if policy_tool_action == "catalog.portfolio":
+                    if policy_tool_action in {
+                        "catalog.portfolio",
+                        "calendar.list_slots",
+                        "calendar.book_slot",
+                        "calendar.get_booking",
+                        "calendar.reschedule",
+                        "calendar.cancel",
+                    }:
                         bot_response = MSG_STYLE_REFERENCE_NEED_MEDIA
                     else:
                         bot_response = _combine_sidecar(
@@ -12560,6 +12743,15 @@ async def _handle_webhook_payload(
                     and not turn_outcome_expected_reason
                 ):
                     turn_outcome_expected_reason = services_overview_contract.reason
+                suppress_info_followup_prompt = bool(
+                    booking_interrupt_prompt
+                    and policy_tool_action in {"catalog.service_query", "catalog.location"}
+                    and not services_overview_followup
+                )
+                if suppress_info_followup_prompt:
+                    # FACT/info turns may keep expected_reply contract, but should not leak
+                    # booking prompt fragments into the rendered reply body.
+                    booking_interrupt_prompt = None
                 if booking_interrupt_prompt and _should_append_followup_prompt(
                     bot_response,
                     booking_interrupt_prompt,

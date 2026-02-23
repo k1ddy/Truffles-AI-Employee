@@ -47,6 +47,9 @@ def _load_quality_helpers():
         "_llm_quality_track_rewrite_governance",
         "_llm_quality_finalize_rewrite_governance",
         "_llm_quality_collect_blocking_reasons",
+        "_llm_quality_is_weak_oracle_expectation",
+        "_llm_quality_build_run_integrity_status",
+        "_llm_quality_validate_scenario_artifacts",
         "_llm_quality_is_lexicon_regex_delta_file",
         "_llm_quality_build_lexicon_regex_delta_status",
         "_llm_quality_hq1_normalize_text",
@@ -255,6 +258,31 @@ def test_rewrite_governance_blocks_missing_and_unknown_reason_codes():
     assert status["rewrite_reason_coverage"] < 1.0
 
 
+def test_rewrite_governance_uses_discrete_turn_budget_ceiling():
+    ns = _load_quality_helpers()
+    init_state = ns["_llm_quality_init_rewrite_governance_state"]
+    track = ns["_llm_quality_track_rewrite_governance"]
+    finalize = ns["_llm_quality_finalize_rewrite_governance"]
+
+    state = init_state()
+    for index in range(88):
+        meta = {"policy_core_mode": "policy_core"}
+        if index in {3, 41}:
+            meta["llm_policy_override_reason_code"] = "required_slot_missing"
+        track(state, meta)
+
+    status = finalize(
+        state,
+        max_post_llm_semantic_rewrite_rate=0.02,
+        max_keyword_override_rate=0.0,
+    )
+
+    assert status["rewrite_turns"] == 2
+    assert status["max_rewrite_turns"] == 2
+    assert "post_llm_semantic_rewrite_budget_exceeded" not in status["blocking_counts"]
+    assert status["valid"] is True
+
+
 def test_collect_blocking_reasons_merges_governance_counts():
     ns = _load_quality_helpers()
     collect = ns["_llm_quality_collect_blocking_reasons"]
@@ -269,6 +297,70 @@ def test_collect_blocking_reasons_merges_governance_counts():
     assert result["reasons"]["expected_reply_type_mismatch"] == 2
     assert result["reasons"]["post_llm_semantic_rewrite_budget_exceeded"] == 1
     assert result["reasons"]["rewrite_reason_missing"] == 3
+
+
+def test_weak_oracle_expectation_detects_empty_contract():
+    ns = _load_quality_helpers()
+    is_weak = ns["_llm_quality_is_weak_oracle_expectation"]
+
+    assert is_weak({"action": None, "info_sections": [], "reply_type": None, "state": None}) is True
+    assert is_weak({"expected_reply": True}) is False
+    assert is_weak({"reply_type": "time"}) is False
+
+
+def test_validate_scenario_artifacts_blocks_missing_summary_and_brief(tmp_path):
+    ns = _load_quality_helpers()
+    validate = ns["_llm_quality_validate_scenario_artifacts"]
+    scenario_file = tmp_path / "scenarios.json"
+    scenario_file.write_text("{}", encoding="utf-8")
+
+    try:
+        validate(str(scenario_file), allow_incomplete=False)
+    except SystemExit as exc:
+        assert "incomplete scenarios-file artifacts" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit for incomplete artifacts")
+
+    status = validate(str(scenario_file), allow_incomplete=True)
+    assert status["checked"] is True
+    assert status["valid"] is False
+    assert "summary.json" in status["missing"]
+    assert "brief.md" in status["missing"]
+
+
+def test_run_integrity_status_detects_completion_and_trace_gaps():
+    ns = _load_quality_helpers()
+    build_status = ns["_llm_quality_build_run_integrity_status"]
+
+    status = build_status(
+        dialogs=[
+            {"turns": [{"text": "1"}, {"text": "2"}]},
+            {"turns": [{"text": "3"}]},
+        ],
+        stats={"turns": 2, "trace_rows_written": 1},
+    )
+
+    assert status["valid"] is False
+    assert status["expected_turns"] == 3
+    assert status["responses_turns"] == 2
+    assert status["trace_rows_written"] == 1
+    assert "run_completion_gap" in status["reasons"]
+    assert "trace_response_mismatch" in status["reasons"]
+
+
+def test_run_integrity_status_is_valid_when_counts_match():
+    ns = _load_quality_helpers()
+    build_status = ns["_llm_quality_build_run_integrity_status"]
+
+    status = build_status(
+        dialogs=[{"turns": [{"text": "1"}, {"text": "2"}]}],
+        stats={"turns": 2, "trace_rows_written": 2},
+    )
+
+    assert status["valid"] is True
+    assert status["reasons"] == []
+    assert status["missing_turns"] == 0
+    assert status["trace_response_delta"] == 0
 
 
 def test_lexicon_regex_delta_gate_requires_resolver_and_tests():
