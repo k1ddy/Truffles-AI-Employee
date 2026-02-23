@@ -98,8 +98,10 @@
   - Прогнаны проверки continuation: `pytest -q truffles-api/tests/test_console_tenants_list.py -k "prewarm or invalidate_tenants_fleet_cache_scope_queues_company_prewarm or on_console_session_after_commit"` (`3 passed`), `pytest -q truffles-api/tests/test_console_admin_provisioning.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py truffles-api/tests/test_console_access_admin_pr2.py` (`136 passed`), `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py` (pass).
   - PR continuation открыт: `https://github.com/k1ddy/Truffles-AI-Employee/pull/806`.
   - CI stop-the-line (infra): run `https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22301196048` отменён как stuck (`core-eval` pending >10 минут без прогресса).
+  - Merge build incident triaged on `main`: run `https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22301909590` failed in `deploy` job, step `Deploy to VPS`, with `Run Command Timeout` during remote console build.
+  - Applied deploy hotfix: `appleboy/ssh-action` now uses `command_timeout: 20m` in `.github/workflows/ci.yml` (was default 10m), keeping job timeout `15m` intact.
 - next:
-  - Дождаться CI по `PR #806` и merge.
+  - Открыть hotfix PR с `command_timeout: 20m`, дождаться CI и merge в `main`.
   - После merge зафиксировать runtime perf snapshot после серии tenant write операций (stale-window evidence + cache hit ratio для non-affected companies).
   - Следующий шаг Wave4/F5: расширить targeted precompute на global summary/attention strategy без full cold-start.
 - evidence:
@@ -163,5 +165,7 @@
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/803
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/806
   - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22301196048
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22301909590
+  - .github/workflows/ci.yml
   - STATE.md
-- last_updated: 2026-02-23T10:12:00Z
+- last_updated: 2026-02-23T10:51:00Z
