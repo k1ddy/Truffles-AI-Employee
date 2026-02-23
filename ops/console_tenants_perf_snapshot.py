@@ -22,7 +22,9 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Capture tenants endpoint latency snapshot from Prometheus metrics.")
+    parser = argparse.ArgumentParser(
+        description="Capture tenants endpoint latency snapshot from Prometheus metrics (with optional branches HTTP metric)."
+    )
     parser.add_argument(
         "--metrics-url",
         default=os.getenv("TENANTS_PERF_METRICS_URL", "http://localhost:8000/metrics"),
