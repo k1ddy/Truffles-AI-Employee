@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
-from sqlalchemy import and_, case, func, or_, text
+from sqlalchemy import and_, case, delete, event, func, or_, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
@@ -2183,6 +2183,16 @@ _TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS = _parse_env_int(
     min_value=50,
     max_value=100000,
 )
+_TENANTS_FLEET_CACHE_PREWARM_ON_INVALIDATION_ENABLED = _parse_env_bool(
+    "TENANTS_FLEET_CACHE_PREWARM_ON_INVALIDATION_ENABLED",
+    default=True,
+)
+_TENANTS_FLEET_CACHE_PREWARM_MAX_COMPANY_SCOPES = _parse_env_int(
+    "TENANTS_FLEET_CACHE_PREWARM_MAX_COMPANY_SCOPES",
+    default=50,
+    min_value=1,
+    max_value=10000,
+)
 _OUTBOX_ARCHIVED_REASON_PREFIX = "archived_pending:"
 _OUTBOX_CALENDAR_SYNC_REASON_PREFIX = "calendar_sync_failed:"
 _OUTBOX_SYSTEM_EVENT_TYPES = {"calendar.sync_inbound", "calendar.sync_outbound"}
@@ -2203,6 +2213,7 @@ _TENANTS_SENSITIVE_FIELDS = {"instance_id"}
 _TENANTS_SENSITIVE_ACTIONS = {"reveal", "copy"}
 _TENANTS_FLEET_CACHE_REFRESH_INFLIGHT: set[str] = set()
 _TENANTS_FLEET_CACHE_REFRESH_LOCK = Lock()
+_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY = "tenants_fleet_cache_prewarm_company_ids"
 
 
 @dataclass
@@ -2567,6 +2578,8 @@ def _upsert_tenants_fleet_cache_payload(
     *,
     cache_type: str,
     scope_key: str,
+    scope_company_id: Optional[UUID] = None,
+    scope_client_id: Optional[UUID] = None,
     payload: dict[str, Any],
     now: datetime,
     ttl_seconds: int = _TENANTS_FLEET_CACHE_TTL_SECONDS,
@@ -2588,6 +2601,8 @@ def _upsert_tenants_fleet_cache_payload(
             )
             db.add(row)
         row.payload_json = payload
+        row.scope_company_id = scope_company_id
+        row.scope_client_id = scope_client_id
         row.schema_version = _TENANTS_FLEET_CACHE_SCHEMA_VERSION
         row.generated_at = now
         row.expires_at = expires_at
@@ -2627,6 +2642,7 @@ def _store_cached_fleet_summary(
     db: Session,
     *,
     scope_key: str,
+    scope_company_id: Optional[UUID],
     now: datetime,
     summary: ConsoleFleetSummary,
 ) -> None:
@@ -2634,6 +2650,7 @@ def _store_cached_fleet_summary(
         db,
         cache_type=_TENANTS_FLEET_CACHE_SUMMARY_TYPE,
         scope_key=scope_key,
+        scope_company_id=scope_company_id,
         payload=summary.model_dump(mode="json"),
         now=now,
     )
@@ -2663,6 +2680,7 @@ def _store_cached_fleet_attention(
     db: Session,
     *,
     scope_key: str,
+    scope_company_id: Optional[UUID] = None,
     now: datetime,
     response: ConsoleFleetAttentionResponse,
 ) -> None:
@@ -2670,6 +2688,7 @@ def _store_cached_fleet_attention(
         db,
         cache_type=_TENANTS_FLEET_CACHE_ATTENTION_TYPE,
         scope_key=scope_key,
+        scope_company_id=scope_company_id,
         payload=response.model_dump(mode="json"),
         now=now,
     )
@@ -2758,6 +2777,7 @@ def _refresh_fleet_summary_cache_worker(task: dict[str, Any]) -> None:
         _store_cached_fleet_summary(
             db,
             scope_key=scope_key,
+            scope_company_id=company_uuid,
             now=datetime.now(timezone.utc),
             summary=summary,
         )
@@ -2808,15 +2828,140 @@ def _schedule_fleet_summary_async_refresh(
         "service_state_filter": service_state_filter,
         "batch_size": batch_size,
     }
+    _start_fleet_summary_refresh_task(
+        scope_key=scope_key,
+        task=task,
+        thread_name="tenants-fleet-summary-refresh",
+    )
+
+
+def _start_fleet_summary_refresh_task(
+    *,
+    scope_key: str,
+    task: dict[str, Any],
+    thread_name: str,
+) -> None:
     try:
         Thread(
             target=_refresh_fleet_summary_cache_worker,
             kwargs={"task": task},
             daemon=True,
-            name="tenants-fleet-summary-refresh",
+            name=thread_name,
         ).start()
     except Exception:
         _release_fleet_cache_refresh(_TENANTS_FLEET_CACHE_SUMMARY_TYPE, scope_key)
+
+
+def _queue_fleet_summary_prewarm_company_ids(
+    db: Session,
+    *,
+    company_ids: set[UUID],
+) -> None:
+    if not _TENANTS_FLEET_CACHE_PREWARM_ON_INVALIDATION_ENABLED:
+        return
+    if not company_ids:
+        return
+    scoped_ids = {company_id for company_id in company_ids if company_id is not None}
+    if not scoped_ids:
+        return
+    info_value = db.info.get(_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY)
+    if not isinstance(info_value, set):
+        info_value = set()
+        db.info[_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY] = info_value
+    info_value.update(scoped_ids)
+
+
+def _load_active_clients_by_company(
+    *,
+    company_ids: set[UUID],
+) -> dict[UUID, set[UUID]]:
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(Client.id, Client.company_id)
+            .filter(
+                Client.status == _CLIENT_STATUS_ACTIVE,
+                Client.company_id.in_(list(company_ids)),
+            )
+            .all()
+        )
+        result: dict[UUID, set[UUID]] = {}
+        for client_id, company_id in rows:
+            if not company_id:
+                continue
+            result.setdefault(company_id, set()).add(client_id)
+        return result
+    except Exception:
+        db.rollback()
+        return {}
+    finally:
+        db.close()
+
+
+def _schedule_fleet_summary_prewarm_for_company_ids(
+    *,
+    company_ids: set[UUID],
+) -> None:
+    if not _TENANTS_FLEET_CACHE_PREWARM_ON_INVALIDATION_ENABLED:
+        return
+    if not company_ids:
+        return
+    capped_company_ids = set(sorted(company_ids, key=str)[:_TENANTS_FLEET_CACHE_PREWARM_MAX_COMPANY_SCOPES])
+    if not capped_company_ids:
+        return
+    active_clients_by_company = _load_active_clients_by_company(company_ids=capped_company_ids)
+    if not active_clients_by_company:
+        return
+    for company_id, active_client_ids in active_clients_by_company.items():
+        if not active_client_ids:
+            continue
+        if len(active_client_ids) > _TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS:
+            continue
+        scope_key = _build_clients_summary_cache_scope_key(
+            accessible_clients_hash=_hash_uuid_values(active_client_ids),
+            company_uuid=company_id,
+            lifecycle_mode="active",
+            query_value=None,
+            fleet_lifecycle_filter=None,
+            payment_status_filter=None,
+            service_state_filter=None,
+        )
+        if not _try_claim_fleet_cache_refresh(_TENANTS_FLEET_CACHE_SUMMARY_TYPE, scope_key):
+            continue
+        task = {
+            "scope_key": scope_key,
+            "accessible_client_ids": [str(client_id) for client_id in sorted(active_client_ids, key=str)],
+            "lifecycle_mode": "active",
+            "company_id": str(company_id),
+            "query_value": None,
+            "fleet_lifecycle_filter": None,
+            "payment_status_filter": None,
+            "service_state_filter": None,
+            "batch_size": 100,
+        }
+        _start_fleet_summary_refresh_task(
+            scope_key=scope_key,
+            task=task,
+            thread_name="tenants-fleet-summary-prewarm",
+        )
+
+
+@event.listens_for(Session, "after_commit")
+def _on_console_session_after_commit(session: Session) -> None:
+    raw_company_ids = session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY, None)
+    if not isinstance(raw_company_ids, set):
+        return
+    scoped_company_ids = {
+        company_id
+        for company_id in raw_company_ids
+        if isinstance(company_id, UUID)
+    }
+    _schedule_fleet_summary_prewarm_for_company_ids(company_ids=scoped_company_ids)
+
+
+@event.listens_for(Session, "after_rollback")
+def _on_console_session_after_rollback(session: Session) -> None:
+    session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY, None)
 
 
 def _build_fleet_attention_response_for_clients(
@@ -3116,24 +3261,44 @@ def _invalidate_tenants_fleet_cache_scope(
     db: Session,
     *,
     reason: str,
+    company_ids: Optional[set[UUID]] = None,
 ) -> None:
     # Keep cache invalidation best-effort and isolated from tenant mutations.
     # If cache storage is unavailable, writes must still succeed.
     _ = reason
+    scoped_company_ids = {
+        company_id
+        for company_id in (company_ids or set())
+        if company_id is not None
+    }
     try:
         with db.begin_nested():
-            db.execute(
-                text(
-                    "DELETE FROM tenants_fleet_cache "
-                    "WHERE cache_type IN ('fleet_summary', 'fleet_attention')"
+            statement = delete(TenantsFleetCache).where(
+                TenantsFleetCache.cache_type.in_(
+                    [
+                        _TENANTS_FLEET_CACHE_SUMMARY_TYPE,
+                        _TENANTS_FLEET_CACHE_ATTENTION_TYPE,
+                    ]
                 )
             )
+            if scoped_company_ids:
+                statement = statement.where(
+                    or_(
+                        TenantsFleetCache.scope_company_id.is_(None),
+                        TenantsFleetCache.scope_company_id.in_(list(scoped_company_ids)),
+                    )
+                )
+            db.execute(statement)
     except ProgrammingError as exc:
         if _is_tenants_fleet_cache_table_missing_error(exc):
             return
         return
     except Exception:
         return
+    _queue_fleet_summary_prewarm_company_ids(
+        db,
+        company_ids=scoped_company_ids,
+    )
 
 
 def _normalize_client_lifecycle_reason(reason: str) -> str:
@@ -3308,6 +3473,22 @@ def _accessible_company_ids(context: ConsoleAuthContext) -> set[UUID]:
         for client in accessible_clients
         if getattr(client, "company_id", None)
     }
+
+
+def _resolve_company_id_for_client_in_context(
+    context: ConsoleAuthContext,
+    client_id: Optional[UUID],
+) -> Optional[UUID]:
+    if client_id is None:
+        return None
+    accessible_clients = getattr(context, "accessible_clients", None) or []
+    for client in accessible_clients:
+        if getattr(client, "id", None) == client_id:
+            return getattr(client, "company_id", None)
+    context_client = getattr(context, "client", None)
+    if context_client and getattr(context_client, "id", None) == client_id:
+        return getattr(context_client, "company_id", None)
+    return None
 
 
 def _require_client_access(
@@ -14350,6 +14531,7 @@ async def list_clients(
             _store_cached_fleet_summary(
                 db,
                 scope_key=summary_scope_key,
+                scope_company_id=company_uuid,
                 now=summary_cache_now,
                 summary=summary,
             )
@@ -16059,6 +16241,7 @@ async def run_integration_reconcile_for_branch(
     if not branch:
         raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
     _require_client_access(context, branch.client_id, message="Branch belongs to another tenant")
+    branch_company_id = _resolve_company_id_for_client_in_context(context, branch.client_id)
     if not branch.is_active:
         raise ConsoleAPIError(409, "INVALID_STATE", "Branch is inactive")
 
@@ -16111,7 +16294,11 @@ async def run_integration_reconcile_for_branch(
                 client_id=branch.client_id,
                 branch_id=branch.id,
             )
-            _invalidate_tenants_fleet_cache_scope(db, reason="integration_reconcile_execute")
+            _invalidate_tenants_fleet_cache_scope(
+                db,
+                reason="integration_reconcile_execute",
+                company_ids={branch_company_id} if branch_company_id else None,
+            )
             db.commit()
         return ConsoleIntegrationBranchActionResponse(
             branch_id=branch.id,
@@ -16335,7 +16522,11 @@ async def run_integration_reconcile_for_branch(
                 target_type="branch",
                 target_id=branch.id,
             )
-        _invalidate_tenants_fleet_cache_scope(db, reason="provider_ops_execute")
+        _invalidate_tenants_fleet_cache_scope(
+            db,
+            reason="provider_ops_execute",
+            company_ids={branch_company_id} if branch_company_id else None,
+        )
         db.commit()
     else:
         result["dry_run"] = True
@@ -16650,7 +16841,11 @@ async def update_company(
             actor_id=context.agent.id,
             actor_name=context.agent.name,
         )
-        _invalidate_tenants_fleet_cache_scope(db, reason="update_company")
+        _invalidate_tenants_fleet_cache_scope(
+            db,
+            reason="update_company",
+            company_ids={company.id},
+        )
         db.commit()
 
     return ConsoleCompany(
@@ -16719,7 +16914,11 @@ async def create_client(
         },
         client_id=client.id,
     )
-    _invalidate_tenants_fleet_cache_scope(db, reason="create_client")
+    _invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="create_client",
+        company_ids={company_id} if company_id else None,
+    )
     db.commit()
 
     return ConsoleClientCreateResponse(
@@ -16762,6 +16961,7 @@ async def update_client(
     if not client:
         raise ConsoleAPIError(404, "NOT_FOUND", "Client not found")
     _require_client_access(context, client.id)
+    previous_company_id = client.company_id
 
     updated_fields: list[str] = []
     fields_set = body.model_fields_set
@@ -16826,7 +17026,16 @@ async def update_client(
             actor_id=context.agent.id,
             actor_name=context.agent.name,
         )
-        _invalidate_tenants_fleet_cache_scope(db, reason="update_client")
+        company_ids_to_invalidate = {
+            company_id
+            for company_id in {previous_company_id, client.company_id}
+            if company_id is not None
+        }
+        _invalidate_tenants_fleet_cache_scope(
+            db,
+            reason="update_client",
+            company_ids=company_ids_to_invalidate or None,
+        )
         db.commit()
 
     company_name = None
@@ -16928,7 +17137,11 @@ async def archive_client(
         actor_id=context.agent.id,
         actor_name=context.agent.name,
     )
-    _invalidate_tenants_fleet_cache_scope(db, reason="archive_client")
+    _invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="archive_client",
+        company_ids={client.company_id} if client.company_id else None,
+    )
     db.commit()
 
     company = db.query(Company).filter(Company.id == client.company_id).first() if client.company_id else None
@@ -16985,7 +17198,11 @@ async def restore_client(
         actor_id=context.agent.id,
         actor_name=context.agent.name,
     )
-    _invalidate_tenants_fleet_cache_scope(db, reason="restore_client")
+    _invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="restore_client",
+        company_ids={client.company_id} if client.company_id else None,
+    )
     db.commit()
 
     company = db.query(Company).filter(Company.id == client.company_id).first() if client.company_id else None
@@ -17116,7 +17333,11 @@ async def create_branch(
         client_id=client.id,
         branch_id=branch.id,
     )
-    _invalidate_tenants_fleet_cache_scope(db, reason="create_branch")
+    _invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="create_branch",
+        company_ids={client.company_id} if client.company_id else None,
+    )
     db.commit()
 
     return ConsoleBranchCreateResponse(
@@ -17153,6 +17374,7 @@ async def update_branch(
     if not branch:
         raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
     _require_client_access(context, branch.client_id)
+    branch_company_id = _resolve_company_id_for_client_in_context(context, branch.client_id)
 
     confirmation = None
     previous_instance_id = branch.instance_id
@@ -17302,7 +17524,11 @@ async def update_branch(
                 target_type="branch",
                 target_id=branch.id,
             )
-        _invalidate_tenants_fleet_cache_scope(db, reason="update_branch")
+        _invalidate_tenants_fleet_cache_scope(
+            db,
+            reason="update_branch",
+            company_ids={branch_company_id} if branch_company_id else None,
+        )
         db.commit()
 
     return _serialize_branch(branch)
@@ -17784,6 +18010,7 @@ async def approve_branch_go_live(
     if not branch:
         raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
     _require_client_access(context, branch.client_id)
+    branch_company_id = _resolve_company_id_for_client_in_context(context, branch.client_id)
 
     reason = _normalize_access_reason(body.reason, required=True)
     _require_branch_scorecard_ready(
@@ -17817,7 +18044,11 @@ async def approve_branch_go_live(
         client_id=branch.client_id,
         branch_id=branch.id,
     )
-    _invalidate_tenants_fleet_cache_scope(db, reason="approve_branch_go_live")
+    _invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="approve_branch_go_live",
+        company_ids={branch_company_id} if branch_company_id else None,
+    )
     db.commit()
     return _serialize_branch(branch)
 
@@ -17845,6 +18076,7 @@ async def reject_branch_go_live(
     if not branch:
         raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
     _require_client_access(context, branch.client_id)
+    branch_company_id = _resolve_company_id_for_client_in_context(context, branch.client_id)
 
     reason = _normalize_access_reason(body.reason, required=True)
     now = datetime.now(timezone.utc)
@@ -17872,7 +18104,11 @@ async def reject_branch_go_live(
         client_id=branch.client_id,
         branch_id=branch.id,
     )
-    _invalidate_tenants_fleet_cache_scope(db, reason="reject_branch_go_live")
+    _invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="reject_branch_go_live",
+        company_ids={branch_company_id} if branch_company_id else None,
+    )
     db.commit()
     return _serialize_branch(branch)
 
@@ -17900,6 +18136,7 @@ async def waive_branch_go_live(
     if not branch:
         raise ConsoleAPIError(404, "NOT_FOUND", "Branch not found")
     _require_client_access(context, branch.client_id)
+    branch_company_id = _resolve_company_id_for_client_in_context(context, branch.client_id)
 
     reason = _normalize_access_reason(body.reason, required=True)
     ttl_hours = _normalize_go_live_waiver_ttl_hours(body.ttl_hours)
@@ -17931,7 +18168,11 @@ async def waive_branch_go_live(
         client_id=branch.client_id,
         branch_id=branch.id,
     )
-    _invalidate_tenants_fleet_cache_scope(db, reason="waive_branch_go_live")
+    _invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="waive_branch_go_live",
+        company_ids={branch_company_id} if branch_company_id else None,
+    )
     db.commit()
     return _serialize_branch(branch)
 

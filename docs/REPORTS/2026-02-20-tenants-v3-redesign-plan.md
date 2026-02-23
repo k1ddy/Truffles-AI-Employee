@@ -267,6 +267,47 @@
 - `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_admin_provisioning.py` -> pass
 - `python3 truffles-api/scripts/generate_openapi.py --check` -> pass
 
+## Wave 4 scope-aware invalidation continuation (2026-02-23, UTC)
+1. Extended cache schema with scope metadata.
+- Added `scope_company_id` and `scope_client_id` to `tenants_fleet_cache` via migration `039`.
+- Updated ORM model `TenantsFleetCache` accordingly.
+
+2. Moved invalidation from full wipe to targeted-by-company delete.
+- `_invalidate_tenants_fleet_cache_scope` now supports `company_ids` and deletes:
+  - global rows (`scope_company_id IS NULL`)
+  - rows for affected companies only.
+- Summary cache writes now persist `scope_company_id` so company-scoped entries become addressable.
+
+3. Endpoint hooks now pass affected company scope.
+- `update_company`, `create/update/archive/restore client`,
+- `create/update branch`,
+- `branch go-live approve/reject/waive`,
+- integrations execute paths (`integration_reconcile`, `provider_ops`).
+
+4. Validation.
+- `pytest -q truffles-api/tests/test_console_admin_provisioning.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py truffles-api/tests/test_console_access_admin_pr2.py` -> `133 passed`
+- `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_admin_provisioning.py truffles-api/app/models/tenants_fleet_cache.py` -> pass
+- `python3 truffles-api/scripts/generate_openapi.py --check` -> pass
+
+## Wave 4 targeted prewarm continuation (2026-02-23, UTC)
+1. Added post-commit targeted prewarm for affected company scopes.
+- `_invalidate_tenants_fleet_cache_scope` now queues affected `company_ids` in session info (`tenants_fleet_cache_prewarm_company_ids`) after successful invalidation.
+- `after_commit` hook consumes queued ids and starts async summary prewarm worker per affected company scope.
+- Prewarm worker reuses existing summary refresh pipeline (`_refresh_fleet_summary_cache_worker`) with scope key based on `company_id + active clients hash`.
+
+2. Transaction safety and behavior guarantees.
+- Prewarm is launched strictly `after_commit`, so it cannot race on uncommitted tenant mutations.
+- Rollback clears pending prewarm queue via `after_rollback`.
+- Flow remains fail-open for write path (best-effort; no mutation blocking).
+
+3. Validation.
+- `pytest -q truffles-api/tests/test_console_tenants_list.py -k "prewarm or invalidate_tenants_fleet_cache_scope_queues_company_prewarm or on_console_session_after_commit"` -> `3 passed`
+- `pytest -q truffles-api/tests/test_console_admin_provisioning.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py truffles-api/tests/test_console_access_admin_pr2.py` -> `136 passed`
+- `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py` -> pass
+
+4. CI/infra note.
+- PR run `https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22301196048` was cancelled as infra-stuck (`core-eval` pending without progress >10m) per stop-the-line policy; continuation runs on next pushed commit.
+
 ## Post-merge canary verification (2026-02-23, UTC)
 1. Authenticated perf baseline on deployed API captured (platform_admin scope).
 - Command:
