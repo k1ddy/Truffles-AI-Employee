@@ -250,6 +250,8 @@ def main() -> int:
             )
         report["tenants_endpoint_latency"] = tenants_report
 
+        # Branch latency may be absent in environments where http_request_latency
+        # is not emitted for this path; keep this metric optional in the report.
         branches_hist = _extract_histogram_by_label(
             metrics_text,
             metric_prefix=HTTP_METRIC,
