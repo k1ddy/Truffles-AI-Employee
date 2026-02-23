@@ -65,11 +65,16 @@
   - Продолжен Wave2 copy cleanup: `TenantsActionQueuePanel` переведён на business wording (`Приоритетные задачи`), убран тех-шум в карточках fleet/company.
   - Обновлены owner-документы (`TP`, `STATE`) по факту merge+verify: F3 отмечен закрытым для текущего контракта, статусы Wave 1/2/4/5 синхронизированы.
   - Прогнаны проверки: `corepack pnpm -C console-web run lint` (pass), `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 corepack pnpm -C console-web exec playwright test e2e/platform-admin.spec.ts --project=chromium --workers=1` (`17 passed`), `corepack pnpm -C console-web run build` (pass).
+  - Открыт новый PR continuation: `https://github.com/k1ddy/Truffles-AI-Employee/pull/803`.
+  - Wave4 decomposition продолжен: из `tenants/page.tsx` вынесены `TenantsClientsPanel`, `TenantsBranchChangeManagementPanel`, `TenantsDecommissionPanel`, `TenantsClientLifecycleModal`; размер `tenants/page.tsx` снижен до `2970` LOC.
+  - Исправлен race в `use-tenants-page-filters.ts`: `clear filters` теперь детерминированно выигрывает у pending URL replace (Scenario C больше не флапает).
+  - Запущен Wave4 perf-track: добавлен Prometheus histogram `console_tenants_endpoint_latency{endpoint=portfolio|company_cockpit}` и router instrumentation для `/admin/tenants/portfolio` + `/admin/tenants/company-cockpit`.
+  - Добавлены backend contract checks для perf-track (`record_tenants_endpoint_latency` в unit tests tenants list).
+  - Прогнаны проверки: `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`, `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 corepack pnpm -C console-web exec playwright test e2e/platform-admin.spec.ts --project=chromium --workers=1` (`17 passed`), `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 A11Y_FAIL_ON_THRESHOLDS=1 corepack pnpm -C console-web exec playwright test e2e/tenants-a11y.spec.ts --project=chromium --workers=1` (`2 passed`), `python3 truffles-api/scripts/generate_openapi.py --check`, `pytest -q truffles-api/tests/test_console_tenants_list.py` (`61 passed`), `pytest -q truffles-api/tests/test_console_fleet_attention.py` (`6 passed`), `scripts/session_check.sh`.
 - next:
-  - Продолжить Wave4 декомпозицию `tenants/page.tsx` (следующий вынос: `clients`, `change-management`, `decommission` секции + data/actions hooks).
-  - Запустить perf hardening Wave4/5: базовые метрики p95 для `/admin/tenants/portfolio` и `/admin/tenants/company-cockpit` на больших company scopes.
   - Выполнить runtime recheck `tenants-a11y` на `https://console.truffles.kz` после текущего деплоя и зафиксировать evidence в `STATE`.
   - Подготовить rollout-note по `NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER` (shadow/canary/full + rollback условия).
+  - Выполнить perf baseline на крупном профиле (PromQL p95 по `console_tenants_endpoint_latency`) и сравнить с целевыми SLO из TP.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
@@ -103,5 +108,12 @@
   - console-web/src/components/TenantsFleetAttentionPanel.tsx
   - console-web/src/components/TenantsPortfolioCompaniesPanel.tsx
   - console-web/src/components/TenantsActionQueuePanel.tsx
+  - console-web/src/components/TenantsClientsPanel.tsx
+  - console-web/src/components/TenantsBranchChangeManagementPanel.tsx
+  - console-web/src/components/TenantsDecommissionPanel.tsx
+  - console-web/src/components/TenantsClientLifecycleModal.tsx
+  - console-web/src/app/tenants/use-tenants-page-filters.ts
+  - truffles-api/app/logging_config.py
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/803
   - STATE.md
-- last_updated: 2026-02-23T05:25:17Z
+- last_updated: 2026-02-23T07:20:00Z

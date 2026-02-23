@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date as dt_date
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+from time import perf_counter
 from threading import Lock
 from typing import Any, Callable, Literal, Optional
 from urllib.error import HTTPError, URLError
@@ -24,6 +25,7 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.logging_config import record_tenants_endpoint_latency
 from app.models import (
     Agent,
     AgentIdentity,
@@ -13694,68 +13696,72 @@ async def get_tenants_portfolio(
     include_low: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> ConsoleTenantsPortfolioResponse:
-    _reject_unknown_query_params(
-        request,
-        {
-            "cursor",
-            "limit",
-            "q",
-            "company_id",
-            "lifecycle",
-            "attention_limit",
-            "stale_after_minutes",
-            "include_low",
-        },
-    )
-    _validate_limit(limit)
-    _validate_limit(attention_limit)
-    lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
+    started_at = perf_counter()
+    try:
+        _reject_unknown_query_params(
+            request,
+            {
+                "cursor",
+                "limit",
+                "q",
+                "company_id",
+                "lifecycle",
+                "attention_limit",
+                "stale_after_minutes",
+                "include_low",
+            },
+        )
+        _validate_limit(limit)
+        _validate_limit(attention_limit)
+        lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
 
-    clients_request = _request_with_query_params(
-        request,
-        {
-            "cursor": cursor,
-            "limit": limit,
-            "q": q,
-            "company_id": company_id,
-            "lifecycle": lifecycle_mode,
-            "include_fleet": "true",
-            "include_summary": "true",
-        },
-    )
-    clients_response = await list_clients(
-        request=clients_request,
-        cursor=cursor,
-        limit=limit,
-        q=q,
-        company_id=company_id,
-        lifecycle=lifecycle_mode,
-        include_fleet="true",
-        include_summary="true",
-        db=db,
-    )
+        clients_request = _request_with_query_params(
+            request,
+            {
+                "cursor": cursor,
+                "limit": limit,
+                "q": q,
+                "company_id": company_id,
+                "lifecycle": lifecycle_mode,
+                "include_fleet": "true",
+                "include_summary": "true",
+            },
+        )
+        clients_response = await list_clients(
+            request=clients_request,
+            cursor=cursor,
+            limit=limit,
+            q=q,
+            company_id=company_id,
+            lifecycle=lifecycle_mode,
+            include_fleet="true",
+            include_summary="true",
+            db=db,
+        )
 
-    attention_request = _request_with_query_params(
-        request,
-        {
-            "limit": attention_limit,
-            "stale_after_minutes": stale_after_minutes,
-            "include_low": include_low,
-        },
-    )
-    attention_response = await list_fleet_attention(
-        request=attention_request,
-        limit=attention_limit,
-        stale_after_minutes=stale_after_minutes,
-        include_low=include_low,
-        db=db,
-    )
+        attention_request = _request_with_query_params(
+            request,
+            {
+                "limit": attention_limit,
+                "stale_after_minutes": stale_after_minutes,
+                "include_low": include_low,
+            },
+        )
+        attention_response = await list_fleet_attention(
+            request=attention_request,
+            limit=attention_limit,
+            stale_after_minutes=stale_after_minutes,
+            include_low=include_low,
+            db=db,
+        )
 
-    return ConsoleTenantsPortfolioResponse(
-        generated_at=datetime.now(timezone.utc).isoformat(),
-        clients=clients_response,
-        fleet_attention=attention_response,
-    )
+        return ConsoleTenantsPortfolioResponse(
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            clients=clients_response,
+            fleet_attention=attention_response,
+        )
+    finally:
+        record_tenants_endpoint_latency("portfolio", (perf_counter() - started_at) * 1000.0)
 
 
 @router.get(
@@ -13776,81 +13782,85 @@ async def get_tenants_company_cockpit(
     branch_q: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> ConsoleTenantsCompanyCockpitResponse:
-    _reject_unknown_query_params(
-        request,
-        {
-            "company_id",
-            "client_id",
-            "lifecycle",
-            "client_limit",
-            "branch_limit",
-            "client_cursor",
-            "branch_cursor",
-            "client_q",
-            "branch_q",
-        },
-    )
-    _validate_limit(client_limit)
-    _validate_limit(branch_limit)
-    lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
+    started_at = perf_counter()
+    try:
+        _reject_unknown_query_params(
+            request,
+            {
+                "company_id",
+                "client_id",
+                "lifecycle",
+                "client_limit",
+                "branch_limit",
+                "client_cursor",
+                "branch_cursor",
+                "client_q",
+                "branch_q",
+            },
+        )
+        _validate_limit(client_limit)
+        _validate_limit(branch_limit)
+        lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
 
-    company_uuid = _parse_uuid_param("company_id", company_id)
-    if company_uuid is None:
-        raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid company_id")
+        company_uuid = _parse_uuid_param("company_id", company_id)
+        if company_uuid is None:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "Invalid company_id")
 
-    selected_client_uuid = _parse_uuid_param("client_id", client_id)
+        selected_client_uuid = _parse_uuid_param("client_id", client_id)
 
-    clients_request = _request_with_query_params(
-        request,
-        {
-            "cursor": client_cursor,
-            "limit": client_limit,
-            "q": client_q,
-            "company_id": str(company_uuid),
-            "lifecycle": lifecycle_mode,
-            "include_fleet": "true",
-        },
-    )
-    clients_response = await list_clients(
-        request=clients_request,
-        cursor=client_cursor,
-        limit=client_limit,
-        q=client_q,
-        company_id=str(company_uuid),
-        lifecycle=lifecycle_mode,
-        include_fleet="true",
-        db=db,
-    )
+        clients_request = _request_with_query_params(
+            request,
+            {
+                "cursor": client_cursor,
+                "limit": client_limit,
+                "q": client_q,
+                "company_id": str(company_uuid),
+                "lifecycle": lifecycle_mode,
+                "include_fleet": "true",
+            },
+        )
+        clients_response = await list_clients(
+            request=clients_request,
+            cursor=client_cursor,
+            limit=client_limit,
+            q=client_q,
+            company_id=str(company_uuid),
+            lifecycle=lifecycle_mode,
+            include_fleet="true",
+            db=db,
+        )
 
-    branches_request = _request_with_query_params(
-        request,
-        {
-            "cursor": branch_cursor,
-            "limit": branch_limit,
-            "q": branch_q,
-            "company_id": str(company_uuid),
-            "client_id": str(selected_client_uuid) if selected_client_uuid else None,
-            "lifecycle": lifecycle_mode,
-        },
-    )
-    branches_response = await list_branches(
-        request=branches_request,
-        cursor=branch_cursor,
-        limit=branch_limit,
-        q=branch_q,
-        company_id=str(company_uuid),
-        client_id=str(selected_client_uuid) if selected_client_uuid else None,
-        lifecycle=lifecycle_mode,
-        db=db,
-    )
+        branches_request = _request_with_query_params(
+            request,
+            {
+                "cursor": branch_cursor,
+                "limit": branch_limit,
+                "q": branch_q,
+                "company_id": str(company_uuid),
+                "client_id": str(selected_client_uuid) if selected_client_uuid else None,
+                "lifecycle": lifecycle_mode,
+            },
+        )
+        branches_response = await list_branches(
+            request=branches_request,
+            cursor=branch_cursor,
+            limit=branch_limit,
+            q=branch_q,
+            company_id=str(company_uuid),
+            client_id=str(selected_client_uuid) if selected_client_uuid else None,
+            lifecycle=lifecycle_mode,
+            db=db,
+        )
 
-    return ConsoleTenantsCompanyCockpitResponse(
-        generated_at=datetime.now(timezone.utc).isoformat(),
-        company_id=company_uuid,
-        selected_client_id=selected_client_uuid,
-        clients=clients_response,
-        branches=branches_response,
-    )
+        return ConsoleTenantsCompanyCockpitResponse(
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            company_id=company_uuid,
+            selected_client_id=selected_client_uuid,
+            clients=clients_response,
+            branches=branches_response,
+        )
+    finally:
+        record_tenants_endpoint_latency("company_cockpit", (perf_counter() - started_at) * 1000.0)
 
 
 @router.get(

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 export type TenantsPageFilters = {
     companyId: string | null;
@@ -66,6 +66,7 @@ export function useTenantsPageFilters({
         branchId: null,
     });
     const [pageFiltersInitialized, setPageFiltersInitialized] = useState(false);
+    const lastPushedQueryRef = useRef<string | null>(null);
 
     const pageFiltersFromSearchParams = useMemo(
         () => readTenantsFiltersFromSearchParams(new URLSearchParams(searchParams.toString())),
@@ -116,9 +117,11 @@ export function useTenantsPageFilters({
         writeTenantsFilterParam(nextParams, TENANTS_FILTER_BRANCH_PARAM, pageFilterBranchId);
         const nextQuery = nextParams.toString();
         const currentQuery = searchParams.toString();
-        if (nextQuery === currentQuery) {
+        const hasPendingUrlMismatch = lastPushedQueryRef.current !== null && lastPushedQueryRef.current !== currentQuery;
+        if (nextQuery === currentQuery && !hasPendingUrlMismatch) {
             return;
         }
+        lastPushedQueryRef.current = nextQuery;
         router.replace(nextQuery ? `/tenants?${nextQuery}` : "/tenants", { scroll: false });
     }, [
         pageFiltersInitialized,
