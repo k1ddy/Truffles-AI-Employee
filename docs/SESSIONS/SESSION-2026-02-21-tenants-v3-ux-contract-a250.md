@@ -87,9 +87,13 @@
   - Выделен общий compute path `_build_fleet_attention_response_for_clients` (request miss + background refresh reuse).
   - Добавлены unit tests на `cache hit -> schedule async refresh` для `list_clients(include_summary)` и `list_fleet_attention`.
   - Прогнаны проверки: `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`72 passed`), `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py` (pass), `python3 truffles-api/scripts/generate_openapi.py --check` (pass).
+  - Wave4 event-driven continuation: добавлен write-path invalidation для `tenants_fleet_cache` (`fleet_summary`/`fleet_attention`) через `_invalidate_tenants_fleet_cache_scope` (best-effort nested transaction guard) в provisioning/go-live/integration execute endpoints.
+  - Добавлены contract tests на invalidation hooks в `truffles-api/tests/test_console_admin_provisioning.py` (update_company/create_client/archive_client/restore_client/update_branch).
+  - Прогнаны проверки continuation: `pytest -q truffles-api/tests/test_console_admin_provisioning.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`89 passed`), `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_admin_provisioning.py` (pass), `python3 truffles-api/scripts/generate_openapi.py --check` (pass).
 - next:
-  - Открыть continuation PR с async-refresh hardening и дождаться CI.
-  - После merge continuation PR обновить `STATE` и закрыть сессию `done`.
+  - Открыть continuation PR с event-driven cache invalidation и дождаться CI.
+  - После merge зафиксировать runtime perf snapshot после серии tenant write операций (stale-window evidence).
+  - Продолжить Wave4 targeted incremental precompute (scope-aware invalidation/refresh вместо global invalidate).
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
@@ -143,6 +147,9 @@
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/804
   - truffles-api/app/routers/console.py
   - truffles-api/tests/test_console_tenants_list.py
+  - truffles-api/tests/test_console_admin_provisioning.py
+  - docs/REPORTS/2026-02-20-tenants-v3-redesign-plan.md
+  - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/803
   - STATE.md
-- last_updated: 2026-02-23T08:20:00Z
+- last_updated: 2026-02-23T09:35:00Z

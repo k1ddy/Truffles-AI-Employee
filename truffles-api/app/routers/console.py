@@ -2427,6 +2427,7 @@ def _build_clients_query_for_scope(
     query = db.query(Client)
     if accessible_client_ids:
         query = query.filter(Client.id.in_(list(accessible_client_ids)))
+    # Keep legacy platform_admin behavior for empty in-memory scope in tests/recovery paths.
     if lifecycle_mode == "active":
         query = query.filter(Client.status == "active")
     elif lifecycle_mode == "archived":
@@ -3109,6 +3110,30 @@ def _schedule_fleet_attention_async_refresh(
         ).start()
     except Exception:
         _release_fleet_cache_refresh(_TENANTS_FLEET_CACHE_ATTENTION_TYPE, scope_key)
+
+
+def _invalidate_tenants_fleet_cache_scope(
+    db: Session,
+    *,
+    reason: str,
+) -> None:
+    # Keep cache invalidation best-effort and isolated from tenant mutations.
+    # If cache storage is unavailable, writes must still succeed.
+    _ = reason
+    try:
+        with db.begin_nested():
+            db.execute(
+                text(
+                    "DELETE FROM tenants_fleet_cache "
+                    "WHERE cache_type IN ('fleet_summary', 'fleet_attention')"
+                )
+            )
+    except ProgrammingError as exc:
+        if _is_tenants_fleet_cache_table_missing_error(exc):
+            return
+        return
+    except Exception:
+        return
 
 
 def _normalize_client_lifecycle_reason(reason: str) -> str:
@@ -16086,6 +16111,7 @@ async def run_integration_reconcile_for_branch(
                 client_id=branch.client_id,
                 branch_id=branch.id,
             )
+            _invalidate_tenants_fleet_cache_scope(db, reason="integration_reconcile_execute")
             db.commit()
         return ConsoleIntegrationBranchActionResponse(
             branch_id=branch.id,
@@ -16309,6 +16335,7 @@ async def run_integration_reconcile_for_branch(
                 target_type="branch",
                 target_id=branch.id,
             )
+        _invalidate_tenants_fleet_cache_scope(db, reason="provider_ops_execute")
         db.commit()
     else:
         result["dry_run"] = True
@@ -16623,6 +16650,7 @@ async def update_company(
             actor_id=context.agent.id,
             actor_name=context.agent.name,
         )
+        _invalidate_tenants_fleet_cache_scope(db, reason="update_company")
         db.commit()
 
     return ConsoleCompany(
@@ -16691,6 +16719,7 @@ async def create_client(
         },
         client_id=client.id,
     )
+    _invalidate_tenants_fleet_cache_scope(db, reason="create_client")
     db.commit()
 
     return ConsoleClientCreateResponse(
@@ -16797,6 +16826,7 @@ async def update_client(
             actor_id=context.agent.id,
             actor_name=context.agent.name,
         )
+        _invalidate_tenants_fleet_cache_scope(db, reason="update_client")
         db.commit()
 
     company_name = None
@@ -16898,6 +16928,7 @@ async def archive_client(
         actor_id=context.agent.id,
         actor_name=context.agent.name,
     )
+    _invalidate_tenants_fleet_cache_scope(db, reason="archive_client")
     db.commit()
 
     company = db.query(Company).filter(Company.id == client.company_id).first() if client.company_id else None
@@ -16954,6 +16985,7 @@ async def restore_client(
         actor_id=context.agent.id,
         actor_name=context.agent.name,
     )
+    _invalidate_tenants_fleet_cache_scope(db, reason="restore_client")
     db.commit()
 
     company = db.query(Company).filter(Company.id == client.company_id).first() if client.company_id else None
@@ -17084,6 +17116,7 @@ async def create_branch(
         client_id=client.id,
         branch_id=branch.id,
     )
+    _invalidate_tenants_fleet_cache_scope(db, reason="create_branch")
     db.commit()
 
     return ConsoleBranchCreateResponse(
@@ -17269,6 +17302,7 @@ async def update_branch(
                 target_type="branch",
                 target_id=branch.id,
             )
+        _invalidate_tenants_fleet_cache_scope(db, reason="update_branch")
         db.commit()
 
     return _serialize_branch(branch)
@@ -17783,6 +17817,7 @@ async def approve_branch_go_live(
         client_id=branch.client_id,
         branch_id=branch.id,
     )
+    _invalidate_tenants_fleet_cache_scope(db, reason="approve_branch_go_live")
     db.commit()
     return _serialize_branch(branch)
 
@@ -17837,6 +17872,7 @@ async def reject_branch_go_live(
         client_id=branch.client_id,
         branch_id=branch.id,
     )
+    _invalidate_tenants_fleet_cache_scope(db, reason="reject_branch_go_live")
     db.commit()
     return _serialize_branch(branch)
 
@@ -17895,6 +17931,7 @@ async def waive_branch_go_live(
         client_id=branch.client_id,
         branch_id=branch.id,
     )
+    _invalidate_tenants_fleet_cache_scope(db, reason="waive_branch_go_live")
     db.commit()
     return _serialize_branch(branch)
 

@@ -251,6 +251,22 @@
   - `cache hit -> schedule async refresh` for `clients summary`,
   - `cache hit -> schedule async refresh` for `fleet attention`.
 
+## Wave 4 event-driven invalidation continuation (2026-02-23, UTC)
+1. Added write-path invalidation for fleet cache.
+- Introduced `_invalidate_tenants_fleet_cache_scope` (best-effort nested transaction guard) to clear `fleet_summary` and `fleet_attention` cache slices without blocking tenant writes.
+
+2. Hooked invalidation into mutation endpoints that change fleet aggregates.
+- `update_company`
+- `create_client`, `update_client`, `archive_client`, `restore_client`
+- `create_branch`, `update_branch`
+- `approve/reject/waive branch go-live`
+- integrations execute paths: `integration_reconcile` and `provider_ops`
+
+3. Validation.
+- `pytest -q truffles-api/tests/test_console_admin_provisioning.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` -> `89 passed`
+- `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_admin_provisioning.py` -> pass
+- `python3 truffles-api/scripts/generate_openapi.py --check` -> pass
+
 ## Post-merge canary verification (2026-02-23, UTC)
 1. Authenticated perf baseline on deployed API captured (platform_admin scope).
 - Command:

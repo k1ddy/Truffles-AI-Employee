@@ -35,10 +35,16 @@ async def test_update_company_updates_fields(monkeypatch):
     company = SimpleNamespace(id=company_id, name="Old", billing_info={"plan": "A"})
     db = Mock()
     db.query.return_value.filter.return_value.first.return_value = company
+    invalidation_reasons: list[str] = []
 
     monkeypatch.setattr(console_router, "get_console_context", lambda *args, **kwargs: _mock_context())
     monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
     monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "_invalidate_tenants_fleet_cache_scope",
+        lambda *_args, **kwargs: invalidation_reasons.append(kwargs.get("reason")),
+    )
 
     response = await console_router.update_company(
         company_id,
@@ -50,6 +56,7 @@ async def test_update_company_updates_fields(monkeypatch):
     assert response.id == company_id
     assert response.name == "New"
     assert response.billing_info == {"plan": "B"}
+    assert invalidation_reasons == ["update_company"]
     db.commit.assert_called_once()
 
 
@@ -130,6 +137,51 @@ async def test_create_company_records_client_scoped_audit(monkeypatch):
     assert audit_calls[0]["client_id"] == selected_client_id
     assert audit_calls[0]["actor"] == context.agent
     assert audit_calls[0]["event_type"] == "company_created"
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_client_invalidates_fleet_cache(monkeypatch):
+    company_id = uuid4()
+    company = SimpleNamespace(id=company_id, name="Company")
+    db = Mock()
+    existing_query = Mock()
+    existing_query.filter.return_value.first.return_value = None
+    company_query = Mock()
+    company_query.filter.return_value.first.return_value = company
+    db.query.side_effect = [existing_query, company_query]
+    invalidation_reasons: list[str] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=uuid4(), company_id=company_id)],
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "_invalidate_tenants_fleet_cache_scope",
+        lambda *_args, **kwargs: invalidation_reasons.append(kwargs.get("reason")),
+    )
+
+    response = await console_router.create_client(
+        request=Mock(),
+        body=ConsoleClientCreateRequest(
+            slug="new-client",
+            company_id=company_id,
+            status="active",
+        ),
+        db=db,
+    )
+
+    assert response.client is not None
+    assert response.client.slug == "new-client"
+    assert response.client.company_id == company_id
+    assert invalidation_reasons == ["create_client"]
     db.commit.assert_called_once()
 
 
@@ -306,6 +358,7 @@ async def test_archive_client_sets_deleted_status(monkeypatch):
     company_query = Mock()
     company_query.filter.return_value.first.return_value = company
     db.query.side_effect = [client_query, company_query]
+    invalidation_reasons: list[str] = []
 
     monkeypatch.setattr(
         console_router,
@@ -327,6 +380,11 @@ async def test_archive_client_sets_deleted_status(monkeypatch):
         },
     )
     monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "_invalidate_tenants_fleet_cache_scope",
+        lambda *_args, **kwargs: invalidation_reasons.append(kwargs.get("reason")),
+    )
 
     response = await console_router.archive_client(
         client_id,
@@ -338,6 +396,7 @@ async def test_archive_client_sets_deleted_status(monkeypatch):
     assert response.id == client_id
     assert response.status == "deleted"
     assert client.deleted_at is not None
+    assert invalidation_reasons == ["archive_client"]
     db.commit.assert_called_once()
 
 
@@ -360,6 +419,7 @@ async def test_restore_client_sets_active_status(monkeypatch):
     company_query = Mock()
     company_query.filter.return_value.first.return_value = company
     db.query.side_effect = [client_query, company_query]
+    invalidation_reasons: list[str] = []
 
     monkeypatch.setattr(
         console_router,
@@ -372,6 +432,11 @@ async def test_restore_client_sets_active_status(monkeypatch):
     )
     monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
     monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "_invalidate_tenants_fleet_cache_scope",
+        lambda *_args, **kwargs: invalidation_reasons.append(kwargs.get("reason")),
+    )
 
     response = await console_router.restore_client(
         client_id,
@@ -383,6 +448,77 @@ async def test_restore_client_sets_active_status(monkeypatch):
     assert response.id == client_id
     assert response.status == "active"
     assert client.deleted_at is None
+    assert invalidation_reasons == ["restore_client"]
+    db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_update_branch_invalidates_fleet_cache_on_success(monkeypatch):
+    client_id = uuid4()
+    branch_id = uuid4()
+    now = datetime.now(timezone.utc)
+    branch = SimpleNamespace(
+        id=branch_id,
+        client_id=client_id,
+        slug="old-branch",
+        name="Old Branch",
+        instance_id="instance-1",
+        phone=None,
+        telegram_chat_id=None,
+        knowledge_tag="demo",
+        timezone="Asia/Almaty",
+        working_hours={},
+        booking_settings={},
+        is_active=True,
+        onboarding_state="branch_draft",
+        onboarding_updated_at=now,
+        go_live_state="approved",
+        go_live_reason=None,
+        go_live_reviewed_at=None,
+        go_live_reviewed_by=None,
+        go_live_waiver_until=None,
+        go_live_waiver_reason=None,
+        go_live_waiver_by=None,
+        integration_state="ok",
+        integration_reason=None,
+        integration_checked_at=None,
+        integration_degraded_at=None,
+        integration_recovered_at=None,
+        updated_at=now,
+        created_at=now,
+    )
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = branch
+    invalidation_reasons: list[str] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *args, **kwargs: _mock_context(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=client_id, company_id=uuid4())],
+            client_id=client_id,
+        ),
+    )
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "record_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(console_router, "ensure_onboarding_step", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        console_router,
+        "_invalidate_tenants_fleet_cache_scope",
+        lambda *_args, **kwargs: invalidation_reasons.append(kwargs.get("reason")),
+    )
+    monkeypatch.setattr(console_router, "_serialize_branch", lambda target: target)
+
+    response = await console_router.update_branch(
+        branch_id,
+        request=Mock(),
+        body=ConsoleBranchUpdateRequest(name="New Branch"),
+        db=db,
+    )
+
+    assert response.name == "New Branch"
+    assert invalidation_reasons == ["update_branch"]
     db.commit.assert_called_once()
 
 
