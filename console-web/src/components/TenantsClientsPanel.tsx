@@ -288,7 +288,7 @@ export default function TenantsClientsPanel({
                                         <div className="mt-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs" data-testid="tenants-client-lifecycle-audit">
                                             <div className="flex flex-wrap items-center justify-between gap-2">
                                                 <div className="font-medium">
-                                                    История статуса (сессия + API)
+                                                    История статуса
                                                 </div>
                                                 <div className="flex items-center gap-1">
                                                     <button
@@ -331,13 +331,14 @@ export default function TenantsClientsPanel({
                                                             disabled={selectedClientAuditIsFetching}
                                                             data-testid="tenants-client-lifecycle-audit-refresh"
                                                         >
-                                                            {selectedClientAuditIsFetching ? "Обновление..." : "Обновить данные API"}
+                                                            {selectedClientAuditIsFetching ? "Обновление..." : "Обновить историю"}
                                                         </button>
                                                     ) : null}
                                                 </div>
                                             </div>
                                             <div className="mt-1 text-muted-foreground">
-                                                источник: кеш сессии + API-аудит{clientIdKey === pageFilterClientId ? "" : " (API-аудит доступен при текущем фильтре клиента)"}
+                                                источник: текущая сессия + журнал изменений
+                                                {clientIdKey === pageFilterClientId ? "" : " (журнал доступен при выбранном клиенте в фильтрах страницы)"}
                                             </div>
                                             <div className="mt-1 space-y-2" data-testid="tenants-client-lifecycle-audit-history">
                                                 {filteredLifecycleAuditHistory.length === 0 ? (
@@ -360,7 +361,7 @@ export default function TenantsClientsPanel({
                                                                 источник: {entry.source}
                                                             </div>
                                                             <div className={entry.status === "success" ? "text-emerald-700" : "text-red-700"}>
-                                                                {entry.status === "success" ? "OK" : "ERROR"}: {entry.message}
+                                                                {entry.status === "success" ? "Успех" : "Ошибка"}: {entry.message}
                                                                 {isPlatformPreset && entry.traceId ? ` (trace_id: ${entry.traceId})` : ""}
                                                             </div>
                                                         </div>

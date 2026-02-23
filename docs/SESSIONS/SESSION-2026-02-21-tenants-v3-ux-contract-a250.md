@@ -71,10 +71,20 @@
   - Запущен Wave4 perf-track: добавлен Prometheus histogram `console_tenants_endpoint_latency{endpoint=portfolio|company_cockpit}` и router instrumentation для `/admin/tenants/portfolio` + `/admin/tenants/company-cockpit`.
   - Добавлены backend contract checks для perf-track (`record_tenants_endpoint_latency` в unit tests tenants list).
   - Прогнаны проверки: `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`, `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 corepack pnpm -C console-web exec playwright test e2e/platform-admin.spec.ts --project=chromium --workers=1` (`17 passed`), `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 A11Y_FAIL_ON_THRESHOLDS=1 corepack pnpm -C console-web exec playwright test e2e/tenants-a11y.spec.ts --project=chromium --workers=1` (`2 passed`), `python3 truffles-api/scripts/generate_openapi.py --check`, `pytest -q truffles-api/tests/test_console_tenants_list.py` (`61 passed`), `pytest -q truffles-api/tests/test_console_fleet_attention.py` (`6 passed`), `scripts/session_check.sh`.
+  - Wave4 continuation: добавлен read-model cache для fleet-агрегаций (`TenantsFleetCache`, migration `038_add_tenants_fleet_cache.sql`) и подключён в `list_clients(include_summary)` + `list_fleet_attention` с fail-open fallback.
+  - Добавлены cache contract tests в tenants suite: `test_list_clients_uses_cached_summary_when_available`, `test_list_clients_stores_summary_in_cache_after_miss`, `test_list_fleet_attention_returns_cached_response`.
+  - Добавлен perf evidence script `ops/console_tenants_perf_snapshot.py` (p50/p95/p99 + SLO verdict + fail-on-breach).
+  - Wave5/6 continuation: очищен deep lifecycle/editor copy (`TenantsClientLifecycleModal`, `TenantsClientsPanel`, `tenants/page.tsx`) и формализованы rollout guardrails (`shadow -> canary -> full`, rollback via flag).
+  - Прогнаны проверки continuation: `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`70 passed`), `ruff check` (router/model/tests/script), `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`, deterministic Playwright lanes (`platform-admin.spec.ts: 17 passed`, `tenants-a11y.spec.ts: 2 passed`), `python3 truffles-api/scripts/generate_openapi.py --check`.
+  - Captured perf snapshot evidence: `/tmp/tenants_perf_snapshot_20260223_after_probe.json` (`portfolio/company_cockpit p95=10ms` on probe traffic, status `pass`).
+  - Выполнен authenticated perf baseline на deployed runtime (`/tmp/tenants_authenticated_perf_baseline_2026-02-23T07-52-36-261Z.json`): `portfolio p95=979.35ms`, `company_cockpit p95=268.05ms`, `branches p95=73.1ms`.
+  - Снят runtime metrics snapshot после auth-нагрузки (`/tmp/tenants_perf_snapshot_20260223_after_authload.json`): `portfolio p95=1000ms`, `company_cockpit p95=250ms`, `branches p95=100ms`, `status=pass`.
+  - Выполнен live fail-closed a11y recheck через setup lane на `https://console.truffles.kz`: `3 passed` (`setup + desktop + mobile`), обновлены artifacts `tenants-desktop/mobile-{axe,png}`.
+  - Зафиксирован live build stamp и health для canary evidence: `Build: 93824a4 | 2026-02-23T07:17:01Z`, `/api/health/full` -> `healthy` (`/tmp/tenants_live_build_20260223.json`).
+  - Открыт PR с Wave4/5/6 continuation + post-merge canary evidence: `https://github.com/k1ddy/Truffles-AI-Employee/pull/804`.
 - next:
-  - Выполнить runtime recheck `tenants-a11y` на `https://console.truffles.kz` после текущего деплоя и зафиксировать evidence в `STATE`.
-  - Подготовить rollout-note по `NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER` (shadow/canary/full + rollback условия).
-  - Выполнить perf baseline на крупном профиле (PromQL p95 по `console_tenants_endpoint_latency`) и сравнить с целевыми SLO из TP.
+  - Дождаться CI статуса по `PR #804` и закрыть stop-the-line при любом красном джобе.
+  - После merge зафиксировать итог в `STATE` и закрыть сессию `done`.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
@@ -114,6 +124,18 @@
   - console-web/src/components/TenantsClientLifecycleModal.tsx
   - console-web/src/app/tenants/use-tenants-page-filters.ts
   - truffles-api/app/logging_config.py
+  - truffles-api/app/models/tenants_fleet_cache.py
+  - truffles-api/migrations/038_add_tenants_fleet_cache.sql
+  - ops/console_tenants_perf_snapshot.py
+  - /tmp/tenants_perf_snapshot_20260223_after_probe.json
+  - /tmp/tenants_authenticated_perf_baseline_2026-02-23T07-52-36-261Z.json
+  - /tmp/tenants_perf_snapshot_20260223_after_authload.json
+  - /tmp/tenants_live_build_20260223.json
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-authenticated-perf-baseline-20260223.json
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-authload-20260223.json
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-live-build-20260223.json
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-runtime-health-20260223.json
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/804
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/803
   - STATE.md
-- last_updated: 2026-02-23T07:20:00Z
+- last_updated: 2026-02-23T07:35:00Z

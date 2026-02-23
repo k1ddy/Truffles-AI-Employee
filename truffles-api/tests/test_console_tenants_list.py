@@ -149,6 +149,33 @@ def _build_request(query: str = "") -> Request:
     )
 
 
+def _build_fleet_summary() -> console_router.ConsoleFleetSummary:
+    return console_router.ConsoleFleetSummary(
+        total_companies=1,
+        total_clients=1,
+        active_clients=1,
+        onboarding_clients=0,
+        archived_clients=0,
+        paused_clients=0,
+        go_live_ready_clients=0,
+        degraded_clients=0,
+        payment_pending_clients=0,
+        payment_confirmed_clients=1,
+        lifecycle_counts={
+            "lead": 0,
+            "contracting": 0,
+            "onboarding": 0,
+            "go_live_ready": 0,
+            "active": 1,
+            "paused": 0,
+            "archived": 0,
+        },
+        payment_counts={"pending": 0, "confirmed": 1, "rejected": 0, "unknown": 0},
+        service_counts={"ok": 1, "degraded": 0, "attention": 0},
+        onboarding_throughput=None,
+    )
+
+
 def test_request_with_query_params_rewrites_query_string() -> None:
     request = _build_request("foo=bar")
 
@@ -158,6 +185,148 @@ def test_request_with_query_params_rewrites_query_string() -> None:
     )
 
     assert dict(derived.query_params) == {"limit": "10", "lifecycle": "active"}
+
+
+@pytest.mark.asyncio
+async def test_list_clients_uses_cached_summary_when_available(monkeypatch) -> None:
+    cached_summary = _build_fleet_summary()
+    db = Mock()
+    db.query.return_value = _build_list_query_mock()
+    build_summary_mock = Mock(side_effect=AssertionError("summary builder must not be called on cache hit"))
+    store_summary_mock = Mock(side_effect=AssertionError("summary cache write must not happen on cache hit"))
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            role="platform_admin",
+            accessible_clients=[],
+            client=None,
+        ),
+    )
+    monkeypatch.setattr(console_router, "_load_cached_fleet_summary", lambda *_, **__: cached_summary)
+    monkeypatch.setattr(console_router, "_build_fleet_summary_for_scope", build_summary_mock)
+    monkeypatch.setattr(console_router, "_store_cached_fleet_summary", store_summary_mock)
+
+    response = await console_router.list_clients(
+        request=_build_request(),
+        include_summary="true",
+        db=db,
+    )
+
+    assert response.summary == cached_summary
+    assert build_summary_mock.call_count == 0
+    assert store_summary_mock.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_list_clients_stores_summary_in_cache_after_miss(monkeypatch) -> None:
+    computed_summary = _build_fleet_summary()
+    db = Mock()
+    db.query.return_value = _build_list_query_mock()
+    store_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            role="platform_admin",
+            accessible_clients=[],
+            client=None,
+        ),
+    )
+    monkeypatch.setattr(console_router, "_load_cached_fleet_summary", lambda *_, **__: None)
+    monkeypatch.setattr(console_router, "_build_fleet_summary_for_scope", lambda *_, **__: computed_summary)
+    monkeypatch.setattr(
+        console_router,
+        "_store_cached_fleet_summary",
+        lambda *_, **kwargs: store_calls.append(kwargs),
+    )
+
+    response = await console_router.list_clients(
+        request=_build_request(),
+        include_summary="true",
+        db=db,
+    )
+
+    assert response.summary == computed_summary
+    assert len(store_calls) == 1
+    assert store_calls[0]["summary"] == computed_summary
+
+
+@pytest.mark.asyncio
+async def test_list_fleet_attention_returns_cached_response(monkeypatch) -> None:
+    cached_response = console_router.ConsoleFleetAttentionResponse(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        stale_after_minutes=120,
+        summary=console_router.ConsoleFleetAttentionSummary(
+            active_clients_total=1,
+            clients_with_attention=1,
+            high_risk_clients=1,
+            medium_risk_clients=0,
+            low_risk_clients=0,
+            stale_branches_total=1,
+            integration_error_branches_total=1,
+            integration_warn_branches_total=0,
+            outbox_failed_24h_total=2,
+            pending_handovers_total=1,
+        ),
+        items=[
+            console_router.ConsoleFleetAttentionItem(
+                client_id=uuid4(),
+                client_slug="cached-client",
+                client_name="Cached Client",
+                company_id=None,
+                company_name=None,
+                lifecycle_state="active",
+                payment_status="confirmed",
+                commercial_state="payment_confirmed",
+                service_state="degraded",
+                owner_name="Owner",
+                next_action="run_integration_recovery",
+                total_branches=2,
+                active_branches=2,
+                degraded_branches=1,
+                go_live_ready_branches=2,
+                reference_branch_ids=[],
+                reference_branch_reason="scored",
+                stale_branches=1,
+                integration_error_branches=1,
+                integration_warn_branches=0,
+                outbox_failed_24h=2,
+                pending_handovers=1,
+                attention_score=80,
+                attention_level="high",
+                reasons=["integration_error"],
+                suggested_actions=["open_integrations_registry_and_fix_bindings"],
+            )
+        ],
+    )
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=uuid4(), status="active", company_id=None)],
+            companies=[],
+            client=None,
+        ),
+    )
+    monkeypatch.setattr(console_router, "_load_cached_fleet_attention", lambda *_, **__: cached_response)
+    monkeypatch.setattr(
+        console_router,
+        "_build_fleet_client_details_map",
+        lambda *_, **__: (_ for _ in ()).throw(AssertionError("cache hit should short-circuit heavy path")),
+    )
+
+    response = await console_router.list_fleet_attention(
+        request=_build_request(),
+        stale_after_minutes=120,
+        db=Mock(),
+    )
+
+    assert response == cached_response
 
 
 @pytest.mark.asyncio

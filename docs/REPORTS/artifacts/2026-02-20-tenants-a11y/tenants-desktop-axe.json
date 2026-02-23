@@ -1,6 +1,6 @@
 {
-  "url": "http://localhost:3100/tenants",
-  "timestamp": "2026-02-23T06:33:06.538Z",
+  "url": "https://console.truffles.kz/tenants?company_id=6a510116-a633-4ce0-91e2-972e51221b49&client_id=c839d5dd-65be-4733-a5d2-72c9f70707f0",
+  "timestamp": "2026-02-23T07:56:06.975Z",
   "violations_total": 0,
   "impacts": {
     "minor": 0,

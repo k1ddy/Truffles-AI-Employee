@@ -33,6 +33,7 @@ from app.models.outbox_status_event import OutboxStatusEvent
 from app.models.prompt import Prompt
 from app.models.reference_pack import ReferencePack
 from app.models.specialist import Specialist
+from app.models.tenants_fleet_cache import TenantsFleetCache
 from app.models.tenants_weekly_snapshot import TenantsWeeklySnapshot
 from app.models.user import User
 
@@ -74,4 +75,5 @@ __all__ = [
     "KnowledgeVersion",
     "Specialist",
     "TenantsWeeklySnapshot",
+    "TenantsFleetCache",
 ]
