@@ -81,9 +81,10 @@
   - Снят runtime metrics snapshot после auth-нагрузки (`/tmp/tenants_perf_snapshot_20260223_after_authload.json`): `portfolio p95=1000ms`, `company_cockpit p95=250ms`, `branches p95=100ms`, `status=pass`.
   - Выполнен live fail-closed a11y recheck через setup lane на `https://console.truffles.kz`: `3 passed` (`setup + desktop + mobile`), обновлены artifacts `tenants-desktop/mobile-{axe,png}`.
   - Зафиксирован live build stamp и health для canary evidence: `Build: 93824a4 | 2026-02-23T07:17:01Z`, `/api/health/full` -> `healthy` (`/tmp/tenants_live_build_20260223.json`).
+  - Открыт PR с Wave4/5/6 continuation + post-merge canary evidence: `https://github.com/k1ddy/Truffles-AI-Employee/pull/804`.
 - next:
-  - Открыть PR с Wave4/5/6 continuation + post-merge canary evidence и дождаться CI статуса.
-  - После CI зафиксировать merge итог в `STATE` и закрыть сессию `done`.
+  - Дождаться CI статуса по `PR #804` и закрыть stop-the-line при любом красном джобе.
+  - После merge зафиксировать итог в `STATE` и закрыть сессию `done`.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
@@ -134,6 +135,7 @@
   - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-authload-20260223.json
   - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-live-build-20260223.json
   - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-runtime-health-20260223.json
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/804
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/803
   - STATE.md
 - last_updated: 2026-02-23T07:35:00Z
