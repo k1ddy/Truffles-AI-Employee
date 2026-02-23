@@ -11,6 +11,9 @@
 - `2026-02-23`: execution update — выполнены Wave 0 + ключевые пункты Wave 1/2: атомарный scope sync (`company/client/branch`), backend/frontend `branch_id` contract для `/admin/branches`, Scenario B3 (e2e), business-copy cleanup в верхних операционных блоках.
 - `2026-02-23`: post-merge verification update — PR `#802` merged (`30f30eb6`), CI green; F3 закрыт (cockpit branch slice больше не привязан к первому клиенту), F2 закрыт на UX уровне (single editable context source на `/tenants`), Wave 4 продолжен выносом `fleet attention` и `portfolio companies` в отдельные компоненты.
 - `2026-02-23`: execution continuation — Wave 4 decomposition extended (`clients/change-management/decommission/lifecycle-modal` moved to dedicated components), page-filter URL race fixed for Scenario C (`clear filters` deterministic), and Wave 4 perf track started with dedicated tenants latency histogram for `/admin/tenants/portfolio` + `/admin/tenants/company-cockpit` (`console_tenants_endpoint_latency`, label `endpoint`).
+- `2026-02-23`: Wave 4 continuation — добавлен read-model cache для fleet-агрегаций (`tenants_fleet_cache` + migration `038`), cache-hit/miss tests, и perf snapshot tool `ops/console_tenants_perf_snapshot.py` с p95 SLO-оценкой по `console_tenants_endpoint_latency`.
+- `2026-02-23`: Wave 5/6 continuation — cleaned deep lifecycle/editor copy (`TenantsClientLifecycleModal`, `TenantsClientsPanel`, `tenants/page.tsx`) и формализован rollout policy для `NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER` (shadow -> canary -> full + rollback guardrails).
+- `2026-02-23`: post-merge canary evidence — deployed build rechecked (`Build: 93824a4 | 2026-02-23T07:17:01Z`), live `tenants-a11y` fail-closed lane green (`3 passed`), and authenticated perf + runtime metrics snapshots satisfy SLO.
 
 ## Canon refs
 - `AGENTS.md`
@@ -36,10 +39,10 @@
 | Wave 1 API contract alignment | `done/partial` | `branch_id` добавлен в `/admin/branches` + frontend pass-through + e2e Scenario B3; `company-cockpit` при `client_id=null` теперь остаётся в company scope (`truffles-api/app/routers/console.py`, `console-web/src/app/tenants/page.tsx`, `console-web/e2e/platform-admin.spec.ts`) | Техдолг: унифицировать/сократить дублирующий `branches` payload в `company-cockpit` и расширить perf-contract tests на большие company scopes |
 | Wave 2 Context kernel | `done` | Атомарный sync `company/client/branch`, orphan-branch guard, стабильные B/C/D + отключён конфликтующий header-edit контекста на `/tenants` (`context-managed-in-tenants`) (`console-web/src/app/tenants/page.tsx`, `console-web/src/components/ConsoleShell.tsx`, `console-web/e2e/platform-admin.spec.ts`) | Нет блокеров |
 | Wave 3 Data contract | `done/partial` | Typed weekly snapshot schema + table/fallback (`truffles-api/app/schemas/console.py:249`, `truffles-api/app/routers/console.py:13434`) | Модель аналитики и fleet-агрегации не рассчитана на очень большой объём (`F5`) |
-| Wave 4 Decomposition/perf | `done/partial` | Вынесены `OperationalKpi`, `FleetAttention`, `PortfolioCompanies`, `Clients`, `ChangeManagement`, `Decommission`, `ClientLifecycleModal` секции; page-filter race для Scenario C устранён в `use-tenants-page-filters.ts`; backend perf-track запущен через `console_tenants_endpoint_latency{endpoint=portfolio|company_cockpit}` + router instrumentation (`truffles-api/app/logging_config.py`, `truffles-api/app/routers/console.py`, `truffles-api/tests/test_console_tenants_list.py`) | Полный read-model/precompute (`F5`) и подтверждение SLO на крупном профиле ещё впереди |
-| Wave 5 A11y/copy | `done/partial` | `A11Y_FAIL_ON_THRESHOLDS=1` проходит в deterministic lane (desktop/mobile), KPI contrast исправлен, business-copy упрощён в `TopControls`/`ActionQueue`/`Fleet`/`Company edit` (`console-web/src/components/TenantsOperationalKpiPanel.tsx`, `console-web/src/components/TenantsTopControls.tsx`, `console-web/src/components/TenantsActionQueuePanel.tsx`) | Остался cleanup тех-копи в deep editor/wizard секциях (`F7`) |
+| Wave 4 Decomposition/perf | `done/partial` | Вынесены `OperationalKpi`, `FleetAttention`, `PortfolioCompanies`, `Clients`, `ChangeManagement`, `Decommission`, `ClientLifecycleModal` секции; page-filter race для Scenario C устранён в `use-tenants-page-filters.ts`; backend perf-track запущен через `console_tenants_endpoint_latency{endpoint=portfolio|company_cockpit}` + router instrumentation; внедрён read-model cache (`truffles-api/migrations/038_add_tenants_fleet_cache.sql`, `truffles-api/app/models/tenants_fleet_cache.py`, `truffles-api/app/routers/console.py`) + cache tests (`truffles-api/tests/test_console_tenants_list.py`) | Полный async precompute/read-model refresh и perf baseline на крупном профиле (не probe-level) ещё впереди |
+| Wave 5 A11y/copy | `done/partial` | `A11Y_FAIL_ON_THRESHOLDS=1` проходит в deterministic lane (desktop/mobile), KPI contrast исправлен, business-copy упрощён в `TopControls`/`ActionQueue`/`Fleet`/`Company edit`, deep lifecycle/editor copy очищен (`console-web/src/components/TenantsClientLifecycleModal.tsx`, `console-web/src/components/TenantsClientsPanel.tsx`, `console-web/src/app/tenants/page.tsx`) | Остаточный тех-copy ограничен preset/debug контекстом (`trace_id` в platform preset), mainline UX очищен |
 | Wave 6 E2E realism | `done` | `platform-admin.spec.ts` стабилизирован: deterministic auth/session, нет `test.skip`, сценарии A/B/C/D/E hard-fail (`console-web/e2e/platform-admin.spec.ts`, `console-web/playwright.config.ts`) | Нет |
-| Feature flag rollout | `partial` | `NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER` уже в коде (`console-web/src/app/tenants/page.tsx:850`) | Shadow/canary/full rollout + наблюдение ещё не формализованы (`Wave 6`) |
+| Feature flag rollout | `done` | `NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER` в коде (`console-web/src/app/tenants/page.tsx:850`), rollout policy формализован (`shadow -> canary -> full` + rollback), post-merge canary evidence зафиксирован: live build stamp, live a11y green, runtime SLO snapshot pass | Нет блокеров |
 
 ## Critical problems (FACT, deep check)
 ### F1. Branch scope теряется после `Взять из рабочего контура`
@@ -76,14 +79,15 @@ Impact:
 - любое изменение цепляет много сценариев.
 - сложнее изолировать баги и удерживать инварианты.
 
-### F5. Серверные fleet-агрегации не готовы к "10M+ компаний" в текущем виде
+### F5. Серверные fleet-агрегации требуют дальнейшего масштабного precompute (частично закрыто)
 Evidence:
 - `_build_fleet_client_details_map` грузит branches для набора клиентов и считает агрегаты в Python (`truffles-api/app/routers/console.py:3281`).
 - `_build_fleet_summary_for_scope` сканирует батчами клиентов и на каждый батч строит heavy details (`truffles-api/app/routers/console.py:3623`).
 - `list_fleet_attention` проходит по всем active clients в scope и пересчитывает сигналы (`truffles-api/app/routers/console.py:15061`).
+- Добавлен read-model cache `tenants_fleet_cache` с TTL и reuse в `list_clients(include_summary)` + `list_fleet_attention` (`truffles-api/migrations/038_add_tenants_fleet_cache.sql`, `truffles-api/app/routers/console.py`).
 Impact:
-- latency растет вместе с размером портфеля.
-- при крупном флоте будет упор в CPU/DB, нестабильный UX и timeout-риск.
+- request-time нагрузка снижена за счёт cache-hit path.
+- для очень большого флота всё ещё нужен отдельный async precompute и проверка p95/p99 под нагрузкой.
 
 ### F6. A11y debt: контраст KPI карточек
 Evidence:
@@ -91,16 +95,17 @@ Evidence:
 - Локальный fail-closed a11y lane зелёный (`A11Y_FAIL_ON_THRESHOLDS=1`), artifacts обновлены (`docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-*-axe.json`).
 Impact:
 - Локальный fail-closed a11y gate закрыт.
-- Нужен runtime recheck после deploy, чтобы подтвердить отсутствие расхождения между локальным билдом и production bundle.
+- Runtime recheck после deploy закрыт: live lane `3 passed`, artifacts обновлены.
 
-### F7. Смешение бизнес и технического copy
+### F7. Смешение бизнес и технического copy (основной поток закрыт)
 Evidence:
 - Business-copy упрощён в `Action Queue` -> `Приоритетные задачи` (`console-web/src/components/TenantsActionQueuePanel.tsx`).
 - KPI/alert copy очищен от тех-формулировок (`console-web/src/components/TenantsOperationalKpiPanel.tsx`).
 - Fleet/Company секции переведены на business wording (`console-web/src/components/TenantsFleetAttentionPanel.tsx`, `console-web/src/components/TenantsPortfolioCompaniesPanel.tsx`).
+- Deep lifecycle/editor copy очищен (`console-web/src/components/TenantsClientLifecycleModal.tsx`, `console-web/src/components/TenantsClientsPanel.tsx`, `console-web/src/app/tenants/page.tsx`).
 Impact:
-- Когнитивный шум снижен в основных операторских секциях.
-- Остаток тех-копи локализован в deep editor/wizard flow (out-of-mainline business path).
+- Mainline операторский поток очищен от тех-шума.
+- Остаточный тех-copy допускается только в platform preset/debug контексте.
 
 ### F8. E2E-контур не является жесткой страховкой от регрессий
 Evidence:
@@ -286,6 +291,8 @@ Expected result:
 - `corepack pnpm -C console-web run build`
 - `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 corepack pnpm -C console-web exec playwright test e2e/platform-admin.spec.ts --project=chromium --workers=1`
 - `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 A11Y_FAIL_ON_THRESHOLDS=1 corepack pnpm -C console-web exec playwright test e2e/tenants-a11y.spec.ts --project=chromium --workers=1`
+- `PLAYWRIGHT_BASE_URL=https://console.truffles.kz PLAYWRIGHT_WEB_SERVER=0 E2E_DETERMINISTIC_AUTH=0 E2E_USERNAME=admin E2E_PASSWORD=admin A11Y_FAIL_ON_THRESHOLDS=1 corepack pnpm -C console-web exec playwright test e2e/tenants-a11y.spec.ts --project=chromium --workers=1 --reporter=line`
+- `python3 ops/console_tenants_perf_snapshot.py --metrics-url https://api.truffles.kz/metrics --pretty --output /tmp/tenants_perf_snapshot_20260223_after_authload.json`
 - `python3 truffles-api/scripts/generate_openapi.py --check`
 - `pytest -q truffles-api/tests/test_console_tenants_list.py` (includes weekly-snapshot contract tests)
 - `pytest -q truffles-api/tests/test_console_fleet_attention.py`
@@ -303,7 +310,12 @@ Expected result:
 3. Quality evidence:
 - e2e logs по A/B/C/D/E (`14 passed`),
 - axe JSON desktop/mobile (`critical=0`, `serious=0`),
-- perf summary with p95.
+- perf summary with p95,
+- live canary artifacts:
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-authenticated-perf-baseline-20260223.json`
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-authload-20260223.json`
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-live-build-20260223.json`
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-runtime-health-20260223.json`.
 4. State evidence:
 - `localStorage scope` vs `query filters` trace before/after critical actions.
 

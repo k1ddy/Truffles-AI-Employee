@@ -2020,9 +2020,9 @@ export default function TenantsPage() {
         const serialized = JSON.stringify(alertHookPayload, null, 2);
         try {
             await navigator.clipboard.writeText(serialized);
-            toast.success("Alert payload скопирован");
+            toast.success("Данные уведомления скопированы");
         } catch {
-            reportValidationError("Не удалось скопировать payload");
+            reportValidationError("Не удалось скопировать данные уведомления");
         }
     };
 

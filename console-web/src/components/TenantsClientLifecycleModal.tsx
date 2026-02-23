@@ -51,7 +51,7 @@ export default function TenantsClientLifecycleModal({
                         {draft.mode === "archive" ? "Архивировать клиента" : "Восстановить клиента"}
                     </h3>
                     <p className="text-sm text-muted-foreground">
-                        Подтвердите lifecycle-действие перед отправкой в API. Заполнение checklist обязательно.
+                        Подтвердите действие перед применением. Все пункты проверки обязательны.
                     </p>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-background p-3 text-xs" data-testid="tenants-client-lifecycle-impact">
@@ -60,14 +60,14 @@ export default function TenantsClientLifecycleModal({
                         клиент: {draft.clientLabel} · компания: {draft.companyLabel}
                     </div>
                     <div className="text-muted-foreground">
-                        переход: {draft.currentLifecycleLabel}{" -> "}{draft.targetLifecycleLabel}
+                        из статуса: {draft.currentLifecycleLabel}{" -> "}{draft.targetLifecycleLabel}
                     </div>
                     <div className="text-muted-foreground">
                         филиалы: активные {draft.activeBranches}/{draft.totalBranches} · деградация {draft.degradedBranches}
                     </div>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-background p-3 text-xs" data-testid="tenants-client-lifecycle-checklist">
-                    <div className="font-medium mb-1">Pre-submit checklist</div>
+                    <div className="font-medium mb-1">Проверка перед применением</div>
                     <label className="mb-2 flex items-start gap-2 text-muted-foreground">
                         <input
                             type="checkbox"
@@ -89,10 +89,10 @@ export default function TenantsClientLifecycleModal({
                             disabled={pending}
                         />
                         <span>
-                            Проверил impact:
+                            Проверил последствия:
                             {draft.mode === "archive"
-                                ? " клиент уйдет из активного списка и деактивация отразится в операционном контуре."
-                                : " клиент вернется в активный список и потребует операционного контроля после восстановления."}
+                                ? " клиент уйдет из активного списка."
+                                : " клиент вернется в активный список и потребует контроля после восстановления."}
                         </span>
                     </label>
                     <label className="flex items-start gap-2 text-muted-foreground">
@@ -126,7 +126,7 @@ export default function TenantsClientLifecycleModal({
                         onChange={(event) => onPatchDraft({ confirmChecked: event.target.checked })}
                         disabled={pending}
                     />
-                    Подтверждаю выполнение действия и влияние на lifecycle клиента
+                    Подтверждаю выполнение действия и влияние на статус клиента
                 </label>
                 <div className="flex flex-wrap justify-end gap-2">
                     <button

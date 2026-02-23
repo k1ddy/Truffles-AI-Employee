@@ -1,0 +1,489 @@
+{
+  "generated_at": "2026-02-23T07:52:36.261Z",
+  "base_url": "https://console.truffles.kz",
+  "selected_scope": {
+    "company_id": "6a510116-a633-4ce0-91e2-972e51221b49",
+    "company_name": "Truffles Corp",
+    "selected_client_id": "c839d5dd-65be-4733-a5d2-72c9f70707f0",
+    "client_count_sample": 1,
+    "branch_count_sample": 1,
+    "clients_has_more": false,
+    "branches_has_more": false
+  },
+  "scope_candidates_top5": [
+    {
+      "company_id": "6a510116-a633-4ce0-91e2-972e51221b49",
+      "company_name": "Truffles Corp",
+      "client_count_sample": 1,
+      "branch_count_sample": 1,
+      "clients_has_more": false,
+      "branches_has_more": false,
+      "score": 11
+    },
+    {
+      "company_id": "6240f4bb-238b-5c76-932d-74d1dbbcba45",
+      "company_name": "Console E2E",
+      "client_count_sample": 0,
+      "branch_count_sample": 0,
+      "clients_has_more": false,
+      "branches_has_more": false,
+      "score": 0
+    }
+  ],
+  "summary": {
+    "portfolio": {
+      "count": 20,
+      "p50_ms": 579,
+      "p95_ms": 979.35,
+      "p99_ms": 999.87,
+      "min_ms": 528,
+      "max_ms": 1005,
+      "status_codes": [
+        200
+      ]
+    },
+    "company_cockpit_company_scope": {
+      "count": 20,
+      "p50_ms": 224,
+      "p95_ms": 268.05,
+      "p99_ms": 360.01,
+      "min_ms": 195,
+      "max_ms": 383,
+      "status_codes": [
+        200
+      ]
+    },
+    "branches_company_scope": {
+      "count": 20,
+      "p50_ms": 65,
+      "p95_ms": 73.1,
+      "p99_ms": 74.62,
+      "min_ms": 57,
+      "max_ms": 75,
+      "status_codes": [
+        200
+      ]
+    },
+    "company_cockpit_client_scope": {
+      "count": 20,
+      "p50_ms": 212,
+      "p95_ms": 245.25,
+      "p99_ms": 249.05,
+      "min_ms": 202,
+      "max_ms": 250,
+      "status_codes": [
+        200
+      ]
+    }
+  },
+  "samples": {
+    "portfolio": [
+      {
+        "round": 1,
+        "status": 200,
+        "elapsed_ms": 1005
+      },
+      {
+        "round": 2,
+        "status": 200,
+        "elapsed_ms": 574
+      },
+      {
+        "round": 3,
+        "status": 200,
+        "elapsed_ms": 541
+      },
+      {
+        "round": 4,
+        "status": 200,
+        "elapsed_ms": 583
+      },
+      {
+        "round": 5,
+        "status": 200,
+        "elapsed_ms": 528
+      },
+      {
+        "round": 6,
+        "status": 200,
+        "elapsed_ms": 629
+      },
+      {
+        "round": 7,
+        "status": 200,
+        "elapsed_ms": 978
+      },
+      {
+        "round": 8,
+        "status": 200,
+        "elapsed_ms": 575
+      },
+      {
+        "round": 9,
+        "status": 200,
+        "elapsed_ms": 575
+      },
+      {
+        "round": 10,
+        "status": 200,
+        "elapsed_ms": 545
+      },
+      {
+        "round": 11,
+        "status": 200,
+        "elapsed_ms": 586
+      },
+      {
+        "round": 12,
+        "status": 200,
+        "elapsed_ms": 556
+      },
+      {
+        "round": 13,
+        "status": 200,
+        "elapsed_ms": 598
+      },
+      {
+        "round": 14,
+        "status": 200,
+        "elapsed_ms": 551
+      },
+      {
+        "round": 15,
+        "status": 200,
+        "elapsed_ms": 625
+      },
+      {
+        "round": 16,
+        "status": 200,
+        "elapsed_ms": 564
+      },
+      {
+        "round": 17,
+        "status": 200,
+        "elapsed_ms": 801
+      },
+      {
+        "round": 18,
+        "status": 200,
+        "elapsed_ms": 592
+      },
+      {
+        "round": 19,
+        "status": 200,
+        "elapsed_ms": 586
+      },
+      {
+        "round": 20,
+        "status": 200,
+        "elapsed_ms": 539
+      }
+    ],
+    "company_cockpit_company_scope": [
+      {
+        "round": 1,
+        "status": 200,
+        "elapsed_ms": 227
+      },
+      {
+        "round": 2,
+        "status": 200,
+        "elapsed_ms": 195
+      },
+      {
+        "round": 3,
+        "status": 200,
+        "elapsed_ms": 216
+      },
+      {
+        "round": 4,
+        "status": 200,
+        "elapsed_ms": 207
+      },
+      {
+        "round": 5,
+        "status": 200,
+        "elapsed_ms": 225
+      },
+      {
+        "round": 6,
+        "status": 200,
+        "elapsed_ms": 222
+      },
+      {
+        "round": 7,
+        "status": 200,
+        "elapsed_ms": 239
+      },
+      {
+        "round": 8,
+        "status": 200,
+        "elapsed_ms": 237
+      },
+      {
+        "round": 9,
+        "status": 200,
+        "elapsed_ms": 214
+      },
+      {
+        "round": 10,
+        "status": 200,
+        "elapsed_ms": 205
+      },
+      {
+        "round": 11,
+        "status": 200,
+        "elapsed_ms": 229
+      },
+      {
+        "round": 12,
+        "status": 200,
+        "elapsed_ms": 383
+      },
+      {
+        "round": 13,
+        "status": 200,
+        "elapsed_ms": 223
+      },
+      {
+        "round": 14,
+        "status": 200,
+        "elapsed_ms": 220
+      },
+      {
+        "round": 15,
+        "status": 200,
+        "elapsed_ms": 258
+      },
+      {
+        "round": 16,
+        "status": 200,
+        "elapsed_ms": 213
+      },
+      {
+        "round": 17,
+        "status": 200,
+        "elapsed_ms": 225
+      },
+      {
+        "round": 18,
+        "status": 200,
+        "elapsed_ms": 228
+      },
+      {
+        "round": 19,
+        "status": 200,
+        "elapsed_ms": 209
+      },
+      {
+        "round": 20,
+        "status": 200,
+        "elapsed_ms": 262
+      }
+    ],
+    "branches_company_scope": [
+      {
+        "round": 1,
+        "status": 200,
+        "elapsed_ms": 61
+      },
+      {
+        "round": 2,
+        "status": 200,
+        "elapsed_ms": 60
+      },
+      {
+        "round": 3,
+        "status": 200,
+        "elapsed_ms": 65
+      },
+      {
+        "round": 4,
+        "status": 200,
+        "elapsed_ms": 71
+      },
+      {
+        "round": 5,
+        "status": 200,
+        "elapsed_ms": 73
+      },
+      {
+        "round": 6,
+        "status": 200,
+        "elapsed_ms": 68
+      },
+      {
+        "round": 7,
+        "status": 200,
+        "elapsed_ms": 68
+      },
+      {
+        "round": 8,
+        "status": 200,
+        "elapsed_ms": 75
+      },
+      {
+        "round": 9,
+        "status": 200,
+        "elapsed_ms": 73
+      },
+      {
+        "round": 10,
+        "status": 200,
+        "elapsed_ms": 62
+      },
+      {
+        "round": 11,
+        "status": 200,
+        "elapsed_ms": 63
+      },
+      {
+        "round": 12,
+        "status": 200,
+        "elapsed_ms": 61
+      },
+      {
+        "round": 13,
+        "status": 200,
+        "elapsed_ms": 60
+      },
+      {
+        "round": 14,
+        "status": 200,
+        "elapsed_ms": 65
+      },
+      {
+        "round": 15,
+        "status": 200,
+        "elapsed_ms": 70
+      },
+      {
+        "round": 16,
+        "status": 200,
+        "elapsed_ms": 65
+      },
+      {
+        "round": 17,
+        "status": 200,
+        "elapsed_ms": 58
+      },
+      {
+        "round": 18,
+        "status": 200,
+        "elapsed_ms": 69
+      },
+      {
+        "round": 19,
+        "status": 200,
+        "elapsed_ms": 57
+      },
+      {
+        "round": 20,
+        "status": 200,
+        "elapsed_ms": 62
+      }
+    ],
+    "company_cockpit_client_scope": [
+      {
+        "round": 1,
+        "status": 200,
+        "elapsed_ms": 237
+      },
+      {
+        "round": 2,
+        "status": 200,
+        "elapsed_ms": 204
+      },
+      {
+        "round": 3,
+        "status": 200,
+        "elapsed_ms": 210
+      },
+      {
+        "round": 4,
+        "status": 200,
+        "elapsed_ms": 245
+      },
+      {
+        "round": 5,
+        "status": 200,
+        "elapsed_ms": 211
+      },
+      {
+        "round": 6,
+        "status": 200,
+        "elapsed_ms": 203
+      },
+      {
+        "round": 7,
+        "status": 200,
+        "elapsed_ms": 216
+      },
+      {
+        "round": 8,
+        "status": 200,
+        "elapsed_ms": 213
+      },
+      {
+        "round": 9,
+        "status": 200,
+        "elapsed_ms": 223
+      },
+      {
+        "round": 10,
+        "status": 200,
+        "elapsed_ms": 204
+      },
+      {
+        "round": 11,
+        "status": 200,
+        "elapsed_ms": 221
+      },
+      {
+        "round": 12,
+        "status": 200,
+        "elapsed_ms": 209
+      },
+      {
+        "round": 13,
+        "status": 200,
+        "elapsed_ms": 215
+      },
+      {
+        "round": 14,
+        "status": 200,
+        "elapsed_ms": 238
+      },
+      {
+        "round": 15,
+        "status": 200,
+        "elapsed_ms": 221
+      },
+      {
+        "round": 16,
+        "status": 200,
+        "elapsed_ms": 202
+      },
+      {
+        "round": 17,
+        "status": 200,
+        "elapsed_ms": 206
+      },
+      {
+        "round": 18,
+        "status": 200,
+        "elapsed_ms": 203
+      },
+      {
+        "round": 19,
+        "status": 200,
+        "elapsed_ms": 250
+      },
+      {
+        "round": 20,
+        "status": 200,
+        "elapsed_ms": 210
+      }
+    ]
+  }
+}

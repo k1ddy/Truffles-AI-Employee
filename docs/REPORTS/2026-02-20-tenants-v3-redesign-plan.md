@@ -167,3 +167,112 @@
   - violation id: `color-contrast`
 - Interpretation:
   - This gate currently validates deployed runtime (`console.truffles.kz`), so red status reflects live build until branch deploy.
+
+## Wave 4 continuation: fleet read-model cache + perf snapshot (2026-02-23, UTC)
+1. Fleet read-model cache added for heavy tenants aggregations.
+- New storage model/table:
+  - `truffles-api/app/models/tenants_fleet_cache.py`
+  - `truffles-api/migrations/038_add_tenants_fleet_cache.sql`
+- Router integration:
+  - `list_clients(include_summary)` now uses cache key by scope hash before running `_build_fleet_summary_for_scope`.
+  - `list_fleet_attention` now uses cache key by active clients + stale window + include_low before heavy recalculation.
+- Fail-open behavior:
+  - Missing table / cache errors do not break API path (fallback to existing on-demand computation).
+
+2. Contract tests added for cache-hit/cache-miss behavior.
+- `truffles-api/tests/test_console_tenants_list.py`:
+  - `test_list_clients_uses_cached_summary_when_available`
+  - `test_list_clients_stores_summary_in_cache_after_miss`
+  - `test_list_fleet_attention_returns_cached_response`
+
+3. Perf evidence tool added.
+- Script: `ops/console_tenants_perf_snapshot.py`
+- Captures histogram quantiles for:
+  - `console_tenants_endpoint_latency{endpoint=portfolio|company_cockpit}`
+  - optional `http_request_latency{method=GET,path=/console/v1/admin/branches}`
+- Computes p50/p95/p99 + SLO verdicts and can fail-closed (`--fail-on-breach`).
+
+4. Runtime probe evidence (current environment).
+- Command:
+  - `python3 ops/console_tenants_perf_snapshot.py --metrics-url https://api.truffles.kz/metrics --pretty --output /tmp/tenants_perf_snapshot_20260223_after_probe.json`
+- Result:
+  - `portfolio p95 = 10ms` (5 samples, probe traffic)
+  - `company_cockpit p95 = 10ms` (5 samples, probe traffic)
+  - `status = pass`
+- Note:
+  - This is probe-level evidence (authless endpoint probes), not full-load baseline for large fleet.
+
+## Wave 5/6 continuation: deep copy cleanup + rollout guardrails (2026-02-23, UTC)
+1. Deep lifecycle/editor copy cleaned in operator flow.
+- Updated files:
+  - `console-web/src/components/TenantsClientLifecycleModal.tsx`
+  - `console-web/src/components/TenantsClientsPanel.tsx`
+  - `console-web/src/app/tenants/page.tsx`
+- Removed technical wording from mainline actions (API/payload/checklist jargon) and replaced with business-operational language.
+
+2. Rollout guardrails formalized for `NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER`.
+- `shadow`:
+  - flag on for internal operators only; monitor `console_tenants_endpoint_latency`, e2e/a11y deterministic lane.
+- `canary`:
+  - expand to controlled platform-admin subset; stop-the-line on p95 breach or deterministic lane failure.
+- `full`:
+  - switch default on after canary stability window.
+- rollback:
+  - set `NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER=0`; keep backend read-model cache backward-compatible.
+
+3. Validation after continuation changes.
+- Backend:
+  - `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` -> `70 passed`
+  - `ruff check ...` (console router/model/tests/perf script) -> pass
+  - `python3 truffles-api/scripts/generate_openapi.py --check` -> pass
+- Frontend:
+  - `corepack pnpm -C console-web run lint` -> pass
+  - `corepack pnpm -C console-web run build` -> pass
+  - `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 ... platform-admin.spec.ts` -> `17 passed`
+  - `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 A11Y_FAIL_ON_THRESHOLDS=1 ... tenants-a11y.spec.ts` -> `2 passed`
+
+## Post-merge canary verification (2026-02-23, UTC)
+1. Authenticated perf baseline on deployed API captured (platform_admin scope).
+- Command:
+  - `PLAYWRIGHT_BASE_URL=https://console.truffles.kz PLAYWRIGHT_WEB_SERVER=0 E2E_DETERMINISTIC_AUTH=0 E2E_USERNAME=admin E2E_PASSWORD=admin corepack pnpm -C console-web exec node - <<'NODE' ... NODE`
+- Result artifact:
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-authenticated-perf-baseline-20260223.json`
+- Summary:
+  - `portfolio p95=979.35ms`
+  - `company_cockpit (company scope) p95=268.05ms`
+  - `branches (company scope) p95=73.1ms`
+  - `company_cockpit (client scope) p95=245.25ms`
+  - all status codes `200`.
+
+2. Runtime SLO snapshot after auth load captured from Prometheus metrics.
+- Command:
+  - `python3 ops/console_tenants_perf_snapshot.py --metrics-url https://api.truffles.kz/metrics --pretty --output /tmp/tenants_perf_snapshot_20260223_after_authload.json`
+- Result artifact:
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-authload-20260223.json`
+- Summary:
+  - `portfolio p95=1000ms` (`samples=25`, SLO `<1200ms` pass)
+  - `company_cockpit p95=250ms` (`samples=45`, SLO `<1000ms` pass)
+  - `branches GET p95=100ms` (`samples=22`, SLO `<800ms` pass)
+  - overall `status=pass`.
+
+3. Live fail-closed a11y lane recheck on deployed `console.truffles.kz` is green.
+- Command:
+  - `PLAYWRIGHT_BASE_URL=https://console.truffles.kz PLAYWRIGHT_WEB_SERVER=0 E2E_DETERMINISTIC_AUTH=0 E2E_USERNAME=admin E2E_PASSWORD=admin A11Y_FAIL_ON_THRESHOLDS=1 corepack pnpm -C console-web exec playwright test e2e/tenants-a11y.spec.ts --project=chromium --workers=1 --reporter=line`
+- Result:
+  - `3 passed (setup + desktop + mobile)`.
+- Updated artifacts:
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-desktop-axe.json`
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-mobile-axe.json`
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-desktop.png`
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-mobile.png`
+
+4. Live canary build/runtime stamp captured for rollout evidence.
+- Build artifact:
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-live-build-20260223.json`
+  - captured value: `Build: 93824a4 | 2026-02-23T07:17:01Z`.
+- Runtime health artifact:
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-runtime-health-20260223.json`
+  - current status: `healthy`.
+
+5. Interpretation.
+- Wave 6 canary evidence is now complete for this rollout slice: deterministic e2e/a11y lanes are green, deployed build is verified, and runtime SLO snapshot is within thresholds.

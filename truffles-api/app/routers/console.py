@@ -50,6 +50,7 @@ from app.models import (
     Message,
     OutboxMessage,
     ReferencePack,
+    TenantsFleetCache,
     TenantsWeeklySnapshot,
     User,
 )
@@ -2026,6 +2027,27 @@ def _parse_env_csv_set(name: str, *, default: set[str]) -> set[str]:
     return {value for value in values if value}
 
 
+def _parse_env_int(
+    name: str,
+    *,
+    default: int,
+    min_value: int,
+    max_value: int,
+) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw.strip())
+    except (TypeError, ValueError):
+        return default
+    if value < min_value:
+        return min_value
+    if value > max_value:
+        return max_value
+    return value
+
+
 def _dedupe_list(values: list[str]) -> list[str]:
     unique: list[str] = []
     seen: set[str] = set()
@@ -2135,6 +2157,16 @@ _FLEET_ATTENTION_HIGH_THRESHOLD = 70
 _FLEET_ATTENTION_MEDIUM_THRESHOLD = 35
 _FLEET_REFERENCE_BRANCH_RECENT_INBOUND_DAYS = 30
 _ONBOARDING_THROUGHPUT_WINDOW_HOURS = 30 * 24
+_TENANTS_FLEET_CACHE_TABLE_NAME = "tenants_fleet_cache"
+_TENANTS_FLEET_CACHE_SUMMARY_TYPE = "fleet_summary"
+_TENANTS_FLEET_CACHE_ATTENTION_TYPE = "fleet_attention"
+_TENANTS_FLEET_CACHE_SCHEMA_VERSION = "v1"
+_TENANTS_FLEET_CACHE_TTL_SECONDS = _parse_env_int(
+    "TENANTS_FLEET_CACHE_TTL_SECONDS",
+    default=180,
+    min_value=30,
+    max_value=3600,
+)
 _OUTBOX_ARCHIVED_REASON_PREFIX = "archived_pending:"
 _OUTBOX_CALENDAR_SYNC_REASON_PREFIX = "calendar_sync_failed:"
 _OUTBOX_SYSTEM_EVENT_TYPES = {"calendar.sync_inbound", "calendar.sync_outbound"}
@@ -2338,6 +2370,169 @@ def _is_tenants_weekly_snapshot_table_missing_error(exc: ProgrammingError) -> bo
     )
 
 
+def _is_tenants_fleet_cache_table_missing_error(exc: ProgrammingError) -> bool:
+    message = str(exc.orig if getattr(exc, "orig", None) is not None else exc).lower()
+    return (
+        _TENANTS_FLEET_CACHE_TABLE_NAME in message
+        and "does not exist" in message
+    )
+
+
+def _hash_uuid_values(values: set[UUID]) -> str:
+    if not values:
+        return "none"
+    payload = ",".join(sorted(str(value) for value in values))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _build_tenants_fleet_cache_scope_key(scope: dict[str, Any]) -> str:
+    encoded = json.dumps(scope, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _load_tenants_fleet_cache_payload(
+    db: Session,
+    *,
+    cache_type: str,
+    scope_key: str,
+    now: datetime,
+) -> Optional[dict[str, Any]]:
+    try:
+        row = (
+            db.query(TenantsFleetCache)
+            .filter(
+                TenantsFleetCache.cache_type == cache_type,
+                TenantsFleetCache.scope_key == scope_key,
+                TenantsFleetCache.expires_at > now,
+            )
+            .first()
+        )
+    except ProgrammingError as exc:
+        db.rollback()
+        if _is_tenants_fleet_cache_table_missing_error(exc):
+            return None
+        return None
+    except Exception:
+        db.rollback()
+        return None
+    if row is None or not isinstance(row.payload_json, dict):
+        return None
+    return row.payload_json
+
+
+def _upsert_tenants_fleet_cache_payload(
+    db: Session,
+    *,
+    cache_type: str,
+    scope_key: str,
+    payload: dict[str, Any],
+    now: datetime,
+    ttl_seconds: int = _TENANTS_FLEET_CACHE_TTL_SECONDS,
+) -> None:
+    expires_at = now + timedelta(seconds=max(ttl_seconds, 1))
+    try:
+        row = (
+            db.query(TenantsFleetCache)
+            .filter(
+                TenantsFleetCache.cache_type == cache_type,
+                TenantsFleetCache.scope_key == scope_key,
+            )
+            .first()
+        )
+        if row is None:
+            row = TenantsFleetCache(
+                cache_type=cache_type,
+                scope_key=scope_key,
+            )
+            db.add(row)
+        row.payload_json = payload
+        row.schema_version = _TENANTS_FLEET_CACHE_SCHEMA_VERSION
+        row.generated_at = now
+        row.expires_at = expires_at
+        row.updated_at = now
+        db.commit()
+    except ProgrammingError as exc:
+        db.rollback()
+        if _is_tenants_fleet_cache_table_missing_error(exc):
+            return
+        return
+    except Exception:
+        db.rollback()
+        return
+
+
+def _load_cached_fleet_summary(
+    db: Session,
+    *,
+    scope_key: str,
+    now: datetime,
+) -> Optional[ConsoleFleetSummary]:
+    payload = _load_tenants_fleet_cache_payload(
+        db,
+        cache_type=_TENANTS_FLEET_CACHE_SUMMARY_TYPE,
+        scope_key=scope_key,
+        now=now,
+    )
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return ConsoleFleetSummary.model_validate(payload)
+    except ValidationError:
+        return None
+
+
+def _store_cached_fleet_summary(
+    db: Session,
+    *,
+    scope_key: str,
+    now: datetime,
+    summary: ConsoleFleetSummary,
+) -> None:
+    _upsert_tenants_fleet_cache_payload(
+        db,
+        cache_type=_TENANTS_FLEET_CACHE_SUMMARY_TYPE,
+        scope_key=scope_key,
+        payload=summary.model_dump(mode="json"),
+        now=now,
+    )
+
+
+def _load_cached_fleet_attention(
+    db: Session,
+    *,
+    scope_key: str,
+    now: datetime,
+) -> Optional[ConsoleFleetAttentionResponse]:
+    payload = _load_tenants_fleet_cache_payload(
+        db,
+        cache_type=_TENANTS_FLEET_CACHE_ATTENTION_TYPE,
+        scope_key=scope_key,
+        now=now,
+    )
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return ConsoleFleetAttentionResponse.model_validate(payload)
+    except ValidationError:
+        return None
+
+
+def _store_cached_fleet_attention(
+    db: Session,
+    *,
+    scope_key: str,
+    now: datetime,
+    response: ConsoleFleetAttentionResponse,
+) -> None:
+    _upsert_tenants_fleet_cache_payload(
+        db,
+        cache_type=_TENANTS_FLEET_CACHE_ATTENTION_TYPE,
+        scope_key=scope_key,
+        payload=response.model_dump(mode="json"),
+        now=now,
+    )
+
+
 def _normalize_client_lifecycle_reason(reason: str) -> str:
     value = (reason or "").strip()
     if not value:
@@ -2495,14 +2690,21 @@ def _require_branch_scorecard_ready(
 
 
 def _accessible_client_ids(context: ConsoleAuthContext) -> set[UUID]:
-    client_ids = {client.id for client in (context.accessible_clients or [])}
-    if context.client and context.client.id:
-        client_ids.add(context.client.id)
+    accessible_clients = getattr(context, "accessible_clients", None) or []
+    client_ids = {client.id for client in accessible_clients if getattr(client, "id", None)}
+    context_client = getattr(context, "client", None)
+    if context_client and getattr(context_client, "id", None):
+        client_ids.add(context_client.id)
     return client_ids
 
 
 def _accessible_company_ids(context: ConsoleAuthContext) -> set[UUID]:
-    return {client.company_id for client in (context.accessible_clients or []) if client.company_id}
+    accessible_clients = getattr(context, "accessible_clients", None) or []
+    return {
+        client.company_id
+        for client in accessible_clients
+        if getattr(client, "company_id", None)
+    }
 
 
 def _require_client_access(
@@ -13422,6 +13624,8 @@ async def list_clients(
     )
     _validate_limit(limit)
 
+    accessible_client_ids = _accessible_client_ids(context)
+    accessible_clients_hash = _hash_uuid_values(accessible_client_ids)
     company_uuid = _parse_uuid_param("company_id", company_id)
     query_value = _normalize_search_query("q", q) if q else None
     cursor_date = _parse_cursor_param(cursor)
@@ -13525,14 +13729,39 @@ async def list_clients(
 
     summary = None
     if include_summary_mode:
-        summary = _build_fleet_summary_for_scope(
-            db,
-            build_client_query=_build_client_query,
-            fleet_lifecycle=fleet_lifecycle_filter,
-            payment_status=payment_status_filter,
-            service_state=service_state_filter,
-            batch_size=max(limit * 4, 100),
+        summary_scope_key = _build_tenants_fleet_cache_scope_key(
+            {
+                "scope": "clients_summary",
+                "accessible_clients_hash": accessible_clients_hash,
+                "company_id": str(company_uuid) if company_uuid else None,
+                "lifecycle": lifecycle_mode,
+                "q": query_value,
+                "fleet_lifecycle": fleet_lifecycle_filter,
+                "payment_status": payment_status_filter,
+                "service_state": service_state_filter,
+            }
         )
+        summary_cache_now = datetime.now(timezone.utc)
+        summary = _load_cached_fleet_summary(
+            db,
+            scope_key=summary_scope_key,
+            now=summary_cache_now,
+        )
+        if summary is None:
+            summary = _build_fleet_summary_for_scope(
+                db,
+                build_client_query=_build_client_query,
+                fleet_lifecycle=fleet_lifecycle_filter,
+                payment_status=payment_status_filter,
+                service_state=service_state_filter,
+                batch_size=max(limit * 4, 100),
+            )
+            _store_cached_fleet_summary(
+                db,
+                scope_key=summary_scope_key,
+                now=summary_cache_now,
+                summary=summary,
+            )
 
     return ConsoleClientListResponse(
         items=[
@@ -15568,6 +15797,24 @@ async def list_fleet_attention(
             items=[],
         )
 
+    active_client_ids = {client.id for client in active_clients}
+    now = datetime.now(timezone.utc)
+    attention_scope_key = _build_tenants_fleet_cache_scope_key(
+        {
+            "scope": "fleet_attention",
+            "active_clients_hash": _hash_uuid_values(active_client_ids),
+            "stale_after_minutes": stale_after_minutes,
+            "include_low": include_low_mode,
+        }
+    )
+    cached_response = _load_cached_fleet_attention(
+        db,
+        scope_key=attention_scope_key,
+        now=now,
+    )
+    if cached_response is not None:
+        return cached_response
+
     companies_by_id = {company.id: company for company in (context.companies or [])}
     fleet_details_map = _build_fleet_client_details_map(
         db,
@@ -15598,7 +15845,6 @@ async def list_fleet_attention(
         client_ids=client_ids,
     )
 
-    now = datetime.now(timezone.utc)
     outbox_failed_map = _query_outbox_failed_24h_map(db, client_ids=client_ids, now=now)
     pending_handovers_map = _query_pending_handovers_map(db, client_ids=client_ids)
 
@@ -15724,12 +15970,19 @@ async def list_fleet_attention(
         reverse=True,
     )
 
-    return ConsoleFleetAttentionResponse(
+    response = ConsoleFleetAttentionResponse(
         generated_at=now.isoformat(),
         stale_after_minutes=stale_after_minutes,
         summary=summary,
         items=items[:limit],
     )
+    _store_cached_fleet_attention(
+        db,
+        scope_key=attention_scope_key,
+        now=now,
+        response=response,
+    )
+    return response
 
 
 @router.get(
