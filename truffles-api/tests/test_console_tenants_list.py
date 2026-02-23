@@ -620,6 +620,121 @@ async def test_list_branches_rejects_client_from_other_company(monkeypatch) -> N
     assert exc_info.value.code == "INVALID_PARAM"
 
 
+@pytest.mark.asyncio
+async def test_list_branches_accepts_branch_id_filter(monkeypatch) -> None:
+    branch_id = uuid4()
+    client_id = uuid4()
+    query = _build_list_query_mock()
+    branch_lookup_query = Mock()
+    branch_lookup_query.filter.return_value = branch_lookup_query
+    branch_lookup_query.first.return_value = SimpleNamespace(
+        id=branch_id,
+        client_id=client_id,
+    )
+    db = Mock()
+    db.query.side_effect = [query, branch_lookup_query]
+    request = SimpleNamespace(query_params={})
+
+    def _fake_context(_request, _db, **_kwargs):
+        return SimpleNamespace(
+            role="platform_admin",
+            client=None,
+            accessible_clients=[SimpleNamespace(id=client_id, company_id=uuid4())],
+        )
+
+    monkeypatch.setattr(console_router, "get_console_context", _fake_context)
+
+    await console_router.list_branches(
+        request=request,
+        client_id=str(client_id),
+        branch_id=str(branch_id),
+        db=db,
+    )
+
+    filters = [str(call.args[0]) for call in query.filter.call_args_list]
+    assert any("branches.id =" in item for item in filters)
+
+
+@pytest.mark.asyncio
+async def test_list_branches_rejects_branch_from_other_client(monkeypatch) -> None:
+    branch_id = uuid4()
+    selected_client_id = uuid4()
+    foreign_client_id = uuid4()
+    query = _build_list_query_mock()
+    branch_lookup_query = Mock()
+    branch_lookup_query.filter.return_value = branch_lookup_query
+    branch_lookup_query.first.return_value = SimpleNamespace(
+        id=branch_id,
+        client_id=foreign_client_id,
+    )
+    db = Mock()
+    db.query.side_effect = [query, branch_lookup_query]
+    request = SimpleNamespace(query_params={})
+
+    def _fake_context(_request, _db, **_kwargs):
+        return SimpleNamespace(
+            role="platform_admin",
+            client=None,
+            accessible_clients=[
+                SimpleNamespace(id=selected_client_id, company_id=uuid4()),
+                SimpleNamespace(id=foreign_client_id, company_id=uuid4()),
+            ],
+        )
+
+    monkeypatch.setattr(console_router, "get_console_context", _fake_context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_branches(
+            request=request,
+            client_id=str(selected_client_id),
+            branch_id=str(branch_id),
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
+@pytest.mark.asyncio
+async def test_list_branches_rejects_branch_from_other_company(monkeypatch) -> None:
+    branch_id = uuid4()
+    scoped_company_id = uuid4()
+    scoped_client_id = uuid4()
+    foreign_company_id = uuid4()
+    foreign_client_id = uuid4()
+    query = _build_list_query_mock()
+    branch_lookup_query = Mock()
+    branch_lookup_query.filter.return_value = branch_lookup_query
+    branch_lookup_query.first.return_value = SimpleNamespace(
+        id=branch_id,
+        client_id=foreign_client_id,
+    )
+    db = Mock()
+    db.query.side_effect = [query, branch_lookup_query]
+    request = SimpleNamespace(query_params={})
+
+    def _fake_context(_request, _db, **_kwargs):
+        return SimpleNamespace(
+            role="platform_admin",
+            client=None,
+            accessible_clients=[
+                SimpleNamespace(id=scoped_client_id, company_id=scoped_company_id),
+                SimpleNamespace(id=foreign_client_id, company_id=foreign_company_id),
+            ],
+        )
+
+    monkeypatch.setattr(console_router, "get_console_context", _fake_context)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_branches(
+            request=request,
+            company_id=str(scoped_company_id),
+            branch_id=str(branch_id),
+            db=db,
+        )
+
+    assert exc_info.value.code == "INVALID_PARAM"
+
+
 class _RowsQuery:
     def __init__(self, rows):
         self._rows = rows

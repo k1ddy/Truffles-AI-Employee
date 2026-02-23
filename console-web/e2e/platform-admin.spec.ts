@@ -910,13 +910,70 @@ test.describe('Platform Admin Tenants', () => {
         const hasContextButton = await clickFirstEnabledContextButton(branchesSection);
         expect(hasContextButton).toBe(true);
 
+        const companyFilter = page.getByTestId('tenants-page-filter-company');
+        const clientFilter = page.getByTestId('tenants-page-filter-client');
         const branchFilter = page.getByTestId('tenants-page-filter-branch');
+        await expect(companyFilter).toBeVisible();
+        await expect(clientFilter).toBeVisible();
         await expect(branchFilter).toBeVisible();
+        await expect(companyFilter).not.toHaveValue('');
+        await expect(clientFilter).not.toHaveValue('');
         await expect(branchFilter).not.toHaveValue('');
+        const companyValueBefore = await companyFilter.inputValue();
+        const clientValueBefore = await clientFilter.inputValue();
         const branchValueBefore = await branchFilter.inputValue();
 
         await page.getByTestId('tenants-page-filter-apply-context').click();
+        await expect(companyFilter).toHaveValue(companyValueBefore);
+        await expect(clientFilter).toHaveValue(clientValueBefore);
         await expect(branchFilter).toHaveValue(branchValueBefore);
+    });
+
+    test('should not mutate page filters when context has orphan branch scope (Scenario B2)', async ({ page }) => {
+        const companyFilter = page.getByTestId('tenants-page-filter-company');
+        const clientFilter = page.getByTestId('tenants-page-filter-client');
+        const branchFilter = page.getByTestId('tenants-page-filter-branch');
+        await expect(companyFilter).toBeVisible();
+        await expect(clientFilter).toBeVisible();
+        await expect(branchFilter).toBeVisible();
+        const companyValueBefore = await companyFilter.inputValue();
+        const clientValueBefore = await clientFilter.inputValue();
+        const branchValueBefore = await branchFilter.inputValue();
+
+        await page.evaluate(() => {
+            window.localStorage.setItem('console:company_id', '');
+            window.localStorage.setItem('console:client_id', '');
+            window.localStorage.setItem('console:branch_id', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+        });
+
+        await page.getByTestId('tenants-page-filter-apply-context').click();
+        await expect(companyFilter).toHaveValue(companyValueBefore);
+        await expect(clientFilter).toHaveValue(clientValueBefore);
+        await expect(branchFilter).toHaveValue(branchValueBefore);
+    });
+
+    test('should pass branch_id to branches API when branch page filter is selected (Scenario B3)', async ({ page }) => {
+        const fixture = buildTenantsFixtureBundle();
+        let capturedBranchParam: string | null = null;
+        await page.route('**/api/proxy/admin/branches**', async (route) => {
+            if (route.request().method() !== 'GET') {
+                await route.fallback();
+                return;
+            }
+            const url = new URL(route.request().url());
+            capturedBranchParam = url.searchParams.get('branch_id');
+            await toJsonResponse(route, {
+                items: [fixture.branch],
+                cursor: null,
+                has_more: false,
+            });
+        });
+
+        const branchFilter = page.getByTestId('tenants-page-filter-branch');
+        await expect(branchFilter).toBeVisible();
+        await branchFilter.selectOption(fixture.branch.id);
+        await expect(branchFilter).toHaveValue(fixture.branch.id);
+        await expect.poll(() => capturedBranchParam).toBe(fixture.branch.id);
     });
 
     test('should reset only page filters and keep context chips (Scenario C)', async ({ page }) => {
@@ -967,7 +1024,7 @@ test.describe('Platform Admin Tenants', () => {
             await page.getByTestId('tenants-mode-portfolio').click();
         }
 
-        const refreshKpiButton = page.getByRole('button', { name: 'Обновить KPI' });
+        const refreshKpiButton = page.getByRole('button', { name: /Обновить/i });
         if (await refreshKpiButton.isVisible().catch(() => false)) {
             await refreshKpiButton.click();
         }

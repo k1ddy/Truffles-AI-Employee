@@ -1119,6 +1119,7 @@ export default function TenantsPage() {
                 q: branchQueryValue,
                 company_id: pageFilterCompanyId ?? undefined,
                 client_id: pageFilterClientId ?? undefined,
+                branch_id: pageFilterBranchId ?? undefined,
                 lifecycle: tenantLifecycle,
             });
             return response.data;
@@ -1618,6 +1619,22 @@ export default function TenantsPage() {
         };
     };
 
+    const validateScopeForBranchActions = (
+        scope: { companyId?: string | null; clientId?: string | null; branchId?: string | null },
+        actionLabel: string,
+    ) => {
+        const normalized = completeContextScope(scope);
+        if (normalized.branchId && (!normalized.clientId || !normalized.companyId)) {
+            reportValidationError(
+                `Нельзя выполнить "${actionLabel}": для филиала требуется связка company + client.`,
+                "TENANTS_SCOPE_INVALID",
+                "filters",
+            );
+            return null;
+        }
+        return normalized;
+    };
+
     const writeContextScope = (scope: { companyId?: string | null; clientId?: string | null; branchId?: string | null }) => {
         const normalized = completeContextScope(scope);
         setConsoleContextScope({
@@ -1665,18 +1682,35 @@ export default function TenantsPage() {
         });
         applyScopeToPageFilters(nextScope);
     };
-    const setBranchContextAndPageFilters = (branchId?: string | null) => {
+    const setBranchContextAndPageFilters = (
+        input?: string | { branchId?: string | null; clientId?: string | null; companyId?: string | null } | null,
+    ) => {
+        const branchPatch = typeof input === "string" || input == null ? { branchId: input ?? null } : input;
         const storedScope = readConsoleContextScopeFromStorage();
+        const nextScopeCandidate = validateScopeForBranchActions(
+            {
+                companyId: branchPatch.companyId ?? pageFilterCompanyId ?? storedScope.companyId,
+                clientId: branchPatch.clientId ?? pageFilterClientId ?? storedScope.clientId,
+                branchId: branchPatch.branchId ?? null,
+            },
+            "В контекст филиала",
+        );
+        if (!nextScopeCandidate) {
+            return;
+        }
         const nextScope = writeContextScope({
-            companyId: pageFilterCompanyId ?? storedScope.companyId,
-            clientId: pageFilterClientId ?? storedScope.clientId,
-            branchId: branchId ?? null,
+            companyId: nextScopeCandidate.companyId,
+            clientId: nextScopeCandidate.clientId,
+            branchId: nextScopeCandidate.branchId,
         });
         applyScopeToPageFilters(nextScope);
     };
     const applyContextToPageFilters = () => {
         const storedScope = readConsoleContextScopeFromStorage();
-        const nextScope = completeContextScope(storedScope);
+        const nextScope = validateScopeForBranchActions(storedScope, "Взять из рабочего контура");
+        if (!nextScope) {
+            return;
+        }
         applyScopeToPageFilters(nextScope);
         if (
             (nextScope.companyId ?? "") !== storedScope.companyId
@@ -1812,7 +1846,11 @@ export default function TenantsPage() {
                 reportValidationError("Филиал создан, но branch_id не вернулся");
                 return;
             }
-            setBranchContextAndPageFilters(branchId);
+            setBranchContextAndPageFilters({
+                branchId,
+                clientId,
+                companyId: quickCreateCompanyId,
+            });
             refreshTenants();
             toast.success("Филиал создан и выбран в контексте");
         } catch (error) {
@@ -2799,7 +2837,7 @@ export default function TenantsPage() {
                                             филиалы активные {item.active_branches}/{item.total_branches} · неактуальные {item.stale_branches} · интеграционных ошибок {item.integration_error_branches} · outbox_failed_24h {item.outbox_failed_24h} · ожидают передачи {item.pending_handovers}
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
-                                            reference-охват: {item.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(item.reference_branch_reason)}
+                                            опорные филиалы: {item.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(item.reference_branch_reason)}
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
                                             причины: {item.reasons?.join(", ") || "—"}
@@ -3137,7 +3175,7 @@ export default function TenantsPage() {
                                                 филиалы: активные {client.active_branches ?? 0}/{client.total_branches ?? 0} · деградация {client.degraded_branches ?? 0} · готовы к запуску {client.go_live_ready_branches ?? 0}
                                             </div>
                                             <div className="text-xs text-muted-foreground">
-                                                reference-охват: {client.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(client.reference_branch_reason)}
+                                                опорные филиалы: {client.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(client.reference_branch_reason)}
                                             </div>
                                             {lifecycleAuditHistory.length > 0 || clientIdKey === pageFilterClientId ? (
                                                 <div className="mt-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs" data-testid="tenants-client-lifecycle-audit">
@@ -3414,7 +3452,13 @@ export default function TenantsPage() {
                                             ) : null}
                                             <button
                                                 className="btn-ghost"
-                                                onClick={() => setBranchContextAndPageFilters(branch.id)}
+                                                onClick={() =>
+                                                    setBranchContextAndPageFilters({
+                                                        branchId: branch.id,
+                                                        clientId: readBranchClientId(branch),
+                                                        companyId: readBranchCompanyId(branch),
+                                                    })
+                                                }
                                                 disabled={branch.id === selectedBranchId}
                                             >
                                                 В контекст
