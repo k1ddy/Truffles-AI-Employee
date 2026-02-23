@@ -231,6 +231,42 @@
   - `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 ... platform-admin.spec.ts` -> `17 passed`
   - `PLAYWRIGHT_BASE_URL=http://localhost:3100 CI=1 E2E_DETERMINISTIC_AUTH=1 A11Y_FAIL_ON_THRESHOLDS=1 ... tenants-a11y.spec.ts` -> `2 passed`
 
+## Wave 4 async refresh continuation (2026-02-23, UTC)
+1. Added async stale-while-refresh for fleet cache hit near expiry.
+- `list_clients(include_summary)` and `list_fleet_attention` now schedule background refresh when cached entry is close to TTL end.
+- Added inflight dedupe guard to prevent thread storms per cache key (`cache_type:scope_key`).
+- Refresh is fail-open and non-blocking for request path.
+
+2. Fleet attention cache key contract hardened.
+- Added `limit` into attention cache scope key to avoid cross-limit cache collisions.
+
+3. Shared compute path extracted for attention.
+- Added helper that builds fleet attention response from active clients and reused it for:
+  - request miss path,
+  - background refresh path.
+
+4. Validation.
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` -> `72 passed`
+- Added explicit tests:
+  - `cache hit -> schedule async refresh` for `clients summary`,
+  - `cache hit -> schedule async refresh` for `fleet attention`.
+
+## Wave 4 event-driven invalidation continuation (2026-02-23, UTC)
+1. Added write-path invalidation for fleet cache.
+- Introduced `_invalidate_tenants_fleet_cache_scope` (best-effort nested transaction guard) to clear `fleet_summary` and `fleet_attention` cache slices without blocking tenant writes.
+
+2. Hooked invalidation into mutation endpoints that change fleet aggregates.
+- `update_company`
+- `create_client`, `update_client`, `archive_client`, `restore_client`
+- `create_branch`, `update_branch`
+- `approve/reject/waive branch go-live`
+- integrations execute paths: `integration_reconcile` and `provider_ops`
+
+3. Validation.
+- `pytest -q truffles-api/tests/test_console_admin_provisioning.py truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` -> `89 passed`
+- `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_admin_provisioning.py` -> pass
+- `python3 truffles-api/scripts/generate_openapi.py --check` -> pass
+
 ## Post-merge canary verification (2026-02-23, UTC)
 1. Authenticated perf baseline on deployed API captured (platform_admin scope).
 - Command:

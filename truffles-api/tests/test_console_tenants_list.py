@@ -255,6 +255,51 @@ async def test_list_clients_stores_summary_in_cache_after_miss(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
+async def test_list_clients_cache_hit_schedules_async_refresh(monkeypatch) -> None:
+    cached_summary = _build_fleet_summary()
+    accessible_client_id = uuid4()
+    db = Mock()
+    db.query.return_value = _build_list_query_mock()
+    schedule_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=accessible_client_id, status="active", company_id=None)],
+            client=None,
+        ),
+    )
+    monkeypatch.setattr(console_router, "_load_cached_fleet_summary", lambda *_, **__: cached_summary)
+    monkeypatch.setattr(
+        console_router,
+        "_build_fleet_summary_for_scope",
+        lambda *_, **__: (_ for _ in ()).throw(AssertionError("cache hit should not rebuild summary in request path")),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_store_cached_fleet_summary",
+        lambda *_, **__: (_ for _ in ()).throw(AssertionError("cache hit should not write summary in request path")),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_summary_async_refresh",
+        lambda *_, **kwargs: schedule_calls.append(kwargs),
+    )
+
+    response = await console_router.list_clients(
+        request=_build_request(),
+        include_summary="true",
+        db=db,
+    )
+
+    assert response.summary == cached_summary
+    assert len(schedule_calls) == 1
+    assert schedule_calls[0]["accessible_client_ids"] == {accessible_client_id}
+
+
+@pytest.mark.asyncio
 async def test_list_fleet_attention_returns_cached_response(monkeypatch) -> None:
     cached_response = console_router.ConsoleFleetAttentionResponse(
         generated_at=datetime.now(timezone.utc).isoformat(),
@@ -316,7 +361,7 @@ async def test_list_fleet_attention_returns_cached_response(monkeypatch) -> None
     monkeypatch.setattr(console_router, "_load_cached_fleet_attention", lambda *_, **__: cached_response)
     monkeypatch.setattr(
         console_router,
-        "_build_fleet_client_details_map",
+        "_build_fleet_attention_response_for_clients",
         lambda *_, **__: (_ for _ in ()).throw(AssertionError("cache hit should short-circuit heavy path")),
     )
 
@@ -327,6 +372,57 @@ async def test_list_fleet_attention_returns_cached_response(monkeypatch) -> None
     )
 
     assert response == cached_response
+
+
+@pytest.mark.asyncio
+async def test_list_fleet_attention_cache_hit_schedules_async_refresh(monkeypatch) -> None:
+    active_client_id = uuid4()
+    cached_response = console_router.ConsoleFleetAttentionResponse(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        stale_after_minutes=120,
+        summary=console_router.ConsoleFleetAttentionSummary(
+            active_clients_total=1,
+            clients_with_attention=0,
+            high_risk_clients=0,
+            medium_risk_clients=0,
+            low_risk_clients=0,
+            stale_branches_total=0,
+            integration_error_branches_total=0,
+            integration_warn_branches_total=0,
+            outbox_failed_24h_total=0,
+            pending_handovers_total=0,
+        ),
+        items=[],
+    )
+    schedule_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        console_router,
+        "get_console_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            role="platform_admin",
+            accessible_clients=[SimpleNamespace(id=active_client_id, status="active", company_id=None)],
+            companies=[],
+            client=None,
+        ),
+    )
+    monkeypatch.setattr(console_router, "_load_cached_fleet_attention", lambda *_, **__: cached_response)
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_attention_async_refresh",
+        lambda *_, **kwargs: schedule_calls.append(kwargs),
+    )
+
+    response = await console_router.list_fleet_attention(
+        request=_build_request(),
+        stale_after_minutes=120,
+        db=Mock(),
+    )
+
+    assert response == cached_response
+    assert len(schedule_calls) == 1
+    assert schedule_calls[0]["active_client_ids"] == {active_client_id}
+    assert schedule_calls[0]["limit"] == 20
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date as dt_date
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Thread
 from time import perf_counter
 from typing import Any, Callable, Literal, Optional
 from urllib.error import HTTPError, URLError
@@ -24,7 +24,7 @@ from sqlalchemy import and_, case, func, or_, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.logging_config import record_tenants_endpoint_latency
 from app.models import (
     Agent,
@@ -2167,6 +2167,22 @@ _TENANTS_FLEET_CACHE_TTL_SECONDS = _parse_env_int(
     min_value=30,
     max_value=3600,
 )
+_TENANTS_FLEET_CACHE_ASYNC_REFRESH_ENABLED = _parse_env_bool(
+    "TENANTS_FLEET_CACHE_ASYNC_REFRESH_ENABLED",
+    default=True,
+)
+_TENANTS_FLEET_CACHE_ASYNC_REFRESH_BUFFER_SECONDS = _parse_env_int(
+    "TENANTS_FLEET_CACHE_ASYNC_REFRESH_BUFFER_SECONDS",
+    default=60,
+    min_value=10,
+    max_value=1800,
+)
+_TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS = _parse_env_int(
+    "TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS",
+    default=5000,
+    min_value=50,
+    max_value=100000,
+)
 _OUTBOX_ARCHIVED_REASON_PREFIX = "archived_pending:"
 _OUTBOX_CALENDAR_SYNC_REASON_PREFIX = "calendar_sync_failed:"
 _OUTBOX_SYSTEM_EVENT_TYPES = {"calendar.sync_inbound", "calendar.sync_outbound"}
@@ -2185,6 +2201,8 @@ _TENANTS_WEEKLY_SNAPSHOT_WEEK_KEY_PATTERN = re.compile(r"^\d{4}-W\d{2}$")
 _TENANTS_SENSITIVE_ACCESS_EVENT_TYPE = "tenants_sensitive_id_accessed"
 _TENANTS_SENSITIVE_FIELDS = {"instance_id"}
 _TENANTS_SENSITIVE_ACTIONS = {"reveal", "copy"}
+_TENANTS_FLEET_CACHE_REFRESH_INFLIGHT: set[str] = set()
+_TENANTS_FLEET_CACHE_REFRESH_LOCK = Lock()
 
 
 @dataclass
@@ -2201,6 +2219,13 @@ class _FleetClientDetails:
     go_live_ready_branches: int
     reference_branch_ids: tuple[UUID, ...] = ()
     reference_branch_reason: str = "no_active_branches"
+
+
+@dataclass
+class _TenantsFleetCacheEntry:
+    payload_json: dict[str, Any]
+    generated_at: datetime
+    expires_at: datetime
 
 
 @dataclass
@@ -2390,13 +2415,106 @@ def _build_tenants_fleet_cache_scope_key(scope: dict[str, Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _load_tenants_fleet_cache_payload(
+def _build_clients_query_for_scope(
+    db: Session,
+    *,
+    accessible_client_ids: set[UUID],
+    lifecycle_mode: str,
+    company_uuid: Optional[UUID],
+    query_value: Optional[str],
+    cursor_cutoff: Optional[datetime],
+):
+    query = db.query(Client)
+    if accessible_client_ids:
+        query = query.filter(Client.id.in_(list(accessible_client_ids)))
+    # Keep legacy platform_admin behavior for empty in-memory scope in tests/recovery paths.
+    if lifecycle_mode == "active":
+        query = query.filter(Client.status == "active")
+    elif lifecycle_mode == "archived":
+        query = query.filter(Client.status != "active")
+    if company_uuid:
+        query = query.filter(Client.company_id == company_uuid)
+    if query_value:
+        query_value_lower = query_value.lower()
+        uuid_value = _looks_like_uuid(query_value)
+        filters = []
+        if uuid_value:
+            filters.append(Client.id == uuid_value)
+        filters.append(func.lower(Client.name).like(f"%{query_value_lower}%"))
+        query = query.filter(or_(*filters))
+    if cursor_cutoff is not None:
+        query = query.filter(Client.created_at < cursor_cutoff)
+    return query
+
+
+def _build_clients_summary_cache_scope_key(
+    *,
+    accessible_clients_hash: str,
+    company_uuid: Optional[UUID],
+    lifecycle_mode: str,
+    query_value: Optional[str],
+    fleet_lifecycle_filter: Optional[str],
+    payment_status_filter: Optional[str],
+    service_state_filter: Optional[str],
+) -> str:
+    return _build_tenants_fleet_cache_scope_key(
+        {
+            "scope": "clients_summary",
+            "accessible_clients_hash": accessible_clients_hash,
+            "company_id": str(company_uuid) if company_uuid else None,
+            "lifecycle": lifecycle_mode,
+            "q": query_value,
+            "fleet_lifecycle": fleet_lifecycle_filter,
+            "payment_status": payment_status_filter,
+            "service_state": service_state_filter,
+        }
+    )
+
+
+def _build_fleet_attention_cache_scope_key(
+    *,
+    active_client_ids: set[UUID],
+    stale_after_minutes: int,
+    include_low_mode: bool,
+    limit: int,
+) -> str:
+    return _build_tenants_fleet_cache_scope_key(
+        {
+            "scope": "fleet_attention",
+            "active_clients_hash": _hash_uuid_values(active_client_ids),
+            "stale_after_minutes": stale_after_minutes,
+            "include_low": include_low_mode,
+            "limit": limit,
+        }
+    )
+
+
+def _fleet_cache_refresh_token(cache_type: str, scope_key: str) -> str:
+    return f"{cache_type}:{scope_key}"
+
+
+def _try_claim_fleet_cache_refresh(cache_type: str, scope_key: str) -> bool:
+    token = _fleet_cache_refresh_token(cache_type, scope_key)
+    with _TENANTS_FLEET_CACHE_REFRESH_LOCK:
+        if token in _TENANTS_FLEET_CACHE_REFRESH_INFLIGHT:
+            return False
+        _TENANTS_FLEET_CACHE_REFRESH_INFLIGHT.add(token)
+    return True
+
+
+def _release_fleet_cache_refresh(cache_type: str, scope_key: str) -> None:
+    token = _fleet_cache_refresh_token(cache_type, scope_key)
+    with _TENANTS_FLEET_CACHE_REFRESH_LOCK:
+        _TENANTS_FLEET_CACHE_REFRESH_INFLIGHT.discard(token)
+
+
+def _load_tenants_fleet_cache_entry(
     db: Session,
     *,
     cache_type: str,
     scope_key: str,
     now: datetime,
-) -> Optional[dict[str, Any]]:
+) -> Optional[_TenantsFleetCacheEntry]:
     try:
         row = (
             db.query(TenantsFleetCache)
@@ -2417,7 +2535,31 @@ def _load_tenants_fleet_cache_payload(
         return None
     if row is None or not isinstance(row.payload_json, dict):
         return None
-    return row.payload_json
+    generated_at = row.generated_at if isinstance(row.generated_at, datetime) else now
+    expires_at = row.expires_at if isinstance(row.expires_at, datetime) else now
+    return _TenantsFleetCacheEntry(
+        payload_json=row.payload_json,
+        generated_at=generated_at,
+        expires_at=expires_at,
+    )
+
+
+def _load_tenants_fleet_cache_payload(
+    db: Session,
+    *,
+    cache_type: str,
+    scope_key: str,
+    now: datetime,
+) -> Optional[dict[str, Any]]:
+    entry = _load_tenants_fleet_cache_entry(
+        db,
+        cache_type=cache_type,
+        scope_key=scope_key,
+        now=now,
+    )
+    if entry is None:
+        return None
+    return entry.payload_json
 
 
 def _upsert_tenants_fleet_cache_payload(
@@ -2531,6 +2673,467 @@ def _store_cached_fleet_attention(
         payload=response.model_dump(mode="json"),
         now=now,
     )
+
+
+def _is_fleet_cache_async_refresh_due(
+    db: Session,
+    *,
+    cache_type: str,
+    scope_key: str,
+    now: datetime,
+) -> bool:
+    if not _TENANTS_FLEET_CACHE_ASYNC_REFRESH_ENABLED:
+        return False
+    entry = _load_tenants_fleet_cache_entry(
+        db,
+        cache_type=cache_type,
+        scope_key=scope_key,
+        now=now,
+    )
+    if entry is None:
+        return False
+    remaining_seconds = (entry.expires_at - now).total_seconds()
+    return remaining_seconds <= _TENANTS_FLEET_CACHE_ASYNC_REFRESH_BUFFER_SECONDS
+
+
+def _refresh_fleet_summary_cache_worker(task: dict[str, Any]) -> None:
+    scope_key = str(task.get("scope_key") or "").strip()
+    if not scope_key:
+        return
+    db = SessionLocal()
+    try:
+        raw_client_ids = task.get("accessible_client_ids") or []
+        accessible_client_ids = {
+            UUID(str(raw_id))
+            for raw_id in raw_client_ids
+            if raw_id
+        }
+        if not accessible_client_ids:
+            return
+
+        company_id_raw = task.get("company_id")
+        company_uuid = UUID(str(company_id_raw)) if company_id_raw else None
+        lifecycle_mode = str(task.get("lifecycle_mode") or "active").strip().lower()
+        if lifecycle_mode not in _TENANT_LIFECYCLE_MODES:
+            lifecycle_mode = "active"
+
+        query_value_raw = task.get("query_value")
+        query_value = str(query_value_raw).strip() if isinstance(query_value_raw, str) and query_value_raw.strip() else None
+        fleet_lifecycle_filter = (
+            str(task.get("fleet_lifecycle_filter")).strip().lower()
+            if isinstance(task.get("fleet_lifecycle_filter"), str)
+            else None
+        )
+        payment_status_filter = (
+            str(task.get("payment_status_filter")).strip().lower()
+            if isinstance(task.get("payment_status_filter"), str)
+            else None
+        )
+        service_state_filter = (
+            str(task.get("service_state_filter")).strip().lower()
+            if isinstance(task.get("service_state_filter"), str)
+            else None
+        )
+        batch_size_raw = task.get("batch_size")
+        batch_size = int(batch_size_raw) if isinstance(batch_size_raw, int) and batch_size_raw > 0 else 100
+
+        def _build_query(cursor_cutoff: Optional[datetime]):
+            return _build_clients_query_for_scope(
+                db,
+                accessible_client_ids=accessible_client_ids,
+                lifecycle_mode=lifecycle_mode,
+                company_uuid=company_uuid,
+                query_value=query_value,
+                cursor_cutoff=cursor_cutoff,
+            )
+
+        summary = _build_fleet_summary_for_scope(
+            db,
+            build_client_query=_build_query,
+            fleet_lifecycle=fleet_lifecycle_filter,
+            payment_status=payment_status_filter,
+            service_state=service_state_filter,
+            batch_size=batch_size,
+        )
+        _store_cached_fleet_summary(
+            db,
+            scope_key=scope_key,
+            now=datetime.now(timezone.utc),
+            summary=summary,
+        )
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+        _release_fleet_cache_refresh(_TENANTS_FLEET_CACHE_SUMMARY_TYPE, scope_key)
+
+
+def _schedule_fleet_summary_async_refresh(
+    db: Session,
+    *,
+    scope_key: str,
+    accessible_client_ids: set[UUID],
+    lifecycle_mode: str,
+    company_uuid: Optional[UUID],
+    query_value: Optional[str],
+    fleet_lifecycle_filter: Optional[str],
+    payment_status_filter: Optional[str],
+    service_state_filter: Optional[str],
+    batch_size: int,
+    now: datetime,
+) -> None:
+    if not _TENANTS_FLEET_CACHE_ASYNC_REFRESH_ENABLED:
+        return
+    if not accessible_client_ids:
+        return
+    if len(accessible_client_ids) > _TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS:
+        return
+    if not _is_fleet_cache_async_refresh_due(
+        db,
+        cache_type=_TENANTS_FLEET_CACHE_SUMMARY_TYPE,
+        scope_key=scope_key,
+        now=now,
+    ):
+        return
+    if not _try_claim_fleet_cache_refresh(_TENANTS_FLEET_CACHE_SUMMARY_TYPE, scope_key):
+        return
+    task = {
+        "scope_key": scope_key,
+        "accessible_client_ids": [str(client_id) for client_id in sorted(accessible_client_ids, key=str)],
+        "lifecycle_mode": lifecycle_mode,
+        "company_id": str(company_uuid) if company_uuid else None,
+        "query_value": query_value,
+        "fleet_lifecycle_filter": fleet_lifecycle_filter,
+        "payment_status_filter": payment_status_filter,
+        "service_state_filter": service_state_filter,
+        "batch_size": batch_size,
+    }
+    try:
+        Thread(
+            target=_refresh_fleet_summary_cache_worker,
+            kwargs={"task": task},
+            daemon=True,
+            name="tenants-fleet-summary-refresh",
+        ).start()
+    except Exception:
+        _release_fleet_cache_refresh(_TENANTS_FLEET_CACHE_SUMMARY_TYPE, scope_key)
+
+
+def _build_fleet_attention_response_for_clients(
+    db: Session,
+    *,
+    active_clients: list[Client],
+    companies_by_id: dict[UUID, Company],
+    stale_after_minutes: int,
+    include_low_mode: bool,
+    limit: int,
+    now: datetime,
+) -> ConsoleFleetAttentionResponse:
+    fleet_details_map = _build_fleet_client_details_map(
+        db,
+        clients=active_clients,
+        companies_by_id=companies_by_id,
+    )
+
+    client_ids = [client.id for client in active_clients]
+    branches = db.query(Branch).filter(Branch.client_id.in_(client_ids)).all()
+    branches_by_client: dict[UUID, list[Branch]] = {client.id: [] for client in active_clients}
+    for branch in branches:
+        branches_by_client.setdefault(branch.client_id, []).append(branch)
+
+    token_rows = (
+        db.query(
+            ClientSettings.client_id,
+            ClientSettings.telegram_bot_token,
+        )
+        .filter(ClientSettings.client_id.in_(client_ids))
+        .all()
+    )
+    telegram_token_map: dict[UUID, bool] = {}
+    for client_id, token in token_rows:
+        telegram_token_map[client_id] = bool(_normalize_optional_text(token))
+
+    inbound_observations = _load_latest_branch_inbound_observations_for_clients(
+        db,
+        client_ids=client_ids,
+    )
+
+    outbox_failed_map = _query_outbox_failed_24h_map(db, client_ids=client_ids, now=now)
+    pending_handovers_map = _query_pending_handovers_map(db, client_ids=client_ids)
+
+    summary = ConsoleFleetAttentionSummary(
+        active_clients_total=len(active_clients),
+        clients_with_attention=0,
+        high_risk_clients=0,
+        medium_risk_clients=0,
+        low_risk_clients=0,
+        stale_branches_total=0,
+        integration_error_branches_total=0,
+        integration_warn_branches_total=0,
+        outbox_failed_24h_total=0,
+        pending_handovers_total=0,
+    )
+
+    items: list[ConsoleFleetAttentionItem] = []
+    for client in active_clients:
+        details = fleet_details_map.get(client.id)
+        if not details:
+            continue
+
+        reference_branch_ids = set(details.reference_branch_ids or ())
+        stale_branches = 0
+        integration_error_branches = 0
+        integration_warn_branches = 0
+
+        for branch in branches_by_client.get(client.id, []):
+            if not branch.is_active:
+                continue
+            if reference_branch_ids and branch.id not in reference_branch_ids:
+                continue
+            observed = inbound_observations.get(branch.id)
+            last_inbound_at: Optional[datetime] = None
+            last_inbound_instance_id: Optional[str] = None
+            if observed:
+                last_inbound_at, last_inbound_instance_id = observed
+
+            status = _build_branch_integration_status(
+                client_id=client.id,
+                client_slug=client.name,
+                branch=branch,
+                has_telegram_bot_token=telegram_token_map.get(client.id, False),
+                stale_after_minutes=stale_after_minutes,
+                last_inbound_at=last_inbound_at,
+                last_inbound_instance_id=last_inbound_instance_id,
+                now=now,
+            )
+            if status.whatsapp_status == "no_recent_inbound":
+                stale_branches += 1
+            if status.status == "error":
+                integration_error_branches += 1
+            elif status.status == "warn":
+                integration_warn_branches += 1
+
+        outbox_failed_24h = outbox_failed_map.get(client.id, 0)
+        pending_handovers = pending_handovers_map.get(client.id, 0)
+        score, level, reasons, suggested_actions = _resolve_fleet_attention_profile(
+            service_state=details.service_state,
+            stale_branches=stale_branches,
+            integration_error_branches=integration_error_branches,
+            integration_warn_branches=integration_warn_branches,
+            outbox_failed_24h=outbox_failed_24h,
+            pending_handovers=pending_handovers,
+        )
+
+        if score > 0:
+            summary.clients_with_attention += 1
+            if level == "high":
+                summary.high_risk_clients += 1
+            elif level == "medium":
+                summary.medium_risk_clients += 1
+            else:
+                summary.low_risk_clients += 1
+        summary.stale_branches_total += stale_branches
+        summary.integration_error_branches_total += integration_error_branches
+        summary.integration_warn_branches_total += integration_warn_branches
+        summary.outbox_failed_24h_total += outbox_failed_24h
+        summary.pending_handovers_total += pending_handovers
+
+        if not include_low_mode and level == "low":
+            continue
+
+        company = companies_by_id.get(client.company_id) if client.company_id else None
+        items.append(
+            ConsoleFleetAttentionItem(
+                client_id=client.id,
+                client_slug=client.name,
+                client_name=client.name,
+                company_id=client.company_id,
+                company_name=company.name if company else None,
+                lifecycle_state=details.lifecycle_state,
+                payment_status=details.payment_status,
+                commercial_state=details.commercial_state,
+                service_state=details.service_state,
+                owner_name=details.owner_name,
+                next_action=details.next_action,
+                total_branches=details.total_branches,
+                active_branches=details.active_branches,
+                degraded_branches=details.degraded_branches,
+                go_live_ready_branches=details.go_live_ready_branches,
+                reference_branch_ids=list(details.reference_branch_ids),
+                reference_branch_reason=details.reference_branch_reason,
+                stale_branches=stale_branches,
+                integration_error_branches=integration_error_branches,
+                integration_warn_branches=integration_warn_branches,
+                outbox_failed_24h=outbox_failed_24h,
+                pending_handovers=pending_handovers,
+                attention_score=score,
+                attention_level=level,
+                reasons=reasons,
+                suggested_actions=suggested_actions,
+            )
+        )
+
+    items.sort(
+        key=lambda item: (
+            item.attention_score,
+            item.integration_error_branches,
+            item.outbox_failed_24h,
+            item.pending_handovers,
+        ),
+        reverse=True,
+    )
+    return ConsoleFleetAttentionResponse(
+        generated_at=now.isoformat(),
+        stale_after_minutes=stale_after_minutes,
+        summary=summary,
+        items=items[:limit],
+    )
+
+
+def _refresh_fleet_attention_cache_worker(task: dict[str, Any]) -> None:
+    scope_key = str(task.get("scope_key") or "").strip()
+    if not scope_key:
+        return
+    db = SessionLocal()
+    try:
+        raw_client_ids = task.get("active_client_ids") or []
+        active_client_ids = {
+            UUID(str(raw_id))
+            for raw_id in raw_client_ids
+            if raw_id
+        }
+        if not active_client_ids:
+            return
+        stale_after_minutes_raw = task.get("stale_after_minutes")
+        stale_after_minutes = (
+            int(stale_after_minutes_raw)
+            if isinstance(stale_after_minutes_raw, int)
+            else _INTEGRATION_DEFAULT_STALE_MINUTES
+        )
+        include_low_mode = bool(task.get("include_low_mode"))
+        limit_raw = task.get("limit")
+        limit = int(limit_raw) if isinstance(limit_raw, int) and limit_raw > 0 else 20
+        now = datetime.now(timezone.utc)
+
+        active_clients = (
+            db.query(Client)
+            .filter(
+                Client.id.in_(list(active_client_ids)),
+                Client.status == _CLIENT_STATUS_ACTIVE,
+            )
+            .all()
+        )
+        if not active_clients:
+            response = ConsoleFleetAttentionResponse(
+                generated_at=now.isoformat(),
+                stale_after_minutes=stale_after_minutes,
+                summary=ConsoleFleetAttentionSummary(
+                    active_clients_total=0,
+                    clients_with_attention=0,
+                    high_risk_clients=0,
+                    medium_risk_clients=0,
+                    low_risk_clients=0,
+                    stale_branches_total=0,
+                    integration_error_branches_total=0,
+                    integration_warn_branches_total=0,
+                    outbox_failed_24h_total=0,
+                    pending_handovers_total=0,
+                ),
+                items=[],
+            )
+        else:
+            company_ids = {client.company_id for client in active_clients if client.company_id}
+            companies_by_id = {
+                company.id: company
+                for company in db.query(Company).filter(Company.id.in_(list(company_ids))).all()
+            } if company_ids else {}
+            response = _build_fleet_attention_response_for_clients(
+                db,
+                active_clients=active_clients,
+                companies_by_id=companies_by_id,
+                stale_after_minutes=stale_after_minutes,
+                include_low_mode=include_low_mode,
+                limit=limit,
+                now=now,
+            )
+        _store_cached_fleet_attention(
+            db,
+            scope_key=scope_key,
+            now=now,
+            response=response,
+        )
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+        _release_fleet_cache_refresh(_TENANTS_FLEET_CACHE_ATTENTION_TYPE, scope_key)
+
+
+def _schedule_fleet_attention_async_refresh(
+    db: Session,
+    *,
+    scope_key: str,
+    active_client_ids: set[UUID],
+    stale_after_minutes: int,
+    include_low_mode: bool,
+    limit: int,
+    now: datetime,
+) -> None:
+    if not _TENANTS_FLEET_CACHE_ASYNC_REFRESH_ENABLED:
+        return
+    if not active_client_ids:
+        return
+    if len(active_client_ids) > _TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS:
+        return
+    if not _is_fleet_cache_async_refresh_due(
+        db,
+        cache_type=_TENANTS_FLEET_CACHE_ATTENTION_TYPE,
+        scope_key=scope_key,
+        now=now,
+    ):
+        return
+    if not _try_claim_fleet_cache_refresh(_TENANTS_FLEET_CACHE_ATTENTION_TYPE, scope_key):
+        return
+    task = {
+        "scope_key": scope_key,
+        "active_client_ids": [str(client_id) for client_id in sorted(active_client_ids, key=str)],
+        "stale_after_minutes": stale_after_minutes,
+        "include_low_mode": include_low_mode,
+        "limit": limit,
+    }
+    try:
+        Thread(
+            target=_refresh_fleet_attention_cache_worker,
+            kwargs={"task": task},
+            daemon=True,
+            name="tenants-fleet-attention-refresh",
+        ).start()
+    except Exception:
+        _release_fleet_cache_refresh(_TENANTS_FLEET_CACHE_ATTENTION_TYPE, scope_key)
+
+
+def _invalidate_tenants_fleet_cache_scope(
+    db: Session,
+    *,
+    reason: str,
+) -> None:
+    # Keep cache invalidation best-effort and isolated from tenant mutations.
+    # If cache storage is unavailable, writes must still succeed.
+    _ = reason
+    try:
+        with db.begin_nested():
+            db.execute(
+                text(
+                    "DELETE FROM tenants_fleet_cache "
+                    "WHERE cache_type IN ('fleet_summary', 'fleet_attention')"
+                )
+            )
+    except ProgrammingError as exc:
+        if _is_tenants_fleet_cache_table_missing_error(exc):
+            return
+        return
+    except Exception:
+        return
 
 
 def _normalize_client_lifecycle_reason(reason: str) -> str:
@@ -13631,24 +14234,14 @@ async def list_clients(
     cursor_date = _parse_cursor_param(cursor)
 
     def _build_client_query(cursor_cutoff: Optional[datetime]):
-        query = db.query(Client)
-        if lifecycle_mode == "active":
-            query = query.filter(Client.status == "active")
-        elif lifecycle_mode == "archived":
-            query = query.filter(Client.status != "active")
-        if company_uuid:
-            query = query.filter(Client.company_id == company_uuid)
-        if query_value:
-            query_value_lower = query_value.lower()
-            uuid_value = _looks_like_uuid(query_value)
-            filters = []
-            if uuid_value:
-                filters.append(Client.id == uuid_value)
-            filters.append(func.lower(Client.name).like(f"%{query_value_lower}%"))
-            query = query.filter(or_(*filters))
-        if cursor_cutoff is not None:
-            query = query.filter(Client.created_at < cursor_cutoff)
-        return query
+        return _build_clients_query_for_scope(
+            db,
+            accessible_client_ids=accessible_client_ids,
+            lifecycle_mode=lifecycle_mode,
+            company_uuid=company_uuid,
+            query_value=query_value,
+            cursor_cutoff=cursor_cutoff,
+        )
 
     clients: list[Client] = []
     has_more = False
@@ -13729,19 +14322,17 @@ async def list_clients(
 
     summary = None
     if include_summary_mode:
-        summary_scope_key = _build_tenants_fleet_cache_scope_key(
-            {
-                "scope": "clients_summary",
-                "accessible_clients_hash": accessible_clients_hash,
-                "company_id": str(company_uuid) if company_uuid else None,
-                "lifecycle": lifecycle_mode,
-                "q": query_value,
-                "fleet_lifecycle": fleet_lifecycle_filter,
-                "payment_status": payment_status_filter,
-                "service_state": service_state_filter,
-            }
+        summary_scope_key = _build_clients_summary_cache_scope_key(
+            accessible_clients_hash=accessible_clients_hash,
+            company_uuid=company_uuid,
+            lifecycle_mode=lifecycle_mode,
+            query_value=query_value,
+            fleet_lifecycle_filter=fleet_lifecycle_filter,
+            payment_status_filter=payment_status_filter,
+            service_state_filter=service_state_filter,
         )
         summary_cache_now = datetime.now(timezone.utc)
+        summary_batch_size = max(limit * 4, 100)
         summary = _load_cached_fleet_summary(
             db,
             scope_key=summary_scope_key,
@@ -13754,13 +14345,27 @@ async def list_clients(
                 fleet_lifecycle=fleet_lifecycle_filter,
                 payment_status=payment_status_filter,
                 service_state=service_state_filter,
-                batch_size=max(limit * 4, 100),
+                batch_size=summary_batch_size,
             )
             _store_cached_fleet_summary(
                 db,
                 scope_key=summary_scope_key,
                 now=summary_cache_now,
                 summary=summary,
+            )
+        else:
+            _schedule_fleet_summary_async_refresh(
+                db,
+                scope_key=summary_scope_key,
+                accessible_client_ids=accessible_client_ids,
+                lifecycle_mode=lifecycle_mode,
+                company_uuid=company_uuid,
+                query_value=query_value,
+                fleet_lifecycle_filter=fleet_lifecycle_filter,
+                payment_status_filter=payment_status_filter,
+                service_state_filter=service_state_filter,
+                batch_size=summary_batch_size,
+                now=summary_cache_now,
             )
 
     return ConsoleClientListResponse(
@@ -15506,6 +16111,7 @@ async def run_integration_reconcile_for_branch(
                 client_id=branch.client_id,
                 branch_id=branch.id,
             )
+            _invalidate_tenants_fleet_cache_scope(db, reason="integration_reconcile_execute")
             db.commit()
         return ConsoleIntegrationBranchActionResponse(
             branch_id=branch.id,
@@ -15729,6 +16335,7 @@ async def run_integration_reconcile_for_branch(
                 target_type="branch",
                 target_id=branch.id,
             )
+        _invalidate_tenants_fleet_cache_scope(db, reason="provider_ops_execute")
         db.commit()
     else:
         result["dry_run"] = True
@@ -15799,13 +16406,11 @@ async def list_fleet_attention(
 
     active_client_ids = {client.id for client in active_clients}
     now = datetime.now(timezone.utc)
-    attention_scope_key = _build_tenants_fleet_cache_scope_key(
-        {
-            "scope": "fleet_attention",
-            "active_clients_hash": _hash_uuid_values(active_client_ids),
-            "stale_after_minutes": stale_after_minutes,
-            "include_low": include_low_mode,
-        }
+    attention_scope_key = _build_fleet_attention_cache_scope_key(
+        active_client_ids=active_client_ids,
+        stale_after_minutes=stale_after_minutes,
+        include_low_mode=include_low_mode,
+        limit=limit,
     )
     cached_response = _load_cached_fleet_attention(
         db,
@@ -15813,168 +16418,26 @@ async def list_fleet_attention(
         now=now,
     )
     if cached_response is not None:
+        _schedule_fleet_attention_async_refresh(
+            db,
+            scope_key=attention_scope_key,
+            active_client_ids=active_client_ids,
+            stale_after_minutes=stale_after_minutes,
+            include_low_mode=include_low_mode,
+            limit=limit,
+            now=now,
+        )
         return cached_response
 
     companies_by_id = {company.id: company for company in (context.companies or [])}
-    fleet_details_map = _build_fleet_client_details_map(
+    response = _build_fleet_attention_response_for_clients(
         db,
-        clients=active_clients,
+        active_clients=active_clients,
         companies_by_id=companies_by_id,
-    )
-
-    client_ids = [client.id for client in active_clients]
-    branches = db.query(Branch).filter(Branch.client_id.in_(client_ids)).all()
-    branches_by_client: dict[UUID, list[Branch]] = {client.id: [] for client in active_clients}
-    for branch in branches:
-        branches_by_client.setdefault(branch.client_id, []).append(branch)
-
-    token_rows = (
-        db.query(
-            ClientSettings.client_id,
-            ClientSettings.telegram_bot_token,
-        )
-        .filter(ClientSettings.client_id.in_(client_ids))
-        .all()
-    )
-    telegram_token_map: dict[UUID, bool] = {}
-    for client_id, token in token_rows:
-        telegram_token_map[client_id] = bool(_normalize_optional_text(token))
-
-    inbound_observations = _load_latest_branch_inbound_observations_for_clients(
-        db,
-        client_ids=client_ids,
-    )
-
-    outbox_failed_map = _query_outbox_failed_24h_map(db, client_ids=client_ids, now=now)
-    pending_handovers_map = _query_pending_handovers_map(db, client_ids=client_ids)
-
-    summary = ConsoleFleetAttentionSummary(
-        active_clients_total=len(active_clients),
-        clients_with_attention=0,
-        high_risk_clients=0,
-        medium_risk_clients=0,
-        low_risk_clients=0,
-        stale_branches_total=0,
-        integration_error_branches_total=0,
-        integration_warn_branches_total=0,
-        outbox_failed_24h_total=0,
-        pending_handovers_total=0,
-    )
-
-    items: list[ConsoleFleetAttentionItem] = []
-    for client in active_clients:
-        details = fleet_details_map.get(client.id)
-        if not details:
-            continue
-
-        reference_branch_ids = set(details.reference_branch_ids or ())
-        stale_branches = 0
-        integration_error_branches = 0
-        integration_warn_branches = 0
-
-        for branch in branches_by_client.get(client.id, []):
-            if not branch.is_active:
-                continue
-            if reference_branch_ids and branch.id not in reference_branch_ids:
-                continue
-            observed = inbound_observations.get(branch.id)
-            last_inbound_at: Optional[datetime] = None
-            last_inbound_instance_id: Optional[str] = None
-            if observed:
-                last_inbound_at, last_inbound_instance_id = observed
-
-            status = _build_branch_integration_status(
-                client_id=client.id,
-                client_slug=client.name,
-                branch=branch,
-                has_telegram_bot_token=telegram_token_map.get(client.id, False),
-                stale_after_minutes=stale_after_minutes,
-                last_inbound_at=last_inbound_at,
-                last_inbound_instance_id=last_inbound_instance_id,
-                now=now,
-            )
-            if status.whatsapp_status == "no_recent_inbound":
-                stale_branches += 1
-            if status.status == "error":
-                integration_error_branches += 1
-            elif status.status == "warn":
-                integration_warn_branches += 1
-
-        outbox_failed_24h = outbox_failed_map.get(client.id, 0)
-        pending_handovers = pending_handovers_map.get(client.id, 0)
-        score, level, reasons, suggested_actions = _resolve_fleet_attention_profile(
-            service_state=details.service_state,
-            stale_branches=stale_branches,
-            integration_error_branches=integration_error_branches,
-            integration_warn_branches=integration_warn_branches,
-            outbox_failed_24h=outbox_failed_24h,
-            pending_handovers=pending_handovers,
-        )
-
-        if score > 0:
-            summary.clients_with_attention += 1
-            if level == "high":
-                summary.high_risk_clients += 1
-            elif level == "medium":
-                summary.medium_risk_clients += 1
-            else:
-                summary.low_risk_clients += 1
-        summary.stale_branches_total += stale_branches
-        summary.integration_error_branches_total += integration_error_branches
-        summary.integration_warn_branches_total += integration_warn_branches
-        summary.outbox_failed_24h_total += outbox_failed_24h
-        summary.pending_handovers_total += pending_handovers
-
-        if not include_low_mode and level == "low":
-            continue
-
-        company = companies_by_id.get(client.company_id) if client.company_id else None
-        items.append(
-            ConsoleFleetAttentionItem(
-                client_id=client.id,
-                client_slug=client.name,
-                client_name=client.name,
-                company_id=client.company_id,
-                company_name=company.name if company else None,
-                lifecycle_state=details.lifecycle_state,
-                payment_status=details.payment_status,
-                commercial_state=details.commercial_state,
-                service_state=details.service_state,
-                owner_name=details.owner_name,
-                next_action=details.next_action,
-                total_branches=details.total_branches,
-                active_branches=details.active_branches,
-                degraded_branches=details.degraded_branches,
-                go_live_ready_branches=details.go_live_ready_branches,
-                reference_branch_ids=list(details.reference_branch_ids),
-                reference_branch_reason=details.reference_branch_reason,
-                stale_branches=stale_branches,
-                integration_error_branches=integration_error_branches,
-                integration_warn_branches=integration_warn_branches,
-                outbox_failed_24h=outbox_failed_24h,
-                pending_handovers=pending_handovers,
-                attention_score=score,
-                attention_level=level,
-                reasons=reasons,
-                suggested_actions=suggested_actions,
-            )
-        )
-
-    items.sort(
-        key=lambda item: (
-            item.attention_score,
-            item.integration_error_branches,
-            item.outbox_failed_24h,
-            item.pending_handovers,
-        ),
-        reverse=True,
-    )
-
-    response = ConsoleFleetAttentionResponse(
-        generated_at=now.isoformat(),
         stale_after_minutes=stale_after_minutes,
-        summary=summary,
-        items=items[:limit],
+        include_low_mode=include_low_mode,
+        limit=limit,
+        now=now,
     )
     _store_cached_fleet_attention(
         db,
@@ -16187,6 +16650,7 @@ async def update_company(
             actor_id=context.agent.id,
             actor_name=context.agent.name,
         )
+        _invalidate_tenants_fleet_cache_scope(db, reason="update_company")
         db.commit()
 
     return ConsoleCompany(
@@ -16255,6 +16719,7 @@ async def create_client(
         },
         client_id=client.id,
     )
+    _invalidate_tenants_fleet_cache_scope(db, reason="create_client")
     db.commit()
 
     return ConsoleClientCreateResponse(
@@ -16361,6 +16826,7 @@ async def update_client(
             actor_id=context.agent.id,
             actor_name=context.agent.name,
         )
+        _invalidate_tenants_fleet_cache_scope(db, reason="update_client")
         db.commit()
 
     company_name = None
@@ -16462,6 +16928,7 @@ async def archive_client(
         actor_id=context.agent.id,
         actor_name=context.agent.name,
     )
+    _invalidate_tenants_fleet_cache_scope(db, reason="archive_client")
     db.commit()
 
     company = db.query(Company).filter(Company.id == client.company_id).first() if client.company_id else None
@@ -16518,6 +16985,7 @@ async def restore_client(
         actor_id=context.agent.id,
         actor_name=context.agent.name,
     )
+    _invalidate_tenants_fleet_cache_scope(db, reason="restore_client")
     db.commit()
 
     company = db.query(Company).filter(Company.id == client.company_id).first() if client.company_id else None
@@ -16648,6 +17116,7 @@ async def create_branch(
         client_id=client.id,
         branch_id=branch.id,
     )
+    _invalidate_tenants_fleet_cache_scope(db, reason="create_branch")
     db.commit()
 
     return ConsoleBranchCreateResponse(
@@ -16833,6 +17302,7 @@ async def update_branch(
                 target_type="branch",
                 target_id=branch.id,
             )
+        _invalidate_tenants_fleet_cache_scope(db, reason="update_branch")
         db.commit()
 
     return _serialize_branch(branch)
@@ -17347,6 +17817,7 @@ async def approve_branch_go_live(
         client_id=branch.client_id,
         branch_id=branch.id,
     )
+    _invalidate_tenants_fleet_cache_scope(db, reason="approve_branch_go_live")
     db.commit()
     return _serialize_branch(branch)
 
@@ -17401,6 +17872,7 @@ async def reject_branch_go_live(
         client_id=branch.client_id,
         branch_id=branch.id,
     )
+    _invalidate_tenants_fleet_cache_scope(db, reason="reject_branch_go_live")
     db.commit()
     return _serialize_branch(branch)
 
@@ -17459,6 +17931,7 @@ async def waive_branch_go_live(
         client_id=branch.client_id,
         branch_id=branch.id,
     )
+    _invalidate_tenants_fleet_cache_scope(db, reason="waive_branch_go_live")
     db.commit()
     return _serialize_branch(branch)
 
