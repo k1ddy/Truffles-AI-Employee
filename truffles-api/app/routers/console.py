@@ -13582,6 +13582,7 @@ async def list_branches(
     q: Optional[str] = None,
     company_id: Optional[str] = None,
     client_id: Optional[str] = None,
+    branch_id: Optional[str] = None,
     lifecycle: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> ConsoleBranchListResponse:
@@ -13593,11 +13594,12 @@ async def list_branches(
         include_inactive_tenants=lifecycle_mode != "active",
     )
     _require_platform_admin(context)
-    _reject_unknown_query_params(request, {"cursor", "limit", "q", "company_id", "client_id", "lifecycle"})
+    _reject_unknown_query_params(request, {"cursor", "limit", "q", "company_id", "client_id", "branch_id", "lifecycle"})
     _validate_limit(limit)
 
     company_uuid = _parse_uuid_param("company_id", company_id)
     client_uuid = _parse_uuid_param("client_id", client_id)
+    branch_uuid = _parse_uuid_param("branch_id", branch_id)
     allowed_client_ids = _accessible_client_ids(context)
     query = db.query(Branch).filter(Branch.client_id.in_(allowed_client_ids))
     scoped_company_client_ids: set[UUID] | None = None
@@ -13622,6 +13624,16 @@ async def list_branches(
         if scoped_company_client_ids is not None and client_uuid not in scoped_company_client_ids:
             raise ConsoleAPIError(400, "INVALID_PARAM", "client_id does not belong to company_id")
         query = query.filter(Branch.client_id == client_uuid)
+    if branch_uuid:
+        _require_branch_access(context, branch_uuid, message="Branch belongs to another tenant")
+        branch_entity = db.query(Branch).filter(Branch.id == branch_uuid).first()
+        if branch_entity is None:
+            return ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
+        if client_uuid is not None and branch_entity.client_id != client_uuid:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to client_id")
+        if scoped_company_client_ids is not None and branch_entity.client_id not in scoped_company_client_ids:
+            raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to company_id")
+        query = query.filter(Branch.id == branch_uuid)
 
     query_value = _normalize_search_query("q", q) if q else None
     if query_value:

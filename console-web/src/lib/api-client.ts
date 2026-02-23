@@ -1158,7 +1158,9 @@ export type ListAuditParams = operations["list_audit_events_console_v1_audit_get
 export type ListLearningCandidatesParams = operations["list_learning_candidates_console_v1_learning_candidates_get"]["parameters"]["query"];
 export type ListCompaniesParams = operations["list_companies_console_v1_admin_companies_get"]["parameters"]["query"];
 export type ListClientsParams = operations["list_clients_console_v1_admin_clients_get"]["parameters"]["query"];
-export type ListBranchesParams = operations["list_branches_console_v1_admin_branches_get"]["parameters"]["query"];
+export type ListBranchesParams = operations["list_branches_console_v1_admin_branches_get"]["parameters"]["query"] & {
+    branch_id?: string;
+};
 export type ListTenantsWeeklySnapshotsParams = {
     client_id: string;
     week_key?: string;

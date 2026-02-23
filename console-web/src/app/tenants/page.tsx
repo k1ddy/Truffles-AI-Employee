@@ -1119,6 +1119,7 @@ export default function TenantsPage() {
                 q: branchQueryValue,
                 company_id: pageFilterCompanyId ?? undefined,
                 client_id: pageFilterClientId ?? undefined,
+                branch_id: pageFilterBranchId ?? undefined,
                 lifecycle: tenantLifecycle,
             });
             return response.data;
@@ -2836,7 +2837,7 @@ export default function TenantsPage() {
                                             филиалы активные {item.active_branches}/{item.total_branches} · неактуальные {item.stale_branches} · интеграционных ошибок {item.integration_error_branches} · outbox_failed_24h {item.outbox_failed_24h} · ожидают передачи {item.pending_handovers}
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
-                                            reference-охват: {item.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(item.reference_branch_reason)}
+                                            опорные филиалы: {item.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(item.reference_branch_reason)}
                                         </div>
                                         <div className="mt-1 text-xs text-muted-foreground">
                                             причины: {item.reasons?.join(", ") || "—"}
@@ -3174,7 +3175,7 @@ export default function TenantsPage() {
                                                 филиалы: активные {client.active_branches ?? 0}/{client.total_branches ?? 0} · деградация {client.degraded_branches ?? 0} · готовы к запуску {client.go_live_ready_branches ?? 0}
                                             </div>
                                             <div className="text-xs text-muted-foreground">
-                                                reference-охват: {client.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(client.reference_branch_reason)}
+                                                опорные филиалы: {client.reference_branch_ids?.length ?? 0} · {formatReferenceScopeReason(client.reference_branch_reason)}
                                             </div>
                                             {lifecycleAuditHistory.length > 0 || clientIdKey === pageFilterClientId ? (
                                                 <div className="mt-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs" data-testid="tenants-client-lifecycle-audit">

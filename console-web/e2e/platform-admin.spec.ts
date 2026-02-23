@@ -952,6 +952,30 @@ test.describe('Platform Admin Tenants', () => {
         await expect(branchFilter).toHaveValue(branchValueBefore);
     });
 
+    test('should pass branch_id to branches API when branch page filter is selected (Scenario B3)', async ({ page }) => {
+        const fixture = buildTenantsFixtureBundle();
+        let capturedBranchParam: string | null = null;
+        await page.route('**/api/proxy/admin/branches**', async (route) => {
+            if (route.request().method() !== 'GET') {
+                await route.fallback();
+                return;
+            }
+            const url = new URL(route.request().url());
+            capturedBranchParam = url.searchParams.get('branch_id');
+            await toJsonResponse(route, {
+                items: [fixture.branch],
+                cursor: null,
+                has_more: false,
+            });
+        });
+
+        const branchFilter = page.getByTestId('tenants-page-filter-branch');
+        await expect(branchFilter).toBeVisible();
+        await branchFilter.selectOption(fixture.branch.id);
+        await expect(branchFilter).toHaveValue(fixture.branch.id);
+        await expect.poll(() => capturedBranchParam).toBe(fixture.branch.id);
+    });
+
     test('should reset only page filters and keep context chips (Scenario C)', async ({ page }) => {
         const modes = page.getByTestId('tenants-workspace-modes');
         if (await modes.isVisible().catch(() => false)) {
@@ -1000,7 +1024,7 @@ test.describe('Platform Admin Tenants', () => {
             await page.getByTestId('tenants-mode-portfolio').click();
         }
 
-        const refreshKpiButton = page.getByRole('button', { name: 'Обновить KPI' });
+        const refreshKpiButton = page.getByRole('button', { name: /Обновить/i });
         if (await refreshKpiButton.isVisible().catch(() => false)) {
             await refreshKpiButton.click();
         }

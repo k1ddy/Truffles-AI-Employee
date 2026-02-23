@@ -8,6 +8,7 @@
 - `2026-02-22`: глубокая перепроверка на `main@9b804d69` и фиксация остаточных системных проблем.
 - `2026-02-22`: Wave 5/6 hardening — deterministic e2e/a11y lane без skip, auth-setup decoupling, KPI contrast fix.
 - `2026-02-23`: recovery update — критерий `tenants/page.tsx <= 1200 LOC` переведен в рекомендательный, обязательный фокус приемки: рабочая ценность `/tenants` (deterministic scope + actionable flow + полная видимость company scope).
+- `2026-02-23`: execution update — выполнены Wave 0 + ключевые пункты Wave 1/2: атомарный scope sync (`company/client/branch`), backend/frontend `branch_id` contract для `/admin/branches`, Scenario B3 (e2e), business-copy cleanup в верхних операционных блоках.
 
 ## Canon refs
 - `AGENTS.md`
@@ -30,11 +31,11 @@
 ## Execution status (FACT, по текущему коду)
 | Wave | Статус | Что подтверждено | Что не закрыто |
 |---|---|---|---|
-| Wave 1 IA boundary | `partial` | Режим `All` убран, default = `portfolio` (`console-web/src/components/TenantsTopControls.tsx:211`) | Страница всё еще смешивает несколько доменов в одном монолите (`console-web/src/app/tenants/page.tsx`) |
-| Wave 2 Context kernel | `partial` | Явные `page filters` и `context` есть (`console-web/src/components/TenantsTopControls.tsx:91`, `console-web/src/components/TenantsTopControls.tsx:166`) | Детерминизм состояния нарушен (см. `F1`, `F2`) |
+| Wave 1 API contract alignment | `partial` | `branch_id` добавлен в `/admin/branches` + frontend pass-through + e2e Scenario B3 (`truffles-api/app/routers/console.py`, `console-web/src/app/tenants/page.tsx`, `console-web/e2e/platform-admin.spec.ts`) | `company-cockpit` по-прежнему даёт branch-slice через selected client (см. `F3`) |
+| Wave 2 Context kernel | `done/partial` | Атомарный sync `company/client/branch`, orphan-branch guard, стабильные B/C/D сценарии (`console-web/src/app/tenants/page.tsx`, `console-web/src/components/ConsoleShell.tsx`, `console-web/e2e/platform-admin.spec.ts`) | Дублирование header context vs page filters ещё требует финальной унификации UX (см. `F2`) |
 | Wave 3 Data contract | `done/partial` | Typed weekly snapshot schema + table/fallback (`truffles-api/app/schemas/console.py:249`, `truffles-api/app/routers/console.py:13434`) | Модель аналитики и fleet-агрегации не рассчитана на очень большой объём (`F5`) |
 | Wave 4 Decomposition/perf | `partial` | Вынесены отдельные панели (`console-web/src/components/TenantsOperationalKpiPanel.tsx`) | `tenants/page.tsx` остается монолитом, основная оркестрация внутри (`F4`) |
-| Wave 5 A11y/copy | `done/partial` | `A11Y_FAIL_ON_THRESHOLDS=1` проходит в deterministic lane (desktop/mobile), KPI contrast исправлен (`console-web/src/components/TenantsOperationalKpiPanel.tsx`) | Остался бизнес-copy cleanup в отдельных секциях (`F7`) |
+| Wave 5 A11y/copy | `done/partial` | `A11Y_FAIL_ON_THRESHOLDS=1` проходит в deterministic lane (desktop/mobile), KPI contrast исправлен, верхний business-copy упрощен (`console-web/src/components/TenantsOperationalKpiPanel.tsx`, `console-web/src/components/TenantsTopControls.tsx`) | Остался cleanup в отдельных deep-секциях (`F7`) |
 | Wave 6 E2E realism | `done` | `platform-admin.spec.ts` стабилизирован: deterministic auth/session, нет `test.skip`, сценарии A/B/C/D/E hard-fail (`console-web/e2e/platform-admin.spec.ts`, `console-web/playwright.config.ts`) | Нет |
 | Feature flag rollout | `partial` | `NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER` уже в коде (`console-web/src/app/tenants/page.tsx:850`) | Shadow/canary/full rollout + наблюдение ещё не формализованы (`Wave 6`) |
 
