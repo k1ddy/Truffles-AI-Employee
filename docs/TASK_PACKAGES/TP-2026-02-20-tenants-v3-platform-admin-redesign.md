@@ -18,6 +18,7 @@
 - `2026-02-23`: Wave 4 event-driven continuation — tenant write-path mutations now invalidate `tenants_fleet_cache` (`fleet_summary`/`fleet_attention`) via best-effort nested transaction guard, reducing stale cache windows after provisioning/go-live/integration operations.
 - `2026-02-23`: Wave 4 scope-aware invalidation continuation — `tenants_fleet_cache` schema extended with `scope_company_id/scope_client_id` (`migration 039`), summary cache upserts persist scope metadata, and write-path invalidation now targets `scope_company_id IS NULL OR scope_company_id IN (affected company_ids)` instead of full-table cache wipe.
 - `2026-02-23`: Wave 4 targeted prewarm continuation — invalidation now queues affected `company_id` scopes for post-commit async summary rebuild (`after_commit` queue + prewarm worker), reducing cold-start for mutated company scopes while preserving fail-open mutation path.
+- `2026-02-23`: Wave 4 + CI hardening continuation — post-commit prewarm расширен до `global portfolio` (summary + attention default scope, rate-limited) для снижения cold-start после мутаций, `console-contract-live` исправлен на корректный schemathesis base URL, `console-e2e-live` auth setup защищён от `AggregateError` в login transition.
 
 ## Canon refs
 - `AGENTS.md`
@@ -43,21 +44,20 @@
 | Wave 1 API contract alignment | `done/partial` | `branch_id` добавлен в `/admin/branches` + frontend pass-through + e2e Scenario B3; `company-cockpit` при `client_id=null` теперь остаётся в company scope (`truffles-api/app/routers/console.py`, `console-web/src/app/tenants/page.tsx`, `console-web/e2e/platform-admin.spec.ts`) | Техдолг: унифицировать/сократить дублирующий `branches` payload в `company-cockpit` и расширить perf-contract tests на большие company scopes |
 | Wave 2 Context kernel | `done` | Атомарный sync `company/client/branch`, orphan-branch guard, стабильные B/C/D + отключён конфликтующий header-edit контекста на `/tenants` (`context-managed-in-tenants`) (`console-web/src/app/tenants/page.tsx`, `console-web/src/components/ConsoleShell.tsx`, `console-web/e2e/platform-admin.spec.ts`) | Нет блокеров |
 | Wave 3 Data contract | `done/partial` | Typed weekly snapshot schema + table/fallback (`truffles-api/app/schemas/console.py:249`, `truffles-api/app/routers/console.py:13434`) | Модель аналитики и fleet-агрегации не рассчитана на очень большой объём (`F5`) |
-| Wave 4 Decomposition/perf | `done/partial` | Вынесены `OperationalKpi`, `FleetAttention`, `PortfolioCompanies`, `Clients`, `ChangeManagement`, `Decommission`, `ClientLifecycleModal` секции; page-filter race для Scenario C устранён в `use-tenants-page-filters.ts`; backend perf-track запущен через `console_tenants_endpoint_latency{endpoint=portfolio|company_cockpit}` + router instrumentation; внедрён read-model cache (`truffles-api/migrations/038_add_tenants_fleet_cache.sql`, `truffles-api/app/models/tenants_fleet_cache.py`, `truffles-api/app/routers/console.py`) + cache tests (`truffles-api/tests/test_console_tenants_list.py`); добавлен async stale-while-refresh для cache-hit near-expiry (`Thread` background refresh + inflight dedupe) для summary/attention; write-path cache invalidation переведён на scope-aware режим по `scope_company_id` (`migration 039`); добавлен post-commit targeted prewarm affected company scopes (`after_commit` queue -> async summary rebuild) | Полный incremental precompute pipeline (event stream -> targeted precompute with global scope strategy) и perf baseline на truly large fleet ещё впереди |
+| Wave 4 Decomposition/perf | `done/partial` | Вынесены `OperationalKpi`, `FleetAttention`, `PortfolioCompanies`, `Clients`, `ChangeManagement`, `Decommission`, `ClientLifecycleModal` секции; page-filter race для Scenario C устранён в `use-tenants-page-filters.ts`; backend perf-track запущен через `console_tenants_endpoint_latency{endpoint=portfolio|company_cockpit}` + router instrumentation; внедрён read-model cache (`truffles-api/migrations/038_add_tenants_fleet_cache.sql`, `truffles-api/app/models/tenants_fleet_cache.py`, `truffles-api/app/routers/console.py`) + cache tests (`truffles-api/tests/test_console_tenants_list.py`); добавлен async stale-while-refresh для cache-hit near-expiry (`Thread` background refresh + inflight dedupe) для summary/attention; write-path cache invalidation переведён на scope-aware режим по `scope_company_id` (`migration 039`); post-commit prewarm теперь покрывает affected company scopes + global default portfolio scope (summary + attention) с throttling | Полный incremental precompute pipeline (event stream -> targeted precompute with global scope strategy) и perf baseline на truly large fleet ещё впереди |
 | Wave 5 A11y/copy | `done/partial` | `A11Y_FAIL_ON_THRESHOLDS=1` проходит в deterministic lane (desktop/mobile), KPI contrast исправлен, business-copy упрощён в `TopControls`/`ActionQueue`/`Fleet`/`Company edit`, deep lifecycle/editor copy очищен (`console-web/src/components/TenantsClientLifecycleModal.tsx`, `console-web/src/components/TenantsClientsPanel.tsx`, `console-web/src/app/tenants/page.tsx`) | Остаточный тех-copy ограничен preset/debug контекстом (`trace_id` в platform preset), mainline UX очищен |
 | Wave 6 E2E realism | `done` | `platform-admin.spec.ts` стабилизирован: deterministic auth/session, нет `test.skip`, сценарии A/B/C/D/E hard-fail (`console-web/e2e/platform-admin.spec.ts`, `console-web/playwright.config.ts`) | Нет |
 | Feature flag rollout | `done` | `NEXT_PUBLIC_TENANTS_V3_CONTROL_TOWER` в коде (`console-web/src/app/tenants/page.tsx:850`), rollout policy формализован (`shadow -> canary -> full` + rollback), post-merge canary evidence зафиксирован: live build stamp, live a11y green, runtime SLO snapshot pass | Нет блокеров |
 
 ## Critical problems (FACT, deep check)
-### F1. Branch scope теряется после `Взять из рабочего контура`
+### F1 (closed). Branch scope drift после `Взять из рабочего контура`
 Evidence:
-- `setBranchContextAndPageFilters` обновляет только `branch`, не поднимая parent scope (`console-web/src/app/tenants/page.tsx:1555`).
-- `applyContextToPageFilters` читает scope из storage (`console-web/src/app/tenants/page.tsx:1559`).
-- `ConsoleShell` перезаписывает storage значением `selected_branch_id` из `/me` (`console-web/src/components/ConsoleShell.tsx:1464`).
-- `/me` возвращает `selected_branch_id` только как `effective_branch_id`; при несовпадении branch/client он становится `null` (`truffles-api/app/services/console_auth.py:305`, `truffles-api/app/routers/console.py:493`).
+- `setBranchContextAndPageFilters` валидирует и применяет полную chain `company+client+branch` через `validateScopeForBranchActions` (`console-web/src/app/tenants/page.tsx`).
+- `applyContextToPageFilters` валидирует scope перед apply и синхронизирует storage только при нормализованном различии (`console-web/src/app/tenants/page.tsx`).
+- `ConsoleShell` сохраняет `stored.branchId`, если `/me` не прислал конкретный `selected_branch_id`, что устраняет silent wipe (`console-web/src/components/ConsoleShell.tsx`).
 Impact:
-- branch фильтр может сбрасываться визуально "сам".
-- кнопки выглядят "нерабочими", потому что фактический state откатывается.
+- branch/page scope больше не сбрасывается молча при неполном `/me` контексте.
+- действия `В контекст`/`Взять из рабочего контура` детерминированы в сценариях B/B2/B3.
 
 ### F2 (closed). Конфликт источников истины для контекста на `/tenants`
 Evidence:
@@ -77,7 +77,7 @@ Impact:
 
 ### F4. Монолит страницы сохраняется (высокий regression risk)
 Evidence:
-- `console-web/src/app/tenants/page.tsx` = ~3900 LOC.
+- `console-web/src/app/tenants/page.tsx` = ~2970 LOC (после Wave 4 декомпозиции), но всё ещё оркестрационный монолит.
 - Внутри одной страницы: context orchestration, filters, CRUD, lifecycle modal, branch-change pipeline, KPI, snapshots, onboarding.
 Impact:
 - любое изменение цепляет много сценариев.
@@ -93,10 +93,11 @@ Evidence:
 - Добавлен event-driven invalidation cache на mutation path (`_invalidate_tenants_fleet_cache_scope`) для `update_company/create|update|archive|restore_client`, `create|update_branch`, `branch go-live approve/reject/waive`, `integration_reconcile/provider_ops execute` (`truffles-api/app/routers/console.py`), с контрактными тестами в `truffles-api/tests/test_console_admin_provisioning.py`.
 - Добавлен scope metadata contract (`scope_company_id/scope_client_id`) в cache table/model (`truffles-api/migrations/039_add_tenants_fleet_cache_scope_columns.sql`, `truffles-api/app/models/tenants_fleet_cache.py`) и scope-aware delete (`global + affected companies`) вместо полного wipe.
 - Добавлен post-commit prewarm contract для affected company scopes: invalidation складывает `company_ids` в session queue, `after_commit` запускает async summary rebuild worker (`_schedule_fleet_summary_prewarm_for_company_ids`) с inflight dedupe и scope key на `company_id + active clients hash`.
+- Добавлен post-commit global prewarm contract: invalidation ставит `global prewarm` флаг, а `after_commit` запускает rate-limited async prewarm default portfolio cache (`fleet_summary` + `fleet_attention`) для active-client global scope.
 Impact:
 - request-time нагрузка снижена за счёт cache-hit path.
 - stale-window после admin мутаций снижен (invalidate сразу после write path), при этом нагрузка на другие company scopes снижена за счёт scope-aware delete.
-- cold-start после мутаций снижен для affected company scope за счёт post-commit prewarm вместо первого "дорогого" запроса пользователя.
+- cold-start после мутаций снижен для affected company scope и default global portfolio scope за счёт post-commit prewarm вместо первого "дорогого" запроса пользователя.
 - для очень большого флота всё ещё нужен targeted incremental precompute и проверка p95/p99 под нагрузкой.
 
 ### F6. A11y debt: контраст KPI карточек

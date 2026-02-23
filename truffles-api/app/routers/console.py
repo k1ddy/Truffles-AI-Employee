@@ -8,7 +8,7 @@ from datetime import date as dt_date
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from threading import Lock, Thread
-from time import perf_counter
+from time import monotonic, perf_counter
 from typing import Any, Callable, Literal, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
@@ -2193,6 +2193,28 @@ _TENANTS_FLEET_CACHE_PREWARM_MAX_COMPANY_SCOPES = _parse_env_int(
     min_value=1,
     max_value=10000,
 )
+_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_SCOPE_ENABLED = _parse_env_bool(
+    "TENANTS_FLEET_CACHE_PREWARM_GLOBAL_SCOPE_ENABLED",
+    default=True,
+)
+_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MAX_ACTIVE_CLIENTS = _parse_env_int(
+    "TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MAX_ACTIVE_CLIENTS",
+    default=20000,
+    min_value=100,
+    max_value=200000,
+)
+_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_ATTENTION_LIMIT = _parse_env_int(
+    "TENANTS_FLEET_CACHE_PREWARM_GLOBAL_ATTENTION_LIMIT",
+    default=20,
+    min_value=1,
+    max_value=200,
+)
+_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MIN_INTERVAL_SECONDS = _parse_env_int(
+    "TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MIN_INTERVAL_SECONDS",
+    default=30,
+    min_value=1,
+    max_value=3600,
+)
 _OUTBOX_ARCHIVED_REASON_PREFIX = "archived_pending:"
 _OUTBOX_CALENDAR_SYNC_REASON_PREFIX = "calendar_sync_failed:"
 _OUTBOX_SYSTEM_EVENT_TYPES = {"calendar.sync_inbound", "calendar.sync_outbound"}
@@ -2214,6 +2236,9 @@ _TENANTS_SENSITIVE_ACTIONS = {"reveal", "copy"}
 _TENANTS_FLEET_CACHE_REFRESH_INFLIGHT: set[str] = set()
 _TENANTS_FLEET_CACHE_REFRESH_LOCK = Lock()
 _TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY = "tenants_fleet_cache_prewarm_company_ids"
+_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY = "tenants_fleet_cache_prewarm_global"
+_TENANTS_FLEET_CACHE_GLOBAL_PREWARM_LOCK = Lock()
+_TENANTS_FLEET_CACHE_GLOBAL_PREWARM_NEXT_ALLOWED_AT = 0.0
 
 
 @dataclass
@@ -2871,6 +2896,51 @@ def _queue_fleet_summary_prewarm_company_ids(
     info_value.update(scoped_ids)
 
 
+def _queue_fleet_global_prewarm(db: Session) -> None:
+    if not _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_SCOPE_ENABLED:
+        return
+    db.info[_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY] = True
+
+
+def _load_global_active_client_ids(
+    *,
+    max_clients: int,
+) -> tuple[set[UUID], bool]:
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(Client.id)
+            .filter(Client.status == _CLIENT_STATUS_ACTIVE)
+            .order_by(Client.created_at.desc(), Client.id.desc())
+            .limit(max_clients + 1)
+            .all()
+        )
+        overflow = len(rows) > max_clients
+        selected_rows = rows[:max_clients]
+        return {
+            row[0]
+            for row in selected_rows
+            if row and row[0] is not None
+        }, overflow
+    except Exception:
+        db.rollback()
+        return set(), False
+    finally:
+        db.close()
+
+
+def _reserve_fleet_global_prewarm_slot(now_mono: float) -> bool:
+    global _TENANTS_FLEET_CACHE_GLOBAL_PREWARM_NEXT_ALLOWED_AT
+
+    with _TENANTS_FLEET_CACHE_GLOBAL_PREWARM_LOCK:
+        if now_mono < _TENANTS_FLEET_CACHE_GLOBAL_PREWARM_NEXT_ALLOWED_AT:
+            return False
+        _TENANTS_FLEET_CACHE_GLOBAL_PREWARM_NEXT_ALLOWED_AT = (
+            now_mono + _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MIN_INTERVAL_SECONDS
+        )
+    return True
+
+
 def _load_active_clients_by_company(
     *,
     company_ids: set[UUID],
@@ -2946,22 +3016,89 @@ def _schedule_fleet_summary_prewarm_for_company_ids(
         )
 
 
+def _schedule_fleet_global_prewarm() -> None:
+    if not _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_SCOPE_ENABLED:
+        return
+    if not _reserve_fleet_global_prewarm_slot(monotonic()):
+        return
+
+    active_client_ids, overflow = _load_global_active_client_ids(
+        max_clients=_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MAX_ACTIVE_CLIENTS,
+    )
+    if overflow or not active_client_ids:
+        return
+    if len(active_client_ids) > _TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS:
+        return
+
+    active_client_ids_sorted = sorted(active_client_ids, key=str)
+
+    summary_scope_key = _build_clients_summary_cache_scope_key(
+        accessible_clients_hash=_hash_uuid_values(active_client_ids),
+        company_uuid=None,
+        lifecycle_mode="active",
+        query_value=None,
+        fleet_lifecycle_filter=None,
+        payment_status_filter=None,
+        service_state_filter=None,
+    )
+    if _try_claim_fleet_cache_refresh(_TENANTS_FLEET_CACHE_SUMMARY_TYPE, summary_scope_key):
+        summary_task = {
+            "scope_key": summary_scope_key,
+            "accessible_client_ids": [str(client_id) for client_id in active_client_ids_sorted],
+            "lifecycle_mode": "active",
+            "company_id": None,
+            "query_value": None,
+            "fleet_lifecycle_filter": None,
+            "payment_status_filter": None,
+            "service_state_filter": None,
+            "batch_size": 100,
+        }
+        _start_fleet_summary_refresh_task(
+            scope_key=summary_scope_key,
+            task=summary_task,
+            thread_name="tenants-fleet-summary-prewarm-global",
+        )
+
+    attention_scope_key = _build_fleet_attention_cache_scope_key(
+        active_client_ids=active_client_ids,
+        stale_after_minutes=_INTEGRATION_DEFAULT_STALE_MINUTES,
+        include_low_mode=False,
+        limit=_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_ATTENTION_LIMIT,
+    )
+    if _try_claim_fleet_cache_refresh(_TENANTS_FLEET_CACHE_ATTENTION_TYPE, attention_scope_key):
+        attention_task = {
+            "scope_key": attention_scope_key,
+            "active_client_ids": [str(client_id) for client_id in active_client_ids_sorted],
+            "stale_after_minutes": _INTEGRATION_DEFAULT_STALE_MINUTES,
+            "include_low_mode": False,
+            "limit": _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_ATTENTION_LIMIT,
+        }
+        _start_fleet_attention_refresh_task(
+            scope_key=attention_scope_key,
+            task=attention_task,
+            thread_name="tenants-fleet-attention-prewarm-global",
+        )
+
+
 @event.listens_for(Session, "after_commit")
 def _on_console_session_after_commit(session: Session) -> None:
     raw_company_ids = session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY, None)
+    global_prewarm_required = bool(
+        session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY, False)
+    )
     if not isinstance(raw_company_ids, set):
-        return
-    scoped_company_ids = {
-        company_id
-        for company_id in raw_company_ids
-        if isinstance(company_id, UUID)
-    }
-    _schedule_fleet_summary_prewarm_for_company_ids(company_ids=scoped_company_ids)
+        raw_company_ids = set()
+    scoped_company_ids = {company_id for company_id in raw_company_ids if isinstance(company_id, UUID)}
+    if scoped_company_ids:
+        _schedule_fleet_summary_prewarm_for_company_ids(company_ids=scoped_company_ids)
+    if global_prewarm_required:
+        _schedule_fleet_global_prewarm()
 
 
 @event.listens_for(Session, "after_rollback")
 def _on_console_session_after_rollback(session: Session) -> None:
     session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY, None)
+    session.info.pop(_TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY, None)
 
 
 def _build_fleet_attention_response_for_clients(
@@ -3246,12 +3383,25 @@ def _schedule_fleet_attention_async_refresh(
         "include_low_mode": include_low_mode,
         "limit": limit,
     }
+    _start_fleet_attention_refresh_task(
+        scope_key=scope_key,
+        task=task,
+        thread_name="tenants-fleet-attention-refresh",
+    )
+
+
+def _start_fleet_attention_refresh_task(
+    *,
+    scope_key: str,
+    task: dict[str, Any],
+    thread_name: str,
+) -> None:
     try:
         Thread(
             target=_refresh_fleet_attention_cache_worker,
             kwargs={"task": task},
             daemon=True,
-            name="tenants-fleet-attention-refresh",
+            name=thread_name,
         ).start()
     except Exception:
         _release_fleet_cache_refresh(_TENANTS_FLEET_CACHE_ATTENTION_TYPE, scope_key)
@@ -3299,6 +3449,7 @@ def _invalidate_tenants_fleet_cache_scope(
         db,
         company_ids=scoped_company_ids,
     )
+    _queue_fleet_global_prewarm(db)
 
 
 def _normalize_client_lifecycle_reason(reason: str) -> str:
