@@ -278,7 +278,7 @@ export default function TenantsTopControls({
                 </>
             ) : (
                 <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-foreground/80" data-testid="tenants-control-tower-disabled">
-                    Режим Control Tower отключён. Доступен базовый обзор портфеля с фильтрами и управлением контекстом.
+                    Расширенный режим отключён. Доступен базовый обзор портфеля с фильтрами и рабочим контекстом.
                 </div>
             )}
         </div>

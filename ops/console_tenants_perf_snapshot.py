@@ -17,6 +17,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 TENANTS_METRIC = "console_tenants_endpoint_latency"
 HTTP_METRIC = "http_request_latency"
+PROJECTION_COVERAGE_METRIC = "console_tenants_fleet_projection_last_coverage_ratio"
+PROJECTION_FALLBACK_METRIC = "console_tenants_fleet_projection_last_fallback_ratio"
+PROJECTION_FRESHNESS_METRIC = "console_tenants_fleet_projection_last_freshness_lag_seconds"
 DEFAULT_BRANCH_PATH = "/console/v1/admin/branches"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
@@ -56,6 +59,30 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=50,
         help="Minimum required sample count for branches GET histogram.",
+    )
+    parser.add_argument(
+        "--projection-min-coverage",
+        type=float,
+        default=0.7,
+        help="Minimum required projection materialized coverage ratio [0..1].",
+    )
+    parser.add_argument(
+        "--projection-max-fallback-rate",
+        type=float,
+        default=0.3,
+        help="Maximum allowed projection fallback ratio [0..1].",
+    )
+    parser.add_argument(
+        "--projection-max-freshness-lag-seconds",
+        type=float,
+        default=900.0,
+        help="Maximum allowed projection freshness lag in seconds.",
+    )
+    parser.add_argument(
+        "--projection-observability-required",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Fail when projection observability metrics are missing/breached.",
     )
     parser.add_argument("--branch-path", default=DEFAULT_BRANCH_PATH, help="Normalized HTTP path for branches latency.")
     parser.add_argument(
@@ -199,6 +226,22 @@ def _build_histogram_report(
     return report
 
 
+def _extract_metric_value(
+    metrics_text: str,
+    *,
+    metric_name: str,
+    expected_labels: dict[str, str] | None = None,
+) -> float | None:
+    rows = _parse_metric_lines(metrics_text, metric_name)
+    if not rows:
+        return None
+    expected_labels = expected_labels or {}
+    for labels, value in rows:
+        if all(labels.get(key) == expected for key, expected in expected_labels.items()):
+            return value
+    return None
+
+
 def _write_report(report: dict[str, Any], output_path: str | None, *, pretty: bool) -> None:
     if output_path is None:
         return
@@ -266,6 +309,21 @@ def _required_sample_size_failed(
     return False
 
 
+def _required_projection_gate_failed(report: dict[str, Any]) -> bool:
+    projection = report.get("projection_observability") if isinstance(report, dict) else None
+    if not isinstance(projection, dict):
+        return True
+    if projection.get("required") is not True:
+        return False
+    if projection.get("coverage_pass") is not True:
+        return True
+    if projection.get("fallback_pass") is not True:
+        return True
+    if projection.get("freshness_pass") is not True:
+        return True
+    return False
+
+
 def capture_tenants_perf_snapshot(
     *,
     metrics_url: str,
@@ -276,6 +334,10 @@ def capture_tenants_perf_snapshot(
     portfolio_min_samples: int,
     company_cockpit_min_samples: int,
     branches_min_samples: int,
+    projection_min_coverage: float,
+    projection_max_fallback_rate: float,
+    projection_max_freshness_lag_seconds: float,
+    projection_observability_required: bool,
     branch_path: str,
 ) -> dict[str, Any]:
     metrics_text, error_text = fetch_metrics_text(metrics_url, timeout=timeout)
@@ -296,6 +358,18 @@ def capture_tenants_perf_snapshot(
             "portfolio_min_samples": portfolio_min_samples,
             "company_cockpit_min_samples": company_cockpit_min_samples,
             "branches_min_samples": branches_min_samples,
+        },
+        "projection_observability": {
+            "required": projection_observability_required,
+            "coverage_ratio": None,
+            "fallback_ratio": None,
+            "freshness_lag_seconds": None,
+            "coverage_target_min": projection_min_coverage,
+            "fallback_target_max": projection_max_fallback_rate,
+            "freshness_lag_target_max_seconds": projection_max_freshness_lag_seconds,
+            "coverage_pass": None,
+            "fallback_pass": None,
+            "freshness_pass": None,
         },
     }
 
@@ -331,6 +405,34 @@ def capture_tenants_perf_snapshot(
             p95_slo_ms=branches_p95_ms,
         )
 
+        projection = report["projection_observability"]
+        coverage_ratio = _extract_metric_value(metrics_text, metric_name=PROJECTION_COVERAGE_METRIC)
+        fallback_ratio = _extract_metric_value(metrics_text, metric_name=PROJECTION_FALLBACK_METRIC)
+        freshness_lag_seconds = _extract_metric_value(metrics_text, metric_name=PROJECTION_FRESHNESS_METRIC)
+
+        projection["coverage_ratio"] = (
+            round(coverage_ratio, 6)
+            if isinstance(coverage_ratio, (int, float)) and coverage_ratio != float("inf")
+            else None
+        )
+        projection["fallback_ratio"] = (
+            round(fallback_ratio, 6)
+            if isinstance(fallback_ratio, (int, float)) and fallback_ratio != float("inf")
+            else None
+        )
+        projection["freshness_lag_seconds"] = (
+            round(freshness_lag_seconds, 3)
+            if isinstance(freshness_lag_seconds, (int, float)) and freshness_lag_seconds != float("inf")
+            else None
+        )
+
+        if isinstance(projection["coverage_ratio"], (int, float)):
+            projection["coverage_pass"] = projection["coverage_ratio"] >= projection_min_coverage
+        if isinstance(projection["fallback_ratio"], (int, float)):
+            projection["fallback_pass"] = projection["fallback_ratio"] <= projection_max_fallback_rate
+        if isinstance(projection["freshness_lag_seconds"], (int, float)):
+            projection["freshness_pass"] = projection["freshness_lag_seconds"] <= projection_max_freshness_lag_seconds
+
     report["required_slo_failed"] = _required_slo_failed(report)
     report["required_sample_size_failed"] = _required_sample_size_failed(
         report,
@@ -338,7 +440,12 @@ def capture_tenants_perf_snapshot(
         company_cockpit_min_samples=company_cockpit_min_samples,
         branches_min_samples=branches_min_samples,
     )
-    report["status"] = "fail" if (report["required_slo_failed"] or report["required_sample_size_failed"]) else "pass"
+    report["required_projection_gate_failed"] = _required_projection_gate_failed(report)
+    report["status"] = "fail" if (
+        report["required_slo_failed"]
+        or report["required_sample_size_failed"]
+        or report["required_projection_gate_failed"]
+    ) else "pass"
     return report
 
 
@@ -353,13 +460,21 @@ def main() -> int:
         portfolio_min_samples=args.portfolio_min_samples,
         company_cockpit_min_samples=args.company_cockpit_min_samples,
         branches_min_samples=args.branches_min_samples,
+        projection_min_coverage=args.projection_min_coverage,
+        projection_max_fallback_rate=args.projection_max_fallback_rate,
+        projection_max_freshness_lag_seconds=args.projection_max_freshness_lag_seconds,
+        projection_observability_required=args.projection_observability_required,
         branch_path=args.branch_path,
     )
 
     _write_report(report, args.output, pretty=args.pretty)
     print(json.dumps(report, ensure_ascii=True, indent=2 if args.pretty else None, sort_keys=args.pretty))
 
-    if args.fail_on_breach and (report["required_slo_failed"] or report["required_sample_size_failed"]):
+    if args.fail_on_breach and (
+        report["required_slo_failed"]
+        or report["required_sample_size_failed"]
+        or report["required_projection_gate_failed"]
+    ):
         return 1
     return 0
 
