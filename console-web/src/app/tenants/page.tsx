@@ -1051,11 +1051,10 @@ export default function TenantsPage() {
             const response = await adminApi.getTenantsCompanyCockpit({
                 company_id: pageFilterCompanyId,
                 client_id: pageFilterClientId ?? undefined,
+                include_branches: "false",
                 lifecycle: tenantLifecycle,
                 client_limit: 20,
-                branch_limit: 20,
                 client_q: clientQueryValue,
-                branch_q: branchQueryValue,
             });
             return response.data;
         },

@@ -104,10 +104,15 @@
   - Applied deploy fix for strict typing: `waitForLoginTransition` now uses typed `transition()` helper so both Promise branches return exact `TransitionResult` shape without literal widening.
   - Local validation completed for deploy fix: `corepack pnpm -C console-web run build`, `corepack pnpm -C console-web run lint`, `scripts/session_check.sh`.
   - Opened hotfix PR with deploy fix: `https://github.com/k1ddy/Truffles-AI-Employee/pull/809` (`fix(deploy): resolve console-web type error in e2e global setup`).
+  - Post-merge factual audit completed on `main@0f90099c` vs TP execution matrix: Waves 0/2/6/flag rollout are `done`, Wave 1 and Wave 4 remain `done/partial` with explicit remaining scope (large-company perf contracts + full incremental precompute evidence).
+  - Wave 1 contract debt reduced: `/admin/tenants/company-cockpit` now supports `include_branches` (`true` by default), and `/tenants` sends `include_branches=false` so cockpit request path no longer duplicates branch payload/compute already fetched via `/admin/branches`.
+  - Added backend contract test `test_get_tenants_company_cockpit_skips_branches_when_not_requested` to guarantee `list_branches` is not called in `include_branches=false` mode.
+  - Updated TP/STATE factual status to reflect completed cockpit payload dedupe and remaining items.
+  - Validation for this continuation: `pytest -q truffles-api/tests/test_console_tenants_list.py -k "company_cockpit"` (`3 passed`), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`80 passed`), `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`, `python3 truffles-api/scripts/generate_openapi.py --check`.
 - next:
-  - Дождаться зелёного CI для PR `#809` и merge в `main`, затем перепроверить deploy run на parity.
-  - После merge зафиксировать runtime perf snapshot после серии tenant write операций (stale-window evidence + cache hit ratio для non-affected companies).
-  - Следующий шаг Wave4/F5: расширить targeted precompute на global summary/attention strategy без full cold-start.
+  - Закрыть оставшийся Wave 1 perf-contract долг: добавить deterministic tests для крупных company scopes (cockpit/branches cursor + payload budget assertions).
+  - Продолжить Wave 4: расширить incremental precompute evidence на truly large fleet профиль (`p95/p99` under load, not probe-only snapshots).
+  - Продолжить Wave 4/F3 risk reduction: выделить remaining orchestration blocks из `tenants/page.tsx` в hooks/components для снижения regression surface.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
@@ -174,6 +179,10 @@
   - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22329943275
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/809
   - console-web/e2e/global-setup.ts
+  - console-web/src/app/tenants/page.tsx
+  - console-web/src/lib/api-client.ts
+  - truffles-api/app/routers/console.py
+  - truffles-api/tests/test_console_tenants_list.py
   - .github/workflows/ci.yml
   - STATE.md
-- last_updated: 2026-02-23T23:49:10Z
+- last_updated: 2026-02-24T00:32:48Z

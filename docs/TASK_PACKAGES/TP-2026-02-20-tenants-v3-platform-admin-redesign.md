@@ -19,6 +19,7 @@
 - `2026-02-23`: Wave 4 scope-aware invalidation continuation — `tenants_fleet_cache` schema extended with `scope_company_id/scope_client_id` (`migration 039`), summary cache upserts persist scope metadata, and write-path invalidation now targets `scope_company_id IS NULL OR scope_company_id IN (affected company_ids)` instead of full-table cache wipe.
 - `2026-02-23`: Wave 4 targeted prewarm continuation — invalidation now queues affected `company_id` scopes for post-commit async summary rebuild (`after_commit` queue + prewarm worker), reducing cold-start for mutated company scopes while preserving fail-open mutation path.
 - `2026-02-23`: Wave 4 + CI hardening continuation — post-commit prewarm расширен до `global portfolio` (summary + attention default scope, rate-limited) для снижения cold-start после мутаций, `console-contract-live` исправлен на корректный schemathesis base URL, `console-e2e-live` auth setup защищён от `AggregateError` в login transition.
+- `2026-02-24`: Wave 1 contract debt continuation — `company-cockpit` получил `include_branches` (`true` by default), `/tenants` запрашивает cockpit с `include_branches=false` (branches остаются из `/admin/branches`), что убирает дублирующий branch payload/compute в company scope without breaking API compatibility.
 
 ## Canon refs
 - `AGENTS.md`
@@ -41,7 +42,7 @@
 ## Execution status (FACT, по текущему коду)
 | Wave | Статус | Что подтверждено | Что не закрыто |
 |---|---|---|---|
-| Wave 1 API contract alignment | `done/partial` | `branch_id` добавлен в `/admin/branches` + frontend pass-through + e2e Scenario B3; `company-cockpit` при `client_id=null` теперь остаётся в company scope (`truffles-api/app/routers/console.py`, `console-web/src/app/tenants/page.tsx`, `console-web/e2e/platform-admin.spec.ts`) | Техдолг: унифицировать/сократить дублирующий `branches` payload в `company-cockpit` и расширить perf-contract tests на большие company scopes |
+| Wave 1 API contract alignment | `done/partial` | `branch_id` добавлен в `/admin/branches` + frontend pass-through + e2e Scenario B3; `company-cockpit` при `client_id=null` теперь остаётся в company scope; `include_branches=false` устраняет дубли branch payload в `/tenants` cockpit read path (`truffles-api/app/routers/console.py`, `truffles-api/tests/test_console_tenants_list.py`, `console-web/src/app/tenants/page.tsx`) | Остаток: расширить perf-contract tests на большие company scopes (fleet/company load profiles) |
 | Wave 2 Context kernel | `done` | Атомарный sync `company/client/branch`, orphan-branch guard, стабильные B/C/D + отключён конфликтующий header-edit контекста на `/tenants` (`context-managed-in-tenants`) (`console-web/src/app/tenants/page.tsx`, `console-web/src/components/ConsoleShell.tsx`, `console-web/e2e/platform-admin.spec.ts`) | Нет блокеров |
 | Wave 3 Data contract | `done/partial` | Typed weekly snapshot schema + table/fallback (`truffles-api/app/schemas/console.py:249`, `truffles-api/app/routers/console.py:13434`) | Модель аналитики и fleet-агрегации не рассчитана на очень большой объём (`F5`) |
 | Wave 4 Decomposition/perf | `done/partial` | Вынесены `OperationalKpi`, `FleetAttention`, `PortfolioCompanies`, `Clients`, `ChangeManagement`, `Decommission`, `ClientLifecycleModal` секции; page-filter race для Scenario C устранён в `use-tenants-page-filters.ts`; backend perf-track запущен через `console_tenants_endpoint_latency{endpoint=portfolio|company_cockpit}` + router instrumentation; внедрён read-model cache (`truffles-api/migrations/038_add_tenants_fleet_cache.sql`, `truffles-api/app/models/tenants_fleet_cache.py`, `truffles-api/app/routers/console.py`) + cache tests (`truffles-api/tests/test_console_tenants_list.py`); добавлен async stale-while-refresh для cache-hit near-expiry (`Thread` background refresh + inflight dedupe) для summary/attention; write-path cache invalidation переведён на scope-aware режим по `scope_company_id` (`migration 039`); post-commit prewarm теперь покрывает affected company scopes + global default portfolio scope (summary + attention) с throttling | Полный incremental precompute pipeline (event stream -> targeted precompute with global scope strategy) и perf baseline на truly large fleet ещё впереди |
@@ -70,9 +71,11 @@ Impact:
 ### F3 (closed). Branch list contract в company scope
 Evidence:
 - `company-cockpit` передаёт `client_id` только если он явно выбран; при `client_id=null` работает company scope (`truffles-api/app/routers/console.py`).
+- `company-cockpit` поддерживает `include_branches=false`; `/tenants` использует этот режим и не тянет дублирующий branches payload из cockpit (`truffles-api/app/routers/console.py`, `console-web/src/app/tenants/page.tsx`).
 - Основной branch list в `/tenants` работает через `/admin/branches` с явными `company_id/client_id/branch_id` фильтрами и e2e контрактом B3 (`console-web/src/app/tenants/page.tsx`, `console-web/e2e/platform-admin.spec.ts`).
 Impact:
 - Ложный branch-slice "только первый клиент" больше не воспроизводится в текущем контракте `/tenants`.
+- Убран лишний branch payload/compute из cockpit request path в company scope.
 - Остаточная задача — perf/read-model для очень больших портфелей (`F5`).
 
 ### F4. Монолит страницы сохраняется (высокий regression risk)

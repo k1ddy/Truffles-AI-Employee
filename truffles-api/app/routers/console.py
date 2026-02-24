@@ -14940,6 +14940,7 @@ async def get_tenants_company_cockpit(
     request: Request,
     company_id: str,
     client_id: Optional[str] = None,
+    include_branches: Optional[str] = None,
     lifecycle: Optional[str] = None,
     client_limit: int = 20,
     branch_limit: int = 20,
@@ -14956,6 +14957,7 @@ async def get_tenants_company_cockpit(
             {
                 "company_id",
                 "client_id",
+                "include_branches",
                 "lifecycle",
                 "client_limit",
                 "branch_limit",
@@ -14968,6 +14970,7 @@ async def get_tenants_company_cockpit(
         _validate_limit(client_limit)
         _validate_limit(branch_limit)
         lifecycle_mode = _parse_tenant_lifecycle_param(lifecycle)
+        include_branches_mode = _parse_bool_param("include_branches", include_branches, default=True)
 
         company_uuid = _parse_uuid_param("company_id", company_id)
         if company_uuid is None:
@@ -14997,27 +15000,29 @@ async def get_tenants_company_cockpit(
             db=db,
         )
 
-        branches_request = _request_with_query_params(
-            request,
-            {
-                "cursor": branch_cursor,
-                "limit": branch_limit,
-                "q": branch_q,
-                "company_id": str(company_uuid),
-                "client_id": str(selected_client_uuid) if selected_client_uuid else None,
-                "lifecycle": lifecycle_mode,
-            },
-        )
-        branches_response = await list_branches(
-            request=branches_request,
-            cursor=branch_cursor,
-            limit=branch_limit,
-            q=branch_q,
-            company_id=str(company_uuid),
-            client_id=str(selected_client_uuid) if selected_client_uuid else None,
-            lifecycle=lifecycle_mode,
-            db=db,
-        )
+        branches_response = ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
+        if include_branches_mode:
+            branches_request = _request_with_query_params(
+                request,
+                {
+                    "cursor": branch_cursor,
+                    "limit": branch_limit,
+                    "q": branch_q,
+                    "company_id": str(company_uuid),
+                    "client_id": str(selected_client_uuid) if selected_client_uuid else None,
+                    "lifecycle": lifecycle_mode,
+                },
+            )
+            branches_response = await list_branches(
+                request=branches_request,
+                cursor=branch_cursor,
+                limit=branch_limit,
+                q=branch_q,
+                company_id=str(company_uuid),
+                client_id=str(selected_client_uuid) if selected_client_uuid else None,
+                lifecycle=lifecycle_mode,
+                db=db,
+            )
 
         return ConsoleTenantsCompanyCockpitResponse(
             generated_at=datetime.now(timezone.utc).isoformat(),

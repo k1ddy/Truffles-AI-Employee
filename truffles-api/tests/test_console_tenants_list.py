@@ -780,6 +780,60 @@ async def test_get_tenants_company_cockpit_uses_selected_client_scope_when_reque
     assert captured["branches"]["company_id"] == str(company_id)
     assert captured["branches"]["client_id"] == str(selected_client_id)
 
+
+@pytest.mark.asyncio
+async def test_get_tenants_company_cockpit_skips_branches_when_not_requested(monkeypatch) -> None:
+    company_id = uuid4()
+    selected_client_id = uuid4()
+    clients_response = console_router.ConsoleClientListResponse(
+        items=[
+            console_router.ConsoleClient(
+                id=selected_client_id,
+                slug="alpha",
+                status="active",
+                company_id=company_id,
+            )
+        ],
+        cursor=None,
+        has_more=False,
+        summary=None,
+    )
+    captured: dict[str, dict[str, object]] = {}
+    latency_calls: list[tuple[str, float | None]] = []
+
+    async def _fake_list_clients(**kwargs):
+        captured["clients"] = kwargs
+        return clients_response
+
+    async def _fake_list_branches(**kwargs):  # pragma: no cover - must not be called
+        raise AssertionError("list_branches should not be called when include_branches=false")
+
+    monkeypatch.setattr(console_router, "list_clients", _fake_list_clients)
+    monkeypatch.setattr(console_router, "list_branches", _fake_list_branches)
+    monkeypatch.setattr(
+        console_router,
+        "record_tenants_endpoint_latency",
+        lambda endpoint, elapsed_ms: latency_calls.append((endpoint, elapsed_ms)),
+    )
+
+    response = await console_router.get_tenants_company_cockpit(
+        request=_build_request(),
+        company_id=str(company_id),
+        client_id=str(selected_client_id),
+        include_branches="false",
+        lifecycle="active",
+        db=Mock(),
+    )
+
+    assert response.selected_client_id == selected_client_id
+    assert response.clients == clients_response
+    assert response.branches.items == []
+    assert response.branches.cursor is None
+    assert response.branches.has_more is False
+    assert "clients" in captured
+    assert latency_calls
+    assert latency_calls[0][0] == "company_cockpit"
+
 @pytest.mark.asyncio
 async def test_list_clients_defaults_to_active_lifecycle(monkeypatch) -> None:
     query = _build_list_query_mock()
