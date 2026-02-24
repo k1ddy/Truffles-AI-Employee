@@ -41,16 +41,20 @@ async function waitForLoginTransition(
         source: LoginTransitionState;
         state: LoginTransitionState | null;
     };
+    const transition = (
+        source: LoginTransitionState,
+        state: LoginTransitionState | null,
+    ): TransitionResult => ({ source, state });
 
     const keycloakTransition: Promise<TransitionResult> = page
         .waitForURL(keycloakHostPattern, { timeout: timeoutMs })
-        .then(() => ({ source: "keycloak", state: "keycloak" }))
-        .catch(() => ({ source: "keycloak", state: null }));
+        .then(() => transition("keycloak", "keycloak"))
+        .catch(() => transition("keycloak", null));
 
     const loggedInTransition: Promise<TransitionResult> = logoutButton
         .waitFor({ state: "visible", timeout: timeoutMs })
-        .then(() => ({ source: "logged-in", state: "logged-in" }))
-        .catch(() => ({ source: "logged-in", state: null }));
+        .then(() => transition("logged-in", "logged-in"))
+        .catch(() => transition("logged-in", null));
 
     const first = await Promise.race([keycloakTransition, loggedInTransition]);
     if (first.state) {

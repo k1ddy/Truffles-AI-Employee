@@ -100,8 +100,12 @@
   - CI stop-the-line (infra): run `https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22301196048` отменён как stuck (`core-eval` pending >10 минут без прогресса).
   - Merge build incident triaged on `main`: run `https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22301909590` failed in `deploy` job, step `Deploy to VPS`, with `Run Command Timeout` during remote console build.
   - Applied deploy hotfix: `appleboy/ssh-action` now uses `command_timeout: 20m` in `.github/workflows/ci.yml` (was default 10m), keeping job timeout `15m` intact.
+  - New deploy regression triaged on merged `main`: run `https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22329292602` failed in `deploy` job during remote `console-web` build (`next build`) with TypeScript error in `console-web/e2e/global-setup.ts` (`source: string` not assignable to `LoginTransitionState`).
+  - Applied deploy fix for strict typing: `waitForLoginTransition` now uses typed `transition()` helper so both Promise branches return exact `TransitionResult` shape without literal widening.
+  - Local validation completed for deploy fix: `corepack pnpm -C console-web run build`, `corepack pnpm -C console-web run lint`, `scripts/session_check.sh`.
+  - Opened hotfix PR with deploy fix: `https://github.com/k1ddy/Truffles-AI-Employee/pull/809` (`fix(deploy): resolve console-web type error in e2e global setup`).
 - next:
-  - Открыть hotfix PR с `command_timeout: 20m`, дождаться CI и merge в `main`.
+  - Дождаться зелёного CI для PR `#809` и merge в `main`, затем перепроверить deploy run на parity.
   - После merge зафиксировать runtime perf snapshot после серии tenant write операций (stale-window evidence + cache hit ratio для non-affected companies).
   - Следующий шаг Wave4/F5: расширить targeted precompute на global summary/attention strategy без full cold-start.
 - evidence:
@@ -166,6 +170,10 @@
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/806
   - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22301196048
   - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22301909590
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22329292602
+  - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22329943275
+  - https://github.com/k1ddy/Truffles-AI-Employee/pull/809
+  - console-web/e2e/global-setup.ts
   - .github/workflows/ci.yml
   - STATE.md
-- last_updated: 2026-02-23T10:51:00Z
+- last_updated: 2026-02-23T23:49:10Z
