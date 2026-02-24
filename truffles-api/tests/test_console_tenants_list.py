@@ -236,6 +236,29 @@ def test_invalidate_tenants_fleet_cache_scope_marks_global_prewarm(monkeypatch) 
     assert db.info[console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY] is True
 
 
+def test_invalidate_tenants_fleet_cache_scope_records_incremental_event(monkeypatch) -> None:
+    company_id = uuid4()
+    db = Mock()
+    db.begin_nested.return_value = nullcontext()
+    db.info = {}
+
+    monkeypatch.setattr(console_router, "_queue_fleet_summary_prewarm_company_ids", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(console_router, "_queue_fleet_global_prewarm", lambda *_args, **_kwargs: None)
+
+    console_router._invalidate_tenants_fleet_cache_scope(
+        db,
+        reason="integration_reconcile.execute",
+        company_ids={company_id},
+    )
+
+    assert db.info[console_router._TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY] == [
+        {
+            "reason": "integration_reconcile.execute",
+            "company_ids": [str(company_id)],
+        }
+    ]
+
+
 def test_on_console_session_after_commit_schedules_company_prewarm(monkeypatch) -> None:
     company_id = uuid4()
     captured_summary: list[set[UUID]] = []
@@ -264,6 +287,50 @@ def test_on_console_session_after_commit_schedules_company_prewarm(monkeypatch) 
     assert console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY not in session.info
 
 
+def test_on_console_session_after_commit_schedules_from_incremental_events(monkeypatch) -> None:
+    company_id = uuid4()
+    captured_summary: list[set[UUID]] = []
+    captured_attention: list[set[UUID]] = []
+    global_calls: list[bool] = []
+    session = SimpleNamespace(
+        info={
+            console_router._TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY: [
+                {
+                    "reason": "update_client",
+                    "company_ids": [str(company_id)],
+                }
+            ],
+            console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY: {company_id},
+            console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY: True,
+        }
+    )
+
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_summary_prewarm_for_company_ids",
+        lambda **kwargs: captured_summary.append(kwargs.get("company_ids") or set()),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_attention_prewarm_for_company_ids",
+        lambda **kwargs: captured_attention.append(kwargs.get("company_ids") or set()),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_global_prewarm",
+        lambda: global_calls.append(True),
+    )
+
+    console_router._on_console_session_after_commit(session)
+
+    assert captured_summary == [{company_id}]
+    assert captured_attention == [{company_id}]
+    assert global_calls == [True]
+    assert console_router._TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY not in session.info
+    assert console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY not in session.info
+    assert console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY not in session.info
+
+
 def test_on_console_session_after_commit_schedules_global_prewarm(monkeypatch) -> None:
     session = SimpleNamespace(
         info={
@@ -282,6 +349,22 @@ def test_on_console_session_after_commit_schedules_global_prewarm(monkeypatch) -
 
     assert calls == [True]
     assert console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY not in session.info
+
+
+def test_on_console_session_after_rollback_clears_incremental_events() -> None:
+    session = SimpleNamespace(
+        info={
+            console_router._TENANTS_FLEET_CACHE_PREWARM_EVENTS_INFO_KEY: [
+                {"reason": "x", "company_ids": []}
+            ],
+            console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY: {uuid4()},
+            console_router._TENANTS_FLEET_CACHE_PREWARM_GLOBAL_INFO_KEY: True,
+        }
+    )
+
+    console_router._on_console_session_after_rollback(session)
+
+    assert session.info == {}
 
 
 def test_schedule_fleet_summary_prewarm_for_company_ids_starts_refresh_task(monkeypatch) -> None:
