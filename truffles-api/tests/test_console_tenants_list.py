@@ -238,7 +238,8 @@ def test_invalidate_tenants_fleet_cache_scope_marks_global_prewarm(monkeypatch) 
 
 def test_on_console_session_after_commit_schedules_company_prewarm(monkeypatch) -> None:
     company_id = uuid4()
-    captured: list[set[UUID]] = []
+    captured_summary: list[set[UUID]] = []
+    captured_attention: list[set[UUID]] = []
     session = SimpleNamespace(
         info={
             console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY: {company_id},
@@ -248,12 +249,18 @@ def test_on_console_session_after_commit_schedules_company_prewarm(monkeypatch) 
     monkeypatch.setattr(
         console_router,
         "_schedule_fleet_summary_prewarm_for_company_ids",
-        lambda **kwargs: captured.append(kwargs.get("company_ids") or set()),
+        lambda **kwargs: captured_summary.append(kwargs.get("company_ids") or set()),
+    )
+    monkeypatch.setattr(
+        console_router,
+        "_schedule_fleet_attention_prewarm_for_company_ids",
+        lambda **kwargs: captured_attention.append(kwargs.get("company_ids") or set()),
     )
 
     console_router._on_console_session_after_commit(session)
 
-    assert captured == [{company_id}]
+    assert captured_summary == [{company_id}]
+    assert captured_attention == [{company_id}]
     assert console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_IDS_INFO_KEY not in session.info
 
 
@@ -303,6 +310,35 @@ def test_schedule_fleet_summary_prewarm_for_company_ids_starts_refresh_task(monk
     assert task_payload["company_id"] == str(company_id)
     assert task_payload["lifecycle_mode"] == "active"
     assert set(task_payload["accessible_client_ids"]) == {str(first_client_id), str(second_client_id)}
+    db.close.assert_called_once()
+
+
+def test_schedule_fleet_attention_prewarm_for_company_ids_starts_refresh_task(monkeypatch) -> None:
+    company_id = uuid4()
+    first_client_id = uuid4()
+    second_client_id = uuid4()
+    db = Mock()
+    db.query.return_value.filter.return_value.all.return_value = [
+        (first_client_id, company_id),
+        (second_client_id, company_id),
+    ]
+    started_tasks: list[dict[str, object]] = []
+
+    monkeypatch.setattr(console_router, "SessionLocal", lambda: db)
+    monkeypatch.setattr(console_router, "_try_claim_fleet_cache_refresh", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        console_router,
+        "_start_fleet_attention_refresh_task",
+        lambda **kwargs: started_tasks.append(kwargs),
+    )
+
+    console_router._schedule_fleet_attention_prewarm_for_company_ids(company_ids={company_id})
+
+    assert len(started_tasks) == 1
+    task_payload = started_tasks[0]["task"]
+    assert set(task_payload["active_client_ids"]) == {str(first_client_id), str(second_client_id)}
+    assert task_payload["stale_after_minutes"] == console_router._INTEGRATION_DEFAULT_STALE_MINUTES
+    assert task_payload["limit"] == console_router._TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT
     db.close.assert_called_once()
 
 

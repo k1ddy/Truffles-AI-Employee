@@ -503,3 +503,48 @@
 
 4. Interpretation.
 - Selected Wave 3 goals (`1/2/3`) are completed for this slice without behavioral regression in deterministic checks.
+
+## Wave 3/4 continuation: scope-derived hook + company attention prewarm (2026-02-24, UTC)
+1. Implemented decomposition continuation for derived scope state.
+- Added `console-web/src/app/tenants/use-tenants-scope-derived-state.ts`.
+- Moved context-derived names/maps/filter-options from page into hook:
+  - `clientCompanyIdById`, `branchClientIdById`, `branchCompanyIdById`
+  - `selectedCompanyName`, `selectedClientName`, `selectedBranchName`
+  - `pageFilterCompanyOptions`, `pageFilterClientOptions`, `pageFilterBranchOptions`
+- `tenants/page.tsx` now consumes derived scope model instead of in-file mapping blocks.
+
+2. Structural effect.
+- `tenants/page.tsx` reduced from `1883` to `1723` LOC.
+- Regression surface for scope derivation is isolated in dedicated hook, while operator control flow remains unchanged.
+
+3. Implemented Wave 4 targeted prewarm continuation.
+- Added company-scope fleet-attention prewarm worker:
+  - `_schedule_fleet_attention_prewarm_for_company_ids`
+  - wired from `after_commit` alongside existing summary prewarm.
+- Added env contract for company attention prewarm limit:
+  - `_TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT`
+- Extended backend tests in `truffles-api/tests/test_console_tenants_list.py`:
+  - `test_on_console_session_after_commit_schedules_company_prewarm` now verifies both summary + attention schedulers.
+  - `test_schedule_fleet_attention_prewarm_for_company_ids_starts_refresh_task`.
+
+4. Validation.
+- `corepack pnpm -C console-web run lint` (pass)
+- `corepack pnpm -C console-web run build` (pass)
+- `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py` (pass)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py -k "prewarm or invalidate_tenants_fleet_cache_scope or on_console_session_after_commit"` (`8 passed`)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`85 passed`)
+
+5. Runtime evidence refresh.
+- Command:
+  - `python3 ops/console_tenants_perf_snapshot.py --metrics-url https://api.truffles.kz/metrics --pretty --output /tmp/tenants_perf_snapshot_20260224_company_attention_prewarm.json`
+- Artifact:
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-company-attention-prewarm-20260224.json`
+- Snapshot status:
+  - `branches p95=100ms` (samples=76) pass
+  - `portfolio p95=50ms` (samples=2) pass
+  - `company_cockpit p95=10ms` (samples=2) pass
+  - overall `status=pass`.
+
+6. Interpretation.
+- Wave 3 decomposition and Wave 4 targeted prewarm moved forward without behavior loss in deterministic checks.
+- Remaining Wave 4 backlog stays unchanged: full incremental precompute pipeline (`event stream -> targeted/global strategy`) for very large fleets.

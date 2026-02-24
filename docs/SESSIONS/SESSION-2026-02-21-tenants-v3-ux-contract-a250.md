@@ -139,9 +139,14 @@
   - `tenants/page.tsx` reduced from `2214` to `1883` LOC while keeping clients/lifecycle/branch-change panel contracts unchanged.
   - Updated canon docs for factual status and semantics: TP clarifies that `orchestration-only` is architectural isolation (not loss of control), and report captures the decomposition continuation with checks/evidence.
   - Validation for decomposition continuation: `corepack pnpm -C console-web run lint` (pass), `corepack pnpm -C console-web run build` (pass), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`), `scripts/session_check.sh`.
+  - Wave3/4 continuation delivered: added `console-web/src/app/tenants/use-tenants-scope-derived-state.ts` and moved scope-derived context names/maps/filter options out of `tenants/page.tsx` (`1883 -> 1723` LOC), preserving current control flows.
+  - Wave4 targeted prewarm continuation delivered: added affected-company attention prewarm (`_schedule_fleet_attention_prewarm_for_company_ids`) and wired it from `after_commit` together with summary prewarm.
+  - Added/updated backend contracts: `test_on_console_session_after_commit_schedules_company_prewarm` now checks summary+attention scheduling, and `test_schedule_fleet_attention_prewarm_for_company_ids_starts_refresh_task` validates company attention prewarm payload.
+  - Refreshed runtime perf evidence: `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-company-attention-prewarm-20260224.json` (`status=pass`, `branches p95=100ms`, `portfolio p95=50ms`, `company_cockpit p95=10ms`).
+  - Validation for this continuation: `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`, `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py`, `pytest -q truffles-api/tests/test_console_tenants_list.py -k "prewarm or invalidate_tenants_fleet_cache_scope or on_console_session_after_commit"` (`8 passed`), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`85 passed`), `python3 ops/console_tenants_perf_snapshot.py --metrics-url https://api.truffles.kz/metrics --pretty --output /tmp/tenants_perf_snapshot_20260224_company_attention_prewarm.json`.
 - next:
   - Wave4 remaining backlog: довести incremental precompute pipeline до устойчивой модели для large fleet (event stream -> targeted precompute strategy) и закрепить long-run perf evidence.
-  - Продолжить декомпозицию `tenants/page.tsx`: вынести helper/derived-state блоки (`branch patch/snapshot helpers`, audit mapping/formatters) в отдельные tenant modules для дальнейшего уменьшения blast radius.
+  - Продолжить декомпозицию `tenants/page.tsx`: вынести remaining helper/formatting блоки (`branch patch/snapshot helpers`, audit mapping/formatters) в отдельные tenant modules для дальнейшего уменьшения blast radius.
   - Зафиксировать post-merge CI/deploy evidence для текущего continuation после публикации ветки/PR.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
@@ -213,6 +218,9 @@
   - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-authload-20260224-recheck.json
   - console-web/src/app/tenants/use-tenants-data-queries.ts
   - console-web/src/app/tenants/use-tenants-actions.ts
+  - console-web/src/app/tenants/use-tenants-scope-derived-state.ts
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-company-attention-prewarm-20260224.json
+  - /tmp/tenants_perf_snapshot_20260224_company_attention_prewarm.json
   - console-web/e2e/global-setup.ts
   - console-web/src/app/tenants/page.tsx
   - console-web/src/lib/api-client.ts
@@ -220,4 +228,4 @@
   - truffles-api/tests/test_console_tenants_list.py
   - .github/workflows/ci.yml
   - STATE.md
-- last_updated: 2026-02-24T03:02:18Z
+- last_updated: 2026-02-24T03:25:00Z

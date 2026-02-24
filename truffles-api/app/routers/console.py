@@ -2209,6 +2209,12 @@ _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_ATTENTION_LIMIT = _parse_env_int(
     min_value=1,
     max_value=200,
 )
+_TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT = _parse_env_int(
+    "TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT",
+    default=20,
+    min_value=1,
+    max_value=200,
+)
 _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MIN_INTERVAL_SECONDS = _parse_env_int(
     "TENANTS_FLEET_CACHE_PREWARM_GLOBAL_MIN_INTERVAL_SECONDS",
     default=30,
@@ -3016,6 +3022,47 @@ def _schedule_fleet_summary_prewarm_for_company_ids(
         )
 
 
+def _schedule_fleet_attention_prewarm_for_company_ids(
+    *,
+    company_ids: set[UUID],
+) -> None:
+    if not _TENANTS_FLEET_CACHE_PREWARM_ON_INVALIDATION_ENABLED:
+        return
+    if not company_ids:
+        return
+    capped_company_ids = set(sorted(company_ids, key=str)[:_TENANTS_FLEET_CACHE_PREWARM_MAX_COMPANY_SCOPES])
+    if not capped_company_ids:
+        return
+    active_clients_by_company = _load_active_clients_by_company(company_ids=capped_company_ids)
+    if not active_clients_by_company:
+        return
+    for active_client_ids in active_clients_by_company.values():
+        if not active_client_ids:
+            continue
+        if len(active_client_ids) > _TENANTS_FLEET_CACHE_ASYNC_MAX_SCOPE_CLIENTS:
+            continue
+        scope_key = _build_fleet_attention_cache_scope_key(
+            active_client_ids=active_client_ids,
+            stale_after_minutes=_INTEGRATION_DEFAULT_STALE_MINUTES,
+            include_low_mode=False,
+            limit=_TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT,
+        )
+        if not _try_claim_fleet_cache_refresh(_TENANTS_FLEET_CACHE_ATTENTION_TYPE, scope_key):
+            continue
+        task = {
+            "scope_key": scope_key,
+            "active_client_ids": [str(client_id) for client_id in sorted(active_client_ids, key=str)],
+            "stale_after_minutes": _INTEGRATION_DEFAULT_STALE_MINUTES,
+            "include_low_mode": False,
+            "limit": _TENANTS_FLEET_CACHE_PREWARM_COMPANY_ATTENTION_LIMIT,
+        }
+        _start_fleet_attention_refresh_task(
+            scope_key=scope_key,
+            task=task,
+            thread_name="tenants-fleet-attention-prewarm-company",
+        )
+
+
 def _schedule_fleet_global_prewarm() -> None:
     if not _TENANTS_FLEET_CACHE_PREWARM_GLOBAL_SCOPE_ENABLED:
         return
@@ -3091,6 +3138,7 @@ def _on_console_session_after_commit(session: Session) -> None:
     scoped_company_ids = {company_id for company_id in raw_company_ids if isinstance(company_id, UUID)}
     if scoped_company_ids:
         _schedule_fleet_summary_prewarm_for_company_ids(company_ids=scoped_company_ids)
+        _schedule_fleet_attention_prewarm_for_company_ids(company_ids=scoped_company_ids)
     if global_prewarm_required:
         _schedule_fleet_global_prewarm()
 

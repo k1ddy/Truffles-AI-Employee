@@ -19,7 +19,7 @@ import TenantsPortfolioCompaniesPanel from "@/components/TenantsPortfolioCompani
 import TenantsQuickCreatePanel from "@/components/TenantsQuickCreatePanel";
 import TenantsScopedErrorSummary from "@/components/TenantsScopedErrorSummary";
 import type { TenantsSensitiveAction } from "@/components/TenantsSensitiveIdCell";
-import TenantsTopControls, { type TenantsFilterOption } from "@/components/TenantsTopControls";
+import TenantsTopControls from "@/components/TenantsTopControls";
 import {
     adminApi,
     authApi,
@@ -45,6 +45,7 @@ import {
 import { useTenantsDataQueries } from "./use-tenants-data-queries";
 import { useTenantsActions } from "./use-tenants-actions";
 import { useTenantsPageFilters } from "./use-tenants-page-filters";
+import { useTenantsScopeDerivedState } from "./use-tenants-scope-derived-state";
 
 type CompanyEditorState = {
     id: string;
@@ -412,39 +413,6 @@ function toCsvCell(value: string | number): string {
     return raw;
 }
 
-function toFilterOptions(
-    values: Array<{ id: string | null | undefined; label: string | null | undefined }>,
-): TenantsFilterOption[] {
-    const unique = new Map<string, string>();
-    values.forEach((item) => {
-        if (!item.id) {
-            return;
-        }
-        const normalizedLabel = (item.label ?? "").trim();
-        if (!unique.has(item.id)) {
-            unique.set(item.id, normalizedLabel || item.id);
-        }
-    });
-    return [...unique.entries()]
-        .map(([id, label]) => ({ id, label }))
-        .sort((left, right) => left.label.localeCompare(right.label, "ru"));
-}
-
-function normalizeOptionalId(value: string | null | undefined): string | null {
-    const normalized = (value ?? "").trim();
-    return normalized.length > 0 ? normalized : null;
-}
-
-function readBranchClientId(branch: components["schemas"]["ConsoleBranch"]): string | null {
-    const value = (branch as components["schemas"]["ConsoleBranch"] & { client_id?: string | null }).client_id;
-    return normalizeOptionalId(value);
-}
-
-function readBranchCompanyId(branch: components["schemas"]["ConsoleBranch"]): string | null {
-    const value = (branch as components["schemas"]["ConsoleBranch"] & { company_id?: string | null }).company_id;
-    return normalizeOptionalId(value);
-}
-
 function pushLifecycleAuditEntry(
     previous: ClientLifecycleAuditMap,
     entry: ClientLifecycleAuditEntry,
@@ -744,26 +712,9 @@ export default function TenantsPage() {
         },
         canInitialize: Boolean(meData),
     });
-    const knownCompanies = useMemo(
-        () => meData?.companies ?? [],
-        [meData?.companies],
-    );
-    const knownBranches = useMemo(
-        () => meData?.branches ?? [],
-        [meData?.branches],
-    );
-    const selectedCompanyNameFromContext = useMemo(() => {
-        if (!selectedCompanyId) {
-            return null;
-        }
-        return knownCompanies.find((company) => company.id === selectedCompanyId)?.name ?? null;
-    }, [knownCompanies, selectedCompanyId]);
-    const selectedBranchNameFromContext = useMemo(() => {
-        if (!selectedBranchId) {
-            return null;
-        }
-        return knownBranches.find((branch) => branch.id === selectedBranchId)?.name ?? null;
-    }, [knownBranches, selectedBranchId]);
+    const knownCompanies = meData?.companies ?? [];
+    const knownClients = meData?.clients ?? [];
+    const knownBranches = meData?.branches ?? [];
     const quickCreateCompanyId = quickCreateForm.companyId || selectedCompanyId || "";
     const quickCreateClientId = quickCreateForm.clientId || selectedClientId || "";
 
@@ -861,140 +812,29 @@ export default function TenantsPage() {
     const clientsUsingServerContract = pageFilterCompanyId
         ? tenantsCompanyCockpitQuery.isSuccess
         : tenantsPortfolioQuery.isSuccess;
-    const clientCompanyIdById = useMemo(() => {
-        const mapping = new Map<string, string>();
-        clients.forEach((client) => {
-            if (client.id && client.company_id) {
-                mapping.set(client.id, client.company_id);
-            }
-        });
-        (meData?.clients ?? []).forEach((client) => {
-            if (client.id && client.company_id && !mapping.has(client.id)) {
-                mapping.set(client.id, client.company_id);
-            }
-        });
-        return mapping;
-    }, [clients, meData?.clients]);
-    const branchClientIdById = useMemo(() => {
-        const mapping = new Map<string, string>();
-        branches.forEach((branch) => {
-            if (branch.id) {
-                const clientId = readBranchClientId(branch);
-                if (clientId) {
-                    mapping.set(branch.id, clientId);
-                }
-            }
-        });
-        knownBranches.forEach((branch) => {
-            if (branch.id && !mapping.has(branch.id)) {
-                const clientId = readBranchClientId(branch);
-                if (clientId) {
-                    mapping.set(branch.id, clientId);
-                }
-            }
-        });
-        return mapping;
-    }, [branches, knownBranches]);
-    const branchCompanyIdById = useMemo(() => {
-        const mapping = new Map<string, string>();
-        branches.forEach((branch) => {
-            if (branch.id) {
-                const companyId = readBranchCompanyId(branch);
-                if (companyId) {
-                    mapping.set(branch.id, companyId);
-                }
-            }
-        });
-        knownBranches.forEach((branch) => {
-            if (branch.id && !mapping.has(branch.id)) {
-                const companyId = readBranchCompanyId(branch);
-                if (companyId) {
-                    mapping.set(branch.id, companyId);
-                }
-            }
-        });
-        return mapping;
-    }, [branches, knownBranches]);
-    const selectedCompanyName = useMemo(() => {
-        if (!selectedCompanyId) {
-            return null;
-        }
-        return (
-            companies.find((company) => company.id === selectedCompanyId)?.name
-            ?? selectedCompanyNameFromContext
-            ?? null
-        );
-    }, [companies, selectedCompanyId, selectedCompanyNameFromContext]);
-    const selectedClientName = useMemo(() => {
-        if (!selectedClientId) {
-            return null;
-        }
-        if (meData?.client?.id === selectedClientId && meData.client?.name) {
-            return meData.client.name;
-        }
-        return clients.find((client) => client.id === selectedClientId)?.name ?? null;
-    }, [clients, meData?.client?.id, meData?.client?.name, selectedClientId]);
-    const selectedBranchName = useMemo(() => {
-        if (!selectedBranchId) {
-            return null;
-        }
-        return (
-            branches.find((branch) => branch.id === selectedBranchId)?.name
-            ?? selectedBranchNameFromContext
-            ?? null
-        );
-    }, [branches, selectedBranchId, selectedBranchNameFromContext]);
-    const pageFilterCompanyOptions = useMemo(
-        () => toFilterOptions([
-            ...knownCompanies.map((company) => ({
-                id: company.id,
-                label: company.name ?? company.id ?? "",
-            })),
-            ...companies.map((company) => ({
-                id: company.id,
-                label: company.name ?? company.id ?? "",
-            })),
-            {
-                id: selectedCompanyId,
-                label: selectedCompanyNameFromContext ?? selectedCompanyId ?? "",
-            },
-        ]),
-        [knownCompanies, companies, selectedCompanyId, selectedCompanyNameFromContext],
-    );
-    const pageFilterClientOptions = useMemo(
-        () => toFilterOptions([
-            ...clients.map((client) => ({
-                id: client.id,
-                label: client.name ?? client.slug ?? client.id ?? "",
-            })),
-            {
-                id: meData?.client?.id ?? null,
-                label: meData?.client?.name ?? meData?.client?.id ?? "",
-            },
-            {
-                id: selectedClientId,
-                label: selectedClientName ?? selectedClientId ?? "",
-            },
-        ]),
-        [clients, meData?.client?.id, meData?.client?.name, selectedClientId, selectedClientName],
-    );
-    const pageFilterBranchOptions = useMemo(() => {
-        const branchItems = branches.map((branch) => ({
-            id: branch.id,
-            label: branch.name ?? branch.slug ?? branch.id ?? "",
-        }));
-        return toFilterOptions([
-            ...knownBranches.map((branch) => ({
-                id: branch.id,
-                label: branch.name ?? branch.id ?? "",
-            })),
-            ...branchItems,
-            {
-                id: selectedBranchId,
-                label: selectedBranchNameFromContext ?? selectedBranchId ?? "",
-            },
-        ]);
-    }, [branches, knownBranches, selectedBranchId, selectedBranchNameFromContext]);
+    const {
+        clientCompanyIdById,
+        branchClientIdById,
+        branchCompanyIdById,
+        selectedCompanyName,
+        selectedClientName,
+        selectedBranchName,
+        pageFilterCompanyOptions,
+        pageFilterClientOptions,
+        pageFilterBranchOptions,
+    } = useTenantsScopeDerivedState({
+        companies,
+        clients,
+        branches,
+        knownCompanies,
+        knownClients,
+        knownBranches,
+        selectedCompanyId,
+        selectedClientId,
+        selectedBranchId,
+        meClientId: meData?.client?.id ?? null,
+        meClientName: meData?.client?.name ?? null,
+    });
     const activeErrorScope = useMemo(
         () => resolveErrorScopeFromWorkspace(effectiveWorkspaceMode),
         [effectiveWorkspaceMode],
@@ -1823,8 +1663,8 @@ export default function TenantsPage() {
                         onSetBranchContext={(branch) =>
                             setBranchContextAndPageFilters({
                                 branchId: branch.id,
-                                clientId: readBranchClientId(branch),
-                                companyId: readBranchCompanyId(branch),
+                                clientId: branch.id ? (branchClientIdById.get(branch.id) ?? null) : null,
+                                companyId: branch.id ? (branchCompanyIdById.get(branch.id) ?? null) : null,
                             })
                         }
                         branchEditor={branchEditor}
