@@ -1611,7 +1611,7 @@ def execute_tool_action(
                 else f"Проверил: на {requested_time} подтверждённой записи не вижу."
             )
             booked_time_note = (
-                f" Вижу подтверждённую запись на {appointment_time}."
+                f" Вижу подтверждённую запись на {appointment_time} (возможно на другую дату)."
                 if isinstance(appointment_time, str) and appointment_time.strip()
                 else ""
             )

@@ -1,2 +1,6 @@
 # False positive in test fixture idempotency header value (PR #777 history).
 d58b1992ed46d653f460171e4780df7a76720dfa:truffles-api/tests/test_console_outreach.py:generic-api-key:102
+
+# False positive: docker image tag in session log command list (PR #782 history).
+3c230d3e008d0843c7c57e18f5ebc6acbbf1c6f0:docs/SESSIONS/SESSION-2026-02-19-llm-first-firebreak-a1.md:generic-api-key:130
+3c230d3e008d0843c7c57e18f5ebc6acbbf1c6f0:docs/SESSIONS/SESSION-2026-02-19-llm-first-firebreak-a1.md:generic-api-key:131
