@@ -266,26 +266,36 @@ def _required_sample_size_failed(
     return False
 
 
-def main() -> int:
-    args = parse_args()
-    metrics_text, error_text = fetch_metrics_text(args.metrics_url, timeout=args.timeout)
+def capture_tenants_perf_snapshot(
+    *,
+    metrics_url: str,
+    timeout: float,
+    portfolio_p95_ms: float,
+    company_cockpit_p95_ms: float,
+    branches_p95_ms: float,
+    portfolio_min_samples: int,
+    company_cockpit_min_samples: int,
+    branches_min_samples: int,
+    branch_path: str,
+) -> dict[str, Any]:
+    metrics_text, error_text = fetch_metrics_text(metrics_url, timeout=timeout)
     generated_at = dt.datetime.now(dt.timezone.utc).isoformat()
 
     report: dict[str, Any] = {
         "generated_at": generated_at,
-        "metrics_url": args.metrics_url,
+        "metrics_url": metrics_url,
         "error": error_text,
         "tenants_endpoint_latency": {},
         "branches_get_latency": {},
         "slo_targets_ms": {
-            "portfolio_p95": args.portfolio_p95_ms,
-            "company_cockpit_p95": args.company_cockpit_p95_ms,
-            "branches_get_p95": args.branches_p95_ms,
+            "portfolio_p95": portfolio_p95_ms,
+            "company_cockpit_p95": company_cockpit_p95_ms,
+            "branches_get_p95": branches_p95_ms,
         },
         "sample_targets": {
-            "portfolio_min_samples": args.portfolio_min_samples,
-            "company_cockpit_min_samples": args.company_cockpit_min_samples,
-            "branches_min_samples": args.branches_min_samples,
+            "portfolio_min_samples": portfolio_min_samples,
+            "company_cockpit_min_samples": company_cockpit_min_samples,
+            "branches_min_samples": branches_min_samples,
         },
     }
 
@@ -297,40 +307,54 @@ def main() -> int:
         )
         tenants_report = _build_histogram_report(tenants_hist)
         if "portfolio" in tenants_report:
-            tenants_report["portfolio"]["p95_slo_ms"] = args.portfolio_p95_ms
+            tenants_report["portfolio"]["p95_slo_ms"] = portfolio_p95_ms
             p95_ms = tenants_report["portfolio"].get("p95_ms")
             tenants_report["portfolio"]["p95_slo_pass"] = (
-                p95_ms <= args.portfolio_p95_ms if isinstance(p95_ms, (int, float)) else None
+                p95_ms <= portfolio_p95_ms if isinstance(p95_ms, (int, float)) else None
             )
         if "company_cockpit" in tenants_report:
-            tenants_report["company_cockpit"]["p95_slo_ms"] = args.company_cockpit_p95_ms
+            tenants_report["company_cockpit"]["p95_slo_ms"] = company_cockpit_p95_ms
             p95_ms = tenants_report["company_cockpit"].get("p95_ms")
             tenants_report["company_cockpit"]["p95_slo_pass"] = (
-                p95_ms <= args.company_cockpit_p95_ms if isinstance(p95_ms, (int, float)) else None
+                p95_ms <= company_cockpit_p95_ms if isinstance(p95_ms, (int, float)) else None
             )
         report["tenants_endpoint_latency"] = tenants_report
 
-        # Branch latency may be absent in environments where http_request_latency
-        # is not emitted for this path; keep this metric optional in the report.
         branches_hist = _extract_histogram_by_label(
             metrics_text,
             metric_prefix=HTTP_METRIC,
             key_label="path",
-            filters={"method": "GET", "path": args.branch_path},
+            filters={"method": "GET", "path": branch_path},
         )
         report["branches_get_latency"] = _build_histogram_report(
             branches_hist,
-            p95_slo_ms=args.branches_p95_ms,
+            p95_slo_ms=branches_p95_ms,
         )
 
     report["required_slo_failed"] = _required_slo_failed(report)
     report["required_sample_size_failed"] = _required_sample_size_failed(
         report,
+        portfolio_min_samples=portfolio_min_samples,
+        company_cockpit_min_samples=company_cockpit_min_samples,
+        branches_min_samples=branches_min_samples,
+    )
+    report["status"] = "fail" if (report["required_slo_failed"] or report["required_sample_size_failed"]) else "pass"
+    return report
+
+
+def main() -> int:
+    args = parse_args()
+    report = capture_tenants_perf_snapshot(
+        metrics_url=args.metrics_url,
+        timeout=args.timeout,
+        portfolio_p95_ms=args.portfolio_p95_ms,
+        company_cockpit_p95_ms=args.company_cockpit_p95_ms,
+        branches_p95_ms=args.branches_p95_ms,
         portfolio_min_samples=args.portfolio_min_samples,
         company_cockpit_min_samples=args.company_cockpit_min_samples,
         branches_min_samples=args.branches_min_samples,
+        branch_path=args.branch_path,
     )
-    report["status"] = "fail" if (report["required_slo_failed"] or report["required_sample_size_failed"]) else "pass"
 
     _write_report(report, args.output, pretty=args.pretty)
     print(json.dumps(report, ensure_ascii=True, indent=2 if args.pretty else None, sort_keys=args.pretty))

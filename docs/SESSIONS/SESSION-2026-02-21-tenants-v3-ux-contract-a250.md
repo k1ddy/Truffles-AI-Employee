@@ -159,10 +159,17 @@
   - Runtime perf gate strengthened in `ops/console_tenants_perf_snapshot.py`: minimum sample-size thresholds (`portfolio/company-cockpit/branches`) are required for valid pass/fail decision.
   - Captured controlled-load runtime artifact with sufficient samples: `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-dispatch-load-20260224.json` (`status=pass`, `portfolio=44`, `company_cockpit=42`, `branches=111`).
   - Validation for this continuation: `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`, `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py ops/console_tenants_perf_snapshot.py`, `pytest -q truffles-api/tests/test_console_tenants_list.py -k "prewarm or invalidate_tenants_fleet_cache_scope or on_console_session_after_commit or on_console_session_after_rollback or dispatch"` (`13 passed`), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`90 passed`), `python3 truffles-api/scripts/generate_openapi.py --check`.
+  - Wave3/4 continuation delivered (part 8): extracted operational KPI/drilldown/alert/report compose from `tenants/page.tsx` into `console-web/src/app/tenants/use-tenants-operational-model.ts`.
+  - `tenants/page.tsx` reduced from `1268` to `1167` LOC while preserving existing operator control workflows.
+  - Wave4 continuation delivered: incremental prewarm dispatch moved from in-memory queue to durable DB queue (`tenants_fleet_prewarm_jobs`, migration `041`) with `pending -> processing -> done` lifecycle, retry marker on scheduler errors, and stuck-processing auto-heal (`locked_at` timeout -> `pending`).
+  - Added backend durable-dispatch contracts in `truffles-api/tests/test_console_tenants_list.py`: durable enqueue persistence, claim transition to processing, and retry marker behavior.
+  - Added reproducible authenticated long-run perf lane `ops/console_tenants_perf_long_run.py` (load profile for `portfolio/company-cockpit/branches` + integrated snapshot gate via `ops/console_tenants_perf_snapshot.py`).
+  - Captured long-run runtime artifacts: `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-long-run-20260224.json` and `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-long-run-snapshot-20260224.json` (`status=pass`, `request_failures=0`, samples `portfolio=112`, `company_cockpit=111`, `branches=144`, p95 `500/250/100 ms`).
+  - Validation for this continuation: `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`, `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py ops/console_tenants_perf_snapshot.py ops/console_tenants_perf_long_run.py`, `python3 -m py_compile ops/console_tenants_perf_snapshot.py ops/console_tenants_perf_long_run.py`, `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`93 passed`), `python3 truffles-api/scripts/generate_openapi.py --check`.
 - next:
-  - Wave4 remaining backlog: довести incremental precompute pipeline до persistent/durable queue strategy (process-restart safe) для large fleet и закрепить long-run perf evidence.
-  - Продолжить декомпозицию `tenants/page.tsx`: вынести remaining compose/orchestration блоки в targeted hooks/modules, не меняя operator control contract.
-  - Добавить reproducible long-run perf lane (фиксированный load profile + sample-size gates) как регулярный контракт regression контроля.
+  - Wave4 remaining backlog: эволюция к fully materialized fleet read-model/backpressure policy для very-large-fleet (10M+ tenants path), при сохранении текущего fail-open контракта.
+  - Wave3 remaining backlog: вынести оставшийся compose wiring из `tenants/page.tsx` в lightweight orchestration hook без потери operator control.
+  - Закрепить perf governance: добавить регулярный CI/manual lane запуск `ops/console_tenants_perf_long_run.py` с версионируемыми артефактами в report pipeline.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
@@ -235,11 +242,17 @@
   - console-web/src/app/tenants/use-tenants-actions.ts
   - console-web/src/app/tenants/use-tenants-scope-derived-state.ts
   - console-web/src/app/tenants/use-tenants-action-queue.ts
+  - console-web/src/app/tenants/use-tenants-operational-model.ts
   - console-web/src/app/tenants/tenants-page-helpers.ts
   - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-company-attention-prewarm-20260224.json
   - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-dispatch-load-20260224.json
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-long-run-20260224.json
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-long-run-snapshot-20260224.json
   - /tmp/tenants_perf_snapshot_20260224_company_attention_prewarm.json
   - /tmp/tenants_perf_snapshot_20260224_dispatch_queue_after_load.json
+  - ops/console_tenants_perf_long_run.py
+  - truffles-api/app/models/tenants_fleet_prewarm_job.py
+  - truffles-api/migrations/041_add_tenants_fleet_prewarm_jobs.sql
   - console-web/e2e/global-setup.ts
   - console-web/src/app/tenants/page.tsx
   - console-web/src/lib/api-client.ts
@@ -247,4 +260,4 @@
   - truffles-api/tests/test_console_tenants_list.py
   - .github/workflows/ci.yml
   - STATE.md
-- last_updated: 2026-02-24T06:51:47Z
+- last_updated: 2026-02-24T08:12:00Z

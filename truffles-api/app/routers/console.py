@@ -52,6 +52,7 @@ from app.models import (
     OutboxMessage,
     ReferencePack,
     TenantsFleetCache,
+    TenantsFleetPrewarmJob,
     TenantsWeeklySnapshot,
     User,
 )
@@ -2159,6 +2160,7 @@ _FLEET_ATTENTION_MEDIUM_THRESHOLD = 35
 _FLEET_REFERENCE_BRANCH_RECENT_INBOUND_DAYS = 30
 _ONBOARDING_THROUGHPUT_WINDOW_HOURS = 30 * 24
 _TENANTS_FLEET_CACHE_TABLE_NAME = "tenants_fleet_cache"
+_TENANTS_FLEET_PREWARM_JOB_TABLE_NAME = "tenants_fleet_prewarm_jobs"
 _TENANTS_FLEET_CACHE_SUMMARY_TYPE = "fleet_summary"
 _TENANTS_FLEET_CACHE_ATTENTION_TYPE = "fleet_attention"
 _TENANTS_FLEET_CACHE_SCHEMA_VERSION = "v1"
@@ -2234,6 +2236,12 @@ _TENANTS_FLEET_PREWARM_DISPATCH_BATCH_MAX = _parse_env_int(
     min_value=1,
     max_value=512,
 )
+_TENANTS_FLEET_PREWARM_DISPATCH_STUCK_SECONDS = _parse_env_int(
+    "TENANTS_FLEET_PREWARM_DISPATCH_STUCK_SECONDS",
+    default=120,
+    min_value=30,
+    max_value=7200,
+)
 _OUTBOX_ARCHIVED_REASON_PREFIX = "archived_pending:"
 _OUTBOX_CALENDAR_SYNC_REASON_PREFIX = "calendar_sync_failed:"
 _OUTBOX_SYSTEM_EVENT_TYPES = {"calendar.sync_inbound", "calendar.sync_outbound"}
@@ -2262,6 +2270,9 @@ _TENANTS_FLEET_CACHE_GLOBAL_PREWARM_NEXT_ALLOWED_AT = 0.0
 _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE: deque[dict[str, Any]] = deque()
 _TENANTS_FLEET_PREWARM_DISPATCH_LOCK = Lock()
 _TENANTS_FLEET_PREWARM_DISPATCH_WORKER: Optional[Thread] = None
+_TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING = "pending"
+_TENANTS_FLEET_PREWARM_JOB_STATUS_PROCESSING = "processing"
+_TENANTS_FLEET_PREWARM_JOB_STATUS_DONE = "done"
 
 
 @dataclass
@@ -2458,6 +2469,14 @@ def _is_tenants_fleet_cache_table_missing_error(exc: ProgrammingError) -> bool:
     message = str(exc.orig if getattr(exc, "orig", None) is not None else exc).lower()
     return (
         _TENANTS_FLEET_CACHE_TABLE_NAME in message
+        and "does not exist" in message
+    )
+
+
+def _is_tenants_fleet_prewarm_job_table_missing_error(exc: ProgrammingError) -> bool:
+    message = str(exc.orig if getattr(exc, "orig", None) is not None else exc).lower()
+    return (
+        _TENANTS_FLEET_PREWARM_JOB_TABLE_NAME in message
         and "does not exist" in message
     )
 
@@ -3005,7 +3024,49 @@ def _coalesce_incremental_prewarm_dispatch_batch(
     return scoped_company_ids, global_prewarm_required
 
 
-def _drain_fleet_incremental_prewarm_dispatch_queue_once() -> bool:
+def _normalize_fleet_incremental_prewarm_company_ids(raw_company_ids: Any) -> set[UUID]:
+    normalized: set[UUID] = set()
+    if not isinstance(raw_company_ids, list):
+        return normalized
+    for raw_company_id in raw_company_ids:
+        if isinstance(raw_company_id, UUID):
+            normalized.add(raw_company_id)
+            continue
+        if not isinstance(raw_company_id, str):
+            continue
+        try:
+            normalized.add(UUID(raw_company_id))
+        except (TypeError, ValueError):
+            continue
+    return normalized
+
+
+def _enqueue_fleet_incremental_prewarm_dispatch_inmemory(
+    *,
+    company_ids: set[UUID],
+    global_prewarm_required: bool,
+) -> None:
+    normalized_company_ids = [str(company_id) for company_id in sorted(company_ids, key=str)]
+    payload = {
+        "company_ids": normalized_company_ids,
+        "global_required": global_prewarm_required,
+    }
+
+    with _TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
+        if len(_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE) >= _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE_MAX:
+            _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.clear()
+            _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.append(
+                {
+                    "company_ids": normalized_company_ids,
+                    "global_required": True,
+                    "reason": "dispatch_queue_overflow",
+                }
+            )
+        else:
+            _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.append(payload)
+
+
+def _drain_fleet_incremental_prewarm_dispatch_queue_inmemory_once() -> bool:
     with _TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
         if not _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE:
             return False
@@ -3023,6 +3084,206 @@ def _drain_fleet_incremental_prewarm_dispatch_queue_once() -> bool:
     if global_prewarm_required:
         _schedule_fleet_global_prewarm()
     return True
+
+
+def _enqueue_fleet_incremental_prewarm_dispatch_durable(
+    *,
+    company_ids: set[UUID],
+    global_prewarm_required: bool,
+) -> bool:
+    db = SessionLocal()
+    now = datetime.now(timezone.utc)
+    normalized_company_ids = [str(company_id) for company_id in sorted(company_ids, key=str)]
+    job_global_required = global_prewarm_required
+    job_reason: Optional[str] = None
+    try:
+        pending_count = (
+            db.query(func.count(TenantsFleetPrewarmJob.id))
+            .filter(
+                TenantsFleetPrewarmJob.status.in_(
+                    [
+                        _TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING,
+                        _TENANTS_FLEET_PREWARM_JOB_STATUS_PROCESSING,
+                    ]
+                )
+            )
+            .scalar()
+            or 0
+        )
+        if pending_count >= _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE_MAX:
+            # Collapse pending backlog into a single global rebuild signal.
+            db.query(TenantsFleetPrewarmJob).filter(
+                TenantsFleetPrewarmJob.status == _TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING
+            ).update(
+                {
+                    TenantsFleetPrewarmJob.status: _TENANTS_FLEET_PREWARM_JOB_STATUS_DONE,
+                    TenantsFleetPrewarmJob.completed_at: now,
+                    TenantsFleetPrewarmJob.updated_at: now,
+                    TenantsFleetPrewarmJob.last_error: "dispatch_queue_overflow",
+                },
+                synchronize_session=False,
+            )
+            job_global_required = True
+            job_reason = "dispatch_queue_overflow"
+        db.add(
+            TenantsFleetPrewarmJob(
+                company_ids=normalized_company_ids,
+                global_required=job_global_required,
+                reason=job_reason,
+                status=_TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING,
+                updated_at=now,
+            )
+        )
+        db.commit()
+        return True
+    except ProgrammingError as exc:
+        db.rollback()
+        if _is_tenants_fleet_prewarm_job_table_missing_error(exc):
+            return False
+        return False
+    except Exception:
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
+def _claim_fleet_incremental_prewarm_dispatch_batch() -> list[dict[str, Any]]:
+    db = SessionLocal()
+    now = datetime.now(timezone.utc)
+    stale_before = now - timedelta(seconds=_TENANTS_FLEET_PREWARM_DISPATCH_STUCK_SECONDS)
+    try:
+        try:
+            db.query(TenantsFleetPrewarmJob).filter(
+                TenantsFleetPrewarmJob.status == _TENANTS_FLEET_PREWARM_JOB_STATUS_PROCESSING,
+                TenantsFleetPrewarmJob.locked_at.isnot(None),
+                TenantsFleetPrewarmJob.locked_at < stale_before,
+            ).update(
+                {
+                    TenantsFleetPrewarmJob.status: _TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING,
+                    TenantsFleetPrewarmJob.locked_at: None,
+                    TenantsFleetPrewarmJob.updated_at: now,
+                    TenantsFleetPrewarmJob.last_error: "processing_timeout_auto_heal",
+                },
+                synchronize_session=False,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        rows = (
+            db.query(TenantsFleetPrewarmJob)
+            .filter(TenantsFleetPrewarmJob.status == _TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING)
+            .order_by(TenantsFleetPrewarmJob.created_at.asc(), TenantsFleetPrewarmJob.id.asc())
+            .with_for_update(skip_locked=True)
+            .limit(_TENANTS_FLEET_PREWARM_DISPATCH_BATCH_MAX)
+            .all()
+        )
+        if not rows:
+            db.commit()
+            return []
+
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            row.status = _TENANTS_FLEET_PREWARM_JOB_STATUS_PROCESSING
+            row.locked_at = now
+            row.updated_at = now
+            row.attempt_count = max(int(row.attempt_count or 0), 0) + 1
+            items.append(
+                {
+                    "job_id": str(row.id),
+                    "company_ids": [str(company_id) for company_id in _normalize_fleet_incremental_prewarm_company_ids(row.company_ids)],
+                    "global_required": bool(row.global_required),
+                }
+            )
+        db.commit()
+        return items
+    except ProgrammingError as exc:
+        db.rollback()
+        if _is_tenants_fleet_prewarm_job_table_missing_error(exc):
+            return []
+        return []
+    except Exception:
+        db.rollback()
+        return []
+    finally:
+        db.close()
+
+
+def _mark_fleet_incremental_prewarm_dispatch_jobs_completed(job_ids: set[UUID]) -> None:
+    if not job_ids:
+        return
+    db = SessionLocal()
+    now = datetime.now(timezone.utc)
+    try:
+        db.query(TenantsFleetPrewarmJob).filter(TenantsFleetPrewarmJob.id.in_(list(job_ids))).update(
+            {
+                TenantsFleetPrewarmJob.status: _TENANTS_FLEET_PREWARM_JOB_STATUS_DONE,
+                TenantsFleetPrewarmJob.locked_at: None,
+                TenantsFleetPrewarmJob.completed_at: now,
+                TenantsFleetPrewarmJob.updated_at: now,
+                TenantsFleetPrewarmJob.last_error: None,
+            },
+            synchronize_session=False,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _mark_fleet_incremental_prewarm_dispatch_jobs_retry(job_ids: set[UUID], *, error_message: str) -> None:
+    if not job_ids:
+        return
+    db = SessionLocal()
+    now = datetime.now(timezone.utc)
+    truncated_error = (error_message or "").strip()[:500]
+    try:
+        db.query(TenantsFleetPrewarmJob).filter(TenantsFleetPrewarmJob.id.in_(list(job_ids))).update(
+            {
+                TenantsFleetPrewarmJob.status: _TENANTS_FLEET_PREWARM_JOB_STATUS_PENDING,
+                TenantsFleetPrewarmJob.locked_at: None,
+                TenantsFleetPrewarmJob.updated_at: now,
+                TenantsFleetPrewarmJob.last_error: truncated_error or "dispatch_retry",
+            },
+            synchronize_session=False,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _drain_fleet_incremental_prewarm_dispatch_queue_once() -> bool:
+    durable_batch = _claim_fleet_incremental_prewarm_dispatch_batch()
+    if durable_batch:
+        scoped_company_ids, global_prewarm_required = _coalesce_incremental_prewarm_dispatch_batch(durable_batch)
+        job_ids: set[UUID] = set()
+        for raw_item in durable_batch:
+            raw_job_id = raw_item.get("job_id")
+            if not isinstance(raw_job_id, str):
+                continue
+            try:
+                job_ids.add(UUID(raw_job_id))
+            except (TypeError, ValueError):
+                continue
+        try:
+            if scoped_company_ids:
+                _schedule_fleet_summary_prewarm_for_company_ids(company_ids=scoped_company_ids)
+                _schedule_fleet_attention_prewarm_for_company_ids(company_ids=scoped_company_ids)
+            if global_prewarm_required:
+                _schedule_fleet_global_prewarm()
+            _mark_fleet_incremental_prewarm_dispatch_jobs_completed(job_ids)
+        except Exception as exc:
+            _mark_fleet_incremental_prewarm_dispatch_jobs_retry(
+                job_ids,
+                error_message=str(exc),
+            )
+        return True
+
+    return _drain_fleet_incremental_prewarm_dispatch_queue_inmemory_once()
 
 
 def _fleet_incremental_prewarm_dispatch_worker() -> None:
@@ -3071,30 +3332,16 @@ def _enqueue_fleet_incremental_prewarm_dispatch(
     if not company_ids and not global_prewarm_required:
         return
 
-    normalized_company_ids = [str(company_id) for company_id in sorted(company_ids, key=str)]
-    payload = {
-        "company_ids": normalized_company_ids,
-        "global_required": global_prewarm_required,
-    }
-
-    should_start_worker = False
-    with _TENANTS_FLEET_PREWARM_DISPATCH_LOCK:
-        if len(_TENANTS_FLEET_PREWARM_DISPATCH_QUEUE) >= _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE_MAX:
-            _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.clear()
-            _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.append(
-                {
-                    "company_ids": normalized_company_ids,
-                    "global_required": True,
-                    "reason": "dispatch_queue_overflow",
-                }
-            )
-        else:
-            _TENANTS_FLEET_PREWARM_DISPATCH_QUEUE.append(payload)
-        worker = _TENANTS_FLEET_PREWARM_DISPATCH_WORKER
-        should_start_worker = worker is None or not worker.is_alive()
-
-    if should_start_worker:
-        _ensure_fleet_incremental_prewarm_dispatch_worker()
+    persisted = _enqueue_fleet_incremental_prewarm_dispatch_durable(
+        company_ids=company_ids,
+        global_prewarm_required=global_prewarm_required,
+    )
+    if not persisted:
+        _enqueue_fleet_incremental_prewarm_dispatch_inmemory(
+            company_ids=company_ids,
+            global_prewarm_required=global_prewarm_required,
+        )
+    _ensure_fleet_incremental_prewarm_dispatch_worker()
 
 
 def _load_global_active_client_ids(

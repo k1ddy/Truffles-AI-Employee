@@ -644,3 +644,66 @@
 - Wave 3 decomposition progressed with no operator-flow regression.
 - Wave 4 moved from direct post-commit scheduling to batched dispatch strategy, reducing burst scheduling churn.
 - Remaining backlog is now narrower: persistent/durable queue semantics (cross-process durability) plus repeatable long-run perf regimen for very large fleets.
+
+## Wave 3/4 continuation: durable prewarm queue + operational model hook + long-run lane (2026-02-24, UTC)
+1. Implemented durable incremental prewarm queue.
+- Added model:
+  - `truffles-api/app/models/tenants_fleet_prewarm_job.py`
+- Added migration:
+  - `truffles-api/migrations/041_add_tenants_fleet_prewarm_jobs.sql`
+- Dispatch flow now persists jobs in DB (`pending -> processing -> done`) instead of relying only on in-memory queue.
+- Added stuck-processing auto-heal:
+  - rows in `processing` older than `TENANTS_FLEET_PREWARM_DISPATCH_STUCK_SECONDS` are returned to `pending` with reason marker.
+- Added retry/completion markers from dispatcher:
+  - `_mark_fleet_incremental_prewarm_dispatch_jobs_retry`
+  - `_mark_fleet_incremental_prewarm_dispatch_jobs_completed`
+
+2. Extended backend contracts for durable dispatch.
+- Added tests in `truffles-api/tests/test_console_tenants_list.py` for:
+  - durable enqueue persistence
+  - durable claim transition to `processing`
+  - retry marker path on scheduler exception
+- Existing in-memory fallback tests remain and are now explicitly forced through fallback stubs.
+
+3. Continued decomposition of `tenants/page.tsx`.
+- Added `console-web/src/app/tenants/use-tenants-operational-model.ts`.
+- Moved out of page:
+  - operational KPI computation
+  - drilldown/status model map
+  - alert payload model
+  - report payload model
+- Structural effect:
+  - `tenants/page.tsx` reduced from `1268` to `1167` LOC.
+
+4. Added reproducible long-run perf lane.
+- Added script:
+  - `ops/console_tenants_perf_long_run.py`
+- Lane contract:
+  - authenticated load for `portfolio/company-cockpit/branches`
+  - request-level success accounting
+  - integrated snapshot gate via `ops/console_tenants_perf_snapshot.py`
+  - sample-size + SLO fail-on-breach support
+
+5. Validation.
+- `corepack pnpm -C console-web run lint` (pass)
+- `corepack pnpm -C console-web run build` (pass)
+- `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py ops/console_tenants_perf_snapshot.py ops/console_tenants_perf_long_run.py` (pass)
+- `python3 -m py_compile ops/console_tenants_perf_snapshot.py ops/console_tenants_perf_long_run.py` (pass)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`93 passed`)
+- `python3 truffles-api/scripts/generate_openapi.py --check` (pass)
+
+6. Runtime evidence (long-run reproducible lane).
+- Command:
+  - `python3 ops/console_tenants_perf_long_run.py --base-url https://api.truffles.kz --metrics-url https://api.truffles.kz/metrics --company-id 6a510116-a633-4ce0-91e2-972e51221b49 --loops 60 --portfolio-min-samples 40 --company-cockpit-min-samples 40 --branches-min-samples 80 --fail-on-breach --pretty --output docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-long-run-20260224.json --snapshot-output docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-long-run-snapshot-20260224.json`
+- Artifacts:
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-long-run-20260224.json`
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-long-run-snapshot-20260224.json`
+- Result:
+  - request failures: `0`
+  - snapshot status: `pass`
+  - samples: `portfolio=112`, `company_cockpit=111`, `branches=144`
+  - p95: `portfolio=500ms`, `company_cockpit=250ms`, `branches=100ms`
+
+7. Interpretation.
+- Wave 4 backlog item "durable queue semantics + long-run reproducible lane" is now closed by implemented runtime contracts and evidence.
+- Remaining Wave 4 scope is narrowed to very-large-fleet evolution (`fully materialized precompute/backpressure policy`) rather than functional correctness/perf gate gaps.
