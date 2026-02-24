@@ -35,6 +35,8 @@ from app.services.pack_runtime_service import (
     build_info_combined_reply,
     format_reply_from_truth,
     get_pack_adapter,
+    get_signal_lexicon_list,
+    get_system_lexicon_list,
     load_yaml_truth,
 )
 
@@ -55,15 +57,6 @@ _DATE_TOKEN_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bсуббот\w*", re.IGNORECASE), "в субботу"),
     (re.compile(r"\bвоскрес\w*", re.IGNORECASE), "в воскресенье"),
     (re.compile(r"\bвыходн\w*", re.IGNORECASE), "в субботу"),
-)
-_BOOKING_VERIFICATION_RE = re.compile(
-    r"\b(проверь|провер|подтверд|подтвержд|check|confirm|verify)\w*",
-    re.IGNORECASE,
-)
-_SERVICES_OVERVIEW_RE = re.compile(
-    r"\b(какие|что|какой|какова)\b.{0,40}\b(услуг[аи]?|процедур[аы]?|сервис[аы]?)\b"
-    r"|\b(перечень|список|каталог|ассортимент)\b.{0,30}\b(услуг[аи]?|процедур[аы]?|сервис[аы]?)\b",
-    re.IGNORECASE,
 )
 
 CALENDAR_TOOL_ACTIONS = {
@@ -396,18 +389,27 @@ def _normalize_slot_request_tokens(
 def _looks_like_booking_verification_message(text: str | None) -> bool:
     if not text:
         return False
-    return bool(_BOOKING_VERIFICATION_RE.search(text))
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    keywords = get_system_lexicon_list("booking_verification_keywords")
+    return bool(keywords and any(keyword in normalized for keyword in keywords))
 
 
 def _extract_daypart_token(text: str | None) -> str | None:
     if not isinstance(text, str) or not text.strip():
         return None
-    normalized = text.casefold()
-    if any(token in normalized for token in ("вечер", "вечером", "на вечер", "к вечеру")):
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    evening_keywords = get_system_lexicon_list("daypart_evening_keywords")
+    morning_keywords = get_system_lexicon_list("daypart_morning_keywords")
+    day_keywords = get_system_lexicon_list("daypart_day_keywords")
+    if evening_keywords and any(token in normalized for token in evening_keywords):
         return "evening"
-    if any(token in normalized for token in ("утро", "утром", "на утро")):
+    if morning_keywords and any(token in normalized for token in morning_keywords):
         return "morning"
-    if any(token in normalized for token in ("день", "днем", "днём", "на день", "днев")):
+    if day_keywords and any(token in normalized for token in day_keywords):
         return "day"
     return None
 
@@ -432,21 +434,20 @@ def _time_token_in_daypart(token: str, daypart: str) -> bool:
     return False
 
 
-def _looks_like_services_overview_message(text: str | None) -> bool:
+def _looks_like_services_overview_message(
+    text: str | None,
+    *,
+    client_slug: str | None = None,
+) -> bool:
     if not isinstance(text, str) or not text.strip():
         return False
-    normalized = text.casefold()
-    if _SERVICES_OVERVIEW_RE.search(normalized):
-        return True
-    return any(
-        marker in normalized
-        for marker in (
-            "что вы предлагаете",
-            "что у вас есть",
-            "какие процедуры",
-            "какие есть услуги",
-        )
-    )
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    markers = get_signal_lexicon_list(client_slug, "services_overview_phrases")
+    if not markers:
+        markers = get_system_lexicon_list("services_overview_phrases")
+    return bool(markers and any(marker in normalized for marker in markers))
 
 
 def _format_services_overview_reply(
@@ -1562,10 +1563,6 @@ def execute_tool_action(
         )
         if error:
             followup_prompt = _expected_reply_prompt_from_hint(expected_reply_type)
-            if _looks_like_booking_verification_message(message_text):
-                # For check/confirm requests avoid generic booking-slot followups like
-                # "На какую услугу..." that look like semantic reroute.
-                followup_prompt = None
             response_parts: list[str] = []
             if requested_reference:
                 response_parts.append(
@@ -1604,7 +1601,7 @@ def execute_tool_action(
             )
         appointment_time = _appointment_time_token(appointment)
         if requested_time and appointment_time and requested_time != appointment_time:
-            verification_request = _looks_like_booking_verification_message(message_text)
+            verification_request = True
             mismatch_prefix = (
                 f"Проверил запись {requested_reference}: подтверждённой записи на это время не вижу."
                 if requested_reference
@@ -1615,18 +1612,15 @@ def execute_tool_action(
                 if isinstance(appointment_time, str) and appointment_time.strip()
                 else ""
             )
-            if verification_request:
-                followup = "Могу подтвердить найденную запись или проверить другой слот."
-                followup_prompt = _expected_reply_prompt_from_hint(expected_reply_type)
-                if followup_prompt:
-                    followup = f"{followup} {followup_prompt}"
-                else:
-                    followup = (
-                        f"{followup} Подскажите имя или номер телефона, "
-                        "и проверю еще раз."
-                    )
+            followup = "Могу подтвердить найденную запись или проверить другой слот."
+            followup_prompt = _expected_reply_prompt_from_hint(expected_reply_type)
+            if followup_prompt:
+                followup = f"{followup} {followup_prompt}"
             else:
-                followup = "Хотите проверить другую дату/время или оформить новую запись?"
+                followup = (
+                    f"{followup} Подскажите имя или номер телефона, "
+                    "и проверю еще раз."
+                )
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
@@ -1760,16 +1754,21 @@ def execute_tool_action(
                 conversation_id=conversation_id,
             )
         except AppointmentConflictError:
-            requested_time = _extract_time_token(message_text)
+            requested_time_from_message = _extract_time_token(message_text)
+            requested_time_from_start = (
+                start_at.strftime("%H:%M") if isinstance(start_at, datetime) else None
+            )
+            requested_time = requested_time_from_message
+            if (
+                requested_time_from_start
+                and requested_time_from_message
+                and requested_time_from_start != requested_time_from_message
+            ):
+                requested_time = requested_time_from_start
             conflict_text = "Этот слот уже занят. Могу предложить другое время."
-            if _looks_like_booking_verification_message(message_text):
-                conflict_text = (
-                    "Подтвердить запись на это время не удалось: слот уже занят. "
-                    "Могу предложить другое время."
-                )
-            else:
-                alternative_reply = None
-                if isinstance(start_at, datetime):
+            alternative_reply = None
+            if isinstance(start_at, datetime):
+                try:
                     alternative_reply, _ = _list_slots(
                         db,
                         branch=branch,
@@ -1779,12 +1778,14 @@ def execute_tool_action(
                         requested_time=requested_time,
                         now=now,
                     )
-                if isinstance(alternative_reply, str) and alternative_reply.strip():
-                    conflict_text = alternative_reply
-                elif requested_time:
-                    conflict_text = (
-                        f"На {requested_time} слот уже занят. Могу предложить другое время."
-                    )
+                except Exception:
+                    alternative_reply = None
+            if isinstance(alternative_reply, str) and alternative_reply.strip():
+                conflict_text = alternative_reply
+            elif requested_time:
+                conflict_text = (
+                    f"На {requested_time} слот уже занят. Могу предложить другое время."
+                )
             return ToolExecutionResult(
                 handled=True,
                 ok=False,
@@ -2075,7 +2076,10 @@ def execute_tool_action(
             info_sections: list[str] = []
             tool_decision = "missing_slot"
             expected_reply_type = legacy.EXPECTED_REPLY_SERVICE
-            if _looks_like_services_overview_message(message_text):
+            if _looks_like_services_overview_message(
+                message_text,
+                client_slug=client_slug,
+            ):
                 overview_reply = _format_services_overview_reply(
                     db,
                     branch=branch,

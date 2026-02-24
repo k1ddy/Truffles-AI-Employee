@@ -364,8 +364,6 @@ def test_tool_registry_get_booking_time_mismatch_keeps_verification_semantics():
     assert result.error_code == "booking_time_mismatch"
     assert result.expected_reply_type == "name"
     assert result.decision_meta.get("verification_request") is True
-    response_text = (result.response_text or "").casefold()
-    assert "проверил запись" in response_text
-    assert "18:30" in response_text
-    assert "10:00" in response_text
-    assert "подтверд" in response_text
+    assert result.decision_meta.get("requested_time") == "18:30"
+    assert result.decision_meta.get("appointment_time") == "10:00"
+    assert result.trace.get("decision") == "time_mismatch"

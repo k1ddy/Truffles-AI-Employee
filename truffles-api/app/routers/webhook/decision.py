@@ -3618,9 +3618,11 @@ def _is_booking_request(text: str, *, client_slug: str | None) -> bool:
     normalized = normalize_for_matching(text)
     if not normalized:
         return False
-    if "запис" in normalized:
+    booking_keywords = get_system_lexicon_list("booking_keywords")
+    if booking_keywords and _contains_any(normalized, booking_keywords):
         return True
-    need_or_desire_signal = any(marker in normalized for marker in ("хочу", "нужн", "надо"))
+    desire_keywords = get_system_lexicon_list("booking_desire_keywords")
+    need_or_desire_signal = bool(desire_keywords and _contains_any(normalized, desire_keywords))
     if not need_or_desire_signal or not client_slug:
         return False
     cleaned_text = re.sub(r"\[[^\]]+\]", " ", text)
@@ -3755,10 +3757,8 @@ def _looks_like_time_only_request(message_text: str | None) -> bool:
     normalized = normalize_for_matching(message_text)
     if not normalized:
         return False
-    if any(
-        phrase in normalized
-        for phrase in ("во сколько", "в какое время", "какое время", "которое время")
-    ):
+    time_only_phrases = get_system_lexicon_list("time_only_request_phrases")
+    if time_only_phrases and _contains_any(normalized, time_only_phrases):
         return True
     tokens = _tokenize_for_matching(normalized)
     if not tokens:
@@ -4893,6 +4893,90 @@ def _is_policy_core_rescue_critical_turn(
         and not consult_intent
     )
     return bool(expected_reply_active or pending_flow or booking_flow)
+
+
+def _should_use_expected_reply_collect_fast_path(
+    *,
+    message_text: str | None,
+    expected_reply_type: str | None,
+    expected_reply_matched: bool | None,
+    expected_reply_blocked_by_info: bool,
+    intent_decomp_set: set[str],
+    info_class_intents: set[str] | list[str] | tuple[str, ...] | None,
+    booking_wants_flow: bool,
+    booking_slot_signal: bool,
+    consult_intent: bool,
+    refusal_flags: dict[str, bool] | None,
+    client_slug: str | None,
+) -> bool:
+    if expected_reply_type not in {EXPECTED_REPLY_SERVICE, EXPECTED_REPLY_TIME, EXPECTED_REPLY_NAME}:
+        return False
+    if expected_reply_matched is not False or expected_reply_blocked_by_info:
+        return False
+    normalized_text = message_text.strip() if isinstance(message_text, str) else ""
+    if not normalized_text:
+        return False
+    if not booking_wants_flow or booking_slot_signal or consult_intent:
+        return False
+    if info_class_intents:
+        return False
+    if intent_decomp_set != {"other"}:
+        return False
+    if _looks_like_info_query(normalized_text, client_slug=client_slug):
+        return False
+    if expected_reply_type == EXPECTED_REPLY_TIME and isinstance(client_slug, str) and client_slug.strip():
+        normalized_service = _normalize_service_text(normalized_text)
+        if normalized_service and (
+            _match_service(normalized_service, client_slug)
+            or _matches_service_request_lexicon(normalized_service, client_slug)
+        ):
+            return False
+    if is_human_request_message(normalized_text) or is_frustration_message(normalized_text):
+        return False
+    if isinstance(refusal_flags, dict) and any(bool(value) for value in refusal_flags.values()):
+        return False
+    return True
+
+
+def _build_expected_reply_collect_fast_policy_result(
+    *,
+    expected_reply_type: str | None,
+    booking_state: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    collect_slot = _expected_reply_slot_key(expected_reply_type)
+    if collect_slot not in {"service", "datetime", "name"}:
+        return None
+    slot_state: dict[str, str] = {}
+    if isinstance(booking_state, dict):
+        for slot_key in BOOKING_SLOT_ORDER:
+            value = booking_state.get(slot_key)
+            if isinstance(value, str) and value.strip():
+                slot_state[slot_key] = value.strip()
+    payload = {
+        "intent": "booking",
+        "action": "collect",
+        "tool_action": "collect",
+        "tool_args": {},
+        "pack_refs": [],
+        "confidence": 1.0,
+        "reason": "expected_reply_pending_collect_fast_path",
+        "goal": "booking",
+        "slots": slot_state,
+        "next_question": collect_slot,
+        "open_questions": [collect_slot],
+        "needs_manager": False,
+        "risk_signals": [],
+    }
+    return {
+        "ok": True,
+        "payload": payload,
+        "error": None,
+        "raw": None,
+        "attempted": False,
+        "elapsed_ms": 0.0,
+        "compact_input_used": False,
+        "compact_retry_used": False,
+    }
 
 
 def _should_attempt_policy_core_llm_rescue(
@@ -8844,40 +8928,51 @@ async def _handle_webhook_payload(
                     if isinstance(item, dict) and isinstance(item.get("key"), str) and item.get("key").strip()
                 ]
         info_refs = sorted(INFO_INTENTS)
-        consult_refs, consult_refs_error = _collect_plan_consult_refs(payload.client_slug)
-        policy_result = route_llm_policy_core(
-            message_text,
+        consult_refs: list[str] = []
+        consult_refs_error = None
+        policy_result = None
+
+        if _should_use_expected_reply_collect_fast_path(
+            message_text=message_text,
             expected_reply_type=expected_reply_type,
-            current_goal=current_goal,
-            slot_state=policy_slot_state,
-            info_refs=info_refs,
-            consult_refs=consult_refs,
-            memory_summary=policy_memory_summary,
-            memory_profile=policy_memory_profile,
-            client_slug=payload.client_slug,
-            client_config=client.config if client else None,
-            timing_context=timing_context,
-        )
-        if _should_attempt_policy_core_llm_rescue(
-            policy_result=policy_result if isinstance(policy_result, dict) else None,
-            conversation_state=conversation.state,
-            expected_reply_type=expected_reply_type,
+            expected_reply_matched=expected_reply_matched,
             expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+            intent_decomp_set=intent_decomp_set,
             info_class_intents=info_class_intents,
             booking_wants_flow=booking_wants_flow,
-            message_text=message_text,
-            intent_decomp_set=intent_decomp_set,
+            booking_slot_signal=booking_slot_signal,
             consult_intent=consult_intent,
+            refusal_flags=refusal_flags,
             client_slug=payload.client_slug,
         ):
-            policy_rescue_attempted = True
-            if isinstance(policy_result, dict):
-                policy_rescue_trigger_error = policy_result.get("error")
-            rescue_timing_context = _build_policy_core_rescue_timing_context(
-                base_timing_context=timing_context,
-                timeout_seconds=POLICY_CORE_RESCUE_TIMEOUT_SECONDS,
+            policy_result = _build_expected_reply_collect_fast_policy_result(
+                expected_reply_type=expected_reply_type,
+                booking_state=booking if isinstance(booking, dict) else None,
             )
-            rescue_result = route_llm_policy_core(
+            if isinstance(policy_result, dict):
+                fast_payload = policy_result.get("payload")
+                fast_slot = fast_payload.get("next_question") if isinstance(fast_payload, dict) else None
+                _record_decision_trace(
+                    conversation,
+                    {
+                        "stage": "llm_policy_core_fast_path",
+                        "decision": "expected_reply_collect",
+                        "expected_reply_type": expected_reply_type,
+                        "missing_slot": fast_slot,
+                    },
+                )
+                if saved_message:
+                    _update_message_decision_metadata(
+                        saved_message,
+                        {
+                            "llm_policy_core_fast_path": "expected_reply_collect",
+                            "llm_policy_core_fast_path_slot": fast_slot,
+                        },
+                    )
+
+        if not isinstance(policy_result, dict):
+            consult_refs, consult_refs_error = _collect_plan_consult_refs(payload.client_slug)
+            policy_result = route_llm_policy_core(
                 message_text,
                 expected_reply_type=expected_reply_type,
                 current_goal=current_goal,
@@ -8888,16 +8983,48 @@ async def _handle_webhook_payload(
                 memory_profile=policy_memory_profile,
                 client_slug=payload.client_slug,
                 client_config=client.config if client else None,
-                timing_context=rescue_timing_context,
+                timing_context=timing_context,
             )
-            if isinstance(rescue_result, dict):
-                policy_rescue_error = rescue_result.get("error")
-                rescue_elapsed = rescue_result.get("elapsed_ms")
-                if isinstance(rescue_elapsed, (int, float)):
-                    policy_rescue_elapsed_ms = float(rescue_elapsed)
-                if rescue_result.get("ok"):
-                    policy_rescue_applied = True
-                    policy_result = rescue_result
+            if _should_attempt_policy_core_llm_rescue(
+                policy_result=policy_result if isinstance(policy_result, dict) else None,
+                conversation_state=conversation.state,
+                expected_reply_type=expected_reply_type,
+                expected_reply_blocked_by_info=expected_reply_blocked_by_info,
+                info_class_intents=info_class_intents,
+                booking_wants_flow=booking_wants_flow,
+                message_text=message_text,
+                intent_decomp_set=intent_decomp_set,
+                consult_intent=consult_intent,
+                client_slug=payload.client_slug,
+            ):
+                policy_rescue_attempted = True
+                if isinstance(policy_result, dict):
+                    policy_rescue_trigger_error = policy_result.get("error")
+                rescue_timing_context = _build_policy_core_rescue_timing_context(
+                    base_timing_context=timing_context,
+                    timeout_seconds=POLICY_CORE_RESCUE_TIMEOUT_SECONDS,
+                )
+                rescue_result = route_llm_policy_core(
+                    message_text,
+                    expected_reply_type=expected_reply_type,
+                    current_goal=current_goal,
+                    slot_state=policy_slot_state,
+                    info_refs=info_refs,
+                    consult_refs=consult_refs,
+                    memory_summary=policy_memory_summary,
+                    memory_profile=policy_memory_profile,
+                    client_slug=payload.client_slug,
+                    client_config=client.config if client else None,
+                    timing_context=rescue_timing_context,
+                )
+                if isinstance(rescue_result, dict):
+                    policy_rescue_error = rescue_result.get("error")
+                    rescue_elapsed = rescue_result.get("elapsed_ms")
+                    if isinstance(rescue_elapsed, (int, float)):
+                        policy_rescue_elapsed_ms = float(rescue_elapsed)
+                    if rescue_result.get("ok"):
+                        policy_rescue_applied = True
+                        policy_result = rescue_result
 
         policy_payload = policy_result.get("payload") if isinstance(policy_result, dict) else None
 

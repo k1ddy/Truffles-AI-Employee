@@ -51,6 +51,10 @@
   - Verified finalization fix with real interrupted runs (`booking-human-nojudge-hq1-r6-a1`, `booking-human-nojudge-hq1-r7-a1`, `booking-human-nojudge-hq1-r8-a1`): all produced `summary.json`/`brief.md` with `stop_reason=signal_2`.
   - Completed bounded no-judge replay on latest runtime without manual stop (`booking-human-nojudge-hq1-r11-a1`): `summary.json` generated with `infra_valid=true`, `semantic_valid=true`, `blocking_reason_count=0`, `stop_reason=null`.
   - Captured before/after blocking set evidence: historical v7 `failure_counts={expected_reply_type_mismatch:7, judge_fail:4, expected_action_mismatch:1}` vs latest bounded replay `failure_counts={}` (`r11`, count=1).
+  - Implemented contract-first remediation steps `1..5` in current firebreak wave: moved core phrase markers into `SYSTEM_LEXICONS.yaml`, rewired booking/info/tool routing to lexicon-driven checks, and removed direct phrase-coupled branching from critical core paths.
+  - Added static CLI gate `llm-quality-gates` to `ops/diagnose.py` and wired it into CI `core-eval` as a hard block for lexicon/hardcode deltas before core tests.
+  - Migrated targeted regressions from response-substring primary checks to contract assertions (`decision_meta`, `decision_trace`, `tool_decision`, `expected_reply_type`) in booking/calendar/message endpoint suites.
+  - Opened PR `#811` with full remediation diff and deterministic validation evidence.
 - next:
   - Fix mixed `master + hours/location` arbitration so `master` remains dominant without explicit location/hours anchors.
   - Fix non-actionable fallback in `catalog.service_query` assortment turns.
@@ -149,4 +153,13 @@
   - /tmp/booking_quality/booking-replay-20260220-postfix-a1-v7/summary.json
   - docs/evidence/2026-02-21-hq1-bad-turn-catalog.tsv
   - docs/REPORTS/2026-02-21-firebreak-human-quality-wave-hq1.md
-- last_updated: 2026-02-21T10:14:05+05:00
+  - python3 -m py_compile ops/diagnose.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/info.py truffles-api/app/services/tool_registry_service.py
+  - ruff check truffles-api/app/routers/webhook/booking.py truffles-api/app/routers/webhook/decision.py truffles-api/app/routers/webhook/info.py truffles-api/app/services/tool_registry_service.py truffles-api/tests/test_booking_appointments.py truffles-api/tests/test_calendar_slot_response_contract.py truffles-api/tests/test_message_endpoint.py
+  - ruff check ops/diagnose.py
+  - python3 ops/diagnose.py llm-quality-gates --delta-gate-base-ref origin/main --hardcode-core-base-ref origin/main --run-economy-gate off
+  - pytest -q truffles-api/tests/test_booking_quality_status_gate.py
+  - pytest -q truffles-api/tests/test_calendar_slot_response_contract.py truffles-api/tests/test_booking_appointments.py
+  - pytest -q truffles-api/tests/test_message_endpoint.py
+  - timeout 240 pytest -q truffles-api/tests/test_demo_salon_eval.py
+  - PR: https://github.com/k1ddy/Truffles-AI-Employee/pull/811
+- last_updated: 2026-02-24T07:32:16+05:00
