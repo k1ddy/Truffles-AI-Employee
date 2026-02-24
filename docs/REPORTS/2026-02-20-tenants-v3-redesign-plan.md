@@ -420,3 +420,20 @@
 4. Interpretation.
 - `orchestration-only` target is an architectural constraint (isolate data/actions from view composition), not a reduction of control surface.
 - Functional operator control remains intact (`create/edit/archive/restore/publish/rollback/context`), while decomposition advances incrementally.
+
+## Wave 3 decomposition continuation: intent/KPI handlers (2026-02-24, UTC)
+1. Implemented extraction from `tenants/page.tsx`.
+- `runActionQueueIntent`, `runKpiAction`, and client target navigation moved into `console-web/src/app/tenants/use-tenants-actions.ts`.
+- Page now consumes these handlers from hook output and keeps the same panel wiring (`ActionQueue`, `OperationalKpi`, `FleetAttention`).
+
+2. Structural effect.
+- `tenants/page.tsx` reduced from `2487` to `2422` LOC.
+- Query/context/intent orchestration is now centralized in hooks; remaining large action pipelines (quick-create/CRUD/lifecycle/branch-change) stay in page backlog.
+
+3. Validation.
+- `corepack pnpm -C console-web run lint` (pass)
+- `corepack pnpm -C console-web run build` (pass)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`)
+
+4. Interpretation.
+- Decomposition is progressing without contract loss; operator control remains unchanged while architectural blast radius is reduced step-by-step.

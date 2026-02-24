@@ -39,7 +39,6 @@ import {
     buildOperationalKpiDrilldown,
     formatOptionalHours,
     formatOptionalPercent,
-    type OperationalKpiAction,
     type OperationalKpiDrilldown,
     type OperationalKpiId,
     type OperationalKpiStatus,
@@ -1238,6 +1237,9 @@ export default function TenantsPage() {
         setClientContextAndPageFilters,
         setBranchContextAndPageFilters,
         applyContextToPageFilters,
+        openClientContextTarget,
+        runActionQueueIntent,
+        runKpiAction,
     } = useTenantsActions({
         clientCompanyIdById,
         branchClientIdById,
@@ -1247,6 +1249,9 @@ export default function TenantsPage() {
         applyScopeToPageFilters,
         refreshContext,
         reportValidationError,
+        setWorkspaceMode,
+        setTenantLifecycle,
+        navigateTo: (target) => router.push(target),
     });
 
     const handleQuickCreateCompany = async () => {
@@ -1381,76 +1386,6 @@ export default function TenantsPage() {
         } finally {
             setQuickCreateRunning(null);
         }
-    };
-
-    const openClientContextTarget = (target: "/" | "/integrations" | "/ops", clientId?: string | null, companyId?: string | null) => {
-        if (!clientId) {
-            return;
-        }
-        setClientContextAndPageFilters(clientId, companyId);
-        router.push(target);
-    };
-
-    const runActionQueueIntent = (item: ActionQueueItem) => {
-        if (item.intent === "set_context") {
-            setClientContextAndPageFilters(item.clientId, item.companyId);
-            return;
-        }
-        if (item.intent === "open_cases") {
-            openClientContextTarget("/", item.clientId, item.companyId);
-            return;
-        }
-        if (item.intent === "open_integrations") {
-            openClientContextTarget("/integrations", item.clientId, item.companyId);
-            return;
-        }
-        if (item.intent === "workspace_portfolio") {
-            setWorkspaceMode("portfolio");
-            return;
-        }
-        if (item.intent === "workspace_onboarding") {
-            setWorkspaceMode("onboarding");
-            return;
-        }
-        if (item.intent === "workspace_changes") {
-            setWorkspaceMode("changes");
-            return;
-        }
-        if (item.intent === "workspace_decommission") {
-            setWorkspaceMode("decommission");
-        }
-    };
-
-    const runKpiAction = (action: OperationalKpiAction) => {
-        if (action === "onboarding") {
-            setWorkspaceMode("onboarding");
-            setTenantLifecycle("active");
-            setTimeout(() => {
-                document.querySelector('[data-testid="tenants-onboarding-section"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }, 120);
-            return;
-        }
-        if (action === "changes") {
-            setWorkspaceMode("changes");
-            setTenantLifecycle("active");
-            setTimeout(() => {
-                document.querySelector('[data-testid="tenants-change-management"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }, 120);
-            return;
-        }
-        if (action === "decommission") {
-            setWorkspaceMode("decommission");
-            setTenantLifecycle("all");
-            setTimeout(() => {
-                document.querySelector('[data-testid="tenants-decommission-center"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }, 120);
-            return;
-        }
-        setWorkspaceMode("portfolio");
-        setTenantLifecycle("active");
-        setTimeout(() => {
-            document.querySelector('[data-testid="tenants-fleet-attention"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }, 120);
     };
 
     const exportOperationalReport = (format: "json" | "csv") => {

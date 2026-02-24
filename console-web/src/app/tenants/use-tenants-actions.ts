@@ -5,12 +5,31 @@ import {
     readConsoleContextScopeFromStorage,
     setConsoleContextScope,
 } from "@/lib/console-context-storage";
+import type { OperationalKpiAction } from "./operational-kpi";
 
 type ScopeValue = {
     companyId?: string | null;
     clientId?: string | null;
     branchId?: string | null;
 };
+
+type TenantsWorkspaceMode = "portfolio" | "onboarding" | "changes" | "decommission";
+type TenantLifecycleMode = "active" | "archived" | "all";
+type ActionQueueIntent =
+    | "set_context"
+    | "open_cases"
+    | "open_integrations"
+    | "workspace_portfolio"
+    | "workspace_onboarding"
+    | "workspace_changes"
+    | "workspace_decommission"
+    | "none";
+type ActionQueueItemForIntent = {
+    intent: ActionQueueIntent;
+    clientId?: string | null;
+    companyId?: string | null;
+};
+type ClientTargetPath = "/" | "/integrations" | "/ops";
 
 type UseTenantsActionsParams = {
     clientCompanyIdById: Map<string, string>;
@@ -21,6 +40,9 @@ type UseTenantsActionsParams = {
     applyScopeToPageFilters: (scope: ScopeValue) => void;
     refreshContext: () => void;
     reportValidationError: (message: string, code?: string, scope?: string) => void;
+    setWorkspaceMode: (mode: TenantsWorkspaceMode) => void;
+    setTenantLifecycle: (mode: TenantLifecycleMode) => void;
+    navigateTo: (target: ClientTargetPath) => void;
 };
 
 function normalizeOptionalId(value: string | null | undefined): string | null {
@@ -37,6 +59,9 @@ export function useTenantsActions({
     applyScopeToPageFilters,
     refreshContext,
     reportValidationError,
+    setWorkspaceMode,
+    setTenantLifecycle,
+    navigateTo,
 }: UseTenantsActionsParams) {
     const completeContextScope = useCallback((scope: ScopeValue) => {
         const normalizedBranchId = normalizeOptionalId(scope.branchId);
@@ -181,6 +206,76 @@ export function useTenantsActions({
         }
     }, [applyScopeToPageFilters, refreshContext, validateScopeForBranchActions]);
 
+    const openClientContextTarget = useCallback((target: ClientTargetPath, clientId?: string | null, companyId?: string | null) => {
+        if (!clientId) {
+            return;
+        }
+        setClientContextAndPageFilters(clientId, companyId);
+        navigateTo(target);
+    }, [navigateTo, setClientContextAndPageFilters]);
+
+    const runActionQueueIntent = useCallback((item: ActionQueueItemForIntent) => {
+        if (item.intent === "set_context") {
+            setClientContextAndPageFilters(item.clientId, item.companyId);
+            return;
+        }
+        if (item.intent === "open_cases") {
+            openClientContextTarget("/", item.clientId, item.companyId);
+            return;
+        }
+        if (item.intent === "open_integrations") {
+            openClientContextTarget("/integrations", item.clientId, item.companyId);
+            return;
+        }
+        if (item.intent === "workspace_portfolio") {
+            setWorkspaceMode("portfolio");
+            return;
+        }
+        if (item.intent === "workspace_onboarding") {
+            setWorkspaceMode("onboarding");
+            return;
+        }
+        if (item.intent === "workspace_changes") {
+            setWorkspaceMode("changes");
+            return;
+        }
+        if (item.intent === "workspace_decommission") {
+            setWorkspaceMode("decommission");
+        }
+    }, [openClientContextTarget, setClientContextAndPageFilters, setWorkspaceMode]);
+
+    const runKpiAction = useCallback((action: OperationalKpiAction) => {
+        if (action === "onboarding") {
+            setWorkspaceMode("onboarding");
+            setTenantLifecycle("active");
+            setTimeout(() => {
+                document.querySelector('[data-testid="tenants-onboarding-section"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 120);
+            return;
+        }
+        if (action === "changes") {
+            setWorkspaceMode("changes");
+            setTenantLifecycle("active");
+            setTimeout(() => {
+                document.querySelector('[data-testid="tenants-change-management"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 120);
+            return;
+        }
+        if (action === "decommission") {
+            setWorkspaceMode("decommission");
+            setTenantLifecycle("all");
+            setTimeout(() => {
+                document.querySelector('[data-testid="tenants-decommission-center"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 120);
+            return;
+        }
+        setWorkspaceMode("portfolio");
+        setTenantLifecycle("active");
+        setTimeout(() => {
+            document.querySelector('[data-testid="tenants-fleet-attention"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 120);
+    }, [setTenantLifecycle, setWorkspaceMode]);
+
     return {
         setCompanyContext,
         setClientContext,
@@ -189,5 +284,8 @@ export function useTenantsActions({
         setClientContextAndPageFilters,
         setBranchContextAndPageFilters,
         applyContextToPageFilters,
+        openClientContextTarget,
+        runActionQueueIntent,
+        runKpiAction,
     };
 }
