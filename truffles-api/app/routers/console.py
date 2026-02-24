@@ -14769,38 +14769,54 @@ async def list_branches(
     company_uuid = _parse_uuid_param("company_id", company_id)
     client_uuid = _parse_uuid_param("client_id", client_id)
     branch_uuid = _parse_uuid_param("branch_id", branch_id)
-    allowed_client_ids = _accessible_client_ids(context)
-    query = db.query(Branch).filter(Branch.client_id.in_(allowed_client_ids))
-    scoped_company_client_ids: set[UUID] | None = None
+    query = db.query(Branch)
+    client_join_applied = False
+
+    def _ensure_client_join() -> None:
+        nonlocal query, client_join_applied
+        if client_join_applied:
+            return
+        query = query.join(Client, Client.id == Branch.client_id)
+        client_join_applied = True
+
     if company_uuid:
         _require_company_access(context, company_uuid)
-        scoped_company_client_ids = {
-            client.id
-            for client in (context.accessible_clients or [])
-            if client.company_id == company_uuid
-        }
-        if context.client and context.client.company_id == company_uuid:
-            scoped_company_client_ids.add(context.client.id)
-        if not scoped_company_client_ids:
-            return ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
-        query = query.filter(Branch.client_id.in_(scoped_company_client_ids))
+        _ensure_client_join()
+        query = query.filter(Client.company_id == company_uuid)
     if lifecycle_mode == "active":
-        query = query.filter(Branch.is_active.is_(True))
+        _ensure_client_join()
+        query = query.filter(
+            Client.status == "active",
+            Branch.is_active.is_(True),
+        )
     elif lifecycle_mode == "archived":
         query = query.filter(Branch.is_active.is_(False))
     if client_uuid:
         _require_client_access(context, client_uuid)
-        if scoped_company_client_ids is not None and client_uuid not in scoped_company_client_ids:
-            raise ConsoleAPIError(400, "INVALID_PARAM", "client_id does not belong to company_id")
+        if company_uuid is not None:
+            resolved_company_id = _resolve_company_id_for_client_in_context(context, client_uuid)
+            if resolved_company_id is None:
+                resolved_company_id = (
+                    db.query(Client.company_id)
+                    .filter(Client.id == client_uuid)
+                    .scalar()
+                )
+            if resolved_company_id != company_uuid:
+                raise ConsoleAPIError(400, "INVALID_PARAM", "client_id does not belong to company_id")
         query = query.filter(Branch.client_id == client_uuid)
     if branch_uuid:
         _require_branch_access(context, branch_uuid, message="Branch belongs to another tenant")
-        branch_entity = db.query(Branch).filter(Branch.id == branch_uuid).first()
-        if branch_entity is None:
+        branch_scope = (
+            db.query(Branch.client_id.label("client_id"), Client.company_id.label("company_id"))
+            .join(Client, Client.id == Branch.client_id)
+            .filter(Branch.id == branch_uuid)
+            .first()
+        )
+        if branch_scope is None:
             return ConsoleBranchListResponse(items=[], cursor=None, has_more=False)
-        if client_uuid is not None and branch_entity.client_id != client_uuid:
+        if client_uuid is not None and branch_scope.client_id != client_uuid:
             raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to client_id")
-        if scoped_company_client_ids is not None and branch_entity.client_id not in scoped_company_client_ids:
+        if company_uuid is not None and branch_scope.company_id != company_uuid:
             raise ConsoleAPIError(400, "INVALID_PARAM", "branch_id does not belong to company_id")
         query = query.filter(Branch.id == branch_uuid)
 

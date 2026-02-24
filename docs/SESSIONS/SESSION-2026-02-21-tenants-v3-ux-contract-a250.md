@@ -119,10 +119,18 @@
     - `company_cockpit p95=250ms (p99=250ms)` pass
     - `branches p95=2500ms (p99=2500ms)` fail
   - Validation for this continuation: `pytest -q truffles-api/tests/test_console_tenants_list.py -k "company_cockpit or oversized_limits or large_scope_pagination"` (`6 passed`), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`83 passed`), `corepack pnpm -C console-web run lint`, `corepack pnpm -C console-web run build`.
+  - Closed Wave4 branch-path perf gap: `/admin/branches` query no longer starts with large `Branch.client_id IN (...)`; path now scopes through `Client` join filters (`company/status`) and keeps strict company/client/branch consistency guards.
+  - Added branch-list runtime perf indexes in `truffles-api/migrations/040_add_branches_listing_perf_indexes.sql` (`idx_branches_client_active_created_desc`, `idx_branches_active_created_desc`, `idx_clients_status_company_id`).
+  - Extended branch contract coverage in `truffles-api/tests/test_console_tenants_list.py` with `test_list_branches_company_scope_filters_on_clients_company_id` and updated query mock helpers for join/filter predicate assertions.
+  - Captured authenticated runtime perf baseline and post-load Prometheus snapshot artifacts:
+    - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-authenticated-perf-baseline-20260224-post-branches-load.json`
+    - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-authload-20260224-recheck.json`
+    - Result: `branches p95=100ms`, `portfolio p95=500ms`, `company_cockpit p95=500ms`, overall snapshot `status=pass`.
+  - Validation for branch-path continuation: `ruff check truffles-api/app/routers/console.py truffles-api/tests/test_console_tenants_list.py`, `pytest -q truffles-api/tests/test_console_tenants_list.py -k "list_branches or company_cockpit"` (`13 passed`), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`), `python3 truffles-api/scripts/generate_openapi.py --check`, `scripts/session_check.sh`.
 - next:
-  - Wave4 runtime perf: разобрать `branches` p95/p99 breach (`2500ms`) на production histogram и зафиксировать targeted optimization plan для branch-list path.
-  - Wave4 perf evidence: получить follow-up snapshot с подтверждением SLO после оптимизации (или формально зафиксировать блокер/waiver с root-cause).
-  - Продолжить декомпозицию `tenants/page.tsx`: вынести следующий orchestration block в hook/component без изменения UX-контракта.
+  - Wave4 remaining backlog: довести incremental precompute pipeline до устойчивой модели для large fleet (event stream -> targeted precompute strategy) и закрепить long-run perf evidence.
+  - Продолжить декомпозицию `tenants/page.tsx` через безопасное вынесение следующего orchestration блока без изменения UX-контракта.
+  - Зафиксировать post-merge CI/deploy evidence для текущего continuation после публикации ветки/PR.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
   - console-web/src/app/tenants/page.tsx
@@ -188,6 +196,9 @@
   - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22329292602
   - https://github.com/k1ddy/Truffles-AI-Employee/actions/runs/22329943275
   - https://github.com/k1ddy/Truffles-AI-Employee/pull/809
+  - truffles-api/migrations/040_add_branches_listing_perf_indexes.sql
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-authenticated-perf-baseline-20260224-post-branches-load.json
+  - docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-authload-20260224-recheck.json
   - console-web/e2e/global-setup.ts
   - console-web/src/app/tenants/page.tsx
   - console-web/src/lib/api-client.ts
@@ -195,4 +206,4 @@
   - truffles-api/tests/test_console_tenants_list.py
   - .github/workflows/ci.yml
   - STATE.md
-- last_updated: 2026-02-24T00:32:48Z
+- last_updated: 2026-02-24T01:42:02Z

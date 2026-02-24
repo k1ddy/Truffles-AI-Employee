@@ -369,3 +369,35 @@
 
 3. Interpretation.
 - Wave 1 contract alignment is complete, but Wave 4 runtime performance work remains open because `branches` p95/p99 exceeds target in latest snapshot and requires branch-list path optimization / targeted runtime profiling.
+
+## Branch-path optimization + SLO recovery recheck (2026-02-24, UTC)
+1. Root-cause facts confirmed before optimization.
+- `branches` histogram snapshot had low sample size (`samples=3`) with high upper bucket (`p95/p99=2500ms`), making branch SLO unstable in low-traffic window.
+- Code inspection of `/admin/branches` showed scalability risk for large fleets: base query relied on `Branch.client_id IN accessible_client_ids` set assembled from context.
+
+2. Optimization implemented in codebase.
+- `/admin/branches` query path now uses `Client` join filters (`status/company`) instead of large `client_id IN (...)` pre-filter for platform-admin scope.
+- Added branch-list perf indexes in migration:
+  - `truffles-api/migrations/040_add_branches_listing_perf_indexes.sql`
+  - `idx_branches_client_active_created_desc`
+  - `idx_branches_active_created_desc`
+  - `idx_clients_status_company_id`
+- Extended backend contract tests for branch path and large scope filtering in `truffles-api/tests/test_console_tenants_list.py`.
+
+3. Runtime recheck after authenticated load.
+- Authenticated request baseline artifact:
+  - `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-authenticated-perf-baseline-20260224-post-branches-load.json`
+  - `branches (company scope): p95=83ms, p99=98ms (40 calls, all 200)`
+  - `portfolio: p95=531ms, p99=556ms (20 calls, all 200)`
+  - `company_cockpit: p95=635ms (company), p95=366ms (company+client), all 200`
+- Prometheus snapshot after auth load:
+  - command: `python3 ops/console_tenants_perf_snapshot.py --metrics-url https://api.truffles.kz/metrics --pretty --output /tmp/tenants_perf_snapshot_20260224_after_authload_recheck.json`
+  - artifact: `docs/REPORTS/artifacts/2026-02-20-tenants-a11y/tenants-perf-snapshot-after-authload-20260224-recheck.json`
+  - `branches p95=100ms (samples=80)` pass
+  - `portfolio p95=500ms (samples=40)` pass
+  - `company_cockpit p95=500ms (samples=41)` pass
+  - overall `status=pass`.
+
+4. Interpretation.
+- Runtime SLO breach from the low-sample snapshot is no longer reproduced after controlled authenticated load.
+- Wave 4 remains `done/partial` because full incremental precompute pipeline and large-fleet reproducible perf regimen are still pending, but current branch-list path and runtime metrics are back within SLO thresholds.

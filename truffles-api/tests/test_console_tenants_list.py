@@ -127,11 +127,19 @@ def test_select_reference_active_branches_falls_back_to_all_active() -> None:
 
 def _build_list_query_mock() -> Mock:
     query = Mock()
+    query.join.return_value = query
     query.filter.return_value = query
     query.order_by.return_value = query
     query.limit.return_value = query
     query.all.return_value = []
     return query
+
+
+def _collect_filter_predicates(query: Mock) -> list[str]:
+    predicates: list[str] = []
+    for call in query.filter.call_args_list:
+        predicates.extend(str(predicate) for predicate in call.args)
+    return predicates
 
 
 def _build_request(query: str = "") -> Request:
@@ -1161,7 +1169,8 @@ async def test_list_branches_defaults_to_active_lifecycle(monkeypatch) -> None:
     )
 
     assert captured["include_inactive_tenants"] is False
-    filters = [str(call.args[0]) for call in query.filter.call_args_list]
+    filters = _collect_filter_predicates(query)
+    assert "clients.status = :status_1" in filters
     assert "branches.is_active IS true" in filters
 
 
@@ -1190,8 +1199,38 @@ async def test_list_branches_archived_lifecycle_filters_inactive(monkeypatch) ->
     )
 
     assert captured["include_inactive_tenants"] is True
-    filters = [str(call.args[0]) for call in query.filter.call_args_list]
+    filters = _collect_filter_predicates(query)
     assert "branches.is_active IS false" in filters
+
+
+@pytest.mark.asyncio
+async def test_list_branches_company_scope_filters_on_clients_company_id(monkeypatch) -> None:
+    query = _build_list_query_mock()
+    db = Mock()
+    db.query.return_value = query
+    request = SimpleNamespace(query_params={})
+    company_id = uuid4()
+    scoped_client_id = uuid4()
+
+    def _fake_context(_request, _db, **_kwargs):
+        return SimpleNamespace(
+            role="platform_admin",
+            client=None,
+            accessible_clients=[SimpleNamespace(id=scoped_client_id, company_id=company_id)],
+        )
+
+    monkeypatch.setattr(console_router, "get_console_context", _fake_context)
+
+    await console_router.list_branches(
+        request=request,
+        company_id=str(company_id),
+        db=db,
+    )
+
+    filters = _collect_filter_predicates(query)
+    assert "clients.company_id = :company_id_1" in filters
+    assert "clients.status = :status_1" in filters
+    assert "branches.is_active IS true" in filters
 
 
 @pytest.mark.asyncio
@@ -1234,10 +1273,12 @@ async def test_list_branches_accepts_branch_id_filter(monkeypatch) -> None:
     client_id = uuid4()
     query = _build_list_query_mock()
     branch_lookup_query = Mock()
+    branch_lookup_query.join.return_value = branch_lookup_query
     branch_lookup_query.filter.return_value = branch_lookup_query
     branch_lookup_query.first.return_value = SimpleNamespace(
         id=branch_id,
         client_id=client_id,
+        company_id=uuid4(),
     )
     db = Mock()
     db.query.side_effect = [query, branch_lookup_query]
@@ -1259,7 +1300,7 @@ async def test_list_branches_accepts_branch_id_filter(monkeypatch) -> None:
         db=db,
     )
 
-    filters = [str(call.args[0]) for call in query.filter.call_args_list]
+    filters = _collect_filter_predicates(query)
     assert any("branches.id =" in item for item in filters)
 
 
@@ -1270,10 +1311,12 @@ async def test_list_branches_rejects_branch_from_other_client(monkeypatch) -> No
     foreign_client_id = uuid4()
     query = _build_list_query_mock()
     branch_lookup_query = Mock()
+    branch_lookup_query.join.return_value = branch_lookup_query
     branch_lookup_query.filter.return_value = branch_lookup_query
     branch_lookup_query.first.return_value = SimpleNamespace(
         id=branch_id,
         client_id=foreign_client_id,
+        company_id=uuid4(),
     )
     db = Mock()
     db.query.side_effect = [query, branch_lookup_query]
@@ -1311,10 +1354,12 @@ async def test_list_branches_rejects_branch_from_other_company(monkeypatch) -> N
     foreign_client_id = uuid4()
     query = _build_list_query_mock()
     branch_lookup_query = Mock()
+    branch_lookup_query.join.return_value = branch_lookup_query
     branch_lookup_query.filter.return_value = branch_lookup_query
     branch_lookup_query.first.return_value = SimpleNamespace(
         id=branch_id,
         client_id=foreign_client_id,
+        company_id=foreign_company_id,
     )
     db = Mock()
     db.query.side_effect = [query, branch_lookup_query]
