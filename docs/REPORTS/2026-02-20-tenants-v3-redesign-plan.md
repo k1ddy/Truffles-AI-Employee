@@ -455,3 +455,21 @@
 
 4. Interpretation.
 - Decomposition remains behavior-preserving: operator control surface is unchanged while orchestration blast radius continues to shrink.
+
+## Wave 3 decomposition continuation: company/client save handlers (2026-02-24, UTC)
+1. Implemented extraction from `tenants/page.tsx`.
+- `handleSaveCompany` and `handleSaveClient` moved into `console-web/src/app/tenants/use-tenants-actions.ts`.
+- `page.tsx` now consumes save handlers from hook output; panel contracts stay unchanged (`onSaveEdit`, `onSaveClientEdit`).
+
+2. Structural effect.
+- `tenants/page.tsx` reduced from `2301` to `2214` LOC.
+- Query/context/intent/quick-create/company-client-save orchestration is centralized in hooks; remaining page-heavy flows are lifecycle/branch-change and editor bootstrap.
+
+3. Validation.
+- `corepack pnpm -C console-web run lint` (pass)
+- `corepack pnpm -C console-web run build` (pass)
+- `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`)
+- `scripts/session_check.sh` (pass)
+
+4. Interpretation.
+- Decomposition remains behavior-preserving and incremental: operator actions are unchanged while regression surface continues to shrink.

@@ -133,11 +133,13 @@
   - `tenants/page.tsx` reduced further from `2487` to `2422` LOC while preserving current UI behavior and panel wiring.
   - Wave3 decomposition continuation part 3 delivered: moved quick-create handlers (`handleQuickCreateCompany`, `handleQuickCreateClient`, `handleQuickCreateBranch`) from `tenants/page.tsx` into `useTenantsActions`.
   - `tenants/page.tsx` reduced from `2422` to `2301` LOC while keeping `TenantsQuickCreatePanel` behavior and action contracts unchanged.
+  - Wave3 decomposition continuation part 4 delivered: moved company/client save handlers (`handleSaveCompany`, `handleSaveClient`) from `tenants/page.tsx` into `useTenantsActions`.
+  - `tenants/page.tsx` reduced from `2301` to `2214` LOC while keeping company/client edit save behavior unchanged.
   - Updated canon docs for factual status and semantics: TP clarifies that `orchestration-only` is architectural isolation (not loss of control), and report captures the decomposition continuation with checks/evidence.
   - Validation for decomposition continuation: `corepack pnpm -C console-web run lint` (pass), `corepack pnpm -C console-web run build` (pass), `pytest -q truffles-api/tests/test_console_tenants_list.py truffles-api/tests/test_console_fleet_attention.py` (`84 passed`), `scripts/session_check.sh`.
 - next:
   - Wave4 remaining backlog: довести incremental precompute pipeline до устойчивой модели для large fleet (event stream -> targeted precompute strategy) и закрепить long-run perf evidence.
-  - Продолжить декомпозицию `tenants/page.tsx`: вынести CRUD/lifecycle/branch-change action pipelines из страницы в `useTenantsActions` без изменения UX-контракта.
+  - Продолжить декомпозицию `tenants/page.tsx`: вынести lifecycle/branch-change action pipelines и editor bootstrap из страницы в `useTenantsActions` без изменения UX-контракта.
   - Зафиксировать post-merge CI/deploy evidence для текущего continuation после публикации ветки/PR.
 - evidence:
   - docs/TASK_PACKAGES/TP-2026-02-20-tenants-v3-platform-admin-redesign.md
@@ -216,4 +218,4 @@
   - truffles-api/tests/test_console_tenants_list.py
   - .github/workflows/ci.yml
   - STATE.md
-- last_updated: 2026-02-24T02:39:27Z
+- last_updated: 2026-02-24T02:45:48Z

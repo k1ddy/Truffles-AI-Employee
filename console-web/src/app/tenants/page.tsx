@@ -202,18 +202,6 @@ function stringifyOptionalJson(value: unknown): string {
     return JSON.stringify(value, null, 2);
 }
 
-function parseOptionalJson(value: string, label: string): { value?: Record<string, unknown>; error?: string } {
-    const trimmed = value.trim();
-    if (!trimmed) {
-        return {};
-    }
-    try {
-        return { value: JSON.parse(trimmed) as Record<string, unknown> };
-    } catch {
-        return { error: `${label}: некорректный JSON` };
-    }
-}
-
 function attentionLevelClass(level?: FleetAttentionLevel): string {
     if (level === "high") {
         return "bg-red-100 text-red-700";
@@ -1240,6 +1228,8 @@ export default function TenantsPage() {
         openClientContextTarget,
         runActionQueueIntent,
         runKpiAction,
+        handleSaveCompany,
+        handleSaveClient,
         handleQuickCreateCompany,
         handleQuickCreateClient,
         handleQuickCreateBranch,
@@ -1260,6 +1250,12 @@ export default function TenantsPage() {
         quickCreateClientId,
         setQuickCreateForm,
         setQuickCreateRunning,
+        companyEditor,
+        clientEditor,
+        setCompanyEditor,
+        setClientEditor,
+        setSavingCompany,
+        setSavingClient,
         refreshTenants,
         reportProvisioningError,
         slugInputPattern: SLUG_INPUT_PATTERN,
@@ -1449,89 +1445,6 @@ export default function TenantsPage() {
                 isActive: branch.is_active ?? false,
             },
         });
-    };
-
-    const handleSaveCompany = async () => {
-        if (!companyEditor) {
-            return;
-        }
-        const name = companyEditor.name.trim();
-        if (!name) {
-            reportValidationError("Укажите название компании");
-            return;
-        }
-        const billing = parseOptionalJson(companyEditor.billingInfo, "billing_info");
-        if (billing.error) {
-            reportValidationError(billing.error);
-            return;
-        }
-        const payload: components["schemas"]["ConsoleCompanyUpdateRequest"] = {};
-        if (name !== companyEditor.originalName) {
-            payload.name = name;
-        }
-        if (companyEditor.billingInfo.trim() !== companyEditor.originalBillingInfo.trim()) {
-            payload.billing_info = (billing.value ?? {}) as Record<string, never>;
-        }
-        if (Object.keys(payload).length === 0) {
-            toast("Нет изменений");
-            return;
-        }
-        setSavingCompany(true);
-        try {
-            await adminApi.patchCompany(companyEditor.id, payload);
-            toast.success("Компания обновлена");
-            setCompanyEditor(null);
-            refreshTenants();
-            refreshContext();
-        } catch (error) {
-            reportProvisioningError(error, "обновление компании", "PATCH /api/proxy/admin/companies/:id");
-        } finally {
-            setSavingCompany(false);
-        }
-    };
-
-    const handleSaveClient = async () => {
-        if (!clientEditor) {
-            return;
-        }
-        const slug = clientEditor.slug.trim();
-        if (!slug) {
-            reportValidationError("Укажите slug клиента");
-            return;
-        }
-        if (!SLUG_INPUT_PATTERN.test(slug)) {
-            reportValidationError("slug: [a-z0-9_-], без пробелов");
-            return;
-        }
-        const payload: components["schemas"]["ConsoleClientUpdateRequest"] = {};
-        if (slug !== clientEditor.originalSlug) {
-            payload.slug = slug;
-        }
-        const companyId = clientEditor.companyId.trim();
-        const companyLocked = clientEditor.totalBranches > 0 && !!clientEditor.originalCompanyId;
-        if (companyLocked && companyId !== clientEditor.originalCompanyId) {
-            reportValidationError("company_id нельзя менять после создания филиалов");
-            return;
-        }
-        if (companyId !== clientEditor.originalCompanyId) {
-            payload.company_id = companyId || null;
-        }
-        if (Object.keys(payload).length === 0) {
-            toast("Нет изменений");
-            return;
-        }
-        setSavingClient(true);
-        try {
-            await adminApi.patchClient(clientEditor.id, payload);
-            toast.success("Клиент обновлён");
-            setClientEditor(null);
-            refreshTenants();
-            refreshContext();
-        } catch (error) {
-            reportProvisioningError(error, "обновление клиента", "PATCH /api/proxy/admin/clients/:id");
-        } finally {
-            setSavingClient(false);
-        }
     };
 
     const isClientArchived = (client: components["schemas"]["ConsoleClient"]) => {

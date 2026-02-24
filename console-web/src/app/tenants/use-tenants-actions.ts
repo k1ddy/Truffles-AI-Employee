@@ -2,6 +2,7 @@
 
 import { type Dispatch, type SetStateAction, useCallback } from "react";
 import toast from "react-hot-toast";
+import type { components } from "@/types/api.generated";
 import { adminApi } from "@/lib/api-client";
 import {
     readConsoleContextScopeFromStorage,
@@ -50,6 +51,12 @@ type UseTenantsActionsParams = {
     quickCreateClientId: string;
     setQuickCreateForm: Dispatch<SetStateAction<QuickCreateFormState>>;
     setQuickCreateRunning: Dispatch<SetStateAction<QuickCreateRunning>>;
+    companyEditor: CompanyEditorState | null;
+    clientEditor: ClientEditorState | null;
+    setCompanyEditor: Dispatch<SetStateAction<CompanyEditorState | null>>;
+    setClientEditor: Dispatch<SetStateAction<ClientEditorState | null>>;
+    setSavingCompany: Dispatch<SetStateAction<boolean>>;
+    setSavingClient: Dispatch<SetStateAction<boolean>>;
     refreshTenants: () => void;
     reportProvisioningError: (error: unknown, operation: string, endpoint: string) => void;
     slugInputPattern: RegExp;
@@ -70,9 +77,42 @@ type QuickCreateFormState = {
     clientId: string;
 };
 
+type CompanyEditorState = {
+    id: string;
+    name: string;
+    billingInfo: string;
+    originalName: string;
+    originalBillingInfo: string;
+};
+
+type ClientEditorState = {
+    id: string;
+    slug: string;
+    companyId: string;
+    originalSlug: string;
+    originalCompanyId: string;
+    totalBranches: number;
+};
+
 function normalizeOptionalId(value: string | null | undefined): string | null {
     const normalized = value?.trim();
     return normalized ? normalized : null;
+}
+
+function parseOptionalJson(value: string, label: string): { value?: Record<string, unknown>; error?: string } {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return { value: {} };
+    }
+    try {
+        const parsed = JSON.parse(trimmed) as unknown;
+        if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+            return { error: `${label} должен быть JSON-объектом` };
+        }
+        return { value: parsed as Record<string, unknown> };
+    } catch {
+        return { error: `${label} должен быть валидным JSON` };
+    }
 }
 
 export function useTenantsActions({
@@ -92,6 +132,12 @@ export function useTenantsActions({
     quickCreateClientId,
     setQuickCreateForm,
     setQuickCreateRunning,
+    companyEditor,
+    clientEditor,
+    setCompanyEditor,
+    setClientEditor,
+    setSavingCompany,
+    setSavingClient,
     refreshTenants,
     reportProvisioningError,
     slugInputPattern,
@@ -311,6 +357,106 @@ export function useTenantsActions({
         }, 120);
     }, [setTenantLifecycle, setWorkspaceMode]);
 
+    const handleSaveCompany = useCallback(async () => {
+        if (!companyEditor) {
+            return;
+        }
+        const name = companyEditor.name.trim();
+        if (!name) {
+            reportValidationError("Укажите название компании");
+            return;
+        }
+        const billing = parseOptionalJson(companyEditor.billingInfo, "billing_info");
+        if (billing.error) {
+            reportValidationError(billing.error);
+            return;
+        }
+        const payload: components["schemas"]["ConsoleCompanyUpdateRequest"] = {};
+        if (name !== companyEditor.originalName) {
+            payload.name = name;
+        }
+        if (companyEditor.billingInfo.trim() !== companyEditor.originalBillingInfo.trim()) {
+            payload.billing_info = (billing.value ?? {}) as Record<string, never>;
+        }
+        if (Object.keys(payload).length === 0) {
+            toast("Нет изменений");
+            return;
+        }
+        setSavingCompany(true);
+        try {
+            await adminApi.patchCompany(companyEditor.id, payload);
+            toast.success("Компания обновлена");
+            setCompanyEditor(null);
+            refreshTenants();
+            refreshContext();
+        } catch (error) {
+            reportProvisioningError(error, "обновление компании", "PATCH /api/proxy/admin/companies/:id");
+        } finally {
+            setSavingCompany(false);
+        }
+    }, [
+        companyEditor,
+        refreshContext,
+        refreshTenants,
+        reportProvisioningError,
+        reportValidationError,
+        setCompanyEditor,
+        setSavingCompany,
+    ]);
+
+    const handleSaveClient = useCallback(async () => {
+        if (!clientEditor) {
+            return;
+        }
+        const slug = clientEditor.slug.trim();
+        if (!slug) {
+            reportValidationError("Укажите slug клиента");
+            return;
+        }
+        if (!slugInputPattern.test(slug)) {
+            reportValidationError("slug: [a-z0-9_-], без пробелов");
+            return;
+        }
+        const payload: components["schemas"]["ConsoleClientUpdateRequest"] = {};
+        if (slug !== clientEditor.originalSlug) {
+            payload.slug = slug;
+        }
+        const companyId = clientEditor.companyId.trim();
+        const companyLocked = clientEditor.totalBranches > 0 && !!clientEditor.originalCompanyId;
+        if (companyLocked && companyId !== clientEditor.originalCompanyId) {
+            reportValidationError("company_id нельзя менять после создания филиалов");
+            return;
+        }
+        if (companyId !== clientEditor.originalCompanyId) {
+            payload.company_id = companyId || null;
+        }
+        if (Object.keys(payload).length === 0) {
+            toast("Нет изменений");
+            return;
+        }
+        setSavingClient(true);
+        try {
+            await adminApi.patchClient(clientEditor.id, payload);
+            toast.success("Клиент обновлён");
+            setClientEditor(null);
+            refreshTenants();
+            refreshContext();
+        } catch (error) {
+            reportProvisioningError(error, "обновление клиента", "PATCH /api/proxy/admin/clients/:id");
+        } finally {
+            setSavingClient(false);
+        }
+    }, [
+        clientEditor,
+        refreshContext,
+        refreshTenants,
+        reportProvisioningError,
+        reportValidationError,
+        setClientEditor,
+        setSavingClient,
+        slugInputPattern,
+    ]);
+
     const handleQuickCreateCompany = useCallback(async () => {
         const companyName = quickCreateForm.companyName.trim();
         if (!companyName) {
@@ -490,6 +636,8 @@ export function useTenantsActions({
         openClientContextTarget,
         runActionQueueIntent,
         runKpiAction,
+        handleSaveCompany,
+        handleSaveClient,
         handleQuickCreateCompany,
         handleQuickCreateClient,
         handleQuickCreateBranch,
