@@ -116,6 +116,8 @@ SOP POINTERS (open when relevant)
 - `SPECS/SYSTEM_REFERENCE.md` → "Dialog Report (one-command анализ диалогов)"
 - `docs/runbooks/DIALOG_REPORT.md` — пошаговый runbook по dialog-report
 - `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` — booking confirm + LLM booking quality runner
+- `docs/runbooks/EXECUTION_CYCLE.md` — единый цикл работы (после каждого run/session/phase)
+- `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` — контракт автономного блока для агента с 0 контекста
 - `SPECS/SYSTEM_REFERENCE.md` → "Live-check SOP (CA audit)"
 - `SPECS/SYSTEM_REFERENCE.md` → "CA-Matrix (suite/mode/evidence)" + "Test design rules"
 - `SPECS/SYSTEM_REFERENCE.md` → "Onboarding Test SOP (CA-13/CA-14)" + "Known risks and fixes"

@@ -261,6 +261,42 @@ async def test_upsert_reference_pack_rejects_unsupported_schema_version(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_list_onboarding_blueprints_requires_platform_admin(monkeypatch):
+    context = _mock_context(role="owner")
+    db = Mock()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda request, db, require_selection=False: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_onboarding_blueprints_api(
+            request=Mock(),
+            domain_slug=None,
+            db=db,
+        )
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_list_reference_packs_requires_platform_admin(monkeypatch):
+    context = _mock_context(role="owner")
+    db = Mock()
+
+    monkeypatch.setattr(console_router, "get_console_context", lambda request, db, require_selection=False: context)
+    monkeypatch.setattr(console_router, "require_console_permission", lambda *args, **kwargs: None)
+
+    with pytest.raises(ConsoleAPIError) as exc_info:
+        await console_router.list_reference_packs(
+            request=Mock(),
+            domain_slug=None,
+            db=db,
+        )
+
+    assert exc_info.value.code == "ACCESS_DENIED"
+
+
+@pytest.mark.asyncio
 async def test_get_webhook_secret_generates_and_returns_value(monkeypatch):
     client_id = uuid4()
     branch_id = uuid4()

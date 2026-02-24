@@ -119,6 +119,63 @@ enforce_llm_evidence_gate() {
   fi
 }
 
+session_meta_value() {
+  local key="$1"
+  grep -E "^- ${key}: " "$session_file" | head -n1 | sed "s/^- ${key}: //"
+}
+
+resolve_repo_path() {
+  local path="$1"
+  if [[ -z "$path" || "$path" == "null" ]]; then
+    echo ""
+    return 0
+  fi
+  if [[ "$path" == /* ]]; then
+    echo "$path"
+    return 0
+  fi
+  echo "$repo_root/$path"
+}
+
+enforce_zero_context_gate_if_required() {
+  local mode
+  mode=$(session_meta_value "zero_context_gate")
+  if [[ -z "$mode" || "$mode" == "off" || "$mode" == "optional" ]]; then
+    return 0
+  fi
+  if [[ "$mode" != "required" ]]; then
+    echo "ERROR: Unsupported zero_context_gate mode '${mode}' in ${session_file}." >&2
+    exit 1
+  fi
+
+  local tp_rel report_rel graph_rel
+  tp_rel=$(session_meta_value "zero_context_tp")
+  report_rel=$(session_meta_value "zero_context_report")
+  graph_rel=$(session_meta_value "zero_context_graph")
+
+  if [[ -z "$tp_rel" || -z "$report_rel" ]]; then
+    echo "ERROR: zero_context_gate=required needs zero_context_tp and zero_context_report in ${session_file}." >&2
+    exit 1
+  fi
+
+  local tp_path report_path graph_path gate_script
+  tp_path=$(resolve_repo_path "$tp_rel")
+  report_path=$(resolve_repo_path "$report_rel")
+  graph_path=$(resolve_repo_path "$graph_rel")
+  gate_script="$repo_root/scripts/zero_context_gate.sh"
+
+  if [[ ! -x "$gate_script" ]]; then
+    echo "ERROR: zero context gate script is missing or not executable: ${gate_script}" >&2
+    exit 1
+  fi
+
+  local cmd=("$gate_script" --tp "$tp_path" --report "$report_path")
+  if [[ -n "$graph_path" ]]; then
+    cmd+=(--graph "$graph_path")
+  fi
+  "${cmd[@]}"
+}
+
 if [[ "$branch" == "HEAD" ]]; then
   echo "ERROR: Detached HEAD; session check requires a named branch." >&2
   exit 1
@@ -256,6 +313,7 @@ if ! grep -q "^| ${session_id} |" "$index_file"; then
 fi
 
 scope_changed_files=$(collect_scope_changed_files)
+enforce_zero_context_gate_if_required
 enforce_llm_evidence_gate "$scope_changed_files"
 
 echo "Session OK: ${session_id} (${branch})"

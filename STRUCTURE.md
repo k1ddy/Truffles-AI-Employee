@@ -15,6 +15,7 @@
 | `docs/SESSION_INDEX.md` | Индекс активных сессий (single source of truth) | Архитектор/Brain/Hands |
 | `docs/SESSIONS/` | Логи сессий (контекст, планы, worktree/branch) | Архитектор/Brain/Hands |
 | `docs/SESSIONS/SESSION_TEMPLATE.md` | Шаблон сессионного лога | Архитектор/Brain/Hands |
+| `docs/BLOCK_GRAPH.yaml` | Граф блоков (BLOCK_ID/DEPENDS_ON/UNLOCKS/status) для zero-context исполнения | Архитектор/Brain/Hands |
 | `contracts/` | Канон контрактов (Console API, ошибки) | Архитектор/Frontend |
 | `contracts/console_api/schemathesis.toml` | Seed/overrides для Schemathesis contract smoke | Backend/QA |
 | `contracts/events/` | Контракты событий (outbox) | Архитектор/Backend |
@@ -49,6 +50,7 @@
 | `scripts/check_migration_governance.py` | Governance check для SQL миграций (naming/frozen ops migrations) | Backend/OPS |
 | `scripts/session_start.sh` | Создать worktree/branch и session log (agent suffix обязателен) | Все роли |
 | `scripts/session_check.sh` | Проверка сессии перед commit/push | Все роли |
+| `scripts/zero_context_gate.sh` | Проверка полноты TP+Report для zero-context блока | Brain/Architect/Hands |
 | `scripts/session_end.sh` | Закрытие сессии + index обновление | Все роли |
 | `scripts/session_resume.sh` | Возобновить активную сессию после compaction (по умолчанию SESSION_AGENT) | Все роли |
 | `scripts/session_index_rebuild.sh` | Пересобрать `docs/SESSION_INDEX.md` из `docs/SESSIONS/*` | Brain/Architect |
@@ -139,6 +141,8 @@
 | `docs/runbooks/CHAOS_SIM.md` | Chaos-sim runbook (human-like диалоги, evaluator, артефакты) | QA/OPS/Brain |
 | `docs/runbooks/DIALOG_REPORT.md` | Dialog-report runbook (one-command анализ диалогов) | QA/OPS/Brain |
 | `docs/runbooks/BOOKING_CONFIRM_VERIFY.md` | Booking confirm verification runbook | QA/OPS/Brain |
+| `docs/runbooks/EXECUTION_CYCLE.md` | Единый рабочий цикл: что делать после каждого run/session/phase | Все роли |
+| `docs/runbooks/ZERO_CONTEXT_BLOCK_DELIVERY.md` | Контракт автономной разработки блоков для агентов с нулевым контекстом | Все роли |
 | `docs/runbooks/PLATFORM_ADMIN_CONTROL_LOOP.md` | Weekly control-loop runbook для Platform Admin (snapshot -> backlog -> checks) | Brain/Architect |
 | `docs/runbooks/OWNER_ADMIN_POSTMERGE_24H.md` | Post-merge control-loop runbook для Owner/Admin (`T+0/T+24`) | Brain/Architect |
 | `SPECS/CONTROL_PLANE.md` | Канон: Console как Control Plane (роли, IA, онбординг, capabilities) | Архитектор/Frontend |
@@ -165,10 +169,14 @@
 | `docs/REPORTS/2026-02-16-owner-admin-wave9-subscription-contract-v1.md` | Report: Owner/Admin wave-9 (subscription contract = plan + fact + action) | Brain/Architect |
 | `docs/REPORTS/2026-02-16-owner-admin-wave10-subscription-truth-v1.md` | Report: Owner/Admin wave-10 (subscription truth mode: fail-closed contract + diagnostics) | Brain/Architect |
 | `docs/REPORTS/2026-02-17-console-postmerge-acceptance-p95-wave123-v1.md` | Report: Post-merge acceptance + p95 timing audit (platform_admin/owner_admin) with nav reliability findings | Brain/Architect |
+| `docs/REPORTS/2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md` | Report: session-scoped zero-context gate isolation for UCPV1 track | Brain/Architect |
+| `docs/REPORTS/REPORT_TEMPLATE_ZERO_CONTEXT.md` | Шаблон отчёта для zero-context block delivery | Brain/Architect/Hands |
 | `docs/TASK_PACKAGES/` | Task Packages (scope/DoD/checks/evidence) | Brain/Architect |
+| `docs/TASK_PACKAGES/TP_TEMPLATE_ZERO_CONTEXT.md` | Шаблон Task Package для zero-context block delivery | Brain/Architect/Hands |
 | `docs/TASK_PACKAGES/TP-2026-01-23-chaos-consult-quality-v1.md` | Task Package: chaos-sim + consult quality (multi-intent, safe advice) | Brain/Architect |
 
 **Активные Task Packages:**
+- `docs/TASK_PACKAGES/TP-2026-02-24-universal-control-plane-v1-sanitize-gates-a500.md`
 - `docs/TASK_PACKAGES/TP-2026-02-22-outreach-auto-case-a200.md`
 - `docs/TASK_PACKAGES/TP-2026-02-16-owner-admin-wave10-subscription-truth-a88.md`
 - `docs/TASK_PACKAGES/TP-2026-02-15-owner-admin-wave7-fact-os-a1.md`
